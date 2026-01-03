@@ -1,6 +1,6 @@
-document.addEventListener("DOMContentLoaded", () => {
+document.addEventListener("DOMContentLoaded", async () => {
 
-  // 🔹 SUPABASE CONFIG (use your real values)
+  // 🔹 SUPABASE CONFIG
   const SUPABASE_URL = "https://cvkxtsvgnynxexmemfuy.supabase.co";
   const SUPABASE_ANON_KEY = "sb_publishable_DGT-x86M-BwI4zA7S_97CA_3v3O3b0A";
 
@@ -11,12 +11,14 @@ document.addEventListener("DOMContentLoaded", () => {
 
   const form = document.getElementById("applyForm");
   const messageBox = document.getElementById("messageBox");
+  const jobTitleEl = document.getElementById("jobTitle");
 
   if (!form) {
     console.error("Form not found");
     return;
   }
 
+  // 🔹 Helper: show messages
   function showMessage(text, type) {
     if (!messageBox) {
       alert(text);
@@ -27,6 +29,37 @@ document.addEventListener("DOMContentLoaded", () => {
     messageBox.style.display = "block";
   }
 
+  // 🔹 1. READ job_id FROM URL
+  const jobId = new URLSearchParams(window.location.search).get("job_id");
+
+  if (!jobId) {
+    showMessage("❌ Invalid job link. Please apply from the Jobs page.", "error");
+    return;
+  }
+
+  // 🔹 2. FETCH JOB DETAILS (for display)
+  try {
+    const { data: job, error } = await supabase
+      .from("jobs")
+      .select("title")
+      .eq("id", jobId)
+      .single();
+
+    if (error || !job) {
+      showMessage("❌ Job not found or closed.", "error");
+      return;
+    }
+
+    if (jobTitleEl) {
+      jobTitleEl.textContent = "Applying for: " + job.title;
+    }
+  } catch (err) {
+    console.error(err);
+    showMessage("❌ Unable to load job details.", "error");
+    return;
+  }
+
+  // 🔹 3. FORM SUBMIT HANDLER
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
 
@@ -61,7 +94,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
       const resumeUrl = urlData.publicUrl;
 
-      // 🧾 Insert into ATS
+      // 🧾 Insert candidate (DYNAMIC job_id)
       const { error: insertError } = await supabase
         .from("candidates")
         .insert({
@@ -69,7 +102,7 @@ document.addEventListener("DOMContentLoaded", () => {
           email: email,
           phone: phone,
           resume_url: resumeUrl,
-          job_id: "baada626-3e67-4aed-82c4-27c818cba345"
+          job_id: jobId
         });
 
       if (insertError) {
