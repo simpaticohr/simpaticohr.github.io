@@ -1,4 +1,4 @@
-alert("apply.js is working");
+
 // 1. SUPABASE CONFIG (replace with your real values)
 const SUPABASE_URL =  "https://cvkxtsvgnynxexmemfuy.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_DGT-x86M-BwI4zA7S_97CA_3v3O3b0A";
