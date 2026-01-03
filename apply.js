@@ -14,7 +14,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   const jobTitleEl = document.getElementById("jobTitle");
 
   if (!form) {
-    console.error("Form not found");
+    console.error("❌ applyForm not found");
     return;
   }
 
@@ -29,15 +29,20 @@ document.addEventListener("DOMContentLoaded", async () => {
     messageBox.style.display = "block";
   }
 
-  // 🔹 1. READ job_id FROM URL
-  const jobId = new URLSearchParams(window.location.search).get("job_id");
+  /* ======================================================
+     1️⃣ READ job_id FROM URL
+  ====================================================== */
+  const params = new URLSearchParams(window.location.search);
+  const jobId = params.get("job_id");
 
   if (!jobId) {
     showMessage("❌ Invalid job link. Please apply from the Jobs page.", "error");
     return;
   }
 
-  // 🔹 2. FETCH JOB DETAILS (for display)
+  /* ======================================================
+     2️⃣ FETCH JOB DETAILS (Designation display)
+  ====================================================== */
   try {
     const { data: job, error } = await supabase
       .from("jobs")
@@ -51,15 +56,18 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
 
     if (jobTitleEl) {
-      jobTitleEl.textContent = "Applying for: " + job.title;
+      jobTitleEl.textContent = "Designation: " + job.title;
     }
+
   } catch (err) {
     console.error(err);
     showMessage("❌ Unable to load job details.", "error");
     return;
   }
 
-  // 🔹 3. FORM SUBMIT HANDLER
+  /* ======================================================
+     3️⃣ FORM SUBMIT HANDLER
+  ====================================================== */
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
 
@@ -74,8 +82,11 @@ document.addEventListener("DOMContentLoaded", async () => {
         return;
       }
 
-      // 📤 Upload resume
-      const filePath = `${Date.now()}_${resumeFile.name}`;
+      // 🔄 Prevent double submit
+      form.querySelector("button").disabled = true;
+
+      /* 📤 Upload Resume */
+      const filePath = `${jobId}/${Date.now()}_${resumeFile.name}`;
 
       const { error: uploadError } = await supabase.storage
         .from("resumes")
@@ -84,17 +95,18 @@ document.addEventListener("DOMContentLoaded", async () => {
       if (uploadError) {
         console.error(uploadError);
         showMessage("❌ Resume upload failed", "error");
+        form.querySelector("button").disabled = false;
         return;
       }
 
-      // 🔗 Get public resume URL
+      /* 🔗 Get public resume URL */
       const { data: urlData } = supabase.storage
         .from("resumes")
         .getPublicUrl(filePath);
 
       const resumeUrl = urlData.publicUrl;
 
-      // 🧾 Insert candidate (DYNAMIC job_id)
+      /* 🧾 Insert candidate into ATS */
       const { error: insertError } = await supabase
         .from("candidates")
         .insert({
@@ -108,16 +120,19 @@ document.addEventListener("DOMContentLoaded", async () => {
       if (insertError) {
         console.error(insertError);
         showMessage("❌ Application submission failed", "error");
+        form.querySelector("button").disabled = false;
         return;
       }
 
-      // ✅ Success
+      // ✅ SUCCESS
       showMessage("✅ Application submitted successfully", "success");
       form.reset();
+      form.querySelector("button").disabled = false;
 
     } catch (err) {
       console.error(err);
       showMessage("❌ Something went wrong. Try again.", "error");
+      form.querySelector("button").disabled = false;
     }
   });
 
