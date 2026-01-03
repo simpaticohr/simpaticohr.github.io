@@ -17,7 +17,7 @@ document.addEventListener("DOMContentLoaded", () => {
     e.preventDefault();
 
     // ✅ THIS IS THE LINE YOU ASKED FOR
-    alert("SUBMIT EVENT FIRED");
+    
 
     const name = document.getElementById("name").value;
     const email = document.getElementById("email").value;
