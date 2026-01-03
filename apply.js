@@ -18,7 +18,9 @@ document.addEventListener("DOMContentLoaded", async () => {
     return;
   }
 
-  // 🔹 Helper: show messages
+  /* ===============================
+     Helper: show message
+  =============================== */
   function showMessage(text, type) {
     if (!messageBox) {
       alert(text);
@@ -29,9 +31,9 @@ document.addEventListener("DOMContentLoaded", async () => {
     messageBox.style.display = "block";
   }
 
-  /* ======================================================
-     1️⃣ READ job_id FROM URL
-  ====================================================== */
+  /* ===============================
+     1️⃣ Read job_id from URL
+  =============================== */
   const params = new URLSearchParams(window.location.search);
   const jobId = params.get("job_id");
 
@@ -40,13 +42,13 @@ document.addEventListener("DOMContentLoaded", async () => {
     return;
   }
 
-  /* ======================================================
-     2️⃣ FETCH JOB DETAILS (Designation display)
-  ====================================================== */
+  /* ===============================
+     2️⃣ Fetch job designation
+  =============================== */
   try {
     const { data: job, error } = await supabase
       .from("jobs")
-      .select("title")
+      .select("designation")
       .eq("id", jobId)
       .single();
 
@@ -56,7 +58,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
 
     if (jobTitleEl) {
-      jobTitleEl.textContent = "Designation: " + job.title;
+      jobTitleEl.textContent = "Designation: " + job.designation;
     }
 
   } catch (err) {
@@ -65,11 +67,14 @@ document.addEventListener("DOMContentLoaded", async () => {
     return;
   }
 
-  /* ======================================================
-     3️⃣ FORM SUBMIT HANDLER
-  ====================================================== */
+  /* ===============================
+     3️⃣ Form submit handler
+  =============================== */
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
+
+    const submitBtn = form.querySelector("button");
+    submitBtn.disabled = true;
 
     try {
       const name = document.getElementById("name").value.trim();
@@ -79,13 +84,11 @@ document.addEventListener("DOMContentLoaded", async () => {
 
       if (!name || !email || !phone || !resumeFile) {
         showMessage("❌ Please fill all fields", "error");
+        submitBtn.disabled = false;
         return;
       }
 
-      // 🔄 Prevent double submit
-      form.querySelector("button").disabled = true;
-
-      /* 📤 Upload Resume */
+      /* 📤 Upload resume */
       const filePath = `${jobId}/${Date.now()}_${resumeFile.name}`;
 
       const { error: uploadError } = await supabase.storage
@@ -95,44 +98,42 @@ document.addEventListener("DOMContentLoaded", async () => {
       if (uploadError) {
         console.error(uploadError);
         showMessage("❌ Resume upload failed", "error");
-        form.querySelector("button").disabled = false;
+        submitBtn.disabled = false;
         return;
       }
 
-      /* 🔗 Get public resume URL */
+      /* 🔗 Get public URL */
       const { data: urlData } = supabase.storage
         .from("resumes")
         .getPublicUrl(filePath);
 
-      const resumeUrl = urlData.publicUrl;
-
-      /* 🧾 Insert candidate into ATS */
+      /* 🧾 Insert candidate */
       const { error: insertError } = await supabase
         .from("candidates")
         .insert({
           full_name: name,
           email: email,
           phone: phone,
-          resume_url: resumeUrl,
+          resume_url: urlData.publicUrl,
           job_id: jobId
         });
 
       if (insertError) {
         console.error(insertError);
         showMessage("❌ Application submission failed", "error");
-        form.querySelector("button").disabled = false;
+        submitBtn.disabled = false;
         return;
       }
 
-      // ✅ SUCCESS
+      // ✅ Success
       showMessage("✅ Application submitted successfully", "success");
       form.reset();
-      form.querySelector("button").disabled = false;
 
     } catch (err) {
       console.error(err);
       showMessage("❌ Something went wrong. Try again.", "error");
-      form.querySelector("button").disabled = false;
+    } finally {
+      submitBtn.disabled = false;
     }
   });
 
