@@ -48,7 +48,7 @@ document.getElementById("applyForm").addEventListener("submit", async (e) => {
       email: email,
       phone: phone,
       resume_url: urlData.publicUrl,
-      job_id: "PASTE_JOB_UUID_HERE"
+      job_id: "baada626-3e67-4aed-82c4-27c818cba345"
     });
 
   if (insertError) {
