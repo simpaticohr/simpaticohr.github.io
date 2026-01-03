@@ -1,6 +1,6 @@
 document.addEventListener("DOMContentLoaded", async () => {
+  console.log("✅ apply.js loaded");
 
-  // 🔹 SUPABASE CONFIG
   const SUPABASE_URL = "https://cvkxtsvgnynxexmemfuy.supabase.co";
   const SUPABASE_ANON_KEY = "sb_publishable_DGT-x86M-BwI4zA7S_97CA_3v3O3b0A";
 
@@ -13,128 +13,83 @@ document.addEventListener("DOMContentLoaded", async () => {
   const messageBox = document.getElementById("messageBox");
   const jobTitleEl = document.getElementById("jobTitle");
 
-  if (!form) {
-    console.error("❌ applyForm not found");
-    return;
-  }
-
-  /* ===============================
-     Helper: show message
-  =============================== */
   function showMessage(text, type) {
-    if (!messageBox) {
-      alert(text);
-      return;
-    }
     messageBox.textContent = text;
     messageBox.className = "message " + type;
     messageBox.style.display = "block";
   }
 
-  /* ===============================
-     1️⃣ Read job_id from URL
-  =============================== */
-  const params = new URLSearchParams(window.location.search);
-  const jobId = params.get("job_id");
+  // 🔍 Read job_id
+  const jobId = new URLSearchParams(window.location.search).get("job_id");
+  console.log("🔍 job_id:", jobId);
 
   if (!jobId) {
-    showMessage("❌ Invalid job link. Please apply from the Jobs page.", "error");
+    showMessage("❌ Invalid job link.", "error");
     return;
   }
 
-  /* ===============================
-     2️⃣ Fetch job designation
-  =============================== */
-  try {
-    const { data: job, error } = await supabase
-      .from("jobs")
-      .select("designation")
-      .eq("id", jobId)
-      .single();
+  // 🔍 Fetch job
+  const { data, error } = await supabase
+    .from("jobs")
+    .select("id, title")
+    .eq("id", jobId)
+    .maybeSingle();
 
-    if (error || !job) {
-      showMessage("❌ Job not found or closed.", "error");
-      return;
-    }
+  console.log("📦 job data:", data, "error:", error);
 
-    if (jobTitleEl) {
-      jobTitleEl.textContent = "Designation: " + job.designation;
-    }
-
-  } catch (err) {
-    console.error(err);
-    showMessage("❌ Unable to load job details.", "error");
+  if (error || !data) {
+    showMessage("❌ Job not found or closed.", "error");
     return;
   }
 
-  /* ===============================
-     3️⃣ Form submit handler
-  =============================== */
+  // ✅ Display designation
+  jobTitleEl.textContent = "Designation: " + data.title;
+
+  // 🧾 Submit application
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
 
-    const submitBtn = form.querySelector("button");
-    submitBtn.disabled = true;
+    const name = document.getElementById("name").value.trim();
+    const email = document.getElementById("email").value.trim();
+    const phone = document.getElementById("phone").value.trim();
+    const resume = document.getElementById("resume").files[0];
 
-    try {
-      const name = document.getElementById("name").value.trim();
-      const email = document.getElementById("email").value.trim();
-      const phone = document.getElementById("phone").value.trim();
-      const resumeFile = document.getElementById("resume").files[0];
-
-      if (!name || !email || !phone || !resumeFile) {
-        showMessage("❌ Please fill all fields", "error");
-        submitBtn.disabled = false;
-        return;
-      }
-
-      /* 📤 Upload resume */
-      const filePath = `${jobId}/${Date.now()}_${resumeFile.name}`;
-
-      const { error: uploadError } = await supabase.storage
-        .from("resumes")
-        .upload(filePath, resumeFile);
-
-      if (uploadError) {
-        console.error(uploadError);
-        showMessage("❌ Resume upload failed", "error");
-        submitBtn.disabled = false;
-        return;
-      }
-
-      /* 🔗 Get public URL */
-      const { data: urlData } = supabase.storage
-        .from("resumes")
-        .getPublicUrl(filePath);
-
-      /* 🧾 Insert candidate */
-      const { error: insertError } = await supabase
-        .from("candidates")
-        .insert({
-          full_name: name,
-          email: email,
-          phone: phone,
-          resume_url: urlData.publicUrl,
-          job_id: jobId
-        });
-
-      if (insertError) {
-        console.error(insertError);
-        showMessage("❌ Application submission failed", "error");
-        submitBtn.disabled = false;
-        return;
-      }
-
-      // ✅ Success
-      showMessage("✅ Application submitted successfully", "success");
-      form.reset();
-
-    } catch (err) {
-      console.error(err);
-      showMessage("❌ Something went wrong. Try again.", "error");
-    } finally {
-      submitBtn.disabled = false;
+    if (!name || !email || !phone || !resume) {
+      showMessage("❌ Please fill all fields", "error");
+      return;
     }
-  });
 
+    const filePath = `${jobId}/${Date.now()}_${resume.name}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from("resumes")
+      .upload(filePath, resume);
+
+    if (uploadError) {
+      showMessage("❌ Resume upload failed", "error");
+      return;
+    }
+
+    const { data: urlData } = supabase.storage
+      .from("resumes")
+      .getPublicUrl(filePath);
+
+    const { error: insertError } = await supabase
+      .from("candidates")
+      .insert({
+        full_name: name,
+        email,
+        phone,
+        resume_url: urlData.publicUrl,
+        job_id: jobId
+      });
+
+    if (insertError) {
+      showMessage("❌ Submission failed", "error");
+      return;
+    }
+
+    showMessage("✅ Application submitted successfully", "success");
+    form.reset();
+  });
 });
