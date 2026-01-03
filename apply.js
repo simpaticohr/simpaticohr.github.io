@@ -1,3 +1,4 @@
+console.log("apply.js loaded");
 document.addEventListener("DOMContentLoaded", () => {
 
   const SUPABASE_URL = "https://cvkxtsvgnynxexmemfuy.supabase.co";
