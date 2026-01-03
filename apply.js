@@ -1,8 +1,5 @@
-console.log("apply.js loaded");
-document.addEventListener("DOMContentLoaded", () => {
 
-  const SUPABASE_URL = "https://cvkxtsvgnynxexmemfuy.supabase.co";
-  const SUPABASE_ANON_KEY = "sb_publishable_DGT-x86M-BwI4zA7S_97CA_3v3O3b0A";
+document.addEventListener("DOMContentLoaded", () => {
 
   const supabase = window.supabase.createClient(
     SUPABASE_URL,
@@ -12,14 +9,15 @@ document.addEventListener("DOMContentLoaded", () => {
   const form = document.getElementById("applyForm");
 
   if (!form) {
-    alert("Form not found ❌");
+    alert("❌ Form not found");
     return;
   }
 
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
 
-    alert("FORM SUBMITTED ✅"); // you WILL see this now
+    // ✅ THIS IS THE LINE YOU ASKED FOR
+    alert("SUBMIT EVENT FIRED");
 
     const name = document.getElementById("name").value;
     const email = document.getElementById("email").value;
@@ -54,11 +52,11 @@ document.addEventListener("DOMContentLoaded", () => {
         email: email,
         phone: phone,
         resume_url: urlData.publicUrl,
-        job_id: "baada626-3e67-4aed-82c4-27c81cba345"
+        job_id: "baada626-3e67-4aed-82c4-27c818cba345"
       });
 
     if (insertError) {
-      alert("Application failed ❌");
+      alert("❌ Application failed");
       console.error(insertError);
     } else {
       alert("✅ Application submitted successfully");
