@@ -1,13 +1,19 @@
-
 document.addEventListener("DOMContentLoaded", () => {
 
+  // 🔴 SAFETY CHECK 1
+  if (!window.supabase) {
+    alert("❌ Supabase JS not loaded");
+    return;
+  }
+
   const supabase = window.supabase.createClient(
-    SUPABASE_URL,
-    SUPABASE_ANON_KEY
+    "https://cvkxtsvgnynxexmemfuy.supabase.co",
+    "sb_publishable_DGT-x86M-BwI4zA7S_97CA_3v3O3b0A"
   );
 
   const form = document.getElementById("applyForm");
 
+  // 🔴 SAFETY CHECK 2
   if (!form) {
     alert("❌ Form not found");
     return;
@@ -16,52 +22,57 @@ document.addEventListener("DOMContentLoaded", () => {
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
 
-    // ✅ THIS IS THE LINE YOU ASKED FOR
-    
+    alert("🟡 Submit clicked"); // MUST appear
 
-    const name = document.getElementById("name").value;
-    const email = document.getElementById("email").value;
-    const phone = document.getElementById("phone").value;
-    const resumeFile = document.getElementById("resume").files[0];
+    try {
+      const name = document.getElementById("name").value;
+      const email = document.getElementById("email").value;
+      const phone = document.getElementById("phone").value;
+      const resumeFile = document.getElementById("resume").files[0];
 
-    if (!resumeFile) {
-      alert("Please upload resume");
-      return;
-    }
+      if (!resumeFile) {
+        alert("❌ Please upload resume");
+        return;
+      }
 
-    const filePath = `${Date.now()}_${resumeFile.name}`;
+      const filePath = `${Date.now()}_${resumeFile.name}`;
 
-    const { error: uploadError } = await supabase.storage
-      .from("resumes")
-      .upload(filePath, resumeFile);
+      const { error: uploadError } = await supabase
+        .storage
+        .from("resumes")
+        .upload(filePath, resumeFile);
 
-    if (uploadError) {
-      alert("Resume upload failed");
-      console.error(uploadError);
-      return;
-    }
+      if (uploadError) {
+        alert("❌ Resume upload failed");
+        return;
+      }
 
-    const { data: urlData } = supabase.storage
-      .from("resumes")
-      .getPublicUrl(filePath);
+      const { data: urlData } = supabase
+        .storage
+        .from("resumes")
+        .getPublicUrl(filePath);
 
-    const { error: insertError } = await supabase
-      .from("candidates")
-      .insert({
-        full_name: name,
-        email: email,
-        phone: phone,
-        resume_url: urlData.publicUrl,
-        job_id: "baada626-3e67-4aed-82c4-27c818cba345"
-      });
+      const { error: insertError } = await supabase
+        .from("candidates")
+        .insert({
+          full_name: name,
+          email: email,
+          phone: phone,
+          resume_url: urlData.publicUrl,
+          job_id: "baada626-3e67-4aed-82c4-27c818cba345"
+        });
 
-    if (insertError) {
-      alert("❌ Application failed");
-      console.error(insertError);
-    } else {
+      if (insertError) {
+        alert("❌ Application failed");
+        return;
+      }
+
+      // ✅ FINAL SUCCESS
       alert("✅ Application submitted successfully");
       form.reset();
+
+    } catch (err) {
+      alert("🔥 JS crashed: " + err.message);
     }
   });
-
 });
