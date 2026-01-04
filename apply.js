@@ -50,9 +50,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       const fileName = `${Date.now()}_${name.replace(/\s+/g, '_')}.${fileExt}`;
       const filePath = `${jobId}/${fileName}`;
 
-      const { error: uploadError } = await supabase.storage
-        .from("RESUMES") 
-        .upload(filePath, resumeFile);
+      const { error: uploadError } = await supabase.storage.from("RESUMES").upload(filePath, resume);
 
       if (uploadError) throw uploadError;
 
