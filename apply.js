@@ -1,6 +1,7 @@
 document.addEventListener("DOMContentLoaded", async () => {
   const SUPABASE_URL = "https://cvkxtsvgnynxexmemfuy.supabase.co";
   const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN2a3h0c3ZnbnlueGV4bWVtZnV5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc0MjE2NTEsImV4cCI6MjA4Mjk5NzY1MX0.2mys8Cc-ucJ1uLThEGJubeDEg1TvfIAkW-xFsR4ecq4";
+  
   const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
   const form = document.getElementById("applyForm");
@@ -27,15 +28,19 @@ document.addEventListener("DOMContentLoaded", async () => {
     const resume = document.getElementById("resume").files[0];
     const filePath = `${jobId}/${Date.now()}_${resume.name}`;
 
-    // 1. Upload to Storage
-    const { error: uploadError } = await supabase.storage.from("resumes").upload(filePath, resume);
+    // 1. Upload to Storage - MUST match your dashboard name "RESUMES"
+    const { error: uploadError } = await supabase.storage.from("RESUMES").upload(filePath, resume);
+    
     if (uploadError) {
-        messageBox.textContent = "❌ Upload failed.";
+        console.error("Upload Error:", uploadError);
+        messageBox.textContent = "❌ Upload failed: " + uploadError.message;
         return;
     }
 
-    // 2. Get URL & Insert to Candidates Table
-    const { data: urlData } = supabase.storage.from("resumes").getPublicUrl(filePath);
+    // 2. Get Public URL
+    const { data: urlData } = supabase.storage.from("RESUMES").getPublicUrl(filePath);
+
+    // 3. Insert to Candidates Table
     const { error: insertError } = await supabase.from("candidates").insert({
         full_name: document.getElementById("name").value,
         email: document.getElementById("email").value,
@@ -45,9 +50,10 @@ document.addEventListener("DOMContentLoaded", async () => {
     });
 
     if (insertError) {
-        messageBox.textContent = "❌ Database Error.";
+        console.error("DB Error:", insertError);
+        messageBox.textContent = "❌ Database Error: " + insertError.message;
     } else {
-        messageBox.textContent = "✅ Success!";
+        messageBox.textContent = "✅ Success! Application submitted.";
         form.reset();
     }
   });
