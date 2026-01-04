@@ -1,79 +1,67 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Careers | Simpatico HR</title>
-    
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-
     <style>
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f8f9fa; padding: 40px 20px; color: #333; }
-        .container { max-width: 800px; margin: 0 auto; }
-        h1 { text-align: center; margin-bottom: 30px; }
-        .job-card { background: white; padding: 25px; margin-bottom: 20px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); border: 1px solid #eee; }
-        .job-card h3 { margin-top: 0; color: #000; }
-        .job-card p { color: #666; font-size: 14px; }
-        .apply-btn { display: inline-block; background: #000; color: #fff; padding: 10px 25px; text-decoration: none; border-radius: 6px; font-weight: bold; margin-top: 10px; }
-        .apply-btn:hover { background: #333; }
-        #jobList { min-height: 200px; }
-        .loading-msg { text-align: center; color: #888; margin-top: 50px; }
+        body { font-family: sans-serif; padding: 20px; transition: 0.3s; }
+        .job-card { background: white; padding: 20px; margin-bottom: 10px; border-radius: 8px; border: 1px solid #ddd; }
+        .apply-btn { background: #000; color: #fff; padding: 10px; text-decoration: none; border-radius: 5px; display: inline-block; }
+        /* Dynamic Header Style */
+        #header-area { text-align: center; margin-bottom: 40px; }
     </style>
 </head>
 <body>
 
-    <div class="container">
-        <h1>Current Openings</h1>
-        
-        <div id="jobList">
-            <p class="loading-msg">Fetching latest opportunities...</p>
-        </div>
+    <div id="header-area">
+        <h1 id="display-company">Simpatico HR</h1>
+        <p>Current Career Opportunities</p>
     </div>
+
+    <div id="jobList">Loading opportunities...</div>
 
     <script>
         const SUPABASE_URL = "https://cvkxtsvgnynxexmemfuy.supabase.co";
-        // Verified Anon Key
         const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN2a3h0c3ZnbnlueGV4bWVtZnV5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc0MjE2NTEsImV4cCI6MjA4Mjk5NzY1MX0.2mys8Cc-ucJ1uLThEGJubeDEg1TvfIAkW-xFsR4ecq4";
+        const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-        document.addEventListener("DOMContentLoaded", function() {
-            const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+        // 1. GET THE COMPANY NAME FROM THE URL (e.g., jobs.html?org=Google)
+        const urlParams = new URLSearchParams(window.location.search);
+        const orgName = urlParams.get('org') || 'Simpatico HR';
 
-            async function fetchJobs() {
-                const container = document.getElementById("jobList");
-                
-                try {
-                    // Fetching from lowercase 'jobs' table
-                    const { data: jobs, error } = await supabase
-                        .from("jobs")
-                        .select("*")
-                        .eq("is_active", true);
+        document.getElementById('display-company').textContent = orgName;
 
-                    if (error) throw error;
-                    
-                    if (!jobs || jobs.length === 0) {
-                        container.innerHTML = "<p class='loading-msg'>No active positions at the moment. Please check back later!</p>";
-                        return;
-                    }
+        async function fetchOrgJobs() {
+            const container = document.getElementById("jobList");
+            
+            // 2. ONLY FETCH JOBS FOR THIS SPECIFIC COMPANY
+            const { data: jobs, error } = await supabase
+                .from("jobs")
+                .select("*")
+                .eq("company_name", orgName)
+                .eq("is_active", true);
 
-                    container.innerHTML = ""; // Clear loading message
-
-                    jobs.forEach(job => {
-                        container.innerHTML += `
-                            <div class="job-card">
-                                <h3>${job.title || 'Position'}</h3>
-                                <p><strong>Location:</strong> ${job.location || 'Remote'}</p>
-                                <p><strong>Department:</strong> ${job.department || 'General'}</p>
-                                <a href="apply.html?job_id=${job.id}" class="apply-btn">Apply Now</a>
-                            </div>`;
-                    });
-                } catch (err) {
-                    console.error("Fetch error:", err);
-                    container.innerHTML = "<p style='color:red; text-align:center;'>Unable to load jobs. Please check your internet and refresh.</p>";
-                }
+            if (error) {
+                container.innerHTML = "Error loading jobs.";
+                return;
             }
 
-            fetchJobs();
-        });
+            if (!jobs || jobs.length === 0) {
+                container.innerHTML = `<p>No active openings for ${orgName} right now.</p>`;
+                return;
+            }
+
+            container.innerHTML = "";
+            jobs.forEach(job => {
+                container.innerHTML += `
+                    <div class="job-card">
+                        <h3>${job.title}</h3>
+                        <p>${job.location} | ${job.department}</p>
+                        <a href="apply.html?job_id=${job.id}&org=${orgName}" class="apply-btn">Apply Now</a>
+                    </div>`;
+            });
+        }
+
+        fetchOrgJobs();
     </script>
 </body>
 </html>
