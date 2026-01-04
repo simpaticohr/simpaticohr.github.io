@@ -8,53 +8,79 @@ document.addEventListener("DOMContentLoaded", async () => {
   const messageBox = document.getElementById("messageBox");
   const jobTitleEl = document.getElementById("jobTitle");
 
+  // Get job_id from the URL (e.g., apply.html?job_id=123)
   const jobId = new URLSearchParams(window.location.search).get("job_id");
 
-  if (!jobId) {
-    messageBox.textContent = "❌ Invalid job link.";
+  function showMessage(text, type) {
+    messageBox.textContent = text;
+    messageBox.className = "message " + type;
     messageBox.style.display = "block";
+  }
+
+  if (!jobId) {
+    showMessage("❌ Invalid job link. Please return to the job board.", "error");
     return;
   }
 
-  // Fetch job title for display
-  const { data: job } = await supabase.from("jobs").select("title").eq("id", jobId).single();
-  if (job) jobTitleEl.textContent = "Designation: " + job.title;
+  // 1. Fetch Job Title for the header
+  const { data: job, error: jobError } = await supabase
+    .from("jobs")
+    .select("title")
+    .eq("id", jobId)
+    .single();
 
+  if (job) {
+    jobTitleEl.textContent = "Role: " + job.title;
+  }
+
+  // 2. Handle Form Submission
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
-    messageBox.textContent = "⏳ Submitting...";
-    messageBox.style.display = "block";
-
-    const resume = document.getElementById("resume").files[0];
-    const filePath = `${jobId}/${Date.now()}_${resume.name}`;
-
-    // 1. Upload to Storage - MUST match your dashboard name "RESUMES"
-    const { error: uploadError } = await supabase.storage.from("RESUMES").upload(filePath, resume);
     
-    if (uploadError) {
-        console.error("Upload Error:", uploadError);
-        messageBox.textContent = "❌ Upload failed: " + uploadError.message;
-        return;
-    }
+    const name = document.getElementById("name").value.trim();
+    const email = document.getElementById("email").value.trim();
+    const phone = document.getElementById("phone").value.trim();
+    const resumeFile = document.getElementById("resume").files[0];
 
-    // 2. Get Public URL
-    const { data: urlData } = supabase.storage.from("RESUMES").getPublicUrl(filePath);
+    showMessage("⏳ Submitting application...", "info");
 
-    // 3. Insert to Candidates Table
-    const { error: insertError } = await supabase.from("candidates").insert({
-        full_name: document.getElementById("name").value,
-        email: document.getElementById("email").value,
-        phone: document.getElementById("phone").value,
-        resume_url: urlData.publicUrl,
-        job_id: jobId
-    });
+    try {
+      // A. Upload Resume to Storage (Bucket name must be exact: RESUMES)
+      const fileExt = resumeFile.name.split('.').pop();
+      const fileName = `${Date.now()}_${name.replace(/\s+/g, '_')}.${fileExt}`;
+      const filePath = `${jobId}/${fileName}`;
 
-    if (insertError) {
-        console.error("DB Error:", insertError);
-        messageBox.textContent = "❌ Database Error: " + insertError.message;
-    } else {
-        messageBox.textContent = "✅ Success! Application submitted.";
-        form.reset();
+      const { error: uploadError } = await supabase.storage
+        .from("RESUMES") 
+        .upload(filePath, resumeFile);
+
+      if (uploadError) throw uploadError;
+
+      // B. Get the Public URL for the resume
+      const { data: urlData } = supabase.storage
+        .from("RESUMES")
+        .getPublicUrl(filePath);
+
+      // C. Save Application to 'candidates' table
+      const { error: insertError } = await supabase
+        .from("candidates")
+        .insert({
+          full_name: name,
+          email: email,
+          phone: phone,
+          resume_url: urlData.publicUrl,
+          job_id: jobId
+        });
+
+      if (insertError) throw insertError;
+
+      showMessage("✅ Application submitted successfully!", "success");
+      form.reset();
+      jobTitleEl.textContent = "";
+
+    } catch (err) {
+      console.error("Submission Error:", err);
+      showMessage("❌ Error: " + (err.message || "Failed to submit"), "error");
     }
   });
 });
