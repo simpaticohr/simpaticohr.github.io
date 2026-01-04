@@ -8,7 +8,6 @@ document.addEventListener("DOMContentLoaded", async () => {
   const messageBox = document.getElementById("messageBox");
   const jobTitleEl = document.getElementById("jobTitle");
 
-  // Get job_id from the URL (e.g., apply.html?job_id=123)
   const jobId = new URLSearchParams(window.location.search).get("job_id");
 
   function showMessage(text, type) {
@@ -22,63 +21,50 @@ document.addEventListener("DOMContentLoaded", async () => {
     return;
   }
 
-  // 1. Fetch Job Title for the header
-  const { data: job, error: jobError } = await supabase
-    .from("jobs")
-    .select("title")
-    .eq("id", jobId)
-    .single();
+  // 1. Fetch Job Title
+  const { data: job } = await supabase.from("jobs").select("title").eq("id", jobId).single();
+  if (job) jobTitleEl.textContent = "Role: " + job.title;
 
-  if (job) {
-    jobTitleEl.textContent = "Role: " + job.title;
-  }
-
-  // 2. Handle Form Submission
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
     
     const name = document.getElementById("name").value.trim();
     const email = document.getElementById("email").value.trim();
     const phone = document.getElementById("phone").value.trim();
-    const resumeFile = document.getElementById("resume").files[0];
+    const resumeFile = document.getElementById("resume").files[0]; // Defined as resumeFile
 
-    showMessage("⏳ Submitting application...", "info");
+    showMessage("⏳ Submitting...", "info");
 
     try {
-      // A. Upload Resume to Storage (Bucket name must be exact: RESUMES)
       const fileExt = resumeFile.name.split('.').pop();
       const fileName = `${Date.now()}_${name.replace(/\s+/g, '_')}.${fileExt}`;
       const filePath = `${jobId}/${fileName}`;
 
-      const { error: uploadError } = await supabase.storage.from("RESUMES").upload(filePath, resume);
+      // FIX: Changed 'resume' to 'resumeFile' to match variable above
+      // FIX: Ensure bucket name is uppercase 'RESUMES'
+      const { error: uploadError } = await supabase.storage
+        .from("RESUMES")
+        .upload(filePath, resumeFile); 
 
       if (uploadError) throw uploadError;
 
-      // B. Get the Public URL for the resume
-      const { data: urlData } = supabase.storage
-        .from("RESUMES")
-        .getPublicUrl(filePath);
+      const { data: urlData } = supabase.storage.from("RESUMES").getPublicUrl(filePath);
 
-      // C. Save Application to 'candidates' table
-      const { error: insertError } = await supabase
-        .from("candidates")
-        .insert({
+      const { error: insertError } = await supabase.from("candidates").insert({
           full_name: name,
           email: email,
           phone: phone,
           resume_url: urlData.publicUrl,
           job_id: jobId
-        });
+      });
 
       if (insertError) throw insertError;
 
       showMessage("✅ Application submitted successfully!", "success");
       form.reset();
-      jobTitleEl.textContent = "";
-
     } catch (err) {
-      console.error("Submission Error:", err);
-      showMessage("❌ Error: " + (err.message || "Failed to submit"), "error");
+      console.error(err);
+      showMessage("❌ Error: " + err.message, "error");
     }
   });
 });
