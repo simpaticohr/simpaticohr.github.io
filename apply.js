@@ -21,7 +21,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     return;
   }
 
-  // 1. Fetch Job Title
+  // Fetch job title for header
   const { data: job } = await supabase.from("jobs").select("title").eq("id", jobId).single();
   if (job) jobTitleEl.textContent = "Role: " + job.title;
 
@@ -31,7 +31,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     const name = document.getElementById("name").value.trim();
     const email = document.getElementById("email").value.trim();
     const phone = document.getElementById("phone").value.trim();
-    const resumeFile = document.getElementById("resume").files[0]; // Defined as resumeFile
+    const resumeFile = document.getElementById("resume").files[0]; 
 
     showMessage("⏳ Submitting...", "info");
 
@@ -40,8 +40,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       const fileName = `${Date.now()}_${name.replace(/\s+/g, '_')}.${fileExt}`;
       const filePath = `${jobId}/${fileName}`;
 
-      // FIX: Changed 'resume' to 'resumeFile' to match variable above
-      // FIX: Ensure bucket name is uppercase 'RESUMES'
+      // FIX: Using 'resumeFile' and uppercase 'RESUMES' bucket
       const { error: uploadError } = await supabase.storage
         .from("RESUMES")
         .upload(filePath, resumeFile); 
