@@ -1,14 +1,21 @@
 document.addEventListener("DOMContentLoaded", async () => {
   console.log("✅ apply.js loaded");
 
+  /* ================================
+     SUPABASE CONFIG
+  ================================= */
   const SUPABASE_URL = "https://cvkxtsvgnynxexmemfuy.supabase.co";
-  const SUPABASE_ANON_KEY = "sb_publishable_DGT-x86M-BwI4zA7S_97CA_3v3O3b0A";
+  const SUPABASE_ANON_KEY =
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN2a3h0c3ZnbnlueGV4bWVtZnV5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc0MjE2NTEsImV4cCI6MjA4Mjk5NzY1MX0.2mys8Cc-ucJ1uLThEGJubeDEg1TvfIAkW-xFsR4ecq4";
 
   const supabase = window.supabase.createClient(
     SUPABASE_URL,
     SUPABASE_ANON_KEY
   );
 
+  /* ================================
+     ELEMENTS
+  ================================= */
   const form = document.getElementById("applyForm");
   const messageBox = document.getElementById("messageBox");
   const jobTitleEl = document.getElementById("jobTitle");
@@ -19,7 +26,9 @@ document.addEventListener("DOMContentLoaded", async () => {
     messageBox.style.display = "block";
   }
 
-  // 🔍 Read job_id
+  /* ================================
+     READ job_id FROM URL
+  ================================= */
   const jobId = new URLSearchParams(window.location.search).get("job_id");
   console.log("🔍 job_id:", jobId);
 
@@ -28,24 +37,29 @@ document.addEventListener("DOMContentLoaded", async () => {
     return;
   }
 
-  // 🔍 Fetch job
-  const { data, error } = await supabase
+  /* ================================
+     FETCH JOB DETAILS
+  ================================= */
+  const { data: job, error: jobError } = await supabase
     .from("jobs")
     .select("id, title")
     .eq("id", jobId)
+    .eq("is_active", true)
     .maybeSingle();
 
-  console.log("📦 job data:", data, "error:", error);
+  console.log("📦 job data:", job, "error:", jobError);
 
-  if (error || !data) {
+  if (jobError || !job) {
     showMessage("❌ Job not found or closed.", "error");
     return;
   }
 
-  // ✅ Display designation
-  jobTitleEl.textContent = "Designation: " + data.title;
+  // Display designation
+  jobTitleEl.textContent = "Designation: " + job.title;
 
-  // 🧾 Submit application
+  /* ================================
+     FORM SUBMISSION
+  ================================= */
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
 
@@ -59,6 +73,11 @@ document.addEventListener("DOMContentLoaded", async () => {
       return;
     }
 
+    showMessage("⏳ Submitting application...", "info");
+
+    /* ================================
+       UPLOAD RESUME
+    ================================= */
     const filePath = `${jobId}/${Date.now()}_${resume.name}`;
 
     const { error: uploadError } = await supabase.storage
@@ -66,6 +85,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       .upload(filePath, resume);
 
     if (uploadError) {
+      console.error(uploadError);
       showMessage("❌ Resume upload failed", "error");
       return;
     }
@@ -74,6 +94,9 @@ document.addEventListener("DOMContentLoaded", async () => {
       .from("resumes")
       .getPublicUrl(filePath);
 
+    /* ================================
+       INSERT CANDIDATE
+    ================================= */
     const { error: insertError } = await supabase
       .from("candidates")
       .insert({
@@ -85,6 +108,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       });
 
     if (insertError) {
+      console.error(insertError);
       showMessage("❌ Submission failed", "error");
       return;
     }
