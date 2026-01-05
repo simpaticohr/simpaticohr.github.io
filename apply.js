@@ -1,80 +1,66 @@
-// ================================
-// Firebase Configuration
-// ================================
+
+// Firebase configuration (Your specific project details)
 const firebaseConfig = {
-  apiKey: "AIzaSyCG-bDtX84QBUteS7P1k20I9YI4qLv-3Q",
+  apiKey: "AIzaSyCG-btDx84oU8uteS7P1KzOI9YI4qLv-3Q",
   authDomain: "simpatico-ats.firebaseapp.com",
   projectId: "simpatico-ats",
-  storageBucket: "simpatico-ats.appspot.com",
+  storageBucket: "simpatico-ats.firebasestorage.app",
   messagingSenderId: "1024863972380",
-  appId: "1:1024863972380:web:594829f0e3e8d9cb9b43d9"
+  appId: "1:1024863972380:web:594829fe03e8d9cb9b43d9",
+  measurementId: "G-LJ1SEK8T8X"
 };
 
-// Initialize Firebase
+// Initialize Firebase (Using Compat version for easy browser support)
 firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
+const storage = firebase.storage();
 
-// ================================
-// DOM Ready
-// ================================
-document.addEventListener("DOMContentLoaded", () => {
-  const form = document.getElementById("applyForm");
-  const messageBox = document.getElementById("messageBox");
-  const jobTitleEl = document.getElementById("jobTitle");
+const applyForm = document.getElementById('applyForm');
+const messageBox = document.getElementById('messageBox');
 
-  // Read job_id from URL
-  const urlParams = new URLSearchParams(window.location.search);
-  const jobId = urlParams.get("job_id");
+applyForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  
+  // Update button state to show progress
+  const submitBtn = document.querySelector('button[type="submit"]');
+  submitBtn.innerText = "Submitting... Please wait";
+  submitBtn.disabled = true;
 
-  if (!jobId) {
-    showMessage("Invalid job link.", "error");
-    return;
-  }
+  // Get data from form fields
+  const name = document.getElementById('name').value;
+  const email = document.getElementById('email').value;
+  const phone = document.getElementById('phone').value;
+  const resumeFile = document.getElementById('resume').files[0];
 
-  // Display job ID (optional – replace later with real title)
-  jobTitleEl.textContent = "Applying for Job ID: " + jobId;
+  try {
+    // 1. Upload the Resume file to Firebase Storage
+    const storageRef = storage.ref(`resumes/${Date.now()}_${resumeFile.name}`);
+    const uploadTask = await storageRef.put(resumeFile);
+    const resumeUrl = await uploadTask.ref.getDownloadURL();
 
-  // ================================
-  // Form Submission
-  // ================================
-  form.addEventListener("submit", async (e) => {
-    e.preventDefault();
+    // 2. Save candidate info and Resume link to Firestore Database
+    await db.collection("candidates").add({
+      name: name,
+      email: email,
+      phone: phone,
+      resumeUrl: resumeUrl,
+      appliedAt: new Date()
+    });
 
-    const name = document.getElementById("name").value.trim();
-    const email = document.getElementById("email").value.trim();
-    const phone = document.getElementById("phone").value.trim();
-
-    if (!name || !email || !phone) {
-      showMessage("Please fill all required fields.", "error");
-      return;
-    }
-
-    showMessage("Submitting your application...", "success");
-
-    try {
-      await db.collection("applications").add({
-        full_name: name,
-        email: email,
-        phone: phone,
-        job_id: jobId,
-        applied_at: new Date()
-      });
-
-      showMessage("Application submitted successfully!", "success");
-      form.reset();
-
-    } catch (error) {
-      console.error(error);
-      showMessage("Submission failed. Please try again.", "error");
-    }
-  });
-
-  // ================================
-  // Message Helper
-  // ================================
-  function showMessage(text, type) {
-    messageBox.textContent = text;
-    messageBox.className = "message " + type;
+    // Show Success Message
+    messageBox.innerText = "✅ Application submitted successfully!";
+    messageBox.className = "message success";
     messageBox.style.display = "block";
+    applyForm.reset();
+
+  } catch (error) {
+    console.error("Submission Error:", error);
+    messageBox.innerText = "❌ Error: " + error.message;
+    messageBox.className = "message error";
+    messageBox.style.display = "block";
+  } finally {
+    // Reset button state
+    submitBtn.innerText = "Submit Application";
+    submitBtn.disabled = false;
   }
 });
