@@ -1,71 +1,50 @@
-document.addEventListener("DOMContentLoaded", async () => {
-  const SUPABASE_URL = "https://cvkxtsvgnynxexmemfuy.supabase.co";
-  const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN2a3h0c3ZnbnlueGV4bWVtZnV5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc0MjE2NTEsImV4cCI6MjA4Mjk5NzY1MX0.2mys8Cc-ucJ1uLThEGJubeDEg1TvfIAkW-xFsR4ecq4";
-  
-  const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+// Firebase Config
+const firebaseConfig = {
+  apiKey: "AIzaSyCG-btDx84oUButeS7PlKzOI9YI4qLv-3Q",
+  authDomain: "simpatico-ats.firebaseapp.com",
+  projectId: "simpatico-ats",
+  storageBucket: "simpatico-ats.firebasestorage.app",
+  messagingSenderId: "1024863972380",
+  appId: "1:1024863972380:web:594829fe03e8d9cb9b43d9",
+  measurementId: "G-LJ1SEK8T8X"
+};
 
-  const form = document.getElementById("applyForm");
-  const messageBox = document.getElementById("messageBox");
-  const jobTitleEl = document.getElementById("jobTitle");
+// Initialize Firebase
+firebase.initializeApp(firebaseConfig);
+const db = firebase.firestore();
 
-  const jobId = new URLSearchParams(window.location.search).get("job_id");
+// Form Submit Handling
+const form = document.getElementById("applyForm");
+const statusMsg = document.getElementById("status");
 
-  function showMessage(text, type) {
-    messageBox.textContent = text;
-    messageBox.className = "message " + type;
-    messageBox.style.display = "block";
-  }
+if(form) {
+    form.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        
+        const name = document.getElementById("name").value;
+        const email = document.getElementById("email").value;
+        const phone = document.getElementById("phone").value;
 
-  if (!jobId) {
-    showMessage("❌ Invalid job link. Please return to the job board.", "error");
-    return;
-  }
+        statusMsg.innerText = "⏳ അയക്കുന്നു...";
+        statusMsg.style.display = "block";
 
-  // 1. Fetch Job Title
-  const { data: job } = await supabase.from("jobs").select("title").eq("id", jobId).single();
-  if (job) jobTitleEl.textContent = "Role: " + job.title;
+        try {
+            // Firestore-ലേക്ക് ഡാറ്റ അയക്കുന്നു
+            await db.collection("applications").add({
+                name: name,
+                email: email,
+                phone: phone,
+                appliedDate: new Date()
+            });
 
-  form.addEventListener("submit", async (e) => {
-    e.preventDefault();
-    
-    const name = document.getElementById("name").value.trim();
-    const email = document.getElementById("email").value.trim();
-    const phone = document.getElementById("phone").value.trim();
-    const resumeFile = document.getElementById("resume").files[0]; 
-
-    showMessage("⏳ Submitting...", "info");
-
-    try {
-      const fileExt = resumeFile.name.split('.').pop();
-      const fileName = `${Date.now()}_${name.replace(/\s+/g, '_')}.${fileExt}`;
-      const filePath = `${jobId}/${fileName}`;
-
-      // FIX: Changed 'resume' to 'resumeFile' to match the variable defined above
-      // FIX: Matches your lowercase bucket name 'resumes'
-      const { error: uploadError } = await supabase.storage
-        .from("resumes")
-        .upload(filePath, resumeFile); 
-
-      if (uploadError) throw uploadError;
-
-      const { data: urlData } = supabase.storage.from("resumes").getPublicUrl(filePath);
-
-      const { error: insertError } = await supabase.from("candidates").insert({
-          full_name: name,
-          email: email,
-          phone: phone,
-          resume_url: urlData.publicUrl,
-          job_id: jobId
-      });
-
-      if (insertError) throw insertError;
-
-      showMessage("✅ Application submitted successfully!", "success");
-      form.reset();
-    } catch (err) {
-      console.error(err);
-      showMessage("❌ Error: " + err.message, "error");
-    }
-  });
-});
+            statusMsg.innerText = "✅ അപേക്ഷ വിജയകരമായി അയച്ചു!";
+            statusMsg.style.color = "green";
+            form.reset();
+        } catch (error) {
+            console.error(error);
+            statusMsg.innerText = "❌ പിശക് സംഭവിച്ചു: " + error.message;
+            statusMsg.style.color = "red";
+        }
+    });
+}
 
