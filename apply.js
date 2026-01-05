@@ -1,62 +1,56 @@
-// New configuration from your latest project
-const firebaseConfig = {
-  apiKey: "AIzaSyCG-btDx84oU8uteS7P1KzOI9YI4qLv-3Q",
-  authDomain: "simpatico-ats.firebaseapp.com",
-  projectId: "simpatico-ats",
-  storageBucket: "simpatico-ats.firebasestorage.app",
-  messagingSenderId: "1024863972380",
-  appId: "1:1024863972380:web:7f9d6db1486d67be9b43d9",
-  measurementId: "G-CF7J8KT96Z"
-};
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Apply for Job | Simpatico HR</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 
-// Initialize Firebase (Compat Mode)
-firebase.initializeApp(firebaseConfig);
-const db = firebase.firestore();
-const storage = firebase.storage();
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-storage-compat.js"></script>
 
-const applyForm = document.getElementById('applyForm');
-const messageBox = document.getElementById('messageBox');
+  <style>
+    body { margin: 0; font-family: Arial, Helvetica, sans-serif; background: #f4f6f8; }
+    .container { max-width: 420px; margin: 60px auto; background: #ffffff; padding: 25px; border-radius: 10px; box-shadow: 0 10px 25px rgba(0,0,0,0.08); }
+    h2 { text-align: center; margin-bottom: 20px; color: #222; }
+    label { font-size: 14px; color: #444; display: block; margin-bottom: 6px; }
+    input[type="text"], input[type="email"], input[type="file"] { width: 100%; padding: 10px; margin-bottom: 16px; border: 1px solid #ccc; border-radius: 6px; font-size: 14px; box-sizing: border-box; }
+    button { width: 100%; padding: 12px; background: #000; color: #fff; border: none; border-radius: 6px; font-size: 15px; cursor: pointer; }
+    button:disabled { background: #666; cursor: not-allowed; }
+    .message { margin-bottom: 15px; padding: 10px; border-radius: 6px; font-size: 14px; display: none; text-align: center; }
+    .success { background: #e6f9ed; color: #0f7a3c; border: 1px solid #b6ebc6; }
+    .error { background: #fdecea; color: #a32020; border: 1px solid #f5c6cb; }
+    .note { margin-top: 15px; font-size: 12px; color: #666; text-align: center; }
+  </style>
+</head>
+<body>
 
-applyForm.addEventListener('submit', async (e) => {
-  e.preventDefault();
-  
-  const submitBtn = document.querySelector('button[type="submit"]');
-  submitBtn.innerText = "Submitting... Please wait";
-  submitBtn.disabled = true;
+  <div class="container">
+    <h2>Job Application</h2>
+    
+    <div id="messageBox" class="message"></div>
 
-  const name = document.getElementById('name').value;
-  const email = document.getElementById('email').value;
-  const phone = document.getElementById('phone').value;
-  const resumeFile = document.getElementById('resume').files[0];
+    <form id="applyForm">
+      <label for="name">Full Name</label>
+      <input type="text" id="name" placeholder="Enter your full name" required />
 
-  try {
-    // 1. Upload Resume to Storage
-    const storageRef = storage.ref(`resumes/${Date.now()}_${resumeFile.name}`);
-    const uploadTask = await storageRef.put(resumeFile);
-    const resumeUrl = await uploadTask.ref.getDownloadURL();
+      <label for="email">Email Address</label>
+      <input type="email" id="email" placeholder="Enter your email" required />
 
-    // 2. Save Data to Firestore
-    await db.collection("candidates").add({
-      name: name,
-      email: email,
-      phone: phone,
-      resumeUrl: resumeUrl,
-      appliedAt: new Date()
-    });
+      <label for="phone">Phone Number</label>
+      <input type="text" id="phone" placeholder="Enter your phone number" required />
 
-    messageBox.innerText = "✅ Application submitted successfully!";
-    messageBox.className = "message success";
-    messageBox.style.display = "block";
-    applyForm.reset();
+      <label for="resume">Upload Resume (PDF)</label>
+      <input type="file" id="resume" accept=".pdf" required />
 
-  } catch (error) {
-    console.error("Error:", error);
-    messageBox.innerText = "❌ Submission Failed: " + error.message;
-    messageBox.className = "message error";
-    messageBox.style.display = "block";
-  } finally {
-    submitBtn.innerText = "Submit Application";
-    submitBtn.disabled = false;
-  }
-});
+      <button type="submit" id="submitBtn">Submit Application</button>
+    </form>
+
+    <div class="note">Powered by <strong>Simpatico ATS</strong></div>
+  </div>
+
+  <script src="apply.js"></script>
+
+</body>
+</html>
 
