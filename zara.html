@@ -1,73 +1,3 @@
-<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <title>Evalis AI — ZARA Interview Lab (Voice)</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <style>
-    body {
-      font-family: Poppins, Arial, sans-serif;
-      background: #f4f8fb;
-      margin: 0;
-      padding: 30px;
-    }
-    .card {
-      max-width: 600px;
-      margin: auto;
-      background: white;
-      padding: 30px;
-      border-radius: 16px;
-      box-shadow: 0 10px 30px rgba(0,0,0,.1);
-    }
-    textarea {
-      width: 100%;
-      height: 120px;
-      margin-top: 10px;
-      padding: 10px;
-      font-size: 14px;
-    }
-    button {
-      margin-top: 12px;
-      padding: 12px;
-      width: 100%;
-      font-weight: 700;
-      border: none;
-      border-radius: 10px;
-      background: #00c2ff;
-      color: white;
-      cursor: pointer;
-    }
-    .reply {
-      margin-top: 20px;
-      background: #f1f5f9;
-      padding: 15px;
-      border-radius: 10px;
-      font-size: 14px;
-    }
-    .progress {
-      font-size: 13px;
-      color: #555;
-      margin-bottom: 10px;
-    }
-  </style>
-</head>
-<body>
-
-<div class="card">
-  <h2>Evalis AI — ZARA Interview Lab</h2>
-
-  <div class="progress" id="progress">Question 1 of 5</div>
-
-  <p><strong>ZARA:</strong> <span id="question"></span></p>
-
-  <textarea id="answer" placeholder="Your spoken answer will appear here..."></textarea>
-
-  <button onclick="startListening()">🎙️ Speak Answer</button>
-  <button onclick="submitAnswer()">Submit Answer</button>
-
-  <div class="reply" id="reply"></div>
-</div>
-
 <script>
   const questions = [
     "Tell me about yourself.",
@@ -78,66 +8,78 @@
   ];
 
   let current = 0;
+  let recognition;
 
   const questionEl = document.getElementById("question");
   const progressEl = document.getElementById("progress");
   const answerEl = document.getElementById("answer");
   const replyEl = document.getElementById("reply");
 
-  questionEl.innerText = questions[current];
-  speak(questionEl.innerText);
+  // Start first question
+  loadQuestion();
 
-  function speak(text) {
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.rate = 0.95;
-    utterance.pitch = 1;
-    speechSynthesis.speak(utterance);
+  function loadQuestion() {
+    questionEl.innerText = questions[current];
+    progressEl.innerText = `Question ${current + 1} of ${questions.length}`;
+    answerEl.value = "";
+    replyEl.innerText = "";
+    speakThenListen(questions[current]);
+  }
+
+  function speakThenListen(text) {
+    const utter = new SpeechSynthesisUtterance(text);
+    utter.rate = 0.95;
+    utter.pitch = 1;
+
+    utter.onend = () => {
+      startListening();
+    };
+
+    speechSynthesis.cancel();
+    speechSynthesis.speak(utter);
   }
 
   function startListening() {
     if (!('webkitSpeechRecognition' in window)) {
-      alert("Voice input not supported on this browser. Please use Chrome.");
+      replyEl.innerText =
+        "Voice input not supported. Please type your answer.";
       return;
     }
 
-    const recognition = new webkitSpeechRecognition();
-    recognition.lang = 'en-US';
+    recognition = new webkitSpeechRecognition();
+    recognition.lang = "en-US";
     recognition.interimResults = false;
+    recognition.continuous = false;
 
-    recognition.onresult = function(event) {
+    recognition.onresult = (event) => {
       answerEl.value = event.results[0][0].transcript;
+    };
+
+    recognition.onend = () => {
+      if (answerEl.value.trim()) {
+        processAnswer();
+      }
     };
 
     recognition.start();
   }
 
-  function submitAnswer() {
-    if (!answerEl.value.trim()) return;
-
+  function processAnswer() {
     replyEl.innerText =
-      "ZARA: Thank you. Try to keep your answers clear, structured, and specific.";
+      "ZARA: Response recorded. Moving to the next question.";
 
-    answerEl.value = "";
     current++;
 
     if (current < questions.length) {
-      setTimeout(() => {
-        questionEl.innerText = questions[current];
-        progressEl.innerText = `Question ${current + 1} of ${questions.length}`;
-        replyEl.innerText = "";
-        speak(questionEl.innerText);
-      }, 800);
+      setTimeout(loadQuestion, 1200);
     } else {
       setTimeout(() => {
         document.querySelector(".card").innerHTML = `
           <h2>Interview Completed</h2>
-          <p>Thank you for completing the ZARA Voice Interview.</p>
-          <p><strong>Next:</strong> AI scoring and detailed feedback coming soon.</p>
+          <p>You have successfully completed the hands-free ZARA interview.</p>
+          <p><strong>Status:</strong> Ready for scoring and AI feedback.</p>
         `;
-      }, 1000);
+      }, 1500);
     }
   }
 </script>
-
-</body>
-</html>
