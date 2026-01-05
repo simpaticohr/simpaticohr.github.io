@@ -1,4 +1,4 @@
-// New Firebase configuration from your screenshot
+// New configuration from your latest project
 const firebaseConfig = {
   apiKey: "AIzaSyCG-btDx84oU8uteS7P1KzOI9YI4qLv-3Q",
   authDomain: "simpatico-ats.firebaseapp.com",
@@ -9,7 +9,7 @@ const firebaseConfig = {
   measurementId: "G-CF7J8KT96Z"
 };
 
-// Initialize Firebase using the Compat libraries
+// Initialize Firebase (Compat Mode)
 firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
 const storage = firebase.storage();
@@ -30,12 +30,12 @@ applyForm.addEventListener('submit', async (e) => {
   const resumeFile = document.getElementById('resume').files[0];
 
   try {
-    // 1. Upload Resume to the new Storage bucket
+    // 1. Upload Resume to Storage
     const storageRef = storage.ref(`resumes/${Date.now()}_${resumeFile.name}`);
     const uploadTask = await storageRef.put(resumeFile);
     const resumeUrl = await uploadTask.ref.getDownloadURL();
 
-    // 2. Save candidate info to the new Firestore
+    // 2. Save Data to Firestore
     await db.collection("candidates").add({
       name: name,
       email: email,
@@ -51,7 +51,7 @@ applyForm.addEventListener('submit', async (e) => {
 
   } catch (error) {
     console.error("Error:", error);
-    messageBox.innerText = "❌ Error: " + error.message;
+    messageBox.innerText = "❌ Submission Failed: " + error.message;
     messageBox.className = "message error";
     messageBox.style.display = "block";
   } finally {
