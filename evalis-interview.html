@@ -1,195 +1,153 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <title>Evalis AI — Mock Interview</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <style>
-    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; background:#f4f8fb; margin:0; padding:24px; }
-    .card { max-width:720px; margin:auto; background:#fff; border-radius:16px; box-shadow:0 12px 30px rgba(0,0,0,.08); padding:24px; }
-    h1 { margin:0 0 8px; }
-    .meta { color:#555; font-size:13px; margin-bottom:16px; }
-    .q { font-weight:600; margin:16px 0 8px; }
-    textarea { width:100%; min-height:120px; padding:12px; border-radius:10px; border:1px solid #ddd; font-size:14px; }
-    .row { display:flex; gap:12px; margin-top:12px; flex-wrap:wrap; }
-    button { padding:12px 16px; border-radius:10px; border:none; font-weight:700; cursor:pointer; }
-    .primary { background:#0ea5e9; color:#fff; }
-    .ghost { background:#eef2f7; }
-    .reply { background:#f1f5f9; border-radius:12px; padding:14px; margin-top:16px; }
-    .badge { display:inline-block; padding:6px 10px; border-radius:999px; background:#eef2f7; font-size:12px; margin-right:6px; }
-    .footer { color:#666; font-size:12px; margin-top:16px; }
-    .divider { height:1px; background:#e5e7eb; margin:16px 0; }
-  </style>
+<meta charset="utf-8">
+<title>Evalis AI — Hands-Free Mock Interview</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  body { font-family: system-ui, Arial; background:#f4f8fb; margin:0; padding:20px; }
+  .card { max-width:760px; margin:auto; background:#fff; padding:24px; border-radius:16px; box-shadow:0 10px 30px rgba(0,0,0,.08); }
+  h1 { margin:0 0 6px; }
+  .tag { display:inline-block; padding:6px 12px; border-radius:999px; background:#eef2f7; font-size:12px; margin-right:6px; }
+  .question { font-size:18px; font-weight:600; margin:18px 0; }
+  .reply { background:#f1f5f9; padding:14px; border-radius:12px; margin-top:14px; }
+  .footer { font-size:12px; color:#666; margin-top:18px; }
+</style>
 </head>
 <body>
 
 <div class="card">
-  <h1>Evalis AI — Mock Interview</h1>
-  <div class="meta">Judgment-driven interviewer • Free • Human-like follow-ups</div>
+  <h1>Evalis AI Interview</h1>
+  <span class="tag" id="modeTag">Mode: Friendly</span>
+  <span class="tag" id="stepTag">Question 1</span>
 
-  <div class="badge" id="modeBadge">Mode: Friendly</div>
-  <div class="badge" id="progressBadge">Question 1</div>
-
-  <div class="q" id="question"></div>
-  <textarea id="answer" placeholder="Type your answer here…"></textarea>
-
-  <div class="row">
-    <button class="primary" onclick="submitAnswer()">Submit</button>
-    <button class="ghost" onclick="toggleMode()">Toggle Pressure</button>
-    <button class="ghost" onclick="restart()">Restart</button>
-  </div>
-
+  <div class="question" id="question"></div>
   <div class="reply" id="reply" style="display:none"></div>
 
-  <div class="divider"></div>
   <div class="footer">
-    Note: This uses proprietary rule-based judgment (no LLMs).  
-    Not affiliated with any third-party AI providers.
+    Hands-free • Judgment-based • Proprietary logic • No third-party AI
   </div>
 </div>
 
 <script>
-/* =========================
-   INTERVIEW DATA
-========================= */
-const baseQuestions = [
-  { topic: "intro", text: "Tell me about yourself." },
-  { topic: "problem", text: "Describe a challenging problem you solved." },
-  { topic: "leadership", text: "Tell me about a time you led or influenced others." },
-  { topic: "impact", text: "What measurable impact did your work have?" }
+/* =============================
+   INTERVIEW CONFIG
+============================= */
+const questions = [
+  { topic:"intro", text:"Tell me about yourself." },
+  { topic:"problem", text:"Describe a challenging problem you solved." },
+  { topic:"leadership", text:"Tell me about a time you influenced others." },
+  { topic:"impact", text:"What measurable impact did your work have?" }
 ];
 
-/* =========================
-   SESSION MEMORY
-========================= */
-const session = {
-  idx: 0,
-  mode: "friendly", // friendly | strict
-  weak: new Set(),
-  strong: new Set(),
-  history: []
+let state = {
+  index: 0,
+  mode: "friendly", // friendly | strict | panel
+  weak: [],
+  strong: [],
+  memory: []
 };
 
-/* =========================
-   UI HELPERS
-========================= */
-const qEl = document.getElementById("question");
-const aEl = document.getElementById("answer");
-const rEl = document.getElementById("reply");
-const modeBadge = document.getElementById("modeBadge");
-const progressBadge = document.getElementById("progressBadge");
-
-function renderQuestion() {
-  const q = baseQuestions[session.idx];
-  qEl.textContent = q ? q.text : "Interview wrap-up.";
-  progressBadge.textContent = `Question ${session.idx + 1}`;
-  aEl.value = "";
-  rEl.style.display = "none";
+/* =============================
+   VOICE UTILITIES
+============================= */
+function speak(text) {
+  speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance(text);
+  u.rate = state.mode === "strict" ? 0.9 : 0.95;
+  u.pitch = state.mode === "panel" ? 0.95 : 1.05;
+  speechSynthesis.speak(u);
 }
-renderQuestion();
 
-/* =========================
-   CORE BRAIN (FREE)
-========================= */
-function evaluateAnswer(answer) {
+function listen(callback) {
+  const rec = new webkitSpeechRecognition();
+  rec.lang = "en-US";
+  rec.interimResults = false;
+  rec.onresult = e => callback(e.results[0][0].transcript);
+  rec.start();
+}
+
+/* =============================
+   HUMAN JUDGMENT BRAIN
+============================= */
+function evaluate(answer) {
   let score = 0;
-  if (answer.length > 40) score += 1;
-  if (answer.length > 80) score += 1;
-  if (/example|project|situation|case/i.test(answer)) score += 2;
-  if (/result|impact|improved|reduced|increased|learned/i.test(answer)) score += 2;
-  if (answer.split(".").length > 2) score += 1;
-
-  const quality = score <= 2 ? "weak" : score <= 5 ? "average" : "strong";
+  if (answer.length > 40) score++;
+  if (answer.length > 80) score++;
+  if (/example|project|situation/i.test(answer)) score += 2;
+  if (/result|impact|improved|learned/i.test(answer)) score += 2;
+  const quality = score < 3 ? "weak" : score < 6 ? "average" : "strong";
   return { score, quality };
 }
 
-function detectIntent(answer) {
-  if (/team|leader|managed|stakeholder/i.test(answer)) return "leadership";
-  if (/bug|issue|problem|fix|optimi/i.test(answer)) return "problem";
-  if (/learn|improve|growth/i.test(answer)) return "growth";
-  return "generic";
-}
-
-function decideFollowUp(quality, topic, intent) {
+function followUp(answer, quality, topic) {
   if (quality === "weak") {
-    session.weak.add(topic);
-    return session.mode === "strict"
-      ? "Be specific. Walk me through the steps you took."
+    state.weak.push(topic);
+    return state.mode === "strict"
+      ? "That’s vague. Walk me through exactly what you did."
       : "Can you explain that step by step?";
   }
   if (quality === "average") {
-    session.strong.add(topic);
-    return "That’s okay. Can you give one concrete example and the outcome?";
+    state.strong.push(topic);
+    return "That’s okay. Give me one concrete example and outcome.";
   }
-  // strong
-  session.strong.add(topic);
-  if (intent === "leadership") return "How did your team react, and what would you change next time?";
-  if (intent === "problem") return "What alternatives did you consider before choosing that solution?";
-  return "If you faced this again, what would you do differently?";
+  state.strong.push(topic);
+  if (/team|leader/i.test(answer)) return "How did others react to your decision?";
+  if (/problem|challenge/i.test(answer)) return "What alternatives did you consider?";
+  return "What would you do differently next time?";
 }
 
-function humanVerdict(quality) {
-  if (quality === "weak") return "I’m not convinced yet. Let’s clarify.";
-  if (quality === "average") return "That’s fine, but I want more evidence.";
-  return "That was solid. Let’s raise the bar.";
+function verdict(quality) {
+  if (quality === "weak") return "I’m not convinced yet.";
+  if (quality === "average") return "That’s acceptable, but I expect more depth.";
+  return "That was strong. Let’s raise the bar.";
 }
 
-/* =========================
-   ACTIONS
-========================= */
-function submitAnswer() {
-  const answer = aEl.value.trim();
-  if (!answer) return;
+/* =============================
+   FLOW CONTROLLER
+============================= */
+const qEl = document.getElementById("question");
+const rEl = document.getElementById("reply");
+const stepTag = document.getElementById("stepTag");
+const modeTag = document.getElementById("modeTag");
 
-  const q = baseQuestions[session.idx];
-  const { score, quality } = evaluateAnswer(answer);
-  const intent = detectIntent(answer);
-  const followUp = decideFollowUp(quality, q.topic, intent);
+function ask() {
+  if (state.index >= questions.length) return finish();
+  const q = questions[state.index];
+  qEl.textContent = q.text;
+  stepTag.textContent = `Question ${state.index + 1}`;
+  speak(q.text);
+  listen(answer => respond(answer, q));
+}
 
-  session.history.push({ q: q.text, answer, score, quality });
-
+function respond(answer, q) {
+  const { quality } = evaluate(answer);
+  const fu = followUp(answer, quality, q.topic);
   rEl.style.display = "block";
-  rEl.innerHTML = `
-    <strong>Evalis AI:</strong> ${humanVerdict(quality)}<br/>
-    <em>${followUp}</em>
-  `;
-
-  // delayed human follow-up
-  setTimeout(() => {
-    session.idx++;
-    if (session.idx < baseQuestions.length) {
-      renderQuestion();
-    } else {
-      finishInterview();
-    }
-  }, 1200);
+  rEl.innerHTML = `<strong>Evalis AI:</strong> ${verdict(quality)}<br><em>${fu}</em>`;
+  speak(`${verdict(quality)} ${fu}`);
+  state.memory.push({ q:q.text, answer, quality });
+  state.index++;
+  setTimeout(ask, 1800);
 }
 
-function finishInterview() {
-  const weak = [...session.weak].join(", ") || "None flagged";
-  const strong = [...session.strong].join(", ") || "None flagged";
+function finish() {
   qEl.textContent = "Interview completed.";
-  rEl.style.display = "block";
+  const weak = state.weak.join(", ") || "None";
+  const strong = state.strong.join(", ") || "General competence";
   rEl.innerHTML = `
-    <strong>Evalis AI — Verdict:</strong><br/>
-    Strengths: ${strong}<br/>
-    Watch areas: ${weak}<br/><br/>
-    <em>If I were the interviewer, I’d move you forward, but I’d flag the watch areas above.</em>
+    <strong>Human Verdict:</strong><br>
+    Strengths: ${strong}<br>
+    Watch areas: ${weak}<br><br>
+    <em>If I were the interviewer, I’d move you forward but flag the watch areas.</em>
   `;
+  speak("Interview completed. I would move you forward with some reservations.");
 }
 
-function toggleMode() {
-  session.mode = session.mode === "friendly" ? "strict" : "friendly";
-  modeBadge.textContent = `Mode: ${session.mode === "friendly" ? "Friendly" : "Strict"}`;
-}
-
-function restart() {
-  session.idx = 0;
-  session.weak.clear();
-  session.strong.clear();
-  session.history = [];
-  renderQuestion();
-}
+/* =============================
+   START
+============================= */
+ask();
 </script>
 
 </body>
