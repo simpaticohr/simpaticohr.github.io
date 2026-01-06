@@ -1,111 +1,91 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<title>Evalis AI Interview</title>
-<meta name="viewport" content="width=device-width, initial-scale=1">
-
-<style>
-body {
-  font-family: Arial, sans-serif;
-  background: #f4f8fb;
-  padding: 20px;
-}
-.card {
-  max-width: 600px;
-  margin: auto;
-  background: white;
-  padding: 25px;
-  border-radius: 12px;
-  box-shadow: 0 10px 30px rgba(0,0,0,.1);
-}
-button {
-  width: 100%;
-  padding: 14px;
-  font-weight: bold;
-  margin-top: 15px;
-  cursor: pointer;
-}
-#status {
-  color: #555;
-}
-</style>
-</head>
-
-<body>
-
-<div class="card">
-  <h2 id="question">Tap “Start Interview” when ready</h2>
-  <p id="status">Idle</p>
-  <button id="startBtn">🎙️ Start Interview</button>
-</div>
-
 <script>
-/* ================= CONFIG ================= */
-const WORKER_URL = "https://YOUR-WORKER-NAME.workers.dev";
+let state = {
+  started: false,
+  history: [],
+  listening: false
+};
 
-/* ================= STATE ================= */
-let interviewState = "introduction";
-let recognition;
-let started = false;
+const WORKER_URL = "https://evalis-ai.simpaticohconsultancy.workers.dev";
 
-/* ================= ELEMENTS ================= */
-const startBtn = document.getElementById("startBtn");
+const orb = document.getElementById("orb");
 const questionEl = document.getElementById("question");
 const statusEl = document.getElementById("status");
 
-/* ================= SPEAK ================= */
-function speak(text, callback) {
+let recognition;
+let speaking = false;
+
+// ---------- SPEAK ----------
+function speak(text, onEnd) {
+  speaking = true;
+  statusEl.innerText = "Speaking...";
+  const msg = new SpeechSynthesisUtterance(text);
+  msg.onend = () => {
+    speaking = false;
+    onEnd && onEnd();
+  };
   speechSynthesis.cancel();
-  const utter = new SpeechSynthesisUtterance(text);
-  utter.rate = 0.9;
-  utter.onend = callback;
-  speechSynthesis.speak(utter);
+  speechSynthesis.speak(msg);
 }
 
-/* ================= LISTEN ================= */
-function listen() {
+// ---------- LISTEN ----------
+function startListening() {
+  if (speaking) return;
+
   recognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
   recognition.lang = "en-US";
+  recognition.interimResults = false;
 
-  recognition.onresult = async (event) => {
+  recognition.onstart = () => {
+    state.listening = true;
+    orb.className = "orb listening";
+    statusEl.innerText = "Listening...";
+  };
+
+  recognition.onresult = async (e) => {
     recognition.stop();
-    const answer = event.results[0][0].transcript;
+    state.listening = false;
+    orb.className = "orb thinking";
+
+    const answer = e.results[0][0].transcript;
     statusEl.innerText = "Thinking...";
 
+    // ---- CALL BACKEND ----
     const res = await fetch(WORKER_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ answer, state: interviewState })
+      body: JSON.stringify({
+        answer,
+        history: state.history
+      })
     });
 
     const data = await res.json();
-    interviewState = data.nextState;
+    state.history.push({ q: questionEl.innerText, a: answer });
 
     questionEl.innerText = data.followUp;
-    statusEl.innerText = "Listening...";
-    speak(data.followUp, listen);
+
+    // 🔁 Speak then listen again
+    speak(data.followUp, () => {
+      setTimeout(startListening, 400);
+    });
+  };
+
+  recognition.onerror = () => {
+    statusEl.innerText = "Tap to continue";
+    orb.className = "orb";
   };
 
   recognition.start();
 }
 
-/* ================= START INTERVIEW ================= */
-function startInterview() {
-  if (started) return;
-  started = true;
+// ---------- START INTERVIEW ----------
+document.body.onclick = () => {
+  if (state.started) return;
 
-  startBtn.style.display = "none";
-  statusEl.innerText = "Listening...";
-
-  const firstQuestion = "Tell me about yourself.";
-  questionEl.innerText = firstQuestion;
-
-  speak(firstQuestion, listen);
-}
-
-startBtn.onclick = startInterview;
+  state.started = true;
+  questionEl.innerText = "Tell me about yourself.";
+  speak("Tell me about yourself.", () => {
+    setTimeout(startListening, 400);
+  });
+};
 </script>
-
-</body>
-</html>
