@@ -2,62 +2,68 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Evalis AI Interviewer</title>
+<title>Evalis AI – Voice Interviewer</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
 <style>
 body {
-  background: #0b1020;
-  font-family: Arial, sans-serif;
-  color: #e5e7eb;
-  display: flex;
-  justify-content: center;
-  padding: 20px;
+  background:#0b1020;
+  font-family: system-ui, Arial;
+  color:#e5e7eb;
+  display:flex;
+  justify-content:center;
+  padding:20px;
 }
 .container {
-  max-width: 600px;
-  width: 100%;
-  background: #111827;
-  border-radius: 12px;
-  padding: 20px;
+  max-width:650px;
+  width:100%;
+  background:#111827;
+  border-radius:14px;
+  padding:20px;
 }
 h1 {
-  text-align: center;
-  color: #38bdf8;
+  text-align:center;
+  color:#38bdf8;
 }
 .chat {
-  min-height: 300px;
-  margin-bottom: 15px;
+  min-height:320px;
+  margin-bottom:15px;
 }
 .bot, .user {
-  margin-bottom: 10px;
-  padding: 10px;
-  border-radius: 8px;
+  margin-bottom:10px;
+  padding:12px;
+  border-radius:10px;
 }
 .bot {
-  background: #1e293b;
+  background:#1e293b;
 }
 .user {
-  background: #2563eb;
-  text-align: right;
+  background:#2563eb;
+  text-align:right;
 }
 input {
-  width: 100%;
-  padding: 12px;
-  border-radius: 8px;
-  border: none;
-  outline: none;
+  width:100%;
+  padding:12px;
+  border-radius:10px;
+  border:none;
+  outline:none;
 }
 button {
-  margin-top: 10px;
-  width: 100%;
-  padding: 12px;
-  border: none;
-  border-radius: 8px;
-  background: #38bdf8;
-  color: #000;
-  font-weight: bold;
-  cursor: pointer;
+  margin-top:10px;
+  width:100%;
+  padding:12px;
+  border:none;
+  border-radius:10px;
+  background:#38bdf8;
+  color:#000;
+  font-weight:700;
+  cursor:pointer;
+}
+small {
+  color:#9ca3af;
+  display:block;
+  text-align:center;
+  margin-top:6px;
 }
 </style>
 </head>
@@ -65,10 +71,14 @@ button {
 <body>
 <div class="container">
   <h1>Evalis AI Interviewer</h1>
+
   <div id="chat" class="chat"></div>
 
-  <input id="answer" placeholder="Type your answer..." />
+  <input id="answer" placeholder="Speak or type your answer…" />
+  <button onclick="startListening()">🎤 Speak Answer</button>
   <button onclick="submitAnswer()">Submit</button>
+
+  <small>Hands-free voice interview • Human-style follow-ups</small>
 </div>
 
 <script>
@@ -76,79 +86,134 @@ const chat = document.getElementById("chat");
 const answerBox = document.getElementById("answer");
 
 let step = 0;
-let memory = {};
+let locked = false;
+let history = [];
 
-const questions = [
+const mainQuestions = [
   "Tell me about yourself.",
-  "What are your strongest skills?",
-  "Can you describe a challenge you faced at work?",
+  "Describe a challenge you faced at work.",
+  "What impact did your work create?",
   "Why should we hire you?",
-  "Where do you see yourself in 3 years?"
+  "Where do you see yourself in three years?"
 ];
 
+// ---------- VOICE ----------
+function speak(text) {
+  speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance(text);
+  u.rate = 0.9;
+  u.pitch = 1;
+  speechSynthesis.speak(u);
+}
+
+function startListening() {
+  if (!("webkitSpeechRecognition" in window)) {
+    alert("Use Chrome for voice input.");
+    return;
+  }
+  const r = new webkitSpeechRecognition();
+  r.lang = "en-US";
+  r.interimResults = false;
+  r.onresult = e => {
+    answerBox.value = e.results[0][0].transcript;
+  };
+  r.start();
+}
+
+// ---------- CHAT ----------
 function botSay(text) {
-  const div = document.createElement("div");
-  div.className = "bot";
-  div.innerText = "AI Interviewer: " + text;
-  chat.appendChild(div);
+  const d = document.createElement("div");
+  d.className = "bot";
+  d.innerText = "Evalis AI: " + text;
+  chat.appendChild(d);
   chat.scrollTop = chat.scrollHeight;
+  speak(text);
 }
 
 function userSay(text) {
-  const div = document.createElement("div");
-  div.className = "user";
-  div.innerText = text;
-  chat.appendChild(div);
+  const d = document.createElement("div");
+  d.className = "user";
+  d.innerText = text;
+  chat.appendChild(d);
   chat.scrollTop = chat.scrollHeight;
 }
 
+// ---------- HUMAN ANALYSIS ----------
+function analyze(answer) {
+  return {
+    length: answer.length,
+    ownership: /\bI\b/i.test(answer),
+    example: /example|for instance|when|because/i.test(answer),
+    outcome: /result|impact|improved|reduced|learned/i.test(answer)
+  };
+}
+
+function followUp(answer) {
+  const a = analyze(answer);
+
+  // Silence / avoidance
+  if (a.length < 20) {
+    locked = true;
+    return "That’s too brief. Start from the beginning and explain clearly.";
+  }
+
+  // Ownership pressure
+  if (!a.ownership) {
+    locked = true;
+    return "You mentioned the team. What did YOU personally do?";
+  }
+
+  // Evidence demand
+  if (!a.example) {
+    locked = true;
+    return "Give me one real example from that situation.";
+  }
+
+  // Outcome pressure
+  if (!a.outcome) {
+    locked = true;
+    return "What changed because of your action?";
+  }
+
+  // Release thread
+  locked = false;
+  return "Alright. Let’s move on.";
+}
+
+// ---------- FLOW ----------
 function submitAnswer() {
   const text = answerBox.value.trim();
   if (!text) return;
 
   userSay(text);
-  memory["q" + step] = text;
+  history.push({ q: step, a: text });
   answerBox.value = "";
 
-  setTimeout(() => followUp(text), 700);
+  setTimeout(() => {
+    const probe = followUp(text);
+    botSay(probe);
+
+    if (!locked) {
+      step++;
+      if (step < mainQuestions.length) {
+        setTimeout(() => botSay(mainQuestions[step]), 1200);
+      } else {
+        setTimeout(() => finishInterview(), 1200);
+      }
+    }
+  }, 900);
 }
 
-function followUp(answer) {
-  let reply = "";
-
-  if (step === 0) {
-    reply = answer.length < 20
-      ? "Could you expand a little more about your background?"
-      : "Interesting. What part of your experience are you most confident about?";
-  }
-
-  else if (step === 1) {
-    reply = answer.toLowerCase().includes("team")
-      ? "You mentioned teamwork. Can you give an example?"
-      : "How have these skills helped you in real situations?";
-  }
-
-  else if (step === 2) {
-    reply = answer.toLowerCase().includes("pressure")
-      ? "How do you personally handle pressure?"
-      : "What did you learn from that challenge?";
-  }
-
-  else if (step === 3) {
-    reply = "What makes you different from other candidates with similar experience?";
-  }
-
-  else {
-    reply = "Thank you. This concludes the interview. We will evaluate your responses.";
-  }
-
-  step++;
-  botSay(reply);
+function finishInterview() {
+  botSay(
+    "Interview completed. You showed potential, but some answers needed more clarity. " +
+    "This is exactly what real interviews test."
+  );
 }
 
-// Start interview
-botSay("Welcome. Let's begin the interview.");
-setTimeout(() => botSay(questions[0]), 600);
+// ---------- START ----------
+botSay("Welcome. This is a real interview simulation.");
+setTimeout(() => botSay(mainQuestions[0]), 800);
 </script>
 </body>
 </html>
