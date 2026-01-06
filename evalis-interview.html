@@ -2,55 +2,62 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Evalis AI — Voice Interview</title>
+<title>Evalis AI — Advanced Voice Interview</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
-  body { font-family: system-ui; background:#0f172a; color:#e5e7eb; margin:0; padding:20px; }
-  .card { max-width:720px; margin:auto; background:#020617; padding:24px; border-radius:16px; }
-  h1 { margin:0 0 10px; }
-  .status { font-size:14px; color:#94a3b8; margin-bottom:12px; }
-  .question { font-size:20px; font-weight:600; margin:20px 0; }
-  .log { background:#020617; border:1px solid #1e293b; padding:12px; border-radius:10px; font-size:14px; }
+  body { font-family: system-ui; background:#020617; color:#e5e7eb; margin:0; padding:20px; }
+  .card { max-width:760px; margin:auto; background:#020617; border:1px solid #1e293b;
+          padding:24px; border-radius:16px; }
+  h1 { margin:0 0 8px; }
+  .status { color:#94a3b8; font-size:14px; }
+  .question { font-size:22px; font-weight:600; margin:20px 0; }
+  .log { font-size:14px; margin-top:14px; color:#cbd5f5; }
 </style>
 </head>
 <body>
 
 <div class="card">
   <h1>Evalis AI — Voice Interview</h1>
-  <div class="status" id="status">Initializing interview…</div>
+  <div class="status" id="status">Initializing…</div>
   <div class="question" id="question"></div>
   <div class="log" id="log"></div>
 </div>
 
 <script>
-/* ===============================
-   INTERVIEW DATA
-================================ */
-const questions = [
-  "Tell me about yourself.",
-  "Describe a challenge you solved.",
-  "What was the impact of your work?",
-  "How do you handle pressure?"
+/* ============================
+   CONFIG
+============================ */
+const QUESTIONS = [
+  { topic:"intro", text:"Tell me about yourself." },
+  { topic:"problem", text:"Describe a difficult problem you solved." },
+  { topic:"impact", text:"What impact did your work create?" },
+  { topic:"pressure", text:"How do you handle pressure situations?" }
 ];
 
-let step = 0;
+let state = {
+  step: 0,
+  mode: "strict",        // friendly | strict
+  weakTopics: [],
+  memory: []
+};
+
 let recognition;
 
-/* ===============================
+/* ============================
    SPEAK
-================================ */
-function speak(text, cb) {
+============================ */
+function speak(text, after) {
   speechSynthesis.cancel();
   const u = new SpeechSynthesisUtterance(text);
-  u.rate = 0.95;
-  u.pitch = 1.05;
-  u.onend = cb;
+  u.rate = state.mode === "strict" ? 0.9 : 0.95;
+  u.pitch = state.mode === "strict" ? 0.95 : 1.05;
+  u.onend = after;
   speechSynthesis.speak(u);
 }
 
-/* ===============================
-   LISTEN (AUTO)
-================================ */
+/* ============================
+   LISTEN (SILENCE AWARE)
+============================ */
 function listen() {
   recognition = new webkitSpeechRecognition();
   recognition.lang = "en-US";
@@ -59,11 +66,17 @@ function listen() {
 
   document.getElementById("status").innerText = "Listening…";
 
-  recognition.onresult = e => {
-    const answer = e.results[0][0].transcript;
-    document.getElementById("log").innerHTML += `<br><strong>You:</strong> ${answer}`;
+  let silenceTimer = setTimeout(() => {
     recognition.stop();
-    think(answer);
+    speak("Take your time. Please answer when ready.", listen);
+  }, 7000);
+
+  recognition.onresult = e => {
+    clearTimeout(silenceTimer);
+    const answer = e.results[0][0].transcript;
+    logUser(answer);
+    recognition.stop();
+    evaluate(answer);
   };
 
   recognition.onerror = () => {
@@ -73,57 +86,92 @@ function listen() {
   recognition.start();
 }
 
-/* ===============================
-   THINK (HUMAN-LIKE)
-================================ */
-function think(answer) {
+/* ============================
+   THINK (HUMAN JUDGMENT)
+============================ */
+function evaluate(answer) {
   document.getElementById("status").innerText = "Thinking…";
 
+  const length = answer.length;
+  const confident = length > 50;
+  const vague = length < 20;
+
+  let followUp;
+
+  if (vague) {
+    followUp = state.mode === "strict"
+      ? "That’s vague. Walk me through exactly what you did."
+      : "Can you explain that in more detail?";
+    state.weakTopics.push(QUESTIONS[state.step].topic);
+  } else if (answer.match(/team|collabor/i)) {
+    followUp = "What was your personal contribution in that situation?";
+  } else if (answer.match(/problem|challenge|issue/i)) {
+    followUp = "What alternatives did you consider before choosing that approach?";
+  } else if (confident) {
+    followUp = "What would you do differently if you faced this again?";
+  } else {
+    followUp = "What was the final outcome?";
+  }
+
+  state.memory.push({ q: QUESTIONS[state.step].text, answer });
+
   setTimeout(() => {
-    let followUp =
-      answer.length < 20
-        ? "Can you explain that in more detail?"
-        : answer.includes("team")
-        ? "What was your personal contribution?"
-        : "What did you learn from this experience?";
-
-    step++;
-
-    if (step < questions.length) {
+    state.step++;
+    if (state.step < QUESTIONS.length) {
       ask(followUp);
     } else {
-      finish();
+      revisitWeakness();
     }
-  }, 1200);
+  }, 1400); // thinking pause
 }
 
-/* ===============================
-   ASK (AUTO)
-================================ */
+/* ============================
+   ASK
+============================ */
 function ask(text) {
   document.getElementById("question").innerText = text;
   document.getElementById("status").innerText = "Speaking…";
-
-  speak(text, () => {
-    listen();
-  });
+  speak(text, listen);
 }
 
-/* ===============================
-   FINISH
-================================ */
-function finish() {
-  const msg = "Interview completed. Thank you for your responses.";
+/* ============================
+   REVISIT WEAK POINT (HUMAN TRICK)
+============================ */
+function revisitWeakness() {
+  if (state.weakTopics.length === 0) return finish();
+
+  const topic = state.weakTopics[0];
+  const msg = `Earlier, you were unclear about ${topic}. Let’s revisit that now.`;
   document.getElementById("question").innerText = msg;
-  document.getElementById("status").innerText = "Completed";
-  speak(msg);
+  speak(msg, listen);
 }
 
-/* ===============================
-   START INTERVIEW (AUTO)
-================================ */
+/* ============================
+   FINISH
+============================ */
+function finish() {
+  const verdict =
+    state.weakTopics.length === 0
+      ? "I would move you forward to the next round."
+      : "I would move you forward, but I have concerns in some areas.";
+
+  document.getElementById("question").innerText = "Interview completed.";
+  document.getElementById("status").innerText = "Completed";
+  speak(`Interview completed. ${verdict}`);
+}
+
+/* ============================
+   LOG
+============================ */
+function logUser(text) {
+  document.getElementById("log").innerHTML += `<br><strong>You:</strong> ${text}`;
+}
+
+/* ============================
+   START
+============================ */
 window.onload = () => {
-  ask(questions[0]);
+  ask(QUESTIONS[0].text);
 };
 </script>
 
