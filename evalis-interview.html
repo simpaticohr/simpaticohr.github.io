@@ -1,91 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Evalis AI Interview</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>
+body {
+  background: #0f1115;
+  color: white;
+  font-family: system-ui;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100vh;
+  margin: 0;
+}
+.card {
+  background: #181b22;
+  padding: 30px;
+  border-radius: 16px;
+  width: 90%;
+  max-width: 400px;
+  text-align: center;
+}
+button {
+  padding: 12px 20px;
+  border-radius: 12px;
+  border: none;
+  background: #4f8cff;
+  color: white;
+  font-size: 16px;
+}
+#status {
+  margin-top: 12px;
+  opacity: 0.7;
+}
+</style>
+</head>
+
+<body>
+<div class="card">
+  <h2 id="question">Tap Start to begin</h2>
+  <button id="startBtn">Start Interview</button>
+  <div id="status"></div>
+</div>
+
 <script>
-let state = {
-  started: false,
-  history: [],
-  listening: false
-};
-
-const WORKER_URL = "https://evalis-ai.simpaticohconsultancy.workers.dev";
-
-const orb = document.getElementById("orb");
-const questionEl = document.getElementById("question");
-const statusEl = document.getElementById("status");
+const WORKER_URL = "https://evalis-ai.simpaticohrrconsultancy.workers.dev";
 
 let recognition;
-let speaking = false;
+let listening = false;
 
-// ---------- SPEAK ----------
-function speak(text, onEnd) {
-  speaking = true;
-  statusEl.innerText = "Speaking...";
+function speak(text, done) {
   const msg = new SpeechSynthesisUtterance(text);
-  msg.onend = () => {
-    speaking = false;
-    onEnd && onEnd();
-  };
+  msg.onend = () => done && done();
   speechSynthesis.cancel();
   speechSynthesis.speak(msg);
 }
 
-// ---------- LISTEN ----------
 function startListening() {
-  if (speaking) return;
-
   recognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
   recognition.lang = "en-US";
   recognition.interimResults = false;
-
-  recognition.onstart = () => {
-    state.listening = true;
-    orb.className = "orb listening";
-    statusEl.innerText = "Listening...";
-  };
+  recognition.maxAlternatives = 1;
 
   recognition.onresult = async (e) => {
     recognition.stop();
-    state.listening = false;
-    orb.className = "orb thinking";
+    document.getElementById("status").innerText = "Thinking...";
 
     const answer = e.results[0][0].transcript;
-    statusEl.innerText = "Thinking...";
 
-    // ---- CALL BACKEND ----
-    const res = await fetch(WORKER_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        answer,
-        history: state.history
-      })
-    });
+    try {
+      const res = await fetch(WORKER_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ answer })
+      });
 
-    const data = await res.json();
-    state.history.push({ q: questionEl.innerText, a: answer });
+      const data = await res.json();
+      document.getElementById("question").innerText = data.followUp;
+      document.getElementById("status").innerText = "";
 
-    questionEl.innerText = data.followUp;
+      speak(data.followUp, startListening);
 
-    // 🔁 Speak then listen again
-    speak(data.followUp, () => {
-      setTimeout(startListening, 400);
-    });
+    } catch (err) {
+      document.getElementById("status").innerText = "Network error. Tap Start again.";
+    }
   };
 
   recognition.onerror = () => {
-    statusEl.innerText = "Tap to continue";
-    orb.className = "orb";
+    document.getElementById("status").innerText = "Mic error. Tap Start again.";
   };
 
   recognition.start();
 }
 
-// ---------- START INTERVIEW ----------
-document.body.onclick = () => {
-  if (state.started) return;
-
-  state.started = true;
-  questionEl.innerText = "Tell me about yourself.";
-  speak("Tell me about yourself.", () => {
-    setTimeout(startListening, 400);
-  });
+document.getElementById("startBtn").onclick = () => {
+  document.getElementById("startBtn").style.display = "none";
+  document.getElementById("question").innerText = "Tell me about yourself.";
+  speak("Tell me about yourself.", startListening);
 };
 </script>
+</body>
+</html>
