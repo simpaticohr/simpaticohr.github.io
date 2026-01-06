@@ -17,12 +17,17 @@ body {
   background: white;
   padding: 25px;
   border-radius: 12px;
+  box-shadow: 0 10px 30px rgba(0,0,0,.1);
 }
 button {
   width: 100%;
-  padding: 12px;
-  margin-top: 10px;
+  padding: 14px;
   font-weight: bold;
+  margin-top: 15px;
+  cursor: pointer;
+}
+#status {
+  color: #555;
 }
 </style>
 </head>
@@ -30,54 +35,76 @@ button {
 <body>
 
 <div class="card">
-  <h2 id="question">Tap to start interview</h2>
-  <p id="status">Ready</p>
-  <button onclick="startInterview()">🎙️ Start Interview</button>
+  <h2 id="question">Tap “Start Interview” when ready</h2>
+  <p id="status">Idle</p>
+  <button id="startBtn">🎙️ Start Interview</button>
 </div>
 
 <script>
+/* ================= CONFIG ================= */
 const WORKER_URL = "https://YOUR-WORKER-NAME.workers.dev";
 
-let state = "introduction";
+/* ================= STATE ================= */
+let interviewState = "introduction";
 let recognition;
+let started = false;
 
-function speak(text, cb) {
-  const u = new SpeechSynthesisUtterance(text);
-  u.rate = 0.9;
-  u.onend = cb;
-  speechSynthesis.speak(u);
+/* ================= ELEMENTS ================= */
+const startBtn = document.getElementById("startBtn");
+const questionEl = document.getElementById("question");
+const statusEl = document.getElementById("status");
+
+/* ================= SPEAK ================= */
+function speak(text, callback) {
+  speechSynthesis.cancel();
+  const utter = new SpeechSynthesisUtterance(text);
+  utter.rate = 0.9;
+  utter.onend = callback;
+  speechSynthesis.speak(utter);
 }
 
+/* ================= LISTEN ================= */
 function listen() {
   recognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
   recognition.lang = "en-US";
-  recognition.onresult = async (e) => {
-    const answer = e.results[0][0].transcript;
-    document.getElementById("status").innerText = "Thinking...";
+
+  recognition.onresult = async (event) => {
+    recognition.stop();
+    const answer = event.results[0][0].transcript;
+    statusEl.innerText = "Thinking...";
 
     const res = await fetch(WORKER_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ answer, state })
+      body: JSON.stringify({ answer, state: interviewState })
     });
 
     const data = await res.json();
-    state = data.nextState;
+    interviewState = data.nextState;
 
-    document.getElementById("question").innerText = data.followUp;
-    document.getElementById("status").innerText = "Listening...";
+    questionEl.innerText = data.followUp;
+    statusEl.innerText = "Listening...";
     speak(data.followUp, listen);
   };
 
   recognition.start();
 }
 
+/* ================= START INTERVIEW ================= */
 function startInterview() {
-  const first = "Tell me about yourself.";
-  document.getElementById("question").innerText = first;
-  document.getElementById("status").innerText = "Listening...";
-  speak(first, listen);
+  if (started) return;
+  started = true;
+
+  startBtn.style.display = "none";
+  statusEl.innerText = "Listening...";
+
+  const firstQuestion = "Tell me about yourself.";
+  questionEl.innerText = firstQuestion;
+
+  speak(firstQuestion, listen);
 }
+
+startBtn.onclick = startInterview;
 </script>
 
 </body>
