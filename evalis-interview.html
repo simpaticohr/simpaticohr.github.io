@@ -2,218 +2,83 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Evalis AI – Voice Interviewer</title>
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Evalis AI Interview</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
 
 <style>
 body {
-  background:#0b1020;
-  font-family: system-ui, Arial;
-  color:#e5e7eb;
-  display:flex;
-  justify-content:center;
-  padding:20px;
+  font-family: Arial, sans-serif;
+  background: #f4f8fb;
+  padding: 20px;
 }
-.container {
-  max-width:650px;
-  width:100%;
-  background:#111827;
-  border-radius:14px;
-  padding:20px;
-}
-h1 {
-  text-align:center;
-  color:#38bdf8;
-}
-.chat {
-  min-height:320px;
-  margin-bottom:15px;
-}
-.bot, .user {
-  margin-bottom:10px;
-  padding:12px;
-  border-radius:10px;
-}
-.bot {
-  background:#1e293b;
-}
-.user {
-  background:#2563eb;
-  text-align:right;
-}
-input {
-  width:100%;
-  padding:12px;
-  border-radius:10px;
-  border:none;
-  outline:none;
+.card {
+  max-width: 600px;
+  margin: auto;
+  background: white;
+  padding: 25px;
+  border-radius: 12px;
 }
 button {
-  margin-top:10px;
-  width:100%;
-  padding:12px;
-  border:none;
-  border-radius:10px;
-  background:#38bdf8;
-  color:#000;
-  font-weight:700;
-  cursor:pointer;
-}
-small {
-  color:#9ca3af;
-  display:block;
-  text-align:center;
-  margin-top:6px;
+  width: 100%;
+  padding: 12px;
+  margin-top: 10px;
+  font-weight: bold;
 }
 </style>
 </head>
 
 <body>
-<div class="container">
-  <h1>Evalis AI Interviewer</h1>
 
-  <div id="chat" class="chat"></div>
-
-  <input id="answer" placeholder="Speak or type your answer…" />
-  <button onclick="startListening()">🎤 Speak Answer</button>
-  <button onclick="submitAnswer()">Submit</button>
-
-  <small>Hands-free voice interview • Human-style follow-ups</small>
+<div class="card">
+  <h2 id="question">Tap to start interview</h2>
+  <p id="status">Ready</p>
+  <button onclick="startInterview()">🎙️ Start Interview</button>
 </div>
 
 <script>
-const chat = document.getElementById("chat");
-const answerBox = document.getElementById("answer");
+const WORKER_URL = "https://YOUR-WORKER-NAME.workers.dev";
 
-let step = 0;
-let locked = false;
-let history = [];
+let state = "introduction";
+let recognition;
 
-const mainQuestions = [
-  "Tell me about yourself.",
-  "Describe a challenge you faced at work.",
-  "What impact did your work create?",
-  "Why should we hire you?",
-  "Where do you see yourself in three years?"
-];
-
-// ---------- VOICE ----------
-function speak(text) {
-  speechSynthesis.cancel();
+function speak(text, cb) {
   const u = new SpeechSynthesisUtterance(text);
   u.rate = 0.9;
-  u.pitch = 1;
+  u.onend = cb;
   speechSynthesis.speak(u);
 }
 
-function startListening() {
-  if (!("webkitSpeechRecognition" in window)) {
-    alert("Use Chrome for voice input.");
-    return;
-  }
-  const r = new webkitSpeechRecognition();
-  r.lang = "en-US";
-  r.interimResults = false;
-  r.onresult = e => {
-    answerBox.value = e.results[0][0].transcript;
+function listen() {
+  recognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
+  recognition.lang = "en-US";
+  recognition.onresult = async (e) => {
+    const answer = e.results[0][0].transcript;
+    document.getElementById("status").innerText = "Thinking...";
+
+    const res = await fetch(WORKER_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ answer, state })
+    });
+
+    const data = await res.json();
+    state = data.nextState;
+
+    document.getElementById("question").innerText = data.followUp;
+    document.getElementById("status").innerText = "Listening...";
+    speak(data.followUp, listen);
   };
-  r.start();
+
+  recognition.start();
 }
 
-// ---------- CHAT ----------
-function botSay(text) {
-  const d = document.createElement("div");
-  d.className = "bot";
-  d.innerText = "Evalis AI: " + text;
-  chat.appendChild(d);
-  chat.scrollTop = chat.scrollHeight;
-  speak(text);
+function startInterview() {
+  const first = "Tell me about yourself.";
+  document.getElementById("question").innerText = first;
+  document.getElementById("status").innerText = "Listening...";
+  speak(first, listen);
 }
-
-function userSay(text) {
-  const d = document.createElement("div");
-  d.className = "user";
-  d.innerText = text;
-  chat.appendChild(d);
-  chat.scrollTop = chat.scrollHeight;
-}
-
-// ---------- HUMAN ANALYSIS ----------
-function analyze(answer) {
-  return {
-    length: answer.length,
-    ownership: /\bI\b/i.test(answer),
-    example: /example|for instance|when|because/i.test(answer),
-    outcome: /result|impact|improved|reduced|learned/i.test(answer)
-  };
-}
-
-function followUp(answer) {
-  const a = analyze(answer);
-
-  // Silence / avoidance
-  if (a.length < 20) {
-    locked = true;
-    return "That’s too brief. Start from the beginning and explain clearly.";
-  }
-
-  // Ownership pressure
-  if (!a.ownership) {
-    locked = true;
-    return "You mentioned the team. What did YOU personally do?";
-  }
-
-  // Evidence demand
-  if (!a.example) {
-    locked = true;
-    return "Give me one real example from that situation.";
-  }
-
-  // Outcome pressure
-  if (!a.outcome) {
-    locked = true;
-    return "What changed because of your action?";
-  }
-
-  // Release thread
-  locked = false;
-  return "Alright. Let’s move on.";
-}
-
-// ---------- FLOW ----------
-function submitAnswer() {
-  const text = answerBox.value.trim();
-  if (!text) return;
-
-  userSay(text);
-  history.push({ q: step, a: text });
-  answerBox.value = "";
-
-  setTimeout(() => {
-    const probe = followUp(text);
-    botSay(probe);
-
-    if (!locked) {
-      step++;
-      if (step < mainQuestions.length) {
-        setTimeout(() => botSay(mainQuestions[step]), 1200);
-      } else {
-        setTimeout(() => finishInterview(), 1200);
-      }
-    }
-  }, 900);
-}
-
-function finishInterview() {
-  botSay(
-    "Interview completed. You showed potential, but some answers needed more clarity. " +
-    "This is exactly what real interviews test."
-  );
-}
-
-// ---------- START ----------
-botSay("Welcome. This is a real interview simulation.");
-setTimeout(() => botSay(mainQuestions[0]), 800);
 </script>
+
 </body>
 </html>
