@@ -1,136 +1,63 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<meta charset="UTF-8">
 <title>Evalis Interview</title>
-
-<style>
-body {
-  margin: 0;
-  height: 100vh;
-  background: radial-gradient(circle at center, #0b1a3a, #020617);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-family: system-ui, sans-serif;
-  color: white;
-}
-
-.card {
-  background: rgba(255,255,255,0.05);
-  padding: 24px 28px;
-  border-radius: 14px;
-  text-align: center;
-  width: 300px;
-}
-
-.circle {
-  width: 70px;
-  height: 70px;
-  margin: 0 auto 16px;
-  border-radius: 50%;
-  background: #3b82f6;
-}
-
-button {
-  margin-top: 14px;
-  padding: 10px 16px;
-  border-radius: 20px;
-  border: none;
-  background: #2563eb;
-  color: white;
-  font-size: 14px;
-}
-</style>
 </head>
-
 <body>
 
-<div class="card">
-  <div class="circle"></div>
-  <div id="question">Ready to start interview</div>
-  <div id="status" style="opacity:.7;margin-top:6px;"></div>
-  <button id="startBtn">Start Interview</button>
-</div>
+<h2 id="question">Ready</h2>
+<p id="status"></p>
+<button id="startBtn">Start Interview</button>
 
 <script>
-(function () {
+const profile = JSON.parse(localStorage.getItem("profile") || "{}");
 
-  const questionEl = document.getElementById("question");
-  const statusEl = document.getElementById("status");
-  const startBtn = document.getElementById("startBtn");
+const QUESTIONS = profile.role?.toLowerCase().includes("recruit")
+  ? ["Tell me about a difficult hiring case you handled."]
+  : ["Tell me about a recent project you worked on."];
 
-  if (!questionEl || !statusEl || !startBtn) {
-    document.body.innerHTML = "<h2 style='color:white'>UI load failed</h2>";
-    return;
-  }
+let depth = 0;
+let currentQuestion = QUESTIONS[0];
 
-  const SpeechRecognition =
-    window.SpeechRecognition || window.webkitSpeechRecognition;
+const SpeechRecognition =
+  window.SpeechRecognition || window.webkitSpeechRecognition;
 
+function speak(text) {
+  question.textContent = text;
+  const u = new SpeechSynthesisUtterance(text);
+  u.onend = listen;
+  speechSynthesis.speak(u);
+}
+
+function listen() {
   if (!SpeechRecognition) {
-    statusEl.textContent = "Speech not supported on this browser";
-    startBtn.disabled = true;
+    status.textContent = "Speech not supported";
     return;
   }
 
-  const questions = [
-    "Tell me about yourself.",
-    "What skills did you use in your last role?",
-    "What was your personal contribution?",
-    "What challenges did you face?",
-    "What was the outcome?"
-  ];
+  const rec = new SpeechRecognition();
+  rec.lang = "en-US";
+  status.textContent = "Listening…";
 
-  let index = 0;
-  let recognition;
+  rec.onresult = e => {
+    rec.stop();
+    depth++;
 
-  function speak(text) {
-    speechSynthesis.cancel();
-    questionEl.textContent = text;
-    statusEl.textContent = "Speaking…";
-
-    const utter = new SpeechSynthesisUtterance(text);
-    utter.lang = "en-US";
-
-    utter.onend = () => listen();
-    speechSynthesis.speak(utter);
-  }
-
-  function listen() {
-    recognition = new SpeechRecognition();
-    recognition.lang = "en-US";
-    recognition.continuous = false;
-
-    statusEl.textContent = "Listening…";
-
-    recognition.onresult = e => {
-      recognition.stop();
-      index++;
-      if (index < questions.length) {
-        speak(questions[index]);
-      } else {
-        questionEl.textContent = "Interview completed";
-        statusEl.textContent = "";
-      }
-    };
-
-    recognition.onerror = () => {
-      statusEl.textContent = "Retrying…";
-      setTimeout(listen, 800);
-    };
-
-    recognition.start();
-  }
-
-  startBtn.onclick = () => {
-    startBtn.style.display = "none";
-    index = 0;
-    speak(questions[0]);
+    if (depth < 3) {
+      speak("Can you explain that in more detail?");
+    } else {
+      speak("Thank you. Interview completed.");
+    }
   };
 
-})();
+  rec.start();
+}
+
+startBtn.onclick = () => {
+  startBtn.style.display = "none";
+  speak(currentQuestion);
+};
 </script>
 
 </body>
