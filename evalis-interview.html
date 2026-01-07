@@ -1,100 +1,17 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <title>Evalis AI Interview</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-
-  <style>
-    body {
-      margin: 0;
-      background: #0b0f1a;
-      color: #fff;
-      font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      height: 100vh;
-    }
-
-    .card {
-      background: #11162a;
-      border-radius: 16px;
-      padding: 28px;
-      width: 90%;
-      max-width: 420px;
-      text-align: center;
-      box-shadow: 0 0 40px rgba(0,0,0,0.6);
-    }
-
-    .orb {
-      width: 90px;
-      height: 90px;
-      margin: 0 auto 20px;
-      border-radius: 50%;
-      background: radial-gradient(circle at top, #4da3ff, #1e3cff);
-      box-shadow: 0 0 30px rgba(77,163,255,0.6);
-    }
-
-    h2 {
-      margin: 0 0 10px;
-      font-weight: 500;
-    }
-
-    #thinking {
-      font-size: 14px;
-      opacity: 0.7;
-      height: 18px;
-    }
-
-    button {
-      margin-top: 20px;
-      padding: 14px 22px;
-      border-radius: 999px;
-      border: none;
-      background: #2d6cff;
-      color: white;
-      font-size: 16px;
-      cursor: pointer;
-    }
-
-    button:disabled {
-      opacity: 0.5;
-      cursor: not-allowed;
-    }
-  </style>
-</head>
-
-<body>
-
-  <div class="card">
-    <div class="orb"></div>
-    <h2 id="question">Tell me about yourself.</h2>
-    <div id="thinking"></div>
-    <button id="micBtn">🎤 Speak</button>
-  </div>
-
 <script>
-/* ===============================
-   CONFIG
-================================ */
 const WORKER_URL = "https://evalis-ai.simpaticohrconsultancy.workers.dev";
 
-/* ===============================
-   STATE
-================================ */
 let isThinking = false;
 let currentState = "introduction";
-let recognition;
 
 /* ===============================
-   SPEECH SYNTHESIS
+   SPEAK AI RESPONSE
 ================================ */
 function speak(text) {
   speechSynthesis.cancel();
   const u = new SpeechSynthesisUtterance(text);
+  u.lang = "en-US";
   u.rate = 1;
-  u.pitch = 1;
   speechSynthesis.speak(u);
 }
 
@@ -102,13 +19,12 @@ function speak(text) {
    THINKING UI
 ================================ */
 function setThinking(on) {
-  const el = document.getElementById("thinking");
-  el.textContent = on ? "Thinking..." : "";
+  document.getElementById("thinking").textContent = on ? "Thinking..." : "";
   document.getElementById("micBtn").disabled = on;
 }
 
 /* ===============================
-   SEND ANSWER TO WORKER
+   SEND ANSWER TO BACKEND
 ================================ */
 async function sendAnswer(answer) {
   if (isThinking || !answer) return;
@@ -120,13 +36,8 @@ async function sendAnswer(answer) {
     const res = await fetch(WORKER_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        answer,
-        state: currentState
-      })
+      body: JSON.stringify({ answer, state: currentState })
     });
-
-    if (!res.ok) throw new Error("Network error");
 
     const data = await res.json();
 
@@ -136,9 +47,8 @@ async function sendAnswer(answer) {
 
     currentState = data.nextState || currentState;
 
-  } catch (err) {
-    console.error(err);
-    speak("Sorry, please repeat that.");
+  } catch (e) {
+    speak("Sorry, please try again.");
   } finally {
     setThinking(false);
     isThinking = false;
@@ -146,22 +56,26 @@ async function sendAnswer(answer) {
 }
 
 /* ===============================
-   SPEECH RECOGNITION
+   START MIC (MOBILE SAFE)
 ================================ */
-function initMic() {
-  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!SR) {
+function startListening() {
+  if (isThinking) return;
+
+  const SpeechRecognition =
+    window.SpeechRecognition || window.webkitSpeechRecognition;
+
+  if (!SpeechRecognition) {
     alert("Speech recognition not supported on this browser.");
     return;
   }
 
-  recognition = new SR();
+  const recognition = new SpeechRecognition();
   recognition.lang = "en-US";
   recognition.interimResults = false;
-  recognition.continuous = false;
+  recognition.maxAlternatives = 1;
 
-  recognition.onresult = (e) => {
-    const transcript = e.results[0][0].transcript;
+  recognition.onresult = (event) => {
+    const transcript = event.results[0][0].transcript;
     sendAnswer(transcript);
   };
 
@@ -169,21 +83,17 @@ function initMic() {
     setThinking(false);
     isThinking = false;
   };
+
+  recognition.start();
 }
 
 /* ===============================
-   BUTTON
+   BUTTON CLICK
 ================================ */
-document.getElementById("micBtn").onclick = () => {
-  if (!recognition) initMic();
-  recognition.start();
-};
+document.getElementById("micBtn").onclick = startListening;
 
 /* ===============================
-   INITIAL SPEAK
+   INITIAL PROMPT
 ================================ */
 speak("Tell me about yourself.");
 </script>
-
-</body>
-</html>
