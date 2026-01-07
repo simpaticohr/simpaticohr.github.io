@@ -1,109 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Evalis AI Interview</title>
+
+<style>
+  body {
+    margin: 0;
+    background: radial-gradient(circle at top, #0b1c3f, #020617);
+    height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: system-ui, sans-serif;
+    color: white;
+  }
+  .card {
+    background: rgba(15,23,42,.85);
+    padding: 28px;
+    border-radius: 18px;
+    width: 90%;
+    max-width: 360px;
+    text-align: center;
+    box-shadow: 0 0 40px rgba(59,130,246,.35);
+  }
+  .orb {
+    width: 70px;
+    height: 70px;
+    margin: 0 auto 14px;
+    border-radius: 50%;
+    background: radial-gradient(circle, #60a5fa, #2563eb);
+    box-shadow: 0 0 25px #3b82f6;
+  }
+  button {
+    margin-top: 16px;
+    background: #2563eb;
+    border: none;
+    color: white;
+    padding: 10px 22px;
+    border-radius: 999px;
+    font-size: 16px;
+  }
+  #status {
+    opacity: .7;
+    margin-top: 6px;
+    font-size: 14px;
+  }
+</style>
+</head>
+
+<body>
+
+<div class="card">
+  <div class="orb"></div>
+  <div id="question">Tap Start</div>
+  <div id="status"></div>
+  <button id="startBtn">Start</button>
+</div>
+
 <script>
+/* ---------- CONFIG ---------- */
 const WORKER_URL = "https://evalis-ai.simpaticohrconsultancy.workers.dev";
 
+/* ---------- STATE ---------- */
 let stage = "introduction";
-let state = "idle";
-let recognition;
-let started = false;
-let answerCaptured = false;
+let listening = false;
 
-/* ---------- UI ---------- */
-function setStatus(text="") {
-  document.getElementById("status").textContent = text;
-}
-function setQuestion(text) {
-  document.getElementById("question").textContent = text;
-}
+/* ---------- SAFE DOM ---------- */
+const questionEl = document.getElementById("question");
+const statusEl = document.getElementById("status");
+const startBtn = document.getElementById("startBtn");
 
 /* ---------- SPEAK ---------- */
 function speak(text) {
-  state = "speaking";
-  setStatus("Speaking…");
-  setQuestion(text);
+  questionEl.textContent = text;
+  statusEl.textContent = "Speaking…";
 
+  speechSynthesis.cancel();
   const u = new SpeechSynthesisUtterance(text);
   u.lang = "en-US";
 
-  u.onend = () => {
-    state = "listening";
-    startListening();
-  };
-
-  speechSynthesis.cancel();
+  u.onend = () => startListening();
   speechSynthesis.speak(u);
 }
 
-/* ---------- LISTEN (DESKTOP SAFE) ---------- */
+/* ---------- LISTEN ---------- */
 function startListening() {
-  if (state !== "listening") return;
-
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!SR) {
-    alert("Speech recognition not supported");
+    statusEl.textContent = "Speech not supported";
     return;
   }
 
-  recognition = new SR();
-  recognition.lang = "en-US";
-  recognition.continuous = false;
-  recognition.interimResults = false;
+  const rec = new SR();
+  rec.lang = "en-US";
+  rec.continuous = false;
+  rec.interimResults = false;
 
-  let finalAnswer = "";
-  answerCaptured = false;
+  statusEl.textContent = "Listening…";
+  listening = true;
 
-  setStatus("Listening…");
+  rec.onresult = async (e) => {
+    if (!listening) return;
+    listening = false;
 
-  recognition.onresult = (e) => {
-    finalAnswer = e.results[0][0].transcript;
-    answerCaptured = true;
-  };
-
-  recognition.onspeechend = () => {
-    recognition.stop(); // 🔑 forces clean stop
-  };
-
-  recognition.onend = async () => {
-    if (!answerCaptured || !finalAnswer.trim()) {
-      setStatus("Listening…");
-      startListening(); // retry once, clean
-      return;
-    }
-
-    state = "thinking";
-    setStatus("Thinking…");
+    const answer = e.results[0][0].transcript;
+    statusEl.textContent = "Thinking…";
 
     try {
-      const res = await fetch(WORKER_URL, {
+      const r = await fetch(WORKER_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          answer: finalAnswer,
-          state: stage
-        })
+        body: JSON.stringify({ answer, state: stage })
       });
 
-      const data = await res.json();
+      const data = await r.json();
       stage = data.nextState || stage;
-
       speak(data.followUp || "Tell me more.");
 
-    } catch (e) {
+    } catch {
       speak("Please repeat that.");
     }
   };
 
-  recognition.onerror = () => {
+  rec.onerror = () => {
+    listening = false;
     startListening();
   };
 
-  recognition.start();
+  rec.start();
 }
 
 /* ---------- START ---------- */
-document.getElementById("startBtn").onclick = () => {
-  if (started) return;
-  started = true;
-  document.getElementById("startBtn").style.display = "none";
+startBtn.onclick = () => {
+  startBtn.style.display = "none";
   speak("Tell me about yourself.");
 };
 </script>
+
+</body>
+</html>
