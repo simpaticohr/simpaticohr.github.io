@@ -1,143 +1,46 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>Evalis AI Interview</title>
-
-<style>
-  body {
-    margin: 0;
-    background: radial-gradient(circle at top, #0b1c3f, #020617);
-    height: 100vh;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-family: system-ui, sans-serif;
-    color: white;
-  }
-  .card {
-    background: rgba(15,23,42,.85);
-    padding: 28px;
-    border-radius: 18px;
-    width: 90%;
-    max-width: 360px;
-    text-align: center;
-    box-shadow: 0 0 40px rgba(59,130,246,.35);
-  }
-  .orb {
-    width: 70px;
-    height: 70px;
-    margin: 0 auto 14px;
-    border-radius: 50%;
-    background: radial-gradient(circle, #60a5fa, #2563eb);
-    box-shadow: 0 0 25px #3b82f6;
-  }
-  button {
-    margin-top: 16px;
-    background: #2563eb;
-    border: none;
-    color: white;
-    padding: 10px 22px;
-    border-radius: 999px;
-    font-size: 16px;
-  }
-  #status {
-    opacity: .7;
-    margin-top: 6px;
-    font-size: 14px;
-  }
-</style>
-</head>
-
-<body>
-
-<div class="card">
-  <div class="orb"></div>
-  <div id="question">Tap Start</div>
-  <div id="status"></div>
-  <button id="startBtn">Start</button>
-</div>
-
 <script>
-/* ---------- CONFIG ---------- */
 const WORKER_URL = "https://evalis-ai.simpaticohrconsultancy.workers.dev";
 
-/* ---------- STATE ---------- */
-let stage = "introduction";
-let listening = false;
+let isThinking = false;
+let currentState = "introduction";
 
-/* ---------- SAFE DOM ---------- */
-const questionEl = document.getElementById("question");
-const statusEl = document.getElementById("status");
-const startBtn = document.getElementById("startBtn");
+async function sendAnswer(answer) {
+  if (isThinking || !answer) return;
 
-/* ---------- SPEAK ---------- */
-function speak(text) {
-  questionEl.textContent = text;
-  statusEl.textContent = "Speaking…";
+  isThinking = true;
+  setThinking(true);
 
-  speechSynthesis.cancel();
-  const u = new SpeechSynthesisUtterance(text);
-  u.lang = "en-US";
+  try {
+    const res = await fetch(WORKER_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        answer: answer.trim(),
+        state: currentState
+      })
+    });
 
-  u.onend = () => startListening();
-  speechSynthesis.speak(u);
-}
+    if (!res.ok) throw new Error("Network error");
 
-/* ---------- LISTEN ---------- */
-function startListening() {
-  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!SR) {
-    statusEl.textContent = "Speech not supported";
-    return;
+    const data = await res.json();
+
+    // 🔊 Speak next question
+    speak(data.followUp || "Tell me more about that.");
+
+    // 🧠 Advance interview state (NOT index)
+    currentState = data.nextState || currentState;
+
+  } catch (err) {
+    console.error(err);
+    speak("Sorry, please repeat that.");
+  } finally {
+    isThinking = false;
+    setThinking(false);
   }
-
-  const rec = new SR();
-  rec.lang = "en-US";
-  rec.continuous = false;
-  rec.interimResults = false;
-
-  statusEl.textContent = "Listening…";
-  listening = true;
-
-  rec.onresult = async (e) => {
-    if (!listening) return;
-    listening = false;
-
-    const answer = e.results[0][0].transcript;
-    statusEl.textContent = "Thinking…";
-
-    try {
-      const r = await fetch(WORKER_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ answer, state: stage })
-      });
-
-      const data = await r.json();
-      stage = data.nextState || stage;
-      speak(data.followUp || "Tell me more.");
-
-    } catch {
-      speak("Please repeat that.");
-    }
-  };
-
-  rec.onerror = () => {
-    listening = false;
-    startListening();
-  };
-
-  rec.start();
 }
 
-/* ---------- START ---------- */
-startBtn.onclick = () => {
-  startBtn.style.display = "none";
-  speak("Tell me about yourself.");
-};
+function setThinking(on) {
+  const el = document.getElementById("thinking");
+  if (el) el.textContent = on ? "Thinking..." : "";
+}
 </script>
-
-</body>
-</html>
