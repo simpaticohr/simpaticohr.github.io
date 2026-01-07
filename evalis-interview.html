@@ -1,46 +1,68 @@
 <script>
 const WORKER_URL = "https://evalis-ai.simpaticohrconsultancy.workers.dev";
 
-let isThinking = false;
-let currentState = "introduction";
+const profile = JSON.parse(localStorage.getItem("simpatico_profile") || "{}");
+
+let stageIndex = 0;
+
+// Role-based question sets
+const QUESTION_SETS = {
+  developer: [
+    "Tell me about a recent project you worked on.",
+    "What technologies did you use?",
+    "What was your personal contribution?",
+    "What challenges did you face?",
+    "What was the final outcome?"
+  ],
+  hr: [
+    "Tell me about a challenging hiring assignment.",
+    "How did you source candidates?",
+    "What was your individual responsibility?",
+    "How did you handle stakeholder pressure?",
+    "What was the result?"
+  ],
+  default: [
+    "Tell me about yourself.",
+    "What skills did you use in your work?",
+    "What was your personal contribution?",
+    "What challenges did you face?",
+    "What was the outcome?"
+  ]
+};
+
+function getQuestionSet() {
+  const role = (profile.role || "").toLowerCase();
+  if (role.includes("developer")) return QUESTION_SETS.developer;
+  if (role.includes("recruit") || role.includes("hr")) return QUESTION_SETS.hr;
+  return QUESTION_SETS.default;
+}
+
+const QUESTIONS = getQuestionSet();
+
+function speak(text) {
+  document.getElementById("question").innerText = text;
+  speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance(text);
+  u.lang = "en-US";
+  speechSynthesis.speak(u);
+}
 
 async function sendAnswer(answer) {
-  if (isThinking || !answer) return;
+  const res = await fetch(WORKER_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ answer })
+  });
 
-  isThinking = true;
-  setThinking(true);
+  stageIndex++;
 
-  try {
-    const res = await fetch(WORKER_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        answer: answer.trim(),
-        state: currentState
-      })
-    });
-
-    if (!res.ok) throw new Error("Network error");
-
-    const data = await res.json();
-
-    // 🔊 Speak next question
-    speak(data.followUp || "Tell me more about that.");
-
-    // 🧠 Advance interview state (NOT index)
-    currentState = data.nextState || currentState;
-
-  } catch (err) {
-    console.error(err);
-    speak("Sorry, please repeat that.");
-  } finally {
-    isThinking = false;
-    setThinking(false);
+  if (stageIndex < QUESTIONS.length) {
+    speak(QUESTIONS[stageIndex]);
+  } else {
+    speak("Interview completed. Thank you.");
   }
 }
 
-function setThinking(on) {
-  const el = document.getElementById("thinking");
-  if (el) el.textContent = on ? "Thinking..." : "";
-}
+// Initial question
+speak(QUESTIONS[0]);
 </script>
