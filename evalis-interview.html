@@ -1,178 +1,166 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Evalis AI Interview</title>
+  <meta charset="UTF-8" />
+  <title>Evalis AI Interview</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 
-<style>
-  body {
-    margin: 0;
-    font-family: Arial, sans-serif;
-    background: radial-gradient(circle at top, #0b1a33, #020617);
-    color: #fff;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    height: 100vh;
-  }
+  <style>
+    body {
+      margin: 0;
+      height: 100vh;
+      background: radial-gradient(circle at top, #0a1a3a, #020617);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+      color: #fff;
+    }
 
-  .card {
-    background: #0f172a;
-    padding: 24px;
-    border-radius: 14px;
-    width: 90%;
-    max-width: 420px;
-    text-align: center;
-    box-shadow: 0 0 40px rgba(59,130,246,0.3);
-  }
+    .card {
+      width: 90%;
+      max-width: 420px;
+      background: #0b1220;
+      border-radius: 14px;
+      padding: 24px;
+      text-align: center;
+      box-shadow: 0 0 40px rgba(0,120,255,0.35);
+    }
 
-  .orb {
-    width: 80px;
-    height: 80px;
-    border-radius: 50%;
-    background: #3b82f6;
-    margin: 0 auto 16px;
-    box-shadow: 0 0 25px #3b82f6;
-  }
+    .orb {
+      width: 70px;
+      height: 70px;
+      margin: 0 auto 16px;
+      border-radius: 50%;
+      background: radial-gradient(circle, #60a5fa, #2563eb);
+      box-shadow: 0 0 25px rgba(96,165,250,0.9);
+    }
 
-  h2 {
-    font-size: 18px;
-    font-weight: normal;
-    margin-bottom: 8px;
-  }
+    #question {
+      font-size: 18px;
+      margin-bottom: 8px;
+    }
 
-  #status {
-    font-size: 14px;
-    opacity: 0.8;
-    margin-bottom: 16px;
-  }
+    #status {
+      font-size: 13px;
+      color: #94a3b8;
+      min-height: 18px;
+    }
 
-  button {
-    background: #2563eb;
-    border: none;
-    color: white;
-    padding: 12px 18px;
-    border-radius: 8px;
-    font-size: 16px;
-    cursor: pointer;
-  }
+    button {
+      margin-top: 16px;
+      padding: 10px 18px;
+      border: none;
+      border-radius: 8px;
+      background: #2563eb;
+      color: white;
+      font-size: 14px;
+      cursor: pointer;
+    }
 
-  button:disabled {
-    background: #475569;
-  }
-</style>
+    button:disabled {
+      opacity: 0.6;
+    }
+  </style>
 </head>
-
 <body>
 
-<div class="card">
-  <div class="orb"></div>
-  <h2 id="question">Ready for your interview?</h2>
-  <div id="status">Tap Start to begin</div>
-  <button id="startBtn">Start Interview</button>
-</div>
+  <div class="card">
+    <div class="orb"></div>
+    <div id="question">Tell me about yourself.</div>
+    <div id="status">Tap Start Interview</div>
+    <button id="startBtn">Start Interview</button>
+  </div>
 
 <script>
-/* ---------- SAFETY GUARDS ---------- */
-if (!("speechSynthesis" in window)) {
-  document.body.innerHTML = "Speech not supported on this browser.";
-}
+/* ================= CONFIG ================= */
+const WORKER_URL = "https://evalis-ai.simpaticohrconsultancy.workers.dev";
 
-/* ---------- INTERVIEW STATE ---------- */
-const skills = ["ATS", "Client Handling", "Bulk Hiring"];
-let skillIndex = 0;
-let depth = 0;
-let maxDepth = 3;
-let recognition = null;
-let started = false;
+/* ================= STATE ================= */
+let listening = false;
+let currentState = "introduction";
 
-/* ---------- SPEAK ---------- */
+/* ================= SPEECH ================= */
+const SpeechRecognition =
+  window.SpeechRecognition || window.webkitSpeechRecognition;
+
+const recognition = new SpeechRecognition();
+recognition.lang = "en-US";
+recognition.continuous = false;
+recognition.interimResults = false;
+
+/* ================= SPEAK (ZARA SAFE) ================= */
 function speak(text, callback) {
   document.getElementById("question").innerText = text;
   document.getElementById("status").innerText = "Speaking...";
 
   speechSynthesis.cancel();
+
   const utter = new SpeechSynthesisUtterance(text);
   utter.lang = "en-US";
 
-  utter.onend = () => {
-    setTimeout(() => callback && callback(), 700);
+  let finished = false;
+
+  const forceContinue = () => {
+    if (finished) return;
+    finished = true;
+    document.getElementById("status").innerText = "Listening...";
+    callback && callback();
   };
+
+  utter.onend = forceContinue;
+  utter.onerror = forceContinue;
+
+  // 🔥 Zara-style safety net
+  setTimeout(forceContinue, Math.max(3500, text.length * 60));
 
   speechSynthesis.speak(utter);
 }
 
-/* ---------- LISTEN ---------- */
+/* ================= LISTEN ================= */
 function listen() {
-  if (recognition) recognition.abort();
-
-  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  recognition = new SR();
-  recognition.lang = "en-US";
-
-  document.getElementById("status").innerText = "Listening...";
-
-  recognition.onresult = e => {
-    recognition.stop();
-    const answer = e.results[0][0].transcript;
-    handleAnswer(answer);
-  };
-
-  recognition.onerror = () => {
-    document.getElementById("status").innerText = "Didn't catch that...";
-    setTimeout(listen, 1000);
-  };
-
+  if (listening) return;
+  listening = true;
   recognition.start();
 }
 
-/* ---------- ANALYSIS ---------- */
-function analyze(answer) {
-  return {
-    ownership: /\b(i|my|me)\b/i.test(answer),
-    example: /(example|when|project|situation)/i.test(answer),
-    impact: /(result|impact|improved|achieved)/i.test(answer)
-  };
-}
+recognition.onresult = (event) => {
+  listening = false;
+  const answer = event.results[0][0].transcript;
+  sendAnswer(answer);
+};
 
-/* ---------- ANSWER HANDLING ---------- */
-function handleAnswer(answer) {
-  depth++;
-  const s = analyze(answer);
+recognition.onerror = () => {
+  listening = false;
+  setTimeout(listen, 800);
+};
 
-  let next;
+/* ================= SEND ANSWER ================= */
+async function sendAnswer(answer) {
+  document.getElementById("status").innerText = "Thinking...";
 
-  if (!s.ownership) {
-    next = "What was your personal role in this?";
-  } else if (!s.example) {
-    next = "Can you give a specific example?";
-  } else if (!s.impact) {
-    next = "What was the outcome?";
-  } else {
-    depth = 0;
-    skillIndex++;
+  try {
+    const res = await fetch(WORKER_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ answer, state: currentState })
+    });
 
-    if (skillIndex >= skills.length) {
-      speak("Thank you. The interview is complete.", () => {
-        document.getElementById("status").innerText = "";
-      });
-      return;
-    }
+    const data = await res.json();
 
-    next = `How did you use ${skills[skillIndex]}?`;
+    currentState = data.nextState || currentState;
+
+    speak(data.followUp || "Can you explain that further?", listen);
+
+  } catch (e) {
+    speak("Sorry, please repeat that.", listen);
   }
-
-  speak(next, listen);
 }
 
-/* ---------- START ---------- */
+/* ================= START ================= */
 document.getElementById("startBtn").onclick = () => {
-  if (started) return;
-  started = true;
-
-  document.getElementById("startBtn").style.display = "none";
-  speak(`How did you use ${skills[0]} in your role?`, listen);
+  document.getElementById("startBtn").disabled = true;
+  speak("Tell me about yourself.", listen);
 };
 </script>
 
