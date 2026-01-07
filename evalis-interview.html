@@ -1,193 +1,97 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <title>Evalis AI – Interview Trainer</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-
-  <style>
-    body {
-      margin: 0;
-      background: radial-gradient(circle at top, #0f172a, #020617);
-      font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
-      color: #e5e7eb;
-      height: 100vh;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
-
-    .card {
-      background: rgba(15, 23, 42, 0.9);
-      padding: 24px;
-      border-radius: 16px;
-      width: 280px;
-      text-align: center;
-      box-shadow: 0 0 60px rgba(59,130,246,.25);
-    }
-
-    .orb {
-      width: 64px;
-      height: 64px;
-      margin: 0 auto 16px;
-      border-radius: 50%;
-      background: radial-gradient(circle, #60a5fa, #2563eb);
-      box-shadow: 0 0 25px rgba(96,165,250,.8);
-    }
-
-    #question {
-      font-size: 15px;
-      margin-bottom: 12px;
-    }
-
-    #thinking {
-      font-size: 12px;
-      color: #94a3b8;
-      min-height: 16px;
-      margin-bottom: 10px;
-    }
-
-    button {
-      background: linear-gradient(to right, #3b82f6, #2563eb);
-      border: none;
-      color: white;
-      padding: 10px 18px;
-      border-radius: 999px;
-      font-size: 14px;
-      cursor: pointer;
-    }
-
-    button:disabled {
-      opacity: .6;
-    }
-  </style>
-</head>
-
-<body>
-
-  <div class="card">
-    <div class="orb"></div>
-    <div id="question">Tell me about yourself.</div>
-    <div id="thinking"></div>
-    <button id="micBtn">🎤 Speak</button>
-  </div>
-
 <script>
-/* ===============================
-   CONFIG
-================================= */
 const WORKER_URL = "https://evalis-ai.simpaticohrconsultancy.workers.dev";
 
-/* ===============================
-   STATE
-================================= */
-let isThinking = false;
-let currentState = "introduction";
+let state = "idle"; // idle | listening | thinking | speaking
+let currentStage = "introduction";
+let recognition;
 
-/* ===============================
-   VOICE OUTPUT
-================================= */
+function setStatus(text = "") {
+  const el = document.getElementById("thinking");
+  if (el) el.textContent = text;
+}
+
 function speak(text) {
-  speechSynthesis.cancel();
-  const u = new SpeechSynthesisUtterance(text);
-  u.lang = "en-US";
-  u.rate = 1;
-  speechSynthesis.speak(u);
+  state = "speaking";
+  setStatus("");
+
+  const utter = new SpeechSynthesisUtterance(text);
+  utter.lang = "en-US";
+
+  utter.onend = () => {
+    state = "idle";
+  };
+
+  speechSynthesis.cancel(); // prevent overlap
+  speechSynthesis.speak(utter);
 }
 
-/* ===============================
-   UI HELPERS
-================================= */
-function setThinking(msg = "") {
-  document.getElementById("thinking").textContent = msg;
-}
-
-function setQuestion(text) {
-  document.getElementById("question").textContent = text;
-}
-
-/* ===============================
-   SEND ANSWER TO AI
-================================= */
-async function sendAnswer(answer) {
-  if (isThinking || !answer) return;
-
-  isThinking = true;
-  setThinking("Thinking…");
-
-  try {
-    const res = await fetch(WORKER_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        answer,
-        state: currentState
-      })
-    });
-
-    if (!res.ok) throw new Error("Worker error");
-
-    const data = await res.json();
-
-    const followUp = data.followUp || "Tell me more.";
-    currentState = data.nextState || currentState;
-
-    setQuestion(followUp);
-    speak(followUp);
-
-  } catch (e) {
-    console.error(e);
-    speak("Please repeat that.");
-  } finally {
-    isThinking = false;
-    setThinking("");
-  }
-}
-
-/* ===============================
-   SPEECH INPUT
-================================= */
 function startListening() {
-  if (isThinking) return;
+  if (state !== "idle") return;
 
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!SR) {
-    alert("Speech recognition not supported on this browser.");
+    alert("Speech recognition not supported in this browser");
     return;
   }
 
-  const rec = new SR();
-  rec.lang = "en-US";
-  rec.interimResults = false;
-  rec.maxAlternatives = 1;
+  recognition = new SR();
+  recognition.lang = "en-US";
+  recognition.interimResults = false;
+  recognition.continuous = false;
 
-  setThinking("Listening…");
+  let finalAnswer = "";
 
-  rec.onresult = e => {
-    const transcript = e.results[0][0].transcript;
-    setThinking("");
-    sendAnswer(transcript);
+  state = "listening";
+  setStatus("Listening…");
+
+  recognition.onresult = e => {
+    finalAnswer = e.results[0][0].transcript;
   };
 
-  rec.onerror = e => {
+  recognition.onspeechend = () => {
+    recognition.stop();
+  };
+
+  recognition.onend = async () => {
+    if (!finalAnswer) {
+      state = "idle";
+      setStatus("");
+      return;
+    }
+
+    state = "thinking";
+    setStatus("Thinking…");
+
+    try {
+      const res = await fetch(WORKER_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          answer: finalAnswer,
+          state: currentStage
+        })
+      });
+
+      const data = await res.json();
+
+      currentStage = data.nextState || currentStage;
+      speak(data.followUp || "Tell me more.");
+
+    } catch (e) {
+      console.error(e);
+      speak("Sorry, something went wrong. Please try again.");
+    } finally {
+      setStatus("");
+    }
+  };
+
+  recognition.onerror = e => {
     console.error(e);
-    setThinking("");
+    state = "idle";
+    setStatus("");
     speak("Microphone error. Please try again.");
   };
 
-  rec.start();
+  recognition.start();
 }
-
-/* ===============================
-   EVENTS
-================================= */
-document.getElementById("micBtn").addEventListener("click", startListening);
-
-/* ===============================
-   INITIAL PROMPT
-================================= */
-speak("Tell me about yourself.");
 </script>
-
-</body>
-</html>
