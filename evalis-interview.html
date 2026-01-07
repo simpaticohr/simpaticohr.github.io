@@ -1,5 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Evalis Interview</title>
+
+<style>
+body {
+  margin: 0;
+  height: 100vh;
+  background: radial-gradient(circle at center, #0b1a3a, #020617);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: system-ui, sans-serif;
+  color: white;
+}
+
+.card {
+  background: rgba(255,255,255,0.05);
+  padding: 24px 28px;
+  border-radius: 14px;
+  text-align: center;
+  width: 300px;
+}
+
+.circle {
+  width: 70px;
+  height: 70px;
+  margin: 0 auto 16px;
+  border-radius: 50%;
+  background: #3b82f6;
+}
+
+button {
+  margin-top: 14px;
+  padding: 10px 16px;
+  border-radius: 20px;
+  border: none;
+  background: #2563eb;
+  color: white;
+  font-size: 14px;
+}
+</style>
+</head>
+
+<body>
+
+<div class="card">
+  <div class="circle"></div>
+  <div id="question">Ready to start interview</div>
+  <div id="status" style="opacity:.7;margin-top:6px;"></div>
+  <button id="startBtn">Start Interview</button>
+</div>
+
 <script>
-document.addEventListener("DOMContentLoaded", () => {
+(function () {
+
+  const questionEl = document.getElementById("question");
+  const statusEl = document.getElementById("status");
+  const startBtn = document.getElementById("startBtn");
+
+  if (!questionEl || !statusEl || !startBtn) {
+    document.body.innerHTML = "<h2 style='color:white'>UI load failed</h2>";
+    return;
+  }
+
+  const SpeechRecognition =
+    window.SpeechRecognition || window.webkitSpeechRecognition;
+
+  if (!SpeechRecognition) {
+    statusEl.textContent = "Speech not supported on this browser";
+    startBtn.disabled = true;
+    return;
+  }
 
   const questions = [
     "Tell me about yourself.",
@@ -11,14 +85,6 @@ document.addEventListener("DOMContentLoaded", () => {
 
   let index = 0;
   let recognition;
-  let isListening = false;
-
-  const questionEl = document.getElementById("question");
-  const statusEl = document.getElementById("status");
-  const startBtn = document.getElementById("startBtn");
-
-  const SpeechRecognition =
-    window.SpeechRecognition || window.webkitSpeechRecognition;
 
   function speak(text) {
     speechSynthesis.cancel();
@@ -28,48 +94,31 @@ document.addEventListener("DOMContentLoaded", () => {
     const utter = new SpeechSynthesisUtterance(text);
     utter.lang = "en-US";
 
-    utter.onend = () => {
-      startListening();
-    };
-
+    utter.onend = () => listen();
     speechSynthesis.speak(utter);
   }
 
-  function startListening() {
-    if (!SpeechRecognition) {
-      statusEl.textContent = "Speech not supported";
-      return;
-    }
-
+  function listen() {
     recognition = new SpeechRecognition();
     recognition.lang = "en-US";
     recognition.continuous = false;
-    recognition.interimResults = false;
 
     statusEl.textContent = "Listening…";
-    isListening = true;
 
-    recognition.onresult = (event) => {
-      isListening = false;
+    recognition.onresult = e => {
       recognition.stop();
-
-      const answer = event.results[0][0].transcript;
-      console.log("User:", answer);
-
       index++;
-
       if (index < questions.length) {
         speak(questions[index]);
       } else {
-        speak("Interview completed. Thank you.");
-        statusEl.textContent = "Done";
+        questionEl.textContent = "Interview completed";
+        statusEl.textContent = "";
       }
     };
 
     recognition.onerror = () => {
-      isListening = false;
-      statusEl.textContent = "Listening failed, retrying…";
-      setTimeout(startListening, 800);
+      statusEl.textContent = "Retrying…";
+      setTimeout(listen, 800);
     };
 
     recognition.start();
@@ -81,5 +130,8 @@ document.addEventListener("DOMContentLoaded", () => {
     speak(questions[0]);
   };
 
-});
+})();
 </script>
+
+</body>
+</html>
