@@ -2,144 +2,150 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
-<title>Evalis Interview</title>
+<title>Evalis AI Interview</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-
 <style>
 body {
   font-family: Arial, sans-serif;
-  background: #f4f6f8;
-  margin: 0;
-  padding: 20px;
+  background: #0b1020;
+  color: #fff;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100vh;
+}
+.card {
+  background: #111833;
+  padding: 30px;
+  border-radius: 12px;
+  width: 90%;
+  max-width: 420px;
   text-align: center;
 }
-#card {
-  max-width: 600px;
-  margin: auto;
-  background: #fff;
-  padding: 25px;
-  border-radius: 12px;
-  box-shadow: 0 10px 30px rgba(0,0,0,0.1);
-}
-#question {
-  font-size: 20px;
-  margin-bottom: 15px;
-}
-#status {
-  color: #555;
-  font-size: 14px;
-}
 button {
+  margin-top: 20px;
   padding: 12px 20px;
-  font-size: 16px;
   border: none;
   border-radius: 8px;
-  background: #007bff;
+  background: #4f7cff;
   color: #fff;
-  cursor: pointer;
+  font-size: 16px;
 }
-button:disabled {
-  background: #999;
+.status {
+  margin-top: 10px;
+  opacity: 0.7;
 }
 </style>
 </head>
-
 <body>
 
-<div id="card">
-  <h2>Evalis AI Interview</h2>
-  <div id="question">Tap Start to begin</div>
-  <div id="status"></div>
-  <br>
-  <button id="startBtn">Start Interview</button>
+<div class="card">
+  <h2 id="question">Click Start Interview</h2>
+  <button onclick="startInterview()">Start Interview</button>
+  <div class="status" id="status"></div>
 </div>
 
 <script>
-/* ================= BASIC SAFETY ================= */
-if (!window.SpeechSynthesisUtterance) {
-  document.getElementById("question").innerText =
-    "Speech not supported on this browser.";
+const WORKER_URL = "https://evalis-ai.simpaticohrconsultancy.workers.dev";
+
+/* -------- CANDIDATE PROFILE (later from CV) -------- */
+const candidateProfile = {
+  role: "HR Recruiter",
+  experience: 4,
+  skills: ["ATS", "Client Handling", "Bulk Hiring"]
+};
+
+/* -------- INTERVIEW STATE -------- */
+let interview = {
+  topicIndex: 0,
+  depth: 0,
+  maxDepth: 3,
+  completed: false
+};
+
+/* -------- QUESTIONS -------- */
+function getBaseQuestion() {
+  const skill = candidateProfile.skills[interview.topicIndex];
+  return `You mentioned ${skill}. How did you use it in your role?`;
 }
 
-/* ================= QUESTIONS ================= */
-const QUESTIONS = [
-  "Tell me about yourself.",
-  "What are your key skills?",
-  "Describe a challenge you faced at work.",
-  "What was the outcome of your actions?",
-  "Thank you. The interview is complete."
-];
-
-let index = 0;
-
-/* ================= ELEMENTS ================= */
-const questionEl = document.getElementById("question");
-const statusEl = document.getElementById("status");
-const startBtn = document.getElementById("startBtn");
-
-/* ================= SPEAK ================= */
+/* -------- SPEECH -------- */
 function speak(text) {
-  questionEl.innerText = text;
-  statusEl.innerText = "Speaking…";
-
+  document.getElementById("question").innerText = text;
   const utter = new SpeechSynthesisUtterance(text);
-  utter.rate = 0.95;
-
-  utter.onend = () => {
-    setTimeout(listen, 500);
-  };
-
   speechSynthesis.cancel();
   speechSynthesis.speak(utter);
 }
 
-/* ================= LISTEN ================= */
+/* -------- LISTEN -------- */
 function listen() {
-  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!SR) {
-    statusEl.innerText = "Listening not supported.";
-    return;
-  }
-
-  const recog = new SR();
+  const SpeechRecognition =
+    window.SpeechRecognition || window.webkitSpeechRecognition;
+  const recog = new SpeechRecognition();
   recog.lang = "en-US";
-  recog.interimResults = false;
+  recog.start();
 
-  statusEl.innerText = "Listening…";
+  document.getElementById("status").innerText = "Listening...";
 
-  recog.onresult = () => {
+  recog.onresult = e => {
     recog.stop();
-    nextQuestion();
+    const answer = e.results[0][0].transcript;
+    document.getElementById("status").innerText = "Thinking...";
+    processAnswer(answer);
   };
 
   recog.onerror = () => {
-    recog.stop();
-    statusEl.innerText = "Could not hear. Continuing…";
-    setTimeout(nextQuestion, 800);
+    document.getElementById("status").innerText = "Please try again.";
+    listen();
   };
-
-  recog.start();
 }
 
-/* ================= FLOW ================= */
-function nextQuestion() {
-  index++;
+/* -------- INTERVIEW BRAIN -------- */
+function analyze(answer) {
+  return {
+    ownership: /\b(i|my|me)\b/i.test(answer),
+    example: /(example|when|situation|project)/i.test(answer),
+    impact: /(result|impact|improved|achieved|reduced)/i.test(answer)
+  };
+}
 
-  if (index >= QUESTIONS.length) {
-    questionEl.innerText = "Interview finished.";
-    statusEl.innerText = "";
-    return;
+/* -------- PROCESS ANSWER -------- */
+async function processAnswer(answer) {
+  if (interview.completed) return;
+
+  const s = analyze(answer);
+  interview.depth++;
+
+  let followUp;
+
+  if (!s.ownership) {
+    followUp = "What was your personal role in this?";
+  } else if (!s.example) {
+    followUp = "Can you give a specific example?";
+  } else if (!s.impact) {
+    followUp = "What was the result of your work?";
+  } else {
+    interview.depth = 0;
+    interview.topicIndex++;
+    if (interview.topicIndex >= candidateProfile.skills.length) {
+      interview.completed = true;
+      speak("Thank you. The interview is complete.");
+      document.getElementById("status").innerText = "";
+      return;
+    }
+    followUp = getBaseQuestion();
   }
 
-  speak(QUESTIONS[index]);
+  speak(followUp);
+  setTimeout(listen, 1500);
 }
 
-/* ================= START ================= */
-startBtn.onclick = () => {
-  startBtn.disabled = true;
-  index = 0;
-  speak(QUESTIONS[index]);
-};
+/* -------- START -------- */
+function startInterview() {
+  const q = getBaseQuestion();
+  speak(q);
+  setTimeout(listen, 1500);
+}
 </script>
 
 </body>
