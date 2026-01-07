@@ -1,99 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Evalis Interview</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+<style>
+body {
+  font-family: Arial, sans-serif;
+  background: #f4f6f8;
+  margin: 0;
+  padding: 20px;
+  text-align: center;
+}
+#card {
+  max-width: 600px;
+  margin: auto;
+  background: #fff;
+  padding: 25px;
+  border-radius: 12px;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+}
+#question {
+  font-size: 20px;
+  margin-bottom: 15px;
+}
+#status {
+  color: #555;
+  font-size: 14px;
+}
+button {
+  padding: 12px 20px;
+  font-size: 16px;
+  border: none;
+  border-radius: 8px;
+  background: #007bff;
+  color: #fff;
+  cursor: pointer;
+}
+button:disabled {
+  background: #999;
+}
+</style>
+</head>
+
+<body>
+
+<div id="card">
+  <h2>Evalis AI Interview</h2>
+  <div id="question">Tap Start to begin</div>
+  <div id="status"></div>
+  <br>
+  <button id="startBtn">Start Interview</button>
+</div>
+
 <script>
-const WORKER_URL = "https://evalis-ai.simpaticohrconsultancy.workers.dev";
-
-/* ================= INTERVIEW STATE ================= */
-let interviewState = {
-  candidate: {
-    role: "Candidate",
-    experience: 0,
-    skills: []
-  },
-  interview: {
-    topic: "intro",
-    depth: 0,
-    maxDepth: 3,
-    turn: 0,
-    completed: false
-  }
-};
-
-/* ================= QUESTION ENGINE ================= */
-const TOPICS = ["intro", "skills", "experience", "impact", "close"];
-
-function nextTopic(state) {
-  const i = TOPICS.indexOf(state.interview.topic);
-  state.interview.topic = TOPICS[i + 1] || "close";
-  state.interview.depth = 0;
-
-  if (state.interview.topic === "close") {
-    state.interview.completed = true;
-  }
+/* ================= BASIC SAFETY ================= */
+if (!window.SpeechSynthesisUtterance) {
+  document.getElementById("question").innerText =
+    "Speech not supported on this browser.";
 }
 
-function getBaseQuestion(state) {
-  const q = {
-    intro: [
-      "Tell me about yourself.",
-      "What is your current role?",
-      "What kind of role are you looking for?"
-    ],
-    skills: [
-      "What skills do you use daily?",
-      "Which skill are you strongest at?",
-      "How do you apply those skills?"
-    ],
-    experience: [
-      "Describe a challenging situation you handled.",
-      "What was your personal role in that?",
-      "Why did you choose that approach?"
-    ],
-    impact: [
-      "What was the outcome?",
-      "How did it impact the organization?",
-      "What did you learn from it?"
-    ],
-    close: [
-      "Is there anything else you'd like to add?"
-    ]
+/* ================= QUESTIONS ================= */
+const QUESTIONS = [
+  "Tell me about yourself.",
+  "What are your key skills?",
+  "Describe a challenge you faced at work.",
+  "What was the outcome of your actions?",
+  "Thank you. The interview is complete."
+];
+
+let index = 0;
+
+/* ================= ELEMENTS ================= */
+const questionEl = document.getElementById("question");
+const statusEl = document.getElementById("status");
+const startBtn = document.getElementById("startBtn");
+
+/* ================= SPEAK ================= */
+function speak(text) {
+  questionEl.innerText = text;
+  statusEl.innerText = "Speaking…";
+
+  const utter = new SpeechSynthesisUtterance(text);
+  utter.rate = 0.95;
+
+  utter.onend = () => {
+    setTimeout(listen, 500);
   };
 
-  return q[state.interview.topic][state.interview.depth] || q[state.interview.topic][0];
+  speechSynthesis.cancel();
+  speechSynthesis.speak(utter);
 }
 
-/* ================= CORE FUNCTION (PASTE HERE) ================= */
-async function sendAnswer(answer) {
-  if (interviewState.interview.completed) return;
-
-  interviewState.interview.turn++;
-  interviewState.interview.depth++;
-
-  const baseQ = getBaseQuestion(interviewState);
-
-  try {
-    const res = await fetch(WORKER_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        answer,
-        state: interviewState
-      })
-    });
-
-    const data = await res.json();
-
-    if (interviewState.interview.depth >= interviewState.interview.maxDepth) {
-      nextTopic(interviewState);
-    }
-
-    if (interviewState.interview.completed) {
-      speakAndListen("Thank you. The interview is complete.");
-      return;
-    }
-
-    speakAndListen(data.followUp || baseQ);
-
-  } catch (e) {
-    speakAndListen(baseQ);
+/* ================= LISTEN ================= */
+function listen() {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) {
+    statusEl.innerText = "Listening not supported.";
+    return;
   }
+
+  const recog = new SR();
+  recog.lang = "en-US";
+  recog.interimResults = false;
+
+  statusEl.innerText = "Listening…";
+
+  recog.onresult = () => {
+    recog.stop();
+    nextQuestion();
+  };
+
+  recog.onerror = () => {
+    recog.stop();
+    statusEl.innerText = "Could not hear. Continuing…";
+    setTimeout(nextQuestion, 800);
+  };
+
+  recog.start();
 }
+
+/* ================= FLOW ================= */
+function nextQuestion() {
+  index++;
+
+  if (index >= QUESTIONS.length) {
+    questionEl.innerText = "Interview finished.";
+    statusEl.innerText = "";
+    return;
+  }
+
+  speak(QUESTIONS[index]);
+}
+
+/* ================= START ================= */
+startBtn.onclick = () => {
+  startBtn.disabled = true;
+  index = 0;
+  speak(QUESTIONS[index]);
+};
 </script>
+
+</body>
+</html>
