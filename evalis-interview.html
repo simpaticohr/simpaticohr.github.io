@@ -1,68 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Simpatico AI Interview</title>
+
+<style>
+body {
+  margin: 0;
+  background: #020617;
+  color: #fff;
+  font-family: system-ui, sans-serif;
+  height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.card {
+  background: #0f172a;
+  padding: 24px;
+  border-radius: 16px;
+  width: 320px;
+  text-align: center;
+}
+button {
+  margin-top: 16px;
+  padding: 12px;
+  width: 100%;
+  border-radius: 999px;
+  border: none;
+  background: #2563eb;
+  color: white;
+  font-size: 15px;
+}
+#status {
+  font-size: 13px;
+  opacity: .7;
+  margin-top: 8px;
+}
+</style>
+</head>
+
+<body>
+
+<div class="card">
+  <div id="question">Tap Start to begin</div>
+  <div id="status"></div>
+  <button id="startBtn">Start Interview</button>
+</div>
+
 <script>
-const WORKER_URL = "https://evalis-ai.simpaticohrconsultancy.workers.dev";
+/* -------- SAFE START -------- */
+document.addEventListener("DOMContentLoaded", () => {
 
-const profile = JSON.parse(localStorage.getItem("simpatico_profile") || "{}");
+  const WORKER_URL = "https://evalis-ai.simpaticohrconsultancy.workers.dev";
 
-let stageIndex = 0;
-
-// Role-based question sets
-const QUESTION_SETS = {
-  developer: [
-    "Tell me about a recent project you worked on.",
-    "What technologies did you use?",
-    "What was your personal contribution?",
-    "What challenges did you face?",
-    "What was the final outcome?"
-  ],
-  hr: [
-    "Tell me about a challenging hiring assignment.",
-    "How did you source candidates?",
-    "What was your individual responsibility?",
-    "How did you handle stakeholder pressure?",
-    "What was the result?"
-  ],
-  default: [
+  let questionIndex = 0;
+  const QUESTIONS = [
     "Tell me about yourself.",
-    "What skills did you use in your work?",
+    "What skills did you use in your last role?",
     "What was your personal contribution?",
     "What challenges did you face?",
     "What was the outcome?"
-  ]
-};
+  ];
 
-function getQuestionSet() {
-  const role = (profile.role || "").toLowerCase();
-  if (role.includes("developer")) return QUESTION_SETS.developer;
-  if (role.includes("recruit") || role.includes("hr")) return QUESTION_SETS.hr;
-  return QUESTION_SETS.default;
-}
+  const questionEl = document.getElementById("question");
+  const statusEl = document.getElementById("status");
+  const startBtn = document.getElementById("startBtn");
 
-const QUESTIONS = getQuestionSet();
-
-function speak(text) {
-  document.getElementById("question").innerText = text;
-  speechSynthesis.cancel();
-  const u = new SpeechSynthesisUtterance(text);
-  u.lang = "en-US";
-  speechSynthesis.speak(u);
-}
-
-async function sendAnswer(answer) {
-  const res = await fetch(WORKER_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ answer })
-  });
-
-  stageIndex++;
-
-  if (stageIndex < QUESTIONS.length) {
-    speak(QUESTIONS[stageIndex]);
-  } else {
-    speak("Interview completed. Thank you.");
+  function speak(text) {
+    questionEl.textContent = text;
+    speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(text);
+    u.lang = "en-US";
+    speechSynthesis.speak(u);
   }
-}
 
-// Initial question
-speak(QUESTIONS[0]);
+  function startListening() {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) {
+      statusEl.textContent = "Speech not supported";
+      return;
+    }
+
+    const rec = new SR();
+    rec.lang = "en-US";
+    rec.interimResults = false;
+    rec.continuous = false;
+
+    statusEl.textContent = "Listening…";
+
+    rec.onresult = (e) => {
+      const answer = e.results[0][0].transcript;
+      statusEl.textContent = "Thinking…";
+
+      questionIndex++;
+
+      if (questionIndex < QUESTIONS.length) {
+        speak(QUESTIONS[questionIndex]);
+      } else {
+        speak("Interview completed. Thank you.");
+      }
+    };
+
+    rec.onerror = () => {
+      statusEl.textContent = "Mic error";
+    };
+
+    rec.start();
+  }
+
+  startBtn.onclick = () => {
+    startBtn.style.display = "none";
+    speak(QUESTIONS[0]);
+    startListening();
+  };
+
+});
 </script>
+
+</body>
+</html>
