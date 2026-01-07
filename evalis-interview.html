@@ -1,55 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Evalis AI Interview</title>
+
+<style>
+  body {
+    margin: 0;
+    font-family: Arial, sans-serif;
+    background: radial-gradient(circle at top, #0b1a33, #020617);
+    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100vh;
+  }
+
+  .card {
+    background: #0f172a;
+    padding: 24px;
+    border-radius: 14px;
+    width: 90%;
+    max-width: 420px;
+    text-align: center;
+    box-shadow: 0 0 40px rgba(59,130,246,0.3);
+  }
+
+  .orb {
+    width: 80px;
+    height: 80px;
+    border-radius: 50%;
+    background: #3b82f6;
+    margin: 0 auto 16px;
+    box-shadow: 0 0 25px #3b82f6;
+  }
+
+  h2 {
+    font-size: 18px;
+    font-weight: normal;
+    margin-bottom: 8px;
+  }
+
+  #status {
+    font-size: 14px;
+    opacity: 0.8;
+    margin-bottom: 16px;
+  }
+
+  button {
+    background: #2563eb;
+    border: none;
+    color: white;
+    padding: 12px 18px;
+    border-radius: 8px;
+    font-size: 16px;
+    cursor: pointer;
+  }
+
+  button:disabled {
+    background: #475569;
+  }
+</style>
+</head>
+
+<body>
+
+<div class="card">
+  <div class="orb"></div>
+  <h2 id="question">Ready for your interview?</h2>
+  <div id="status">Tap Start to begin</div>
+  <button id="startBtn">Start Interview</button>
+</div>
+
 <script>
-let recognition = null;
-let interviewStarted = false;
-
-const candidateProfile = {
-  skills: ["ATS", "Client Handling", "Bulk Hiring"]
-};
-
-let interview = {
-  topicIndex: 0,
-  depth: 0,
-  maxDepth: 3,
-  completed: false
-};
-
-function speak(text, callback) {
-  document.getElementById("question").innerText = text;
-  document.getElementById("status").innerText = "Speaking…";
-
-  const u = new SpeechSynthesisUtterance(text);
-  speechSynthesis.cancel();
-  speechSynthesis.speak(u);
-
-  u.onend = () => {
-    setTimeout(callback, 800);
-  };
+/* ---------- SAFETY GUARDS ---------- */
+if (!("speechSynthesis" in window)) {
+  document.body.innerHTML = "Speech not supported on this browser.";
 }
 
-function startListening() {
+/* ---------- INTERVIEW STATE ---------- */
+const skills = ["ATS", "Client Handling", "Bulk Hiring"];
+let skillIndex = 0;
+let depth = 0;
+let maxDepth = 3;
+let recognition = null;
+let started = false;
+
+/* ---------- SPEAK ---------- */
+function speak(text, callback) {
+  document.getElementById("question").innerText = text;
+  document.getElementById("status").innerText = "Speaking...";
+
+  speechSynthesis.cancel();
+  const utter = new SpeechSynthesisUtterance(text);
+  utter.lang = "en-US";
+
+  utter.onend = () => {
+    setTimeout(() => callback && callback(), 700);
+  };
+
+  speechSynthesis.speak(utter);
+}
+
+/* ---------- LISTEN ---------- */
+function listen() {
   if (recognition) recognition.abort();
 
-  const SpeechRecognition =
-    window.SpeechRecognition || window.webkitSpeechRecognition;
-
-  recognition = new SpeechRecognition();
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  recognition = new SR();
   recognition.lang = "en-US";
-  recognition.start();
 
-  document.getElementById("status").innerText = "Listening…";
+  document.getElementById("status").innerText = "Listening...";
 
   recognition.onresult = e => {
     recognition.stop();
     const answer = e.results[0][0].transcript;
-    processAnswer(answer);
+    handleAnswer(answer);
   };
 
   recognition.onerror = () => {
-    document.getElementById("status").innerText = "Please speak again…";
-    setTimeout(startListening, 1000);
+    document.getElementById("status").innerText = "Didn't catch that...";
+    setTimeout(listen, 1000);
   };
+
+  recognition.start();
 }
 
+/* ---------- ANALYSIS ---------- */
 function analyze(answer) {
   return {
     ownership: /\b(i|my|me)\b/i.test(answer),
@@ -58,45 +136,45 @@ function analyze(answer) {
   };
 }
 
-function processAnswer(answer) {
-  if (interview.completed) return;
-
-  interview.depth++;
+/* ---------- ANSWER HANDLING ---------- */
+function handleAnswer(answer) {
+  depth++;
   const s = analyze(answer);
 
-  let followUp;
+  let next;
 
   if (!s.ownership) {
-    followUp = "What was your personal role in this?";
+    next = "What was your personal role in this?";
   } else if (!s.example) {
-    followUp = "Can you give a specific example?";
+    next = "Can you give a specific example?";
   } else if (!s.impact) {
-    followUp = "What was the outcome of your work?";
+    next = "What was the outcome?";
   } else {
-    interview.depth = 0;
-    interview.topicIndex++;
+    depth = 0;
+    skillIndex++;
 
-    if (interview.topicIndex >= candidateProfile.skills.length) {
-      interview.completed = true;
+    if (skillIndex >= skills.length) {
       speak("Thank you. The interview is complete.", () => {
         document.getElementById("status").innerText = "";
       });
       return;
     }
 
-    followUp = `How did you use ${candidateProfile.skills[interview.topicIndex]}?`;
+    next = `How did you use ${skills[skillIndex]}?`;
   }
 
-  speak(followUp, startListening);
+  speak(next, listen);
 }
 
-function startInterview() {
-  if (interviewStarted) return;
-  interviewStarted = true;
+/* ---------- START ---------- */
+document.getElementById("startBtn").onclick = () => {
+  if (started) return;
+  started = true;
 
   document.getElementById("startBtn").style.display = "none";
-
-  const firstQ = `How did you use ${candidateProfile.skills[0]} in your role?`;
-  speak(firstQ, startListening);
-}
+  speak(`How did you use ${skills[0]} in your role?`, listen);
+};
 </script>
+
+</body>
+</html>
