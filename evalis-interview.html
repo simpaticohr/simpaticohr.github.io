@@ -1,64 +1,99 @@
-<!DOCTYPE html>
-<html>
-<head>
-<meta charset="UTF-8">
-<title>Evalis Interview</title>
-</head>
-<body>
-
-<h2 id="question">Ready</h2>
-<p id="status"></p>
-<button id="startBtn">Start Interview</button>
-
 <script>
-const profile = JSON.parse(localStorage.getItem("profile") || "{}");
+const WORKER_URL = "https://evalis-ai.simpaticohrconsultancy.workers.dev";
 
-const QUESTIONS = profile.role?.toLowerCase().includes("recruit")
-  ? ["Tell me about a difficult hiring case you handled."]
-  : ["Tell me about a recent project you worked on."];
+/* ================= INTERVIEW STATE ================= */
+let interviewState = {
+  candidate: {
+    role: "Candidate",
+    experience: 0,
+    skills: []
+  },
+  interview: {
+    topic: "intro",
+    depth: 0,
+    maxDepth: 3,
+    turn: 0,
+    completed: false
+  }
+};
 
-let depth = 0;
-let currentQuestion = QUESTIONS[0];
+/* ================= QUESTION ENGINE ================= */
+const TOPICS = ["intro", "skills", "experience", "impact", "close"];
 
-const SpeechRecognition =
-  window.SpeechRecognition || window.webkitSpeechRecognition;
+function nextTopic(state) {
+  const i = TOPICS.indexOf(state.interview.topic);
+  state.interview.topic = TOPICS[i + 1] || "close";
+  state.interview.depth = 0;
 
-function speak(text) {
-  question.textContent = text;
-  const u = new SpeechSynthesisUtterance(text);
-  u.onend = listen;
-  speechSynthesis.speak(u);
+  if (state.interview.topic === "close") {
+    state.interview.completed = true;
+  }
 }
 
-function listen() {
-  if (!SpeechRecognition) {
-    status.textContent = "Speech not supported";
-    return;
-  }
-
-  const rec = new SpeechRecognition();
-  rec.lang = "en-US";
-  status.textContent = "Listening…";
-
-  rec.onresult = e => {
-    rec.stop();
-    depth++;
-
-    if (depth < 3) {
-      speak("Can you explain that in more detail?");
-    } else {
-      speak("Thank you. Interview completed.");
-    }
+function getBaseQuestion(state) {
+  const q = {
+    intro: [
+      "Tell me about yourself.",
+      "What is your current role?",
+      "What kind of role are you looking for?"
+    ],
+    skills: [
+      "What skills do you use daily?",
+      "Which skill are you strongest at?",
+      "How do you apply those skills?"
+    ],
+    experience: [
+      "Describe a challenging situation you handled.",
+      "What was your personal role in that?",
+      "Why did you choose that approach?"
+    ],
+    impact: [
+      "What was the outcome?",
+      "How did it impact the organization?",
+      "What did you learn from it?"
+    ],
+    close: [
+      "Is there anything else you'd like to add?"
+    ]
   };
 
-  rec.start();
+  return q[state.interview.topic][state.interview.depth] || q[state.interview.topic][0];
 }
 
-startBtn.onclick = () => {
-  startBtn.style.display = "none";
-  speak(currentQuestion);
-};
-</script>
+/* ================= CORE FUNCTION (PASTE HERE) ================= */
+async function sendAnswer(answer) {
+  if (interviewState.interview.completed) return;
 
-</body>
-</html>
+  interviewState.interview.turn++;
+  interviewState.interview.depth++;
+
+  const baseQ = getBaseQuestion(interviewState);
+
+  try {
+    const res = await fetch(WORKER_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        answer,
+        state: interviewState
+      })
+    });
+
+    const data = await res.json();
+
+    if (interviewState.interview.depth >= interviewState.interview.maxDepth) {
+      nextTopic(interviewState);
+    }
+
+    if (interviewState.interview.completed) {
+      speakAndListen("Thank you. The interview is complete.");
+      return;
+    }
+
+    speakAndListen(data.followUp || baseQ);
+
+  } catch (e) {
+    speakAndListen(baseQ);
+  }
+}
+</script>
