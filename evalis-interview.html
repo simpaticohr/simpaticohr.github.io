@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8" />
+<meta charset="UTF-8">
 <title>Evalis AI Interview</title>
 
 <script src="https://cdn.jsdelivr.net/npm/@ricky0123/vad-web@0.0.7/dist/bundle.standard.js"></script>
@@ -11,11 +11,11 @@ body {
   margin: 0;
   background: #0f172a;
   font-family: system-ui;
-  color: #e5e7eb;
   height: 100vh;
   display: flex;
   align-items: center;
   justify-content: center;
+  color: #e5e7eb;
 }
 
 .card {
@@ -25,20 +25,10 @@ body {
   max-width: 420px;
   border-radius: 16px;
   text-align: center;
-  box-shadow: 0 0 40px rgba(0,0,0,.6);
 }
 
-#question {
-  font-size: 18px;
-  margin: 20px 0;
-  min-height: 60px;
-}
-
-#status {
-  font-size: 14px;
-  color: #22c55e;
-  min-height: 20px;
-}
+#question { font-size: 18px; margin: 16px 0; }
+#status { font-size: 14px; color: #22c55e; }
 
 button {
   width: 100%;
@@ -61,79 +51,46 @@ button {
 </div>
 
 <script>
-let isAISpeaking = false;
-let recognition;
-let myvad;
-let micStream;
+const startBtn = document.getElementById("startBtn");
+const statusEl = document.getElementById("status");
+const questionEl = document.getElementById("question");
 
-const synth = window.speechSynthesis;
-
-function setStatus(t) {
-  document.getElementById("status").innerText = t;
-}
-
-function speak(text) {
-  synth.cancel();
-  const u = new SpeechSynthesisUtterance(text);
-  u.lang = "en-US";
-
-  u.onstart = () => {
-    isAISpeaking = true;
-    setStatus("AI speaking…");
-  };
-
-  u.onend = () => {
-    isAISpeaking = false;
-    setStatus("Listening…");
-  };
-
-  document.getElementById("question").innerText = text;
-  synth.speak(u);
-}
-
-function initSpeechRecognition() {
-  recognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
-  recognition.lang = "en-US";
-  recognition.onresult = (e) => {
-    const text = e.results[0][0].transcript;
-    speak("Thank you. Can you explain that further?");
-  };
-}
-
-async function initVAD() {
-  myvad = await vad.MicVAD.new({
-    stream: micStream,
-    onSpeechStart: () => {
-      if (isAISpeaking) synth.cancel();
-    },
-    onSpeechEnd: () => {
-      recognition.start();
-    }
-  });
-  myvad.start();
-}
-
-document.getElementById("startBtn").onclick = async () => {
-  const btn = document.getElementById("startBtn");
-  btn.disabled = true;
-  btn.innerText = "Starting…";
+startBtn.onclick = async () => {
+  startBtn.disabled = true;
+  startBtn.innerText = "Starting…";
 
   try {
-    // 🔥 THIS IS THE CRITICAL FIX
-    micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    // 🔥 THIS MUST BE FIRST
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
 
-    btn.style.display = "none";
-    setStatus("Microphone ready");
+    // Now SAFE to create audio APIs
+    const synth = window.speechSynthesis;
 
-    initSpeechRecognition();
-    await initVAD();
+    const recognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
+    recognition.lang = "en-US";
+    recognition.onresult = (e) => {
+      questionEl.innerText = "Thanks. Can you explain more?";
+      synth.speak(new SpeechSynthesisUtterance("Thanks. Can you explain more?"));
+    };
 
-    speak("Tell me about yourself.");
+    const myvad = await vad.MicVAD.new({
+      stream,
+      onSpeechEnd: () => recognition.start()
+    });
+    myvad.start();
+
+    startBtn.style.display = "none";
+    statusEl.innerText = "Listening…";
+
+    const intro = new SpeechSynthesisUtterance("Tell me about yourself.");
+    synth.speak(intro);
+    questionEl.innerText = "Tell me about yourself.";
 
   } catch (err) {
-    btn.disabled = false;
-    btn.innerText = "Start Interview";
-    setStatus("Microphone permission denied");
+    console.error(err);
+    statusEl.innerText = "Microphone permission required";
+    startBtn.disabled = false;
+    startBtn.innerText = "Start Interview";
   }
 };
 </script>
