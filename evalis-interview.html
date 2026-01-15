@@ -4,8 +4,8 @@ const statusEl = document.getElementById("status");
 const questionEl = document.getElementById("question");
 const pulse = document.getElementById("pulse");
 
-const synth = window.speechSynthesis;
 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+const synth = window.speechSynthesis;
 
 const questions = [
   "Tell me about yourself.",
@@ -17,11 +17,12 @@ const questions = [
 let qIndex = 0;
 let recognition;
 let vadInstance;
+let interviewStarted = false;
 
 function speak(text) {
   synth.cancel();
-  questionEl.innerText = text;
   statusEl.innerText = "Evalis AI Speaking";
+  questionEl.innerText = text;
   const u = new SpeechSynthesisUtterance(text);
   u.onend = () => statusEl.innerText = "Listening…";
   synth.speak(u);
@@ -29,9 +30,8 @@ function speak(text) {
 
 startBtn.onclick = () => {
   startBtn.style.display = "none";
-  statusEl.innerText = "Requesting microphone…";
+  statusEl.innerText = "Listening… Speak to begin";
 
-  // ✅ MUST be inside click (no await before)
   navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
 
     recognition = new SpeechRecognition();
@@ -39,6 +39,14 @@ startBtn.onclick = () => {
 
     recognition.onresult = () => {
       recognition.stop();
+
+      // 🔓 First successful speech unlocks AI
+      if (!interviewStarted) {
+        interviewStarted = true;
+        speak(questions[0]);
+        return;
+      }
+
       qIndex++;
       if (qIndex < questions.length) {
         speak(questions[qIndex]);
@@ -62,12 +70,11 @@ startBtn.onclick = () => {
     }).then(v => {
       vadInstance = v;
       vadInstance.start();
-      speak(questions[0]);
     });
 
   }).catch(() => {
     statusEl.innerText = "Microphone blocked";
-    questionEl.innerText = "Please allow mic access and refresh.";
+    questionEl.innerText = "Allow mic access and refresh.";
   });
 };
 </script>
