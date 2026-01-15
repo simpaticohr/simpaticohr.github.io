@@ -2,10 +2,9 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width,initial-scale=1" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Evalis AI Interview</title>
 
-<!-- VAD -->
 <script src="https://cdn.jsdelivr.net/npm/@ricky0123/vad-web@0.0.7/dist/bundle.standard.js"></script>
 
 <style>
@@ -13,13 +12,12 @@ body {
   margin: 0;
   height: 100vh;
   background: radial-gradient(circle at top, #1e293b, #020617);
-  font-family: system-ui, -apple-system, Segoe UI, Roboto;
+  font-family: system-ui;
   color: #e5e7eb;
   display: flex;
   align-items: center;
   justify-content: center;
 }
-
 .card {
   width: 92%;
   max-width: 420px;
@@ -29,59 +27,31 @@ body {
   box-shadow: 0 30px 80px rgba(0,0,0,.6);
   text-align: center;
 }
-
-h3 {
-  margin: 0 0 8px;
-  font-weight: 600;
-}
-
-#question {
-  margin: 18px 0;
-  font-size: 18px;
-  min-height: 64px;
-}
-
-#status {
-  font-size: 14px;
-  color: #22c55e;
-  min-height: 20px;
-}
-
-/* MIC */
+#question { font-size: 18px; min-height: 60px; margin: 16px 0; }
+#status { font-size: 14px; color: #22c55e; min-height: 20px; }
 .mic {
-  width: 22px;
-  height: 22px;
+  width: 18px; height: 18px;
   border-radius: 50%;
   background: #22c55e;
-  margin: 14px auto 6px;
+  margin: 10px auto;
   opacity: .3;
-  transition: .2s;
 }
-
 .mic.active {
   opacity: 1;
   animation: pulse 1.2s infinite;
 }
-
 @keyframes pulse {
   0% { box-shadow: 0 0 0 0 rgba(34,197,94,.6); }
   70% { box-shadow: 0 0 0 16px rgba(34,197,94,0); }
-  100% { box-shadow: 0 0 0 0 rgba(34,197,94,0); }
 }
-
 button {
   width: 100%;
-  margin-top: 18px;
   padding: 14px;
-  font-size: 16px;
-  font-weight: 600;
   border-radius: 12px;
   border: none;
-  background: linear-gradient(135deg,#2563eb,#3b82f6);
+  background: #2563eb;
   color: white;
-}
-button:disabled {
-  opacity: .6;
+  font-size: 16px;
 }
 </style>
 </head>
@@ -90,130 +60,86 @@ button:disabled {
 <div class="card">
   <h3>Evalis AI Interview</h3>
   <div id="question">Ready to begin</div>
-  <div id="status">Microphone permission required</div>
+  <div id="status">Tap Start to allow microphone</div>
   <div id="mic" class="mic"></div>
   <button id="startBtn">Start Interview</button>
 </div>
 
 <script>
-/* ================= STATE ================= */
-let started = false;
-let isAISpeaking = false;
-let audioContext;
-let micStream;
-let myvad;
+let audioStream, vadInstance;
+let isSpeaking = false;
 
-/* ================= ELEMENTS ================= */
 const questionEl = document.getElementById("question");
 const statusEl = document.getElementById("status");
 const micEl = document.getElementById("mic");
 const startBtn = document.getElementById("startBtn");
 
-/* ================= HELPERS ================= */
-function setStatus(t){ statusEl.innerText = t; }
-function setMic(active){ micEl.classList.toggle("active", active); }
-
-/* ================= AUDIO UNLOCK (CRITICAL FOR MOBILE) ================= */
-async function unlockAudio(){
-  audioContext = new (window.AudioContext || window.webkitAudioContext)();
-  if(audioContext.state !== "running"){
-    await audioContext.resume();
-  }
+function setMic(active){
+  micEl.classList.toggle("active", active);
 }
 
-/* ================= SPEECH SYNTH ================= */
 const synth = window.speechSynthesis;
 
 function speak(text){
   synth.cancel();
-
   const u = new SpeechSynthesisUtterance(text);
   u.lang = "en-US";
-  u.rate = .95;
-
   u.onstart = () => {
-    isAISpeaking = true;
-    setStatus("AI speaking…");
+    isSpeaking = true;
     setMic(false);
+    statusEl.innerText = "AI speaking…";
   };
-
   u.onend = () => {
-    isAISpeaking = false;
-    setStatus("Listening…");
+    isSpeaking = false;
+    statusEl.innerText = "Listening…";
   };
-
   questionEl.innerText = text;
   synth.speak(u);
 }
 
-/* ================= SPEECH RECOGNITION ================= */
 const recognition =
   new (window.SpeechRecognition || window.webkitSpeechRecognition)();
-
 recognition.lang = "en-US";
-recognition.interimResults = false;
-recognition.continuous = false;
-
-recognition.onresult = (e)=>{
+recognition.onresult = e => {
   const answer = e.results[0][0].transcript;
-  setStatus("Thinking…");
-  setMic(false);
-
-  // 🔹 TEMP LOGIC (replace with resume engine later)
-  if(answer.length < 15){
-    speak("Can you explain that in more detail?");
-  } else {
-    speak("What challenges did you face there?");
-  }
+  speak(answer.length < 15
+    ? "Can you explain that in more detail?"
+    : "What challenges did you face there?"
+  );
 };
 
-/* ================= VAD ================= */
-async function initVAD(stream){
-  myvad = await vad.MicVAD.new({
-    stream,
-    onSpeechStart(){
-      if(isAISpeaking) synth.cancel();
-      setMic(true);
-    },
-    onSpeechEnd(){
-      setMic(false);
-      recognition.start();
-    }
-  });
-  myvad.start();
-}
-
-/* ================= START ================= */
-startBtn.onclick = async ()=>{
-  if(started) return;
-  started = true;
+async function startInterview(){
   startBtn.disabled = true;
-  setStatus("Initializing audio…");
+  statusEl.innerText = "Requesting microphone…";
 
-  try{
-    // 1️⃣ Unlock audio (MANDATORY on mobile)
-    await unlockAudio();
+  try {
+    // 🔑 MUST BE FIRST ON ANDROID
+    audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
 
-    // 2️⃣ Request mic
-    micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    vadInstance = await vad.MicVAD.new({
+      stream: audioStream,
+      onSpeechStart(){
+        if(isSpeaking) synth.cancel();
+        setMic(true);
+      },
+      onSpeechEnd(){
+        setMic(false);
+        recognition.start();
+      }
+    });
 
-    // 3️⃣ Init VAD
-    await initVAD(micStream);
-
-    // 4️⃣ UI
+    vadInstance.start();
     startBtn.style.display = "none";
-    setStatus("Listening…");
-
-    // 5️⃣ Speak
     speak("Tell me about yourself.");
 
-  }catch(err){
-    console.error(err);
-    setStatus("Microphone permission required");
-    started = false;
+  } catch (e){
+    console.error(e);
+    statusEl.innerText = "Microphone permission denied";
     startBtn.disabled = false;
   }
-};
+}
+
+startBtn.onclick = startInterview;
 </script>
 </body>
 </html>
