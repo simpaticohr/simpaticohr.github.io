@@ -4,50 +4,25 @@
 <meta charset="UTF-8">
 <title>Evalis AI Interview</title>
 
+<script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.14.0/dist/ort.wasm.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@ricky0123/vad-web@0.0.7/dist/bundle.standard.js"></script>
 
 <style>
-body {
-  margin: 0;
-  background: #0f172a;
-  font-family: system-ui;
-  height: 100vh;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #e5e7eb;
-}
-
-.card {
-  background: #020617;
-  padding: 28px;
-  width: 90%;
-  max-width: 420px;
-  border-radius: 16px;
-  text-align: center;
-}
-
-#question { font-size: 18px; margin: 16px 0; }
-#status { font-size: 14px; color: #22c55e; }
-
-button {
-  width: 100%;
-  padding: 14px;
-  border-radius: 12px;
-  border: none;
-  background: #2563eb;
-  color: white;
-  font-size: 16px;
-}
+body { margin: 0; background: #0f172a; font-family: system-ui; height: 100vh; display: flex; align-items: center; justify-content: center; color: #e5e7eb; }
+.card { background: #020617; padding: 28px; width: 90%; max-width: 420px; border-radius: 16px; text-align: center; border: 1px solid #1e293b; }
+#question { font-size: 18px; margin: 16px 0; min-height: 50px; }
+#status { font-size: 14px; color: #64748b; margin-bottom: 20px; }
+button { width: 100%; padding: 14px; border-radius: 12px; border: none; background: #2563eb; color: white; font-size: 16px; font-weight: bold; cursor: pointer; }
+button:disabled { background: #1e293b; color: #64748b; cursor: not-allowed; }
 </style>
 </head>
 
 <body>
 <div class="card">
   <h3>Evalis AI Interview</h3>
-  <div id="question">Ready to begin</div>
-  <div id="status">Tap Start</div>
-  <button id="startBtn">Start Interview</button>
+  <div id="question">Ready to begin?</div>
+  <div id="status">Checking AI Engine...</div>
+  <button id="startBtn" disabled>Please Wait...</button>
 </div>
 
 <script>
@@ -55,42 +30,58 @@ const startBtn = document.getElementById("startBtn");
 const statusEl = document.getElementById("status");
 const questionEl = document.getElementById("question");
 
+// Wait for VAD to load before enabling the button
+window.onload = () => {
+  if (typeof vad !== 'undefined') {
+    startBtn.disabled = false;
+    startBtn.innerText = "Start Interview";
+    statusEl.innerText = "AI Ready";
+  } else {
+    statusEl.innerText = "Error: AI failed to load. Refresh page.";
+  }
+};
+
 startBtn.onclick = async () => {
   startBtn.disabled = true;
-  startBtn.innerText = "Starting…";
+  statusEl.innerText = "Requesting Microphone...";
 
   try {
-    // 🔥 THIS MUST BE FIRST
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-
-    // Now SAFE to create audio APIs
     const synth = window.speechSynthesis;
-
-    const recognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    const recognition = new SpeechRecognition();
+    
     recognition.lang = "en-US";
     recognition.onresult = (e) => {
-      questionEl.innerText = "Thanks. Can you explain more?";
-      synth.speak(new SpeechSynthesisUtterance("Thanks. Can you explain more?"));
+      const reply = "That's interesting. Can you tell me more about your experience?";
+      questionEl.innerText = reply;
+      synth.speak(new SpeechSynthesisUtterance(reply));
     };
 
+    // Initialize VAD with the stream
     const myvad = await vad.MicVAD.new({
-      stream,
-      onSpeechEnd: () => recognition.start()
+      stream: stream,
+      onSpeechStart: () => {
+        if (synth.speaking) synth.cancel(); // Interrupt AI
+      },
+      onSpeechEnd: () => {
+        try { recognition.start(); } catch(e) {}
+      }
     });
+
     myvad.start();
-
     startBtn.style.display = "none";
-    statusEl.innerText = "Listening…";
+    statusEl.innerText = "Listening...";
 
-    const intro = new SpeechSynthesisUtterance("Tell me about yourself.");
-    synth.speak(intro);
-    questionEl.innerText = "Tell me about yourself.";
+    const intro = "Hello. I am Zara. Please introduce yourself and your background.";
+    questionEl.innerText = intro;
+    synth.speak(new SpeechSynthesisUtterance(intro));
 
   } catch (err) {
     console.error(err);
-    statusEl.innerText = "Microphone permission required";
+    statusEl.innerText = "Error: " + err.message;
     startBtn.disabled = false;
-    startBtn.innerText = "Start Interview";
+    startBtn.innerText = "Try Again";
   }
 };
 </script>
