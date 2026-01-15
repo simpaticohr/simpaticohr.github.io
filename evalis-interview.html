@@ -9,108 +9,96 @@
     <script src="https://cdn.jsdelivr.net/npm/@ricky0123/vad-web@0.0.7/dist/bundle.standard.js"></script>
 
     <style>
-        :root { --accent: #00c2ff; --bg: #020617; }
-        body { margin: 0; background: var(--bg); font-family: 'Segoe UI', system-ui, sans-serif; height: 100vh; display: flex; align-items: center; justify-content: center; color: white; overflow: hidden; }
-        .card { background: rgba(30, 41, 59, 0.5); backdrop-filter: blur(20px); padding: 40px; border-radius: 32px; text-align: center; border: 1px solid rgba(255,255,255,0.1); width: 320px; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.5); }
-        .voice-ring { width: 80px; height: 80px; border-radius: 50%; border: 3px solid var(--accent); margin: 0 auto 30px; display: flex; align-items: center; justify-content: center; box-shadow: 0 0 20px rgba(0, 194, 255, 0.3); transition: 0.3s; }
-        .listening { animation: pulse 1.5s infinite; border-color: #00ffcc; box-shadow: 0 0 30px rgba(0, 255, 204, 0.5); }
-        @keyframes pulse { 0% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.1); opacity: 0.7; } 100% { transform: scale(1); opacity: 1; } }
-        #question { font-size: 16px; margin: 20px 0; color: #94a3b8; min-height: 60px; line-height: 1.6; }
-        #status { font-size: 10px; color: var(--accent); letter-spacing: 2px; text-transform: uppercase; font-weight: 900; margin-bottom: 25px; }
-        .btn { width: 100%; padding: 18px; border-radius: 16px; border: none; background: linear-gradient(135deg, #002d5a, #00c2ff); color: white; font-weight: 700; cursor: pointer; transition: 0.3s; }
+        body { margin: 0; background: #020617; font-family: system-ui; height: 100vh; display: flex; align-items: center; justify-content: center; color: white; }
+        .card { background: #0f172a; padding: 40px; border-radius: 24px; text-align: center; border: 1px solid #1e293b; width: 300px; box-shadow: 0 20px 50px rgba(0,0,0,0.5); }
+        #status { font-size: 11px; color: #3b82f6; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 20px; font-weight: bold; }
+        #question { font-size: 15px; color: #94a3b8; margin-bottom: 30px; line-height: 1.5; min-height: 60px; }
+        .btn { width: 100%; padding: 16px; border-radius: 12px; border: none; background: #2563eb; color: white; font-weight: bold; cursor: pointer; }
         .btn:disabled { background: #1e293b; color: #475569; cursor: not-allowed; }
+        .pulse { width: 12px; height: 12px; background: #22c55e; border-radius: 50%; margin: 0 auto 15px; display: none; box-shadow: 0 0 10px #22c55e; animation: pulse-kf 1.5s infinite; }
+        @keyframes pulse-kf { 0% { opacity: 1; transform: scale(1); } 50% { opacity: 0.5; transform: scale(1.3); } 100% { opacity: 1; transform: scale(1); } }
     </style>
 </head>
 <body>
 
 <div class="card">
-    <div class="voice-ring" id="ring">🎙️</div>
-    <div id="status">Initializing Neural Link...</div>
-    <div id="question">Zara is preparing your HR screening session.</div>
-    <button class="btn" id="startBtn" disabled>Please Wait...</button>
+    <div class="pulse" id="pulse"></div>
+    <div id="status">Loading AI Engine...</div>
+    <div id="question">Please wait while Zara connects.</div>
+    <button class="btn" id="startBtn" disabled>Starting...</button>
 </div>
 
 <script>
-    // INTERVIEW LOGIC
-    const state = {
-        index: 0,
-        questions: [
-            "Tell me about your experience in HR and recruitment.",
-            "How do you handle high-volume hiring challenges?",
-            "What strategies do you use to source quality candidates?",
-            "Great. Lastly, why do you want to join Simpatico HR?"
-        ]
-    };
-
     const startBtn = document.getElementById("startBtn");
     const statusEl = document.getElementById("status");
     const questionEl = document.getElementById("question");
-    const ring = document.getElementById("ring");
+    const pulse = document.getElementById("pulse");
     const synth = window.speechSynthesis;
 
-    // FORCE ENGINE CHECK
-    function loadEngine() {
-        if (typeof vad !== 'undefined' && typeof ort !== 'undefined') {
+    // --- DECISION ENGINE ---
+    const questions = [
+        "Tell me about your HR experience.",
+        "How do you handle recruitment pressure?",
+        "What is your sourcing strategy?",
+        "Thank you. We will contact you soon."
+    ];
+    let qIndex = 0;
+
+    // --- ENGINE LOADER ---
+    function init() {
+        if (typeof vad !== 'undefined') {
             startBtn.disabled = false;
             startBtn.innerText = "Start Interview";
-            statusEl.innerText = "System Ready";
-            questionEl.innerText = "Click below to begin your voice-guided interview.";
+            statusEl.innerText = "AI Ready";
+            questionEl.innerText = "Click below to begin your voice session.";
         } else {
-            setTimeout(loadEngine, 1000);
+            setTimeout(init, 1000); // Retry every second
         }
     }
-    loadEngine();
+    init();
 
     startBtn.onclick = async () => {
         startBtn.style.display = 'none';
         statusEl.innerText = "Requesting Microphone...";
-        
+
         try {
             const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
             const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
             const recognition = new SpeechRecognition();
             recognition.lang = "en-US";
 
-            recognition.onresult = (e) => {
-                ring.classList.remove('listening');
-                state.index++;
-                if (state.index < state.questions.length) {
-                    ask(state.questions[state.index]);
+            recognition.onresult = () => {
+                qIndex++;
+                if (qIndex < questions.length) {
+                    ask(questions[qIndex]);
                 } else {
-                    questionEl.innerText = "Interview complete. We will review your responses.";
-                    statusEl.innerText = "Session Ended";
-                    synth.speak(new SpeechSynthesisUtterance("Thank you. Your interview is complete."));
+                    statusEl.innerText = "Finished";
+                    questionEl.innerText = "Interview complete.";
                 }
             };
 
             const myvad = await vad.MicVAD.new({
                 stream: stream,
-                onSpeechStart: () => { 
-                    if (synth.speaking) synth.cancel();
-                    ring.classList.add('listening');
-                },
-                onSpeechEnd: () => { 
-                    try { recognition.start(); } catch(err) {}
-                }
+                onSpeechStart: () => { if (synth.speaking) synth.cancel(); pulse.style.display = 'block'; },
+                onSpeechEnd: () => { pulse.style.display = 'none'; try { recognition.start(); } catch(e) {} }
             });
 
             myvad.start();
-            
-            function ask(text) {
-                questionEl.innerText = text;
-                statusEl.innerText = "Zara is Speaking";
-                const msg = new SpeechSynthesisUtterance(text);
-                msg.onend = () => { statusEl.innerText = "Zara is Listening"; };
-                synth.speak(msg);
-            }
-
-            ask(state.questions[0]);
+            ask(questions[0]);
 
         } catch (err) {
-            statusEl.innerText = "Error: Mic Access Denied";
-            questionEl.innerText = "Please enable microphone permissions in your settings and refresh the page.";
+            statusEl.innerText = "Error: Mic Access";
+            questionEl.innerText = "Please enable your microphone and refresh.";
         }
     };
+
+    function ask(text) {
+        questionEl.innerText = text;
+        statusEl.innerText = "Zara is Speaking";
+        const msg = new SpeechSynthesisUtterance(text);
+        msg.onend = () => { statusEl.innerText = "Zara is Listening"; };
+        synth.speak(msg);
+    }
 </script>
 </body>
 </html>
