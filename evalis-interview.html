@@ -4,185 +4,91 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 <title>Evalis AI Interview</title>
+<script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.14.0/dist/ort.wasm.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@ricky0123/vad-web@0.0.7/dist/bundle.standard.js"></script>
 
 <style>
-  body {
-    margin: 0;
-    height: 100vh;
-    background: radial-gradient(circle at center, #0c1b3a, #050b1a);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
-    color: white;
-  }
-
-  .card {
-    width: 320px;
-    padding: 28px;
-    background: rgba(10, 20, 45, 0.95);
-    border-radius: 16px;
-    text-align: center;
-    box-shadow: 0 0 40px rgba(60,120,255,0.35);
-  }
-
-  .orb {
-    width: 58px;
-    height: 58px;
-    margin: 0 auto 14px;
-    border-radius: 50%;
-    background: radial-gradient(circle, #6aa8ff, #2a5bd7);
-    box-shadow: 0 0 20px #3b82f6;
-  }
-
-  #question {
-    font-size: 16px;
-    margin: 10px 0 6px;
-    min-height: 44px;
-  }
-
-  #status {
-    font-size: 13px;
-    color: #9bb3ff;
-    margin-bottom: 14px;
-  }
-
-  button {
-    background: #3b82f6;
-    border: none;
-    color: white;
-    padding: 10px 18px;
-    border-radius: 8px;
-    font-size: 14px;
-    cursor: pointer;
-  }
-
-  button:disabled {
-    background: #444;
-    cursor: not-allowed;
-  }
+  body { margin: 0; height: 100vh; background: transparent; display: flex; align-items: center; justify-content: center; font-family: system-ui, sans-serif; color: white; }
+  .card { width: 320px; padding: 28px; background: rgba(10, 20, 45, 0.95); border-radius: 16px; text-align: center; box-shadow: 0 0 40px rgba(60,120,255,0.35); }
+  .orb { width: 58px; height: 58px; margin: 0 auto 14px; border-radius: 50%; background: radial-gradient(circle, #6aa8ff, #2a5bd7); box-shadow: 0 0 20px #3b82f6; transition: 0.3s; }
+  .orb.listening { background: radial-gradient(circle, #22c55e, #16a34a); box-shadow: 0 0 20px #22c55e; }
+  #question { font-size: 16px; margin: 10px 0 6px; min-height: 44px; }
+  #status { font-size: 13px; color: #9bb3ff; margin-bottom: 14px; }
+  button { background: #3b82f6; border: none; color: white; padding: 12px 20px; border-radius: 8px; font-size: 14px; cursor: pointer; font-weight: bold; }
+  button:disabled { background: #444; cursor: not-allowed; }
 </style>
 </head>
-
 <body>
 
 <div class="card">
-  <div class="orb"></div>
-  <div id="question">Tell me about yourself.</div>
-  <div id="status">Tap once to enable hands-free</div>
-  <button id="startBtn">Enable Hands-Free Interview</button>
+  <div id="orb" class="orb"></div>
+  <div id="question">Ready to start?</div>
+  <div id="status">Microphone required</div>
+  <button id="startBtn">Start Interview</button>
 </div>
 
 <script>
-/* ================= CONFIG ================= */
 const WORKER_URL = "https://evalis-ai.simpaticohrconsultancy.workers.dev";
+let isTalking = false;
+let myvad;
+const synth = window.speechSynthesis;
+const recognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
+recognition.continuous = false;
+recognition.lang = 'en-US';
 
-/* ================= STATE ================= */
-let recognition;
-let handsFree = false;
-let isThinking = false;
-let interviewState = "introduction";
-
-/* ================= ELEMENTS ================= */
-const questionEl = document.getElementById("question");
-const statusEl = document.getElementById("status");
-const startBtn = document.getElementById("startBtn");
-
-/* ================= SPEECH OUTPUT ================= */
+// 1. Interruptible Speech
 function speak(text) {
-  questionEl.innerText = text;
-  statusEl.innerText = "Speaking…";
-
-  speechSynthesis.cancel();
-
+  if (synth.speaking) synth.cancel();
   const utter = new SpeechSynthesisUtterance(text);
-  utter.lang = "en-US";
-
-  let finished = false;
-  const proceed = () => {
-    if (finished) return;
-    finished = true;
-    statusEl.innerText = "Listening…";
-    startListening();
-  };
-
-  utter.onend = proceed;
-  utter.onerror = proceed;
-
-  setTimeout(proceed, Math.max(3500, text.length * 60));
-  speechSynthesis.speak(utter);
+  utter.onstart = () => { isTalking = true; updateUI('talking'); };
+  utter.onend = () => { isTalking = false; updateUI('listening'); };
+  questionEl.innerText = text;
+  synth.speak(utter);
 }
 
-/* ================= SPEECH INPUT ================= */
-function setupRecognition() {
-  recognition = new webkitSpeechRecognition();
-  recognition.lang = "en-US";
-  recognition.interimResults = false;
-  recognition.continuous = false;
-
-  recognition.onresult = e => {
-    const answer = e.results[0][0].transcript;
-    handleAnswer(answer);
-  };
-
-  recognition.onerror = () => restartListening();
+// 2. VAD Interruption Detection
+async function initVAD() {
+  myvad = await vad.MicVAD.new({
+    onSpeechStart: () => {
+      if (isTalking) {
+        synth.cancel(); // STOPS AI IMMEDIATELY IF YOU SPEAK
+        isTalking = false;
+        updateUI('listening');
+      }
+    },
+    onSpeechEnd: () => {
+      try { recognition.start(); } catch(e) {}
+    }
+  });
+  myvad.start();
 }
 
-function startListening() {
-  if (!handsFree || isThinking) return;
-  restartListening();
+recognition.onresult = async (e) => {
+  const answer = e.results[0][0].transcript;
+  updateUI('thinking');
+  const res = await fetch(WORKER_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ answer })
+  });
+  const data = await res.json();
+  speak(data.followUp || data.reply);
+};
+
+function updateUI(state) {
+  const orb = document.getElementById("orb");
+  const status = document.getElementById("status");
+  if(state === 'listening') { orb.className = "orb listening"; status.innerText = "Listening..."; }
+  if(state === 'talking') { orb.className = "orb"; status.innerText = "Speaking..."; }
+  if(state === 'thinking') { status.innerText = "Thinking..."; }
 }
 
-function restartListening() {
-  try { recognition.stop(); } catch {}
-  setTimeout(() => {
-    try {
-      recognition.start();
-      statusEl.innerText = "Listening…";
-    } catch {}
-  }, 350);
-}
-
-/* ================= BACKEND CALL ================= */
-async function handleAnswer(answer) {
-  if (isThinking) return;
-
-  isThinking = true;
-  statusEl.innerText = "Thinking…";
-
-  try {
-    const res = await fetch(WORKER_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        answer,
-        state: interviewState
-      })
-    });
-
-    const data = await res.json();
-
-    interviewState = data.nextState || interviewState;
-    speak(data.followUp || "Can you explain that further?");
-  } catch {
-    speak("Sorry, please repeat that.");
-  } finally {
-    isThinking = false;
-  }
-}
-
-/* ================= START ================= */
-startBtn.onclick = () => {
-  if (handsFree) return;
-
-  handsFree = true;
-  startBtn.disabled = true;
-  startBtn.innerText = "Hands-Free Enabled";
-
-  setupRecognition();
-  speak("Tell me about yourself.");
+const questionEl = document.getElementById("question");
+document.getElementById("startBtn").onclick = async function() {
+  this.style.display = 'none';
+  await initVAD();
+  speak("Hello! I am your AI interviewer. Let's begin. Tell me a bit about yourself.");
 };
 </script>
-
 </body>
 </html>
