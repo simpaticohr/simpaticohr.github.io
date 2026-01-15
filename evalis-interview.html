@@ -2,27 +2,30 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Evalis AI Interview</title>
 
-<script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.14.0/dist/ort.wasm.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@ricky0123/vad-web@0.0.7/dist/bundle.standard.js"></script>
+<script src="https://unpkg.com/onnxruntime-web@1.14.0/dist/ort.wasm.min.js"></script>
+<script src="https://unpkg.com/@ricky0123/vad-web@0.0.7/dist/bundle.standard.js"></script>
 
 <style>
-body { margin: 0; background: #0f172a; font-family: system-ui; height: 100vh; display: flex; align-items: center; justify-content: center; color: #e5e7eb; }
-.card { background: #020617; padding: 28px; width: 90%; max-width: 420px; border-radius: 16px; text-align: center; border: 1px solid #1e293b; }
-#question { font-size: 18px; margin: 16px 0; min-height: 50px; }
-#status { font-size: 14px; color: #64748b; margin-bottom: 20px; }
-button { width: 100%; padding: 14px; border-radius: 12px; border: none; background: #2563eb; color: white; font-size: 16px; font-weight: bold; cursor: pointer; }
-button:disabled { background: #1e293b; color: #64748b; cursor: not-allowed; }
+body { margin: 0; background: #0f172a; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; height: 100vh; display: flex; align-items: center; justify-content: center; color: #e5e7eb; }
+.card { background: #020617; padding: 30px; width: 320px; border-radius: 20px; text-align: center; border: 1px solid #1e293b; box-shadow: 0 20px 50px rgba(0,0,0,0.5); }
+#question { font-size: 16px; margin: 20px 0; min-height: 60px; line-height: 1.5; color: #94a3b8; }
+#status { font-size: 12px; color: #3b82f6; margin-bottom: 20px; text-transform: uppercase; letter-spacing: 1px; }
+button { width: 100%; padding: 15px; border-radius: 12px; border: none; background: #2563eb; color: white; font-size: 16px; font-weight: bold; cursor: pointer; transition: 0.2s; }
+button:hover { background: #1d4ed8; }
+button:disabled { background: #1e293b; color: #475569; cursor: not-allowed; }
 </style>
 </head>
 
 <body>
 <div class="card">
-  <h3>Evalis AI Interview</h3>
-  <div id="question">Ready to begin?</div>
-  <div id="status">Checking AI Engine...</div>
-  <button id="startBtn" disabled>Please Wait...</button>
+  <div style="font-size: 24px; margin-bottom: 5px;">🎙️</div>
+  <h3 style="margin: 0; font-size: 18px;">AI Mock Interview</h3>
+  <div id="question">Initializing Zara AI...</div>
+  <div id="status">Checking Engine</div>
+  <button id="startBtn" disabled>Loading...</button>
 </div>
 
 <script>
@@ -30,16 +33,20 @@ const startBtn = document.getElementById("startBtn");
 const statusEl = document.getElementById("status");
 const questionEl = document.getElementById("question");
 
-// Wait for VAD to load before enabling the button
-window.onload = () => {
+// This function checks if the library is actually loaded
+function checkLibraries() {
   if (typeof vad !== 'undefined') {
     startBtn.disabled = false;
     startBtn.innerText = "Start Interview";
-    statusEl.innerText = "AI Ready";
+    statusEl.innerText = "Ready to Begin";
+    questionEl.innerText = "Click the button below to start your AI interview session.";
   } else {
-    statusEl.innerText = "Error: AI failed to load. Refresh page.";
+    statusEl.innerText = "Still Loading AI...";
+    setTimeout(checkLibraries, 1000); // Retry every second
   }
-};
+}
+
+checkLibraries();
 
 startBtn.onclick = async () => {
   startBtn.disabled = true;
@@ -48,40 +55,35 @@ startBtn.onclick = async () => {
   try {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     const synth = window.speechSynthesis;
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    const recognition = new SpeechRecognition();
+    const recognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
     
     recognition.lang = "en-US";
     recognition.onresult = (e) => {
-      const reply = "That's interesting. Can you tell me more about your experience?";
+      const reply = "That is very interesting. Can you tell me more about how you handle pressure?";
       questionEl.innerText = reply;
-      synth.speak(new SpeechSynthesisUtterance(reply));
+      const utter = new SpeechSynthesisUtterance(reply);
+      synth.speak(utter);
     };
 
-    // Initialize VAD with the stream
     const myvad = await vad.MicVAD.new({
       stream: stream,
-      onSpeechStart: () => {
-        if (synth.speaking) synth.cancel(); // Interrupt AI
-      },
-      onSpeechEnd: () => {
-        try { recognition.start(); } catch(e) {}
-      }
+      onSpeechStart: () => { if (synth.speaking) synth.cancel(); },
+      onSpeechEnd: () => { try { recognition.start(); } catch(e) {} }
     });
 
     myvad.start();
     startBtn.style.display = "none";
-    statusEl.innerText = "Listening...";
+    statusEl.innerText = "Zara is Listening";
 
-    const intro = "Hello. I am Zara. Please introduce yourself and your background.";
+    const intro = "Hello! I am Zara. Please introduce yourself and tell me about your background.";
     questionEl.innerText = intro;
     synth.speak(new SpeechSynthesisUtterance(intro));
 
   } catch (err) {
-    console.error(err);
-    statusEl.innerText = "Error: " + err.message;
+    statusEl.innerText = "Mic Access Denied";
+    questionEl.innerText = "Please enable microphone permissions in your browser settings and refresh.";
     startBtn.disabled = false;
-    startBtn.innerText = "Try Again";
+    startBtn.innerText = "Retry Access";
   }
 };
 </script>
