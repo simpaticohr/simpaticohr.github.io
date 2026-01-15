@@ -2,8 +2,8 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
-<title>Evalis AI – Voice Interview</title>
-<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Evalis AI Interview</title>
 
 <!-- VAD -->
 <script src="https://cdn.jsdelivr.net/npm/@ricky0123/vad-web@0.0.7/dist/bundle.standard.js"></script>
@@ -11,34 +11,34 @@
 <style>
 body {
   margin: 0;
-  background: #0f172a;
+  height: 100vh;
+  background: radial-gradient(circle at top, #1e293b, #020617);
   font-family: system-ui, -apple-system, Segoe UI, Roboto;
   color: #e5e7eb;
   display: flex;
-  justify-content: center;
   align-items: center;
-  height: 100vh;
+  justify-content: center;
 }
 
 .card {
-  background: #020617;
-  padding: 28px;
   width: 92%;
   max-width: 420px;
+  background: rgba(2,6,23,.9);
   border-radius: 18px;
-  box-shadow: 0 0 40px rgba(0,0,0,.6);
+  padding: 26px;
+  box-shadow: 0 30px 80px rgba(0,0,0,.6);
   text-align: center;
 }
 
 h3 {
-  margin: 0 0 10px;
+  margin: 0 0 8px;
   font-weight: 600;
 }
 
 #question {
-  font-size: 18px;
   margin: 18px 0;
-  min-height: 70px;
+  font-size: 18px;
+  min-height: 64px;
 }
 
 #status {
@@ -47,28 +47,41 @@ h3 {
   min-height: 20px;
 }
 
-button {
-  width: 100%;
-  margin-top: 18px;
-  padding: 14px;
-  border-radius: 14px;
-  border: none;
-  background: #2563eb;
-  color: white;
-  font-size: 16px;
-  cursor: pointer;
-}
-
+/* MIC */
 .mic {
-  margin-top: 10px;
-  font-size: 26px;
-  opacity: 0.4;
-  transition: transform 0.2s, opacity 0.2s;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: #22c55e;
+  margin: 14px auto 6px;
+  opacity: .3;
+  transition: .2s;
 }
 
 .mic.active {
   opacity: 1;
-  transform: scale(1.2);
+  animation: pulse 1.2s infinite;
+}
+
+@keyframes pulse {
+  0% { box-shadow: 0 0 0 0 rgba(34,197,94,.6); }
+  70% { box-shadow: 0 0 0 16px rgba(34,197,94,0); }
+  100% { box-shadow: 0 0 0 0 rgba(34,197,94,0); }
+}
+
+button {
+  width: 100%;
+  margin-top: 18px;
+  padding: 14px;
+  font-size: 16px;
+  font-weight: 600;
+  border-radius: 12px;
+  border: none;
+  background: linear-gradient(135deg,#2563eb,#3b82f6);
+  color: white;
+}
+button:disabled {
+  opacity: .6;
 }
 </style>
 </head>
@@ -77,56 +90,60 @@ button {
 <div class="card">
   <h3>Evalis AI Interview</h3>
   <div id="question">Ready to begin</div>
-  <div id="status">Tap start</div>
-  <div id="mic" class="mic">🎤</div>
+  <div id="status">Microphone permission required</div>
+  <div id="mic" class="mic"></div>
   <button id="startBtn">Start Interview</button>
 </div>
 
 <script>
-/* ================= CONFIG ================= */
-const WORKER_URL = "https://evalis-ai.simpaticohrconsultancy.workers.dev";
-
 /* ================= STATE ================= */
-let interviewStarted = false;
+let started = false;
 let isAISpeaking = false;
 let audioContext;
-let myvad;
 let micStream;
+let myvad;
 
-/* ================= UI ================= */
+/* ================= ELEMENTS ================= */
 const questionEl = document.getElementById("question");
 const statusEl = document.getElementById("status");
 const micEl = document.getElementById("mic");
 const startBtn = document.getElementById("startBtn");
 
-function setStatus(t) { statusEl.innerText = t; }
-function setMic(active) {
-  micEl.classList.toggle("active", active);
+/* ================= HELPERS ================= */
+function setStatus(t){ statusEl.innerText = t; }
+function setMic(active){ micEl.classList.toggle("active", active); }
+
+/* ================= AUDIO UNLOCK (CRITICAL FOR MOBILE) ================= */
+async function unlockAudio(){
+  audioContext = new (window.AudioContext || window.webkitAudioContext)();
+  if(audioContext.state !== "running"){
+    await audioContext.resume();
+  }
 }
 
 /* ================= SPEECH SYNTH ================= */
 const synth = window.speechSynthesis;
 
-function speak(text) {
+function speak(text){
   synth.cancel();
 
-  const utter = new SpeechSynthesisUtterance(text);
-  utter.lang = "en-US";
-  utter.rate = 0.95;
+  const u = new SpeechSynthesisUtterance(text);
+  u.lang = "en-US";
+  u.rate = .95;
 
-  utter.onstart = () => {
+  u.onstart = () => {
     isAISpeaking = true;
     setStatus("AI speaking…");
     setMic(false);
   };
 
-  utter.onend = () => {
+  u.onend = () => {
     isAISpeaking = false;
     setStatus("Listening…");
   };
 
   questionEl.innerText = text;
-  synth.speak(utter);
+  synth.speak(u);
 }
 
 /* ================= SPEECH RECOGNITION ================= */
@@ -134,75 +151,67 @@ const recognition =
   new (window.SpeechRecognition || window.webkitSpeechRecognition)();
 
 recognition.lang = "en-US";
-recognition.continuous = false;
 recognition.interimResults = false;
+recognition.continuous = false;
 
-recognition.onresult = async (event) => {
-  const answer = event.results[0][0].transcript;
+recognition.onresult = (e)=>{
+  const answer = e.results[0][0].transcript;
   setStatus("Thinking…");
   setMic(false);
 
-  try {
-    const res = await fetch(WORKER_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        text: answer,
-        // OPTIONAL: resume can be injected later
-        // resume: window.resumeText
-      })
-    });
-
-    const data = await res.json();
-    speak(data.reply || "Can you explain that further?");
-  } catch (e) {
-    speak("Please repeat that.");
+  // 🔹 TEMP LOGIC (replace with resume engine later)
+  if(answer.length < 15){
+    speak("Can you explain that in more detail?");
+  } else {
+    speak("What challenges did you face there?");
   }
 };
 
 /* ================= VAD ================= */
-async function initVAD(stream) {
+async function initVAD(stream){
   myvad = await vad.MicVAD.new({
     stream,
-    onSpeechStart: () => {
+    onSpeechStart(){
+      if(isAISpeaking) synth.cancel();
       setMic(true);
-      if (isAISpeaking) synth.cancel();
     },
-    onSpeechEnd: () => {
+    onSpeechEnd(){
       setMic(false);
       recognition.start();
     }
   });
-
   myvad.start();
 }
 
 /* ================= START ================= */
-startBtn.onclick = async () => {
-  if (interviewStarted) return;
-  interviewStarted = true;
-
+startBtn.onclick = async ()=>{
+  if(started) return;
+  started = true;
   startBtn.disabled = true;
-  startBtn.style.display = "none";
-  setStatus("Requesting microphone…");
+  setStatus("Initializing audio…");
 
-  try {
+  try{
+    // 1️⃣ Unlock audio (MANDATORY on mobile)
+    await unlockAudio();
+
+    // 2️⃣ Request mic
     micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
 
-    audioContext = new (window.AudioContext || window.webkitAudioContext)();
-    await audioContext.resume();
-
+    // 3️⃣ Init VAD
     await initVAD(micStream);
 
+    // 4️⃣ UI
+    startBtn.style.display = "none";
     setStatus("Listening…");
+
+    // 5️⃣ Speak
     speak("Tell me about yourself.");
 
-  } catch (err) {
+  }catch(err){
     console.error(err);
-    setStatus("Microphone permission required.");
+    setStatus("Microphone permission required");
+    started = false;
     startBtn.disabled = false;
-    startBtn.style.display = "block";
-    interviewStarted = false;
   }
 };
 </script>
