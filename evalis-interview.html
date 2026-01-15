@@ -1,147 +1,73 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>Evalis AI Interview</title>
-
-<script src="https://unpkg.com/@ricky0123/vad-web@0.0.7/dist/bundle.standard.js"></script>
-
-<style>
-body {
-  margin: 0;
-  background: #020617;
-  font-family: system-ui;
-  height: 100vh;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  color: white;
-}
-.card {
-  background: #0f172a;
-  padding: 36px;
-  border-radius: 20px;
-  width: 320px;
-  text-align: center;
-  border: 1px solid #1e293b;
-}
-#status {
-  font-size: 11px;
-  color: #3b82f6;
-  text-transform: uppercase;
-  margin-bottom: 16px;
-}
-#question {
-  font-size: 15px;
-  color: #cbd5f5;
-  min-height: 70px;
-  margin-bottom: 20px;
-}
-button {
-  width: 100%;
-  padding: 14px;
-  border-radius: 12px;
-  border: none;
-  background: #2563eb;
-  color: white;
-  font-weight: bold;
-  cursor: pointer;
-}
-.pulse {
-  width: 12px;
-  height: 12px;
-  background: #22c55e;
-  border-radius: 50%;
-  margin: 0 auto 12px;
-  display: none;
-  animation: pulse 1.2s infinite;
-}
-@keyframes pulse {
-  0% { transform: scale(1); opacity: 1; }
-  50% { transform: scale(1.4); opacity: 0.6; }
-  100% { transform: scale(1); opacity: 1; }
-}
-</style>
-</head>
-
-<body>
-<div class="card">
-  <div class="pulse" id="pulse"></div>
-  <div id="status">Evalis AI Ready</div>
-  <div id="question">Ready to begin?</div>
-  <button id="startBtn">Start Interview</button>
-</div>
-
 <script>
-/* ================= INTERVIEW ENGINE ================= */
+const startBtn = document.getElementById("startBtn");
+const statusEl = document.getElementById("status");
+const questionEl = document.getElementById("question");
+const pulse = document.getElementById("pulse");
 
-function createInterview(resume) {
-  return {
-    profile: resume,
-    topics: buildTopics(resume),
-    topicIndex: 0,
-    depth: 0,
-    maxDepth: 2,
-    coveredIntents: new Set(),
-    completed: false
-  };
+const synth = window.speechSynthesis;
+const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+const questions = [
+  "Tell me about yourself.",
+  "What experience do you have related to this role?",
+  "Describe a challenge you handled well.",
+  "Why should we hire you?"
+];
+
+let qIndex = 0;
+let recognition;
+let vadInstance;
+
+function speak(text) {
+  synth.cancel();
+  questionEl.innerText = text;
+  statusEl.innerText = "Evalis AI Speaking";
+  const u = new SpeechSynthesisUtterance(text);
+  u.onend = () => statusEl.innerText = "Listening…";
+  synth.speak(u);
 }
 
-function buildTopics(resume) {
-  const topics = [];
-  if (resume.role) topics.push({ type: "role" });
-  if (resume.skills?.length) topics.push({ type: "skill", value: resume.skills[0] });
-  if (resume.projects?.length) topics.push({ type: "project", value: resume.projects[0] });
-  topics.push({ type: "impact" });
-  return topics;
-}
+startBtn.onclick = () => {
+  startBtn.style.display = "none";
+  statusEl.innerText = "Requesting microphone…";
 
-function decideNextQuestion(answer, state) {
-  if (state.completed) {
-    return { question: "The interview is complete. Thank you.", done: true };
-  }
+  // ✅ MUST be inside click (no await before)
+  navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
 
-  const s = analyze(answer);
+    recognition = new SpeechRecognition();
+    recognition.lang = "en-US";
 
-  if (!s.detail && !state.coveredIntents.has("detail")) {
-    state.coveredIntents.add("detail");
-    return ask("Can you explain that in more detail?");
-  }
-  if (!s.ownership && !state.coveredIntents.has("ownership")) {
-    state.coveredIntents.add("ownership");
-    return ask("What was your personal responsibility there?");
-  }
-  if (!s.example && !state.coveredIntents.has("example")) {
-    state.coveredIntents.add("example");
-    return ask("Can you give a real example?");
-  }
-  if (!s.impact && !state.coveredIntents.has("impact")) {
-    state.coveredIntents.add("impact");
-    return ask("What was the outcome or impact?");
-  }
+    recognition.onresult = () => {
+      recognition.stop();
+      qIndex++;
+      if (qIndex < questions.length) {
+        speak(questions[qIndex]);
+      } else {
+        statusEl.innerText = "Interview Completed";
+        questionEl.innerText = "Thank you. Interview complete.";
+        pulse.style.display = "none";
+      }
+    };
 
-  if (state.depth < state.maxDepth) {
-    state.depth++;
-    return ask("What challenges did you face?");
-  }
+    vad.MicVAD.new({
+      stream,
+      onSpeechStart: () => {
+        pulse.style.display = "block";
+        if (synth.speaking) synth.cancel();
+      },
+      onSpeechEnd: () => {
+        pulse.style.display = "none";
+        try { recognition.start(); } catch(e){}
+      }
+    }).then(v => {
+      vadInstance = v;
+      vadInstance.start();
+      speak(questions[0]);
+    });
 
-  state.coveredIntents.clear();
-  state.depth = 0;
-  state.topicIndex++;
-
-  if (state.topicIndex >= state.topics.length) {
-    state.completed = true;
-    return { question: "Thank you. The interview is complete.", done: true };
-  }
-
-  return ask(generateTopicQuestion(state.topics[state.topicIndex], state.profile));
-}
-
-function analyze(text = "") {
-  const t = text.toLowerCase();
-  return {
-    detail: text.split(" ").length > 25,
-    ownership: /\b(i|my|me)\b/.test(t),
-    example: /(example|when|project|situation)/.test(t),
-    impact: /(impact|result|improve|increase|reduce
+  }).catch(() => {
+    statusEl.innerText = "Microphone blocked";
+    questionEl.innerText = "Please allow mic access and refresh.";
+  });
+};
+</script>
