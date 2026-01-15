@@ -18,7 +18,6 @@ body {
   justify-content: center;
   align-items: center;
 }
-
 .card {
   width: 380px;
   background: #0f172a;
@@ -26,26 +25,19 @@ body {
   padding: 26px;
   border: 1px solid #1e293b;
 }
-
-h2 {
-  margin-top: 0;
-  text-align: center;
-}
-
+h2 { margin: 0 0 10px; text-align: center; }
 #status {
   font-size: 12px;
   color: #38bdf8;
-  margin-bottom: 12px;
   text-align: center;
+  margin-bottom: 10px;
 }
-
 #question {
   font-size: 15px;
   min-height: 70px;
-  margin-bottom: 12px;
   color: #cbd5f5;
+  margin-bottom: 10px;
 }
-
 textarea {
   width: 100%;
   min-height: 90px;
@@ -53,9 +45,7 @@ textarea {
   border: none;
   padding: 10px;
   font-size: 14px;
-  margin-bottom: 10px;
 }
-
 button {
   width: 100%;
   padding: 14px;
@@ -65,17 +55,15 @@ button {
   color: white;
   font-weight: 600;
   cursor: pointer;
+  margin-top: 10px;
 }
-
 button:disabled {
   background: #1e293b;
   color: #64748b;
 }
-
 .score {
   font-size: 32px;
   font-weight: bold;
-  margin-top: 10px;
   text-align: center;
 }
 </style>
@@ -83,73 +71,75 @@ button:disabled {
 
 <body>
 <div class="card">
-
-<h2>Evalis AI Interview</h2>
-
-<div id="status">Upload resume to begin</div>
-
-<input type="file" id="resumeInput" accept=".pdf,.txt" />
-
-<div id="question">Waiting for resume…</div>
-
-<textarea id="answer" placeholder="Type your answer here…" disabled></textarea>
-
-<button id="submitBtn" disabled>Submit Answer</button>
-
-<div id="result"></div>
-
+  <h2>Evalis AI Interview</h2>
+  <div id="status">Upload resume to begin</div>
+  <input type="file" id="resumeInput" accept=".pdf,.txt" />
+  <div id="question">Waiting for resume…</div>
+  <textarea id="answer" placeholder="Type your answer here…" disabled></textarea>
+  <button id="submitBtn" disabled>Submit Answer</button>
+  <div id="result"></div>
 </div>
 
 <script>
-/* ================= RESUME PARSER ================= */
-
+/* ================= PDF SETUP ================= */
 const pdfjsLib = window['pdfjs-dist/build/pdf'];
 pdfjsLib.GlobalWorkerOptions.workerSrc =
   "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
 
+/* ================= RESUME PARSER ================= */
 async function parseResume(file) {
   let text = "";
 
   if (file.type === "application/pdf") {
     const buffer = await file.arrayBuffer();
     const pdf = await pdfjsLib.getDocument(buffer).promise;
-    const page = await pdf.getPage(1);
-    const content = await page.getTextContent();
-    text = content.items.map(i => i.str).join(" ");
+
+    for (let i = 1; i <= pdf.numPages; i++) {
+      const page = await pdf.getPage(i);
+      const content = await page.getTextContent();
+      text += content.items.map(i => i.str).join(" ") + " ";
+    }
   } else {
     text = await file.text();
   }
 
   text = text.toLowerCase();
+  return extractProfile(text);
+}
+
+function extractProfile(text) {
+  const roles = [
+    "content evaluator","content moderator","quality analyst",
+    "ai trainer","data annotator","recruiter","hr",
+    "frontend developer","backend developer","software developer","engineer"
+  ];
+
+  const skills = [
+    "javascript","python","java","ai","machine learning","nlp",
+    "content moderation","quality review","recruitment","sourcing"
+  ];
 
   return {
-    role: text.match(/(developer|engineer|recruiter|hr|manager)/)?.[0] || "professional",
-    skills: [...text.matchAll(/(javascript|java|python|recruitment|sourcing|interviewing)/g)].map(m => m[0]),
-    projects: [...text.matchAll(/project\s([\w\s]+)/g)].map(m => m[1])
+    role: roles.find(r => text.includes(r)) || "professional",
+    skills: skills.filter(s => text.includes(s))
   };
 }
 
 /* ================= INTERVIEW ENGINE ================= */
-
-function createInterview(resume) {
+function createInterview(profile) {
   return {
-    profile: resume,
-    topics: buildTopics(resume),
+    profile,
+    topics: buildTopics(profile),
     topicIndex: 0,
-    depth: 0,
-    maxDepth: 2,
     covered: new Set(),
-    completed: false,
-    score: { detail: 0, ownership: 0, example: 0, impact: 0 }
+    score: { detail:0, ownership:0, example:0, impact:0 }
   };
 }
 
-function buildTopics(r) {
-  const t = [];
-  if (r.role) t.push({ type: "role" });
-  if (r.skills.length) t.push({ type: "skill", value: r.skills[0] });
-  if (r.projects.length) t.push({ type: "project", value: r.projects[0] });
-  t.push({ type: "impact" });
+function buildTopics(p) {
+  const t = [{ type:"role", value:p.role }];
+  p.skills.slice(0,2).forEach(s => t.push({ type:"skill", value:s }));
+  t.push({ type:"impact" });
   return t;
 }
 
@@ -166,10 +156,7 @@ function analyze(answer) {
 function decideNext(answer, state) {
   const s = analyze(answer);
 
-  if (s.detail) state.score.detail++;
-  if (s.ownership) state.score.ownership++;
-  if (s.example) state.score.example++;
-  if (s.impact) state.score.impact++;
+  Object.keys(s).forEach(k => s[k] && state.score[k]++);
 
   if (!s.detail && !state.covered.has("detail")) {
     state.covered.add("detail");
@@ -191,26 +178,19 @@ function decideNext(answer, state) {
   state.covered.clear();
   state.topicIndex++;
 
-  if (state.topicIndex >= state.topics.length) {
-    state.completed = true;
-    return null;
-  }
-
-  return topicQuestion(state.topics[state.topicIndex], state.profile);
+  if (state.topicIndex >= state.topics.length) return null;
+  return topicQuestion(state.topics[state.topicIndex]);
 }
 
-function topicQuestion(topic, profile) {
+function topicQuestion(topic) {
   if (topic.type === "role")
-    return `You worked as a ${profile.role}. What were your responsibilities?`;
+    return `You worked as a ${topic.value}. What were your key responsibilities?`;
   if (topic.type === "skill")
-    return `How did you use ${topic.value} in real work?`;
-  if (topic.type === "project")
-    return `Tell me about the project ${topic.value}.`;
+    return `How did you use ${topic.value} in your real work?`;
   return "What measurable impact did your work create?";
 }
 
 /* ================= UI FLOW ================= */
-
 let interview;
 
 const resumeInput = document.getElementById("resumeInput");
@@ -222,10 +202,10 @@ const resultEl = document.getElementById("result");
 
 resumeInput.onchange = async () => {
   statusEl.innerText = "Parsing resume…";
-  const resume = await parseResume(resumeInput.files[0]);
-  interview = createInterview(resume);
+  const profile = await parseResume(resumeInput.files[0]);
+  interview = createInterview(profile);
 
-  questionEl.innerText = topicQuestion(interview.topics[0], resume);
+  questionEl.innerText = topicQuestion(interview.topics[0]);
   statusEl.innerText = "Interview started";
   answerEl.disabled = false;
   submitBtn.disabled = false;
@@ -236,14 +216,9 @@ submitBtn.onclick = () => {
   if (!answer) return;
 
   answerEl.value = "";
-
   const next = decideNext(answer, interview);
 
-  if (!next) {
-    finishInterview();
-    return;
-  }
-
+  if (!next) return finishInterview();
   questionEl.innerText = next;
 };
 
@@ -251,24 +226,16 @@ function finishInterview() {
   answerEl.disabled = true;
   submitBtn.disabled = true;
 
-  const total =
-    interview.score.detail +
-    interview.score.ownership +
-    interview.score.example +
-    interview.score.impact;
-
+  const total = Object.values(interview.score).reduce((a,b)=>a+b,0);
   const percent = Math.min(100, Math.round((total / 12) * 100));
 
   questionEl.innerText = "Interview Completed";
-
   resultEl.innerHTML = `
     <div class="score">${percent}%</div>
     <p style="text-align:center">
       ${percent > 70 ? "Strong candidate" : "Needs improvement"}
-    </p>
-  `;
+    </p>`;
 }
 </script>
-
 </body>
 </html>
