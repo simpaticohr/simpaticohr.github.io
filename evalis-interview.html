@@ -2,31 +2,37 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Evalis AI Interview</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Evalis AI Interview | Simpatico HR</title>
+
 <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.14.0/dist/ort.wasm.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@ricky0123/vad-web@0.0.7/dist/bundle.standard.js"></script>
 
 <style>
-  body { margin: 0; background: #0f172a; font-family: sans-serif; height: 100vh; display: flex; align-items: center; justify-content: center; color: white; }
-  .card { background: #020617; padding: 30px; border-radius: 20px; text-align: center; border: 1px solid #1e293b; width: 350px; }
-  #question { font-size: 16px; margin: 20px 0; color: #94a3b8; min-height: 40px; }
-  #status { color: #3b82f6; font-size: 12px; font-weight: bold; text-transform: uppercase; }
-  button { width: 100%; padding: 15px; border-radius: 12px; border: none; background: #2563eb; color: white; cursor: pointer; }
-  button:disabled { background: #1e293b; color: #475569; }
+    :root { --primary: #002d5a; --tech: #00c2ff; }
+    body { margin: 0; background: #0f172a; font-family: 'Inter', sans-serif; height: 100vh; display: flex; align-items: center; justify-content: center; color: white; }
+    .card { background: #020617; padding: 40px; border-radius: 24px; text-align: center; border: 1px solid #1e293b; width: 340px; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.5); }
+    #question { font-size: 16px; margin: 25px 0; color: #94a3b8; min-height: 60px; line-height: 1.5; }
+    #status { color: var(--tech); font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 2px; }
+    button { width: 100%; padding: 16px; border-radius: 14px; border: none; background: var(--tech); color: var(--primary); font-weight: 800; cursor: pointer; transition: 0.3s; font-size: 15px; }
+    button:disabled { background: #1e293b; color: #475569; cursor: not-allowed; }
+    .orb { width: 60px; height: 60px; background: var(--tech); border-radius: 50%; margin: 0 auto 20px; filter: blur(15px); opacity: 0.5; animation: pulse 2s infinite; }
+    @keyframes pulse { 0% { transform: scale(1); opacity: 0.5; } 50% { transform: scale(1.2); opacity: 0.8; } 100% { transform: scale(1); opacity: 0.5; } }
 </style>
 </head>
 <body>
 
 <div class="card">
-  <div id="status">Loading AI Engine...</div>
-  <div id="question">Zara is preparing for your interview.</div>
-  <button id="startBtn" disabled>Please Wait...</button>
+    <div class="orb"></div>
+    <div id="status">Syncing Neural Link...</div>
+    <div id="question">Preparing for your HR Recruiter Interview.</div>
+    <button id="startBtn" disabled>Please Wait...</button>
 </div>
 
 <script>
-// --- YOUR ENGINE LOGIC (CONVERTED FOR HTML) ---
-let interviewState = {
-    profile: { role: "HR Recruiter", skills: ["Sourcing", "Interviews"], projects: ["Campus Hiring"] },
+// --- CONVERTED INTERVIEW ENGINE LOGIC ---
+const interviewState = {
+    profile: { role: "HR Recruiter", skills: ["Sourcing", "Interviews"], projects: ["HR Internship"] },
     topics: [{ type: "role" }, { type: "skill", value: "Sourcing" }, { type: "impact" }],
     topicIndex: 0,
     depth: 0,
@@ -35,16 +41,18 @@ let interviewState = {
     completed: false
 };
 
-function decideNextQuestion(answer) {
-    if (interviewState.completed) return "Thank you. The interview is complete.";
-    
-    // Simple analysis from your script
-    const t = answer.toLowerCase();
-    const signals = {
-        detail: answer.split(" ").length > 15,
+function analyze(text = "") {
+    const t = text.toLowerCase();
+    return {
+        detail: text.split(" ").length > 20,
         ownership: /\b(i|my|me)\b/.test(t),
-        impact: /(impact|result|improve|learned)/.test(t)
+        impact: /(result|outcome|impact|improve|learned)/.test(t)
     };
+}
+
+function decideNextQuestion(answer) {
+    if (interviewState.completed) return "The interview is complete. Thank you.";
+    const signals = analyze(answer);
 
     if (!signals.detail && !interviewState.coveredIntents.has("detail")) {
         interviewState.coveredIntents.add("detail");
@@ -52,34 +60,40 @@ function decideNextQuestion(answer) {
     }
     if (!signals.ownership && !interviewState.coveredIntents.has("ownership")) {
         interviewState.coveredIntents.add("ownership");
-        return "What was your personal responsibility in that situation?";
+        return "What was your personal responsibility in that project?";
     }
 
     interviewState.topicIndex++;
     if (interviewState.topicIndex >= interviewState.topics.length) {
         interviewState.completed = true;
-        return "Thank you. We have covered everything.";
+        return "Thank you for your time. The interview is now complete.";
     }
-    return "Great. How did you handle the challenges in your " + interviewState.topics[interviewState.topicIndex].type + "?";
+    const nextTopic = interviewState.topics[interviewState.topicIndex];
+    return nextTopic.type === "skill" ? `How have you used ${nextTopic.value} in a real-world scenario?` : "What impact did your work have on the organization?";
 }
 
-// --- MICROPHONE & VOICE BRIDGE ---
+// --- VOICE & MICROPHONE BRIDGE ---
 const startBtn = document.getElementById("startBtn");
 const statusEl = document.getElementById("status");
 const questionEl = document.getElementById("question");
 const synth = window.speechSynthesis;
 
-window.onload = () => {
-    if (typeof vad !== 'undefined') {
+// FAIL-SAFE: Loop until library loads
+function checkAI() {
+    if (typeof vad !== 'undefined' && typeof ort !== 'undefined') {
         startBtn.disabled = false;
         startBtn.innerText = "Start Interview";
-        statusEl.innerText = "Zara is Ready";
+        statusEl.innerText = "System Ready";
+        questionEl.innerText = "Ready to start your HR screening?";
+    } else {
+        setTimeout(checkAI, 1000);
     }
-};
+}
+checkAI();
 
-async function start() {
+startBtn.onclick = async () => {
     startBtn.style.display = 'none';
-    statusEl.innerText = "Requesting Mic...";
+    statusEl.innerText = "Accessing Microphone...";
     try {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
         const recognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
@@ -87,7 +101,7 @@ async function start() {
 
         recognition.onresult = (e) => {
             const userText = e.results[0][0].transcript;
-            const nextQ = decideNextQuestion(userText); // USES YOUR LOGIC
+            const nextQ = decideNextQuestion(userText);
             questionEl.innerText = nextQ;
             synth.speak(new SpeechSynthesisUtterance(nextQ));
         };
@@ -99,16 +113,15 @@ async function start() {
         });
 
         myvad.start();
-        statusEl.innerText = "Zara is Listening...";
-        const intro = "Hello! I am Zara. Tell me about your role as an HR Recruiter.";
+        statusEl.innerText = "Zara is Listening";
+        const intro = "Hello! I am Zara. I see you've applied for the HR Recruiter role. Tell me about your background.";
         questionEl.innerText = intro;
         synth.speak(new SpeechSynthesisUtterance(intro));
     } catch (err) {
-        statusEl.innerText = "Mic Denied";
+        statusEl.innerText = "Error: Mic Denied";
+        questionEl.innerText = "Please allow microphone access and refresh.";
     }
-}
-
-startBtn.onclick = start;
+};
 </script>
 </body>
 </html>
