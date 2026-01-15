@@ -18,7 +18,6 @@ body {
   align-items: center;
   color: white;
 }
-
 .card {
   background: #0f172a;
   padding: 36px;
@@ -27,21 +26,18 @@ body {
   text-align: center;
   border: 1px solid #1e293b;
 }
-
 #status {
   font-size: 11px;
   color: #3b82f6;
   text-transform: uppercase;
   margin-bottom: 16px;
 }
-
 #question {
   font-size: 15px;
   color: #cbd5f5;
   min-height: 70px;
   margin-bottom: 20px;
 }
-
 button {
   width: 100%;
   padding: 14px;
@@ -52,12 +48,6 @@ button {
   font-weight: bold;
   cursor: pointer;
 }
-
-button:disabled {
-  background: #1e293b;
-  color: #64748b;
-}
-
 .pulse {
   width: 12px;
   height: 12px;
@@ -67,7 +57,6 @@ button:disabled {
   display: none;
   animation: pulse 1.2s infinite;
 }
-
 @keyframes pulse {
   0% { transform: scale(1); opacity: 1; }
   50% { transform: scale(1.4); opacity: 0.6; }
@@ -93,6 +82,12 @@ const pulse = document.getElementById("pulse");
 const synth = window.speechSynthesis;
 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 
+if (!SpeechRecognition) {
+  statusEl.innerText = "Voice not supported";
+  questionEl.innerText = "Please use Chrome browser.";
+  startBtn.disabled = true;
+}
+
 const questions = [
   "Tell me about your background.",
   "What experience do you have related to this role?",
@@ -102,10 +97,11 @@ const questions = [
 
 let qIndex = 0;
 let recognition;
-let vadInstance;
+let silenceTimer;
 
 function speak(text) {
   synth.cancel();
+  questionEl.innerText = text;
   statusEl.innerText = "Evalis AI Speaking";
   const u = new SpeechSynthesisUtterance(text);
   u.rate = 0.95;
@@ -122,39 +118,39 @@ async function startInterview() {
 
     recognition = new SpeechRecognition();
     recognition.lang = "en-US";
-    recognition.continuous = false;
 
     recognition.onresult = () => {
       recognition.stop();
       qIndex++;
-
       if (qIndex < questions.length) {
         setTimeout(() => speak(questions[qIndex]), 800);
       } else {
         statusEl.innerText = "Interview Completed";
-        questionEl.innerText = "Thank you. Your interview is complete.";
+        questionEl.innerText = "Thank you. Interview complete.";
         pulse.style.display = "none";
       }
     };
 
-    vadInstance = await vad.MicVAD.new({
+    const vadInstance = await vad.MicVAD.new({
       stream,
       onSpeechStart: () => {
         pulse.style.display = "block";
+        clearTimeout(silenceTimer);
         if (synth.speaking) synth.cancel();
       },
       onSpeechEnd: () => {
         pulse.style.display = "none";
-        try {
-          recognition.start();
-        } catch (e) {}
+        try { recognition.start(); } catch (e) {}
+        silenceTimer = setTimeout(() => {
+          statusEl.innerText = "Waiting for you…";
+        }, 4000);
       }
     });
 
     vadInstance.start();
     speak(questions[0]);
 
-  } catch (err) {
+  } catch {
     statusEl.innerText = "Microphone blocked";
     questionEl.innerText = "Please allow mic access and refresh.";
   }
