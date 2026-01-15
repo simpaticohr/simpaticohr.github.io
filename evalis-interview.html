@@ -1,75 +1,79 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>Evalis AI Interview</title>
-<script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.14.0/dist/ort.wasm.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@ricky0123/vad-web@0.0.7/dist/bundle.standard.js"></script>
-
-<style>
-  body { margin: 0; height: 100vh; background: transparent; display: flex; align-items: center; justify-content: center; font-family: system-ui, sans-serif; color: white; }
-  .card { width: 320px; padding: 28px; background: rgba(10, 20, 45, 0.95); border-radius: 16px; text-align: center; box-shadow: 0 0 40px rgba(60,120,255,0.35); }
-  .orb { width: 58px; height: 58px; margin: 0 auto 14px; border-radius: 50%; background: radial-gradient(circle, #6aa8ff, #2a5bd7); box-shadow: 0 0 20px #3b82f6; transition: 0.3s; }
-  .orb.listening { background: radial-gradient(circle, #22c55e, #16a34a); box-shadow: 0 0 20px #22c55e; }
-  #question { font-size: 16px; margin: 10px 0 6px; min-height: 44px; }
-  #status { font-size: 13px; color: #9bb3ff; margin-bottom: 14px; }
-  button { background: #3b82f6; border: none; color: white; padding: 12px 20px; border-radius: 8px; font-size: 14px; cursor: pointer; font-weight: bold; }
-</style>
+    <meta charset="UTF-8">
+    <title>Evalis AI</title>
+    <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.14.0/dist/ort.wasm.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@ricky0123/vad-web@0.0.7/dist/bundle.standard.js"></script>
+    <style>
+        body { margin: 0; display: flex; justify-content: center; align-items: center; height: 100vh; background: #0c1b3a; font-family: sans-serif; color: white; }
+        .card { text-align: center; padding: 20px; border-radius: 15px; background: rgba(255,255,255,0.05); }
+        button { padding: 10px 20px; background: #3b82f6; color: white; border: none; border-radius: 5px; cursor: pointer; }
+    </style>
 </head>
 <body>
-<div class="card">
-  <div id="orb" class="orb"></div>
-  <div id="question">Ready for your interview?</div>
-  <div id="status">Tap Start to begin</div>
-  <button id="startBtn">Start Interview</button>
-</div>
+    <div class="card">
+        <h3 id="display">Ready?</h3>
+        <p id="status">Click below to start</p>
+        <button id="startBtn">Start Interview</button>
+    </div>
 
 <script>
 const WORKER_URL = "https://evalis-ai.simpaticohrconsultancy.workers.dev";
-let isTalking = false;
 const synth = window.speechSynthesis;
+let isTalking = false;
+
+async function start() {
+    try {
+        document.getElementById('startBtn').style.display = 'none';
+        document.getElementById('status').innerText = "Initializing Microphone...";
+
+        // Initialize Continuous Listening (VAD)
+        const myvad = await vad.MicVAD.new({
+            onSpeechStart: () => {
+                if (isTalking) {
+                    synth.cancel(); // Interrupts AI
+                    isTalking = false;
+                }
+            },
+            onSpeechEnd: (audio) => {
+                // Trigger Browser Recognition after you stop talking
+                recognition.start();
+            }
+        });
+        myvad.start();
+        
+        speak("Hello! I am Zara. Let's start the interview. Can you tell me about your background?");
+    } catch (err) {
+        console.error(err);
+        document.getElementById('status').innerText = "Error: Allow Microphone access.";
+    }
+}
+
+// Browser Recognition for turning your voice to text
 const recognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
-recognition.lang = 'en-US';
+recognition.onresult = async (event) => {
+    const text = event.results[0][0].transcript;
+    document.getElementById('status').innerText = "Thinking...";
+    
+    const response = await fetch(WORKER_URL, {
+        method: 'POST',
+        body: JSON.stringify({ answer: text })
+    });
+    const data = await response.json();
+    speak(data.reply || data.followUp);
+};
 
 function speak(text) {
-  if (synth.speaking) synth.cancel();
-  const utter = new SpeechSynthesisUtterance(text);
-  utter.onstart = () => { isTalking = true; updateUI('talking'); };
-  utter.onend = () => { isTalking = false; updateUI('listening'); };
-  document.getElementById("question").innerText = text;
-  synth.speak(utter);
+    synth.cancel();
+    const utter = new SpeechSynthesisUtterance(text);
+    utter.onstart = () => { isTalking = true; document.getElementById('status').innerText = "AI Speaking..."; };
+    utter.onend = () => { isTalking = false; document.getElementById('status').innerText = "Listening..."; };
+    document.getElementById('display').innerText = text;
+    synth.speak(utter);
 }
 
-async function initVAD() {
-  const myvad = await vad.MicVAD.new({
-    onSpeechStart: () => { if (isTalking) { synth.cancel(); isTalking = false; updateUI('listening'); } },
-    onSpeechEnd: () => { try { recognition.start(); } catch(e) {} }
-  });
-  myvad.start();
-}
-
-recognition.onresult = async (e) => {
-  const answer = e.results[0][0].transcript;
-  updateUI('thinking');
-  const res = await fetch(WORKER_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ answer }) });
-  const data = await res.json();
-  speak(data.followUp || data.reply);
-};
-
-function updateUI(state) {
-  const orb = document.getElementById("orb");
-  const status = document.getElementById("status");
-  if(state === 'listening') { orb.className = "orb listening"; status.innerText = "Listening..."; }
-  if(state === 'talking') { orb.className = "orb"; status.innerText = "Speaking..."; }
-  if(state === 'thinking') { status.innerText = "Thinking..."; }
-}
-
-document.getElementById("startBtn").onclick = async function() {
-  this.style.display = 'none';
-  await initVAD();
-  speak("Hello! I am Zara. Tell me about your professional background.");
-};
+document.getElementById('startBtn').onclick = start;
 </script>
 </body>
 </html>
