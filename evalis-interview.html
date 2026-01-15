@@ -1,34 +1,274 @@
-<div style="padding:30px;text-align:center;">
-  <p style="font-size:14px;color:#64748b;margin-bottom:16px">
-    Voice interview requires microphone access
-  </p>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Evalis AI – Resume Interview</title>
 
-  <button
-    onclick="startEvalisInterview()"
-    style="
-      padding:16px 32px;
-      background:#2563eb;
-      color:white;
-      border:none;
-      border-radius:14px;
-      font-size:16px;
-      font-weight:700;
-      cursor:pointer;
-    "
-  >
-    🎙️ Start AI Interview
-  </button>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 
-  <p style="font-size:11px;color:#94a3b8;margin-top:12px">
-    Opens in new tab • Mobile supported
-  </p>
+<style>
+body {
+  margin: 0;
+  background: #020617;
+  font-family: system-ui;
+  color: #e5e7eb;
+  min-height: 100vh;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.card {
+  width: 380px;
+  background: #0f172a;
+  border-radius: 18px;
+  padding: 26px;
+  border: 1px solid #1e293b;
+}
+
+h2 {
+  margin-top: 0;
+  text-align: center;
+}
+
+#status {
+  font-size: 12px;
+  color: #38bdf8;
+  margin-bottom: 12px;
+  text-align: center;
+}
+
+#question {
+  font-size: 15px;
+  min-height: 70px;
+  margin-bottom: 12px;
+  color: #cbd5f5;
+}
+
+textarea {
+  width: 100%;
+  min-height: 90px;
+  border-radius: 10px;
+  border: none;
+  padding: 10px;
+  font-size: 14px;
+  margin-bottom: 10px;
+}
+
+button {
+  width: 100%;
+  padding: 14px;
+  border-radius: 12px;
+  border: none;
+  background: #2563eb;
+  color: white;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+button:disabled {
+  background: #1e293b;
+  color: #64748b;
+}
+
+.score {
+  font-size: 32px;
+  font-weight: bold;
+  margin-top: 10px;
+  text-align: center;
+}
+</style>
+</head>
+
+<body>
+<div class="card">
+
+<h2>Evalis AI Interview</h2>
+
+<div id="status">Upload resume to begin</div>
+
+<input type="file" id="resumeInput" accept=".pdf,.txt" />
+
+<div id="question">Waiting for resume…</div>
+
+<textarea id="answer" placeholder="Type your answer here…" disabled></textarea>
+
+<button id="submitBtn" disabled>Submit Answer</button>
+
+<div id="result"></div>
+
 </div>
 
 <script>
-function startEvalisInterview() {
-  window.open(
-    "https://simpaticohr.github.io/evalis-interview.html",
-    "_blank"
-  );
+/* ================= RESUME PARSER ================= */
+
+const pdfjsLib = window['pdfjs-dist/build/pdf'];
+pdfjsLib.GlobalWorkerOptions.workerSrc =
+  "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+
+async function parseResume(file) {
+  let text = "";
+
+  if (file.type === "application/pdf") {
+    const buffer = await file.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument(buffer).promise;
+    const page = await pdf.getPage(1);
+    const content = await page.getTextContent();
+    text = content.items.map(i => i.str).join(" ");
+  } else {
+    text = await file.text();
+  }
+
+  text = text.toLowerCase();
+
+  return {
+    role: text.match(/(developer|engineer|recruiter|hr|manager)/)?.[0] || "professional",
+    skills: [...text.matchAll(/(javascript|java|python|recruitment|sourcing|interviewing)/g)].map(m => m[0]),
+    projects: [...text.matchAll(/project\s([\w\s]+)/g)].map(m => m[1])
+  };
+}
+
+/* ================= INTERVIEW ENGINE ================= */
+
+function createInterview(resume) {
+  return {
+    profile: resume,
+    topics: buildTopics(resume),
+    topicIndex: 0,
+    depth: 0,
+    maxDepth: 2,
+    covered: new Set(),
+    completed: false,
+    score: { detail: 0, ownership: 0, example: 0, impact: 0 }
+  };
+}
+
+function buildTopics(r) {
+  const t = [];
+  if (r.role) t.push({ type: "role" });
+  if (r.skills.length) t.push({ type: "skill", value: r.skills[0] });
+  if (r.projects.length) t.push({ type: "project", value: r.projects[0] });
+  t.push({ type: "impact" });
+  return t;
+}
+
+function analyze(answer) {
+  const t = answer.toLowerCase();
+  return {
+    detail: answer.split(" ").length > 25,
+    ownership: /\b(i|my|me)\b/.test(t),
+    example: /(example|when|project|situation)/.test(t),
+    impact: /(impact|result|improve|increase|reduce|learned)/.test(t)
+  };
+}
+
+function decideNext(answer, state) {
+  const s = analyze(answer);
+
+  if (s.detail) state.score.detail++;
+  if (s.ownership) state.score.ownership++;
+  if (s.example) state.score.example++;
+  if (s.impact) state.score.impact++;
+
+  if (!s.detail && !state.covered.has("detail")) {
+    state.covered.add("detail");
+    return "Can you explain that in more detail?";
+  }
+  if (!s.ownership && !state.covered.has("ownership")) {
+    state.covered.add("ownership");
+    return "What was your personal responsibility?";
+  }
+  if (!s.example && !state.covered.has("example")) {
+    state.covered.add("example");
+    return "Can you share a real example?";
+  }
+  if (!s.impact && !state.covered.has("impact")) {
+    state.covered.add("impact");
+    return "What was the outcome or impact?";
+  }
+
+  state.covered.clear();
+  state.topicIndex++;
+
+  if (state.topicIndex >= state.topics.length) {
+    state.completed = true;
+    return null;
+  }
+
+  return topicQuestion(state.topics[state.topicIndex], state.profile);
+}
+
+function topicQuestion(topic, profile) {
+  if (topic.type === "role")
+    return `You worked as a ${profile.role}. What were your responsibilities?`;
+  if (topic.type === "skill")
+    return `How did you use ${topic.value} in real work?`;
+  if (topic.type === "project")
+    return `Tell me about the project ${topic.value}.`;
+  return "What measurable impact did your work create?";
+}
+
+/* ================= UI FLOW ================= */
+
+let interview;
+
+const resumeInput = document.getElementById("resumeInput");
+const questionEl = document.getElementById("question");
+const statusEl = document.getElementById("status");
+const answerEl = document.getElementById("answer");
+const submitBtn = document.getElementById("submitBtn");
+const resultEl = document.getElementById("result");
+
+resumeInput.onchange = async () => {
+  statusEl.innerText = "Parsing resume…";
+  const resume = await parseResume(resumeInput.files[0]);
+  interview = createInterview(resume);
+
+  questionEl.innerText = topicQuestion(interview.topics[0], resume);
+  statusEl.innerText = "Interview started";
+  answerEl.disabled = false;
+  submitBtn.disabled = false;
+};
+
+submitBtn.onclick = () => {
+  const answer = answerEl.value.trim();
+  if (!answer) return;
+
+  answerEl.value = "";
+
+  const next = decideNext(answer, interview);
+
+  if (!next) {
+    finishInterview();
+    return;
+  }
+
+  questionEl.innerText = next;
+};
+
+function finishInterview() {
+  answerEl.disabled = true;
+  submitBtn.disabled = true;
+
+  const total =
+    interview.score.detail +
+    interview.score.ownership +
+    interview.score.example +
+    interview.score.impact;
+
+  const percent = Math.min(100, Math.round((total / 12) * 100));
+
+  questionEl.innerText = "Interview Completed";
+
+  resultEl.innerHTML = `
+    <div class="score">${percent}%</div>
+    <p style="text-align:center">
+      ${percent > 70 ? "Strong candidate" : "Needs improvement"}
+    </p>
+  `;
 }
 </script>
+
+</body>
+</html>
