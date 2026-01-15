@@ -9,11 +9,11 @@ body {
   margin: 0;
   height: 100vh;
   background: radial-gradient(circle at top, #0f172a, #020617);
-  font-family: system-ui, sans-serif;
+  font-family: system-ui;
   color: #e5e7eb;
   display: flex;
-  align-items: center;
   justify-content: center;
+  align-items: center;
 }
 
 .card {
@@ -22,22 +22,19 @@ body {
   background: #020617;
   padding: 24px;
   border-radius: 16px;
-  box-shadow: 0 0 50px rgba(0,0,0,.6);
+  box-shadow: 0 0 40px rgba(0,0,0,.6);
   text-align: center;
 }
 
-h3 { margin-top: 0; }
-
 #question {
   min-height: 70px;
+  font-size: 18px;
   margin: 16px 0;
-  font-size: 17px;
 }
 
 #status {
   font-size: 14px;
   color: #22c55e;
-  min-height: 20px;
 }
 
 button {
@@ -50,101 +47,81 @@ button {
   font-size: 16px;
   margin-top: 12px;
 }
-
-input[type="file"] {
-  display: none;
-}
-
-textarea {
-  width: 100%;
-  min-height: 90px;
-  margin-top: 10px;
-  border-radius: 10px;
-  border: none;
-  padding: 10px;
-  font-size: 14px;
-}
-
-.hidden { display: none; }
 </style>
 </head>
 
 <body>
-
 <div class="card">
   <h3>Evalis AI Interview</h3>
-
-  <div id="question">Upload your CV to begin</div>
+  <div id="question">Click start and answer verbally</div>
   <div id="status"></div>
-
-  <label class="btn">
-    <button onclick="cvInput.click()">Upload Resume (PDF)</button>
-  </label>
-  <input id="cvInput" type="file" accept=".pdf">
-
-  <textarea id="textAnswer" class="hidden" placeholder="Type your answer here..."></textarea>
-
-  <button id="sendBtn" class="hidden">Submit Answer</button>
+  <button id="startBtn">Start Interview</button>
 </div>
 
 <script>
-/* ================= STATE ================= */
-let resumeText = "";
+const questions = [
+  "Tell me about yourself.",
+  "Describe a key responsibility from your last role.",
+  "Explain a challenge you handled.",
+  "What skills make you suitable for this role?"
+];
+
 let step = 0;
+let recognition;
 
-/* ================= QUESTIONS ================= */
-function getQuestion() {
-  if (step === 0) return "Tell me about yourself based on your resume.";
-  if (step === 1) return "Explain a key responsibility from your recent role.";
-  if (step === 2) return "Describe a challenge you handled and its outcome.";
-  if (step === 3) return "What skills from your resume are your strongest?";
-  return "Interview complete. Your score is being prepared.";
-}
+/* ========== INIT SPEECH API ========== */
+function initRecognition() {
+  const SpeechRecognition =
+    window.SpeechRecognition || window.webkitSpeechRecognition;
 
-/* ================= CV UPLOAD ================= */
-document.getElementById("cvInput").onchange = async (e) => {
-  const file = e.target.files[0];
-  if (!file) return;
+  recognition = new SpeechRecognition();
+  recognition.lang = "en-US";
+  recognition.interimResults = false;
+  recognition.continuous = false;
 
-  document.getElementById("status").innerText = "Reading resume...";
-  resumeText = file.name; // lightweight parsing (safe for GitHub Pages)
-
-  startInterview();
-};
-
-/* ================= INTERVIEW FLOW ================= */
-function startInterview() {
-  document.getElementById("question").innerText = getQuestion();
-  document.getElementById("status").innerText =
-    "Voice interview works on desktop. Text mode enabled.";
-  enableTextMode();
-}
-
-function enableTextMode() {
-  document.getElementById("textAnswer").classList.remove("hidden");
-  document.getElementById("sendBtn").classList.remove("hidden");
-}
-
-/* ================= ANSWER SUBMIT ================= */
-document.getElementById("sendBtn").onclick = () => {
-  const answer = document.getElementById("textAnswer").value.trim();
-  if (!answer) return;
-
-  document.getElementById("textAnswer").value = "";
-  step++;
-
-  if (step >= 4) {
-    document.getElementById("question").innerText =
-      "Interview completed ✔️\nScore: " + (70 + Math.floor(Math.random()*20)) + "%";
+  recognition.onresult = (e) => {
+    const answer = e.results[0][0].transcript;
     document.getElementById("status").innerText =
-      "Detailed report will be shared by HR.";
-    document.getElementById("sendBtn").style.display = "none";
-    return;
-  }
+      "You said: " + answer;
 
-  document.getElementById("question").innerText = getQuestion();
+    step++;
+    if (step >= questions.length) {
+      document.getElementById("question").innerText =
+        "Interview complete ✔ Score: " +
+        (70 + Math.floor(Math.random() * 20)) + "%";
+      return;
+    }
+
+    askQuestion();
+  };
+
+  recognition.onerror = (e) => {
+    document.getElementById("status").innerText =
+      "Mic error. Click Start again.";
+  };
+}
+
+/* ========== ASK QUESTION ========== */
+function askQuestion() {
+  const q = questions[step];
+  document.getElementById("question").innerText = q;
+
+  const utter = new SpeechSynthesisUtterance(q);
+  utter.onend = () => {
+    document.getElementById("status").innerText = "Listening…";
+    recognition.start(); // ✅ VALID
+  };
+
+  speechSynthesis.cancel();
+  speechSynthesis.speak(utter);
+}
+
+/* ========== START ========== */
+document.getElementById("startBtn").onclick = () => {
+  initRecognition();
+  step = 0;
+  askQuestion();
 };
 </script>
-
 </body>
 </html>
