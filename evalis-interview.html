@@ -4,6 +4,7 @@
 <meta charset="UTF-8" />
 <title>Evalis AI – Interview</title>
 
+<!-- Optional VAD (non-blocking) -->
 <script src="https://cdn.jsdelivr.net/npm/@ricky0123/vad-web@0.0.7/dist/bundle.standard.js"></script>
 
 <style>
@@ -17,7 +18,6 @@ body {
   align-items: center;
   height: 100vh;
 }
-
 .card {
   background: #020617;
   padding: 28px;
@@ -27,21 +27,17 @@ body {
   box-shadow: 0 0 40px rgba(0,0,0,.6);
   text-align: center;
 }
-
 h3 { margin: 0 0 8px; }
-
 #question {
   font-size: 18px;
   margin: 18px 0;
-  min-height: 70px;
+  min-height: 60px;
 }
-
 #status {
   font-size: 14px;
   color: #22c55e;
   min-height: 20px;
 }
-
 button {
   width: 100%;
   margin-top: 18px;
@@ -51,6 +47,7 @@ button {
   background: #2563eb;
   color: white;
   font-size: 16px;
+  cursor: pointer;
 }
 </style>
 </head>
@@ -64,20 +61,23 @@ button {
 </div>
 
 <script>
+/* ================= CONFIG ================= */
 const WORKER_URL = "https://evalis-ai.simpaticohrconsultancy.workers.dev";
 
-let isAISpeaking = false;
+/* ================= STATE ================= */
 let interviewStarted = false;
-let recognitionActive = false;
+let isAISpeaking = false;
 
-const synth = window.speechSynthesis;
-const statusEl = document.getElementById("status");
+/* ================= UI ================= */
 const questionEl = document.getElementById("question");
+const statusEl = document.getElementById("status");
 
-function setStatus(t) { statusEl.innerText = t; }
+function setStatus(t){ statusEl.innerText = t; }
 
-/* ---------- SPEAK ---------- */
-function speak(text) {
+/* ================= SPEECH SYNTH ================= */
+const synth = window.speechSynthesis;
+
+function speak(text){
   synth.cancel();
   const u = new SpeechSynthesisUtterance(text);
   u.lang = "en-US";
@@ -87,34 +87,39 @@ function speak(text) {
     isAISpeaking = true;
     setStatus("AI speaking…");
   };
-
   u.onend = () => {
     isAISpeaking = false;
     setStatus("Listening…");
+    safeStartRecognition();
   };
 
   questionEl.innerText = text;
   synth.speak(u);
 }
 
-/* ---------- SPEECH RECOGNITION ---------- */
-const recognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
+/* ================= SPEECH RECOGNITION ================= */
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+const recognition = new SR();
 recognition.lang = "en-US";
-recognition.interimResults = false;
 recognition.continuous = false;
+recognition.interimResults = false;
 
-recognition.onstart = () => recognitionActive = true;
-recognition.onend = () => recognitionActive = false;
+function safeStartRecognition(){
+  try {
+    recognition.abort();
+    recognition.start();
+  } catch(e){}
+}
 
 recognition.onresult = async (e) => {
-  const answer = e.results[0][0].transcript;
+  const text = e.results[0][0].transcript;
   setStatus("Thinking…");
 
   try {
-    const res = await fetch(WORKER_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text: answer })
+    const res = await fetch(WORKER_URL,{
+      method:"POST",
+      headers:{ "Content-Type":"application/json" },
+      body: JSON.stringify({ text })
     });
     const data = await res.json();
     speak(data.reply || "Can you explain that further?");
@@ -123,37 +128,40 @@ recognition.onresult = async (e) => {
   }
 };
 
-/* ---------- VAD ---------- */
-let myvad;
+recognition.onerror = () => {
+  setTimeout(safeStartRecognition, 500);
+};
 
-async function initVAD() {
-  myvad = await vad.MicVAD.new({
-    onSpeechStart: () => {
-      if (isAISpeaking) synth.cancel();
-    },
-    onSpeechEnd: () => {
-      if (!recognitionActive && !isAISpeaking) {
-        recognition.start();
+/* ================= OPTIONAL VAD ================= */
+async function initVAD(){
+  try {
+    const myvad = await vad.MicVAD.new({
+      onSpeechStart(){
+        if(isAISpeaking){
+          synth.cancel();
+          isAISpeaking = false;
+        }
       }
-    }
-  });
-  myvad.start();
+    });
+    myvad.start();
+    console.log("VAD active");
+  } catch(err){
+    console.warn("VAD disabled (safe):", err);
+  }
 }
 
-/* ---------- START ---------- */
+/* ================= START ================= */
 document.getElementById("startBtn").onclick = async () => {
-  if (interviewStarted) return;
+  if(interviewStarted) return;
   interviewStarted = true;
   document.getElementById("startBtn").style.display = "none";
 
-  try {
-    setStatus("Requesting microphone…");
-    await navigator.mediaDevices.getUserMedia({ audio: true });
-    await initVAD();
-    speak("Tell me about yourself.");
-  } catch (e) {
-    setStatus("Microphone permission required");
-  }
+  setStatus("Listening…");
+  safeStartRecognition();
+  speak("Tell me about yourself.");
+
+  // Non-blocking enhancement
+  initVAD();
 };
 </script>
 </body>
