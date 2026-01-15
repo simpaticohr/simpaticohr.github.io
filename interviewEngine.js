@@ -1,79 +1,102 @@
-export function createInterview(profile = {}) {
+// interviewEngine.js
+
+export function createInterview(resume) {
   return {
-    topics: ["experience", "skills", "project", "impact"],
+    profile: resume,
+    topics: buildTopics(resume),
     topicIndex: 0,
     depth: 0,
     maxDepth: 2,
     coveredIntents: new Set(),
-    completed: false,
+    completed: false
   };
 }
 
-export function analyzeAnswer(answer = "") {
-  const t = answer.toLowerCase();
-  const words = answer.split(" ").length;
+function buildTopics(resume) {
+  const topics = [];
 
-  return {
-    lengthOK: words > 25,
-    ownership: /\b(i|my|me)\b/.test(t),
-    example: /(example|when|project|situation)/.test(t),
-    impact: /(result|impact|improved|increased|learned)/.test(t),
-  };
+  if (resume.role) topics.push({ type: "role" });
+  if (resume.skills?.length) topics.push({ type: "skill", value: resume.skills[0] });
+  if (resume.projects?.length) topics.push({ type: "project", value: resume.projects[0] });
+  topics.push({ type: "impact" });
+
+  return topics;
 }
 
-export function decideNextQuestion(answer, state, profile = {}) {
-  const s = analyzeAnswer(answer);
+export function decideNextQuestion(answer, state) {
+  if (state.completed) {
+    return { question: "The interview is complete. Thank you.", done: true };
+  }
 
-  if (!s.lengthOK && !state.coveredIntents.has("detail")) {
+  const signals = analyze(answer);
+
+  if (!signals.detail && !state.coveredIntents.has("detail")) {
     state.coveredIntents.add("detail");
-    return "Can you explain that in more detail?";
+    return ask("Can you explain that in more detail?");
   }
 
-  if (!s.ownership && !state.coveredIntents.has("ownership")) {
+  if (!signals.ownership && !state.coveredIntents.has("ownership")) {
     state.coveredIntents.add("ownership");
-    return "What was your personal responsibility there?";
+    return ask("What was your personal responsibility there?");
   }
 
-  if (!s.example && !state.coveredIntents.has("example")) {
+  if (!signals.example && !state.coveredIntents.has("example")) {
     state.coveredIntents.add("example");
-    return "Can you give me a real example?";
+    return ask("Can you give a real example?");
   }
 
-  if (!s.impact && !state.coveredIntents.has("impact")) {
+  if (!signals.impact && !state.coveredIntents.has("impact")) {
     state.coveredIntents.add("impact");
-    return "What was the outcome or impact?";
+    return ask("What was the outcome or impact?");
   }
 
   if (state.depth < state.maxDepth) {
     state.depth++;
-    return "What challenges did you face during this?";
+    return ask("What challenges did you face?");
   }
 
-  // Move to next topic
+  // move to next topic
   state.coveredIntents.clear();
   state.depth = 0;
   state.topicIndex++;
 
   if (state.topicIndex >= state.topics.length) {
     state.completed = true;
-    return "Thank you. The interview is complete.";
+    return { question: "Thank you. The interview is complete.", done: true };
   }
 
-  return nextTopicQuestion(state.topics[state.topicIndex], profile);
+  return ask(generateTopicQuestion(state.topics[state.topicIndex], state.profile));
 }
 
-function nextTopicQuestion(topic, profile) {
-  if (topic === "experience")
-    return "Tell me about your professional background.";
+function analyze(text = "") {
+  const t = text.toLowerCase();
+  return {
+    detail: text.split(" ").length > 25,
+    ownership: /\b(i|my|me)\b/.test(t),
+    example: /(example|when|project|situation)/.test(t),
+    impact: /(impact|result|improve|increase|reduce|learned)/.test(t)
+  };
+}
 
-  if (topic === "skills")
-    return `Which technical skills do you use most in your work?`;
+function generateTopicQuestion(topic, profile) {
+  switch (topic.type) {
+    case "role":
+      return `You are currently working as a ${profile.role}. What are your core responsibilities?`;
 
-  if (topic === "project")
-    return "Tell me about a challenging project you worked on.";
+    case "skill":
+      return `Your resume mentions ${topic.value}. How have you used it in real work?`;
 
-  if (topic === "impact")
-    return "What measurable impact did your work create?";
+    case "project":
+      return `Tell me about the project ${topic.value}. What was your role?`;
 
-  return "Please continue.";
+    case "impact":
+      return "What measurable impact did your work create?";
+
+    default:
+      return "Please tell me more.";
+  }
+}
+
+function ask(q) {
+  return { question: q, done: false };
 }
