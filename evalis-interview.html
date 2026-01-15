@@ -15,50 +15,36 @@
   #question { font-size: 16px; margin: 10px 0 6px; min-height: 44px; }
   #status { font-size: 13px; color: #9bb3ff; margin-bottom: 14px; }
   button { background: #3b82f6; border: none; color: white; padding: 12px 20px; border-radius: 8px; font-size: 14px; cursor: pointer; font-weight: bold; }
-  button:disabled { background: #444; cursor: not-allowed; }
 </style>
 </head>
 <body>
-
 <div class="card">
   <div id="orb" class="orb"></div>
-  <div id="question">Ready to start?</div>
-  <div id="status">Microphone required</div>
+  <div id="question">Ready for your interview?</div>
+  <div id="status">Tap Start to begin</div>
   <button id="startBtn">Start Interview</button>
 </div>
 
 <script>
 const WORKER_URL = "https://evalis-ai.simpaticohrconsultancy.workers.dev";
 let isTalking = false;
-let myvad;
 const synth = window.speechSynthesis;
 const recognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
-recognition.continuous = false;
 recognition.lang = 'en-US';
 
-// 1. Interruptible Speech
 function speak(text) {
   if (synth.speaking) synth.cancel();
   const utter = new SpeechSynthesisUtterance(text);
   utter.onstart = () => { isTalking = true; updateUI('talking'); };
   utter.onend = () => { isTalking = false; updateUI('listening'); };
-  questionEl.innerText = text;
+  document.getElementById("question").innerText = text;
   synth.speak(utter);
 }
 
-// 2. VAD Interruption Detection
 async function initVAD() {
-  myvad = await vad.MicVAD.new({
-    onSpeechStart: () => {
-      if (isTalking) {
-        synth.cancel(); // STOPS AI IMMEDIATELY IF YOU SPEAK
-        isTalking = false;
-        updateUI('listening');
-      }
-    },
-    onSpeechEnd: () => {
-      try { recognition.start(); } catch(e) {}
-    }
+  const myvad = await vad.MicVAD.new({
+    onSpeechStart: () => { if (isTalking) { synth.cancel(); isTalking = false; updateUI('listening'); } },
+    onSpeechEnd: () => { try { recognition.start(); } catch(e) {} }
   });
   myvad.start();
 }
@@ -66,11 +52,7 @@ async function initVAD() {
 recognition.onresult = async (e) => {
   const answer = e.results[0][0].transcript;
   updateUI('thinking');
-  const res = await fetch(WORKER_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ answer })
-  });
+  const res = await fetch(WORKER_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ answer }) });
   const data = await res.json();
   speak(data.followUp || data.reply);
 };
@@ -83,11 +65,10 @@ function updateUI(state) {
   if(state === 'thinking') { status.innerText = "Thinking..."; }
 }
 
-const questionEl = document.getElementById("question");
 document.getElementById("startBtn").onclick = async function() {
   this.style.display = 'none';
   await initVAD();
-  speak("Hello! I am your AI interviewer. Let's begin. Tell me a bit about yourself.");
+  speak("Hello! I am Zara. Tell me about your professional background.");
 };
 </script>
 </body>
