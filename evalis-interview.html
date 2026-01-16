@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>Evalis AI – Resume Interview</title>
+<title>Evalis AI Interview</title>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 
@@ -25,27 +25,6 @@ body {
   padding: 26px;
   border: 1px solid #1e293b;
 }
-h2 { margin: 0 0 10px; text-align: center; }
-#status {
-  font-size: 12px;
-  color: #38bdf8;
-  text-align: center;
-  margin-bottom: 10px;
-}
-#question {
-  font-size: 15px;
-  min-height: 70px;
-  color: #cbd5f5;
-  margin-bottom: 10px;
-}
-textarea {
-  width: 100%;
-  min-height: 90px;
-  border-radius: 10px;
-  border: none;
-  padding: 10px;
-  font-size: 14px;
-}
 button {
   width: 100%;
   padding: 14px;
@@ -54,188 +33,127 @@ button {
   background: #2563eb;
   color: white;
   font-weight: 600;
-  cursor: pointer;
-  margin-top: 10px;
 }
-button:disabled {
-  background: #1e293b;
-  color: #64748b;
-}
-.score {
-  font-size: 32px;
-  font-weight: bold;
-  text-align: center;
+textarea {
+  width: 100%;
+  min-height: 90px;
+  margin: 10px 0;
+  border-radius: 10px;
 }
 </style>
 </head>
 
 <body>
 <div class="card">
-  <h2>Evalis AI Interview</h2>
-  <div id="status">Upload resume to begin</div>
-  <input type="file" id="resumeInput" accept=".pdf,.txt" />
-  <div id="question">Waiting for resume…</div>
-  <textarea id="answer" placeholder="Type your answer here…" disabled></textarea>
-  <button id="submitBtn" disabled>Submit Answer</button>
-  <div id="result"></div>
+
+<h2>Evalis AI Interview</h2>
+
+<input type="file" id="resumeInput" accept=".pdf,.txt" />
+<p id="status">Upload resume to begin</p>
+<p id="question"></p>
+
+<textarea id="answer" placeholder="Type answer..."></textarea>
+
+<button id="recordBtn">🎤 Speak Answer</button>
+<button id="submitBtn">Submit</button>
+
 </div>
 
 <script>
-/* ================= PDF SETUP ================= */
+/* ===== PDF CONFIG ===== */
 const pdfjsLib = window['pdfjs-dist/build/pdf'];
 pdfjsLib.GlobalWorkerOptions.workerSrc =
   "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
 
-/* ================= RESUME PARSER ================= */
+/* ===== RESUME PARSER ===== */
 async function parseResume(file) {
   let text = "";
-
-  if (file.type === "application/pdf") {
-    const buffer = await file.arrayBuffer();
-    const pdf = await pdfjsLib.getDocument(buffer).promise;
-
+  if (file.type.includes("pdf")) {
+    const buf = await file.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument(buf).promise;
     for (let i = 1; i <= pdf.numPages; i++) {
       const page = await pdf.getPage(i);
       const content = await page.getTextContent();
-      text += content.items.map(i => i.str).join(" ") + " ";
+      text += content.items.map(i => i.str).join(" ");
     }
   } else {
     text = await file.text();
   }
-
   text = text.toLowerCase();
-  return extractProfile(text);
-}
-
-function extractProfile(text) {
-  const roles = [
-    "content evaluator","content moderator","quality analyst",
-    "ai trainer","data annotator","recruiter","hr",
-    "frontend developer","backend developer","software developer","engineer"
-  ];
-
-  const skills = [
-    "javascript","python","java","ai","machine learning","nlp",
-    "content moderation","quality review","recruitment","sourcing"
-  ];
-
   return {
-    role: roles.find(r => text.includes(r)) || "professional",
-    skills: skills.filter(s => text.includes(s))
+    role: text.match(/(content evaluator|developer|engineer|hr)/)?.[0] || "professional",
+    skills: [...text.matchAll(/(python|javascript|ai|seo|nlp|quality)/g)].map(m => m[0]),
+    company: text.match(/(google|amazon|telus|meta)/)?.[0] || "company"
   };
 }
 
-/* ================= INTERVIEW ENGINE ================= */
-function createInterview(profile) {
+/* ===== INTERVIEW ENGINE (BRAIN) ===== */
+function createInterview(p) {
   return {
-    profile,
-    topics: buildTopics(profile),
-    topicIndex: 0,
-    covered: new Set(),
-    score: { detail:0, ownership:0, example:0, impact:0 }
+    p,
+    index: 0,
+    questions: [
+      `You worked as a ${p.role} at ${p.company}. What were your responsibilities?`,
+      `How did you use ${p.skills[0] || "your skills"} in real work?`,
+      `Describe a challenge you faced in this role.`,
+      `What measurable impact did your work create?`
+    ]
   };
 }
 
-function buildTopics(p) {
-  const t = [{ type:"role", value:p.role }];
-  p.skills.slice(0,2).forEach(s => t.push({ type:"skill", value:s }));
-  t.push({ type:"impact" });
-  return t;
-}
-
-function analyze(answer) {
-  const t = answer.toLowerCase();
-  return {
-    detail: answer.split(" ").length > 25,
-    ownership: /\b(i|my|me)\b/.test(t),
-    example: /(example|when|project|situation)/.test(t),
-    impact: /(impact|result|improve|increase|reduce|learned)/.test(t)
-  };
-}
-
-function decideNext(answer, state) {
-  const s = analyze(answer);
-
-  Object.keys(s).forEach(k => s[k] && state.score[k]++);
-
-  if (!s.detail && !state.covered.has("detail")) {
-    state.covered.add("detail");
+function decideNext(answer, i) {
+  if (answer.length < 40)
     return "Can you explain that in more detail?";
-  }
-  if (!s.ownership && !state.covered.has("ownership")) {
-    state.covered.add("ownership");
-    return "What was your personal responsibility?";
-  }
-  if (!s.example && !state.covered.has("example")) {
-    state.covered.add("example");
-    return "Can you share a real example?";
-  }
-  if (!s.impact && !state.covered.has("impact")) {
-    state.covered.add("impact");
-    return "What was the outcome or impact?";
-  }
-
-  state.covered.clear();
-  state.topicIndex++;
-
-  if (state.topicIndex >= state.topics.length) return null;
-  return topicQuestion(state.topics[state.topicIndex]);
+  i.index++;
+  return i.questions[i.index] || null;
 }
 
-function topicQuestion(topic) {
-  if (topic.type === "role")
-    return `You worked as a ${topic.value}. What were your key responsibilities?`;
-  if (topic.type === "skill")
-    return `How did you use ${topic.value} in your real work?`;
-  return "What measurable impact did your work create?";
-}
-
-/* ================= UI FLOW ================= */
+/* ===== VOICE + FLOW ===== */
 let interview;
-
 const resumeInput = document.getElementById("resumeInput");
 const questionEl = document.getElementById("question");
 const statusEl = document.getElementById("status");
 const answerEl = document.getElementById("answer");
-const submitBtn = document.getElementById("submitBtn");
-const resultEl = document.getElementById("result");
 
 resumeInput.onchange = async () => {
-  statusEl.innerText = "Parsing resume…";
   const profile = await parseResume(resumeInput.files[0]);
   interview = createInterview(profile);
-
-  questionEl.innerText = topicQuestion(interview.topics[0]);
+  questionEl.innerText = interview.questions[0];
   statusEl.innerText = "Interview started";
-  answerEl.disabled = false;
-  submitBtn.disabled = false;
 };
 
-submitBtn.onclick = () => {
-  const answer = answerEl.value.trim();
-  if (!answer) return;
-
+document.getElementById("submitBtn").onclick = () => {
+  const next = decideNext(answerEl.value, interview);
   answerEl.value = "";
-  const next = decideNext(answer, interview);
-
-  if (!next) return finishInterview();
+  if (!next) {
+    questionEl.innerText = "Interview complete ✅";
+    return;
+  }
   questionEl.innerText = next;
 };
 
-function finishInterview() {
-  answerEl.disabled = true;
-  submitBtn.disabled = true;
+/* ===== VOICE RECORD ===== */
+document.getElementById("recordBtn").onclick = async () => {
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  const rec = new MediaRecorder(stream);
+  let chunks = [];
+  rec.ondataavailable = e => chunks.push(e.data);
+  rec.onstop = async () => {
+    const blob = new Blob(chunks, { type: "audio/webm" });
+    const fd = new FormData();
+    fd.append("audio", blob);
 
-  const total = Object.values(interview.score).reduce((a,b)=>a+b,0);
-  const percent = Math.min(100, Math.round((total / 12) * 100));
-
-  questionEl.innerText = "Interview Completed";
-  resultEl.innerHTML = `
-    <div class="score">${percent}%</div>
-    <p style="text-align:center">
-      ${percent > 70 ? "Strong candidate" : "Needs improvement"}
-    </p>`;
-}
+    const r = await fetch(
+      "https://evalis-ai.simpaticohconsultancy.workers.dev",
+      { method: "POST", body: fd }
+    );
+    const { transcript } = await r.json();
+    answerEl.value = transcript;
+  };
+  rec.start();
+  setTimeout(() => rec.stop(), 5000);
+};
 </script>
+
 </body>
 </html>
