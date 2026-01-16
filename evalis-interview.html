@@ -1,65 +1,61 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
 <title>Evalis AI Interview</title>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 
 <style>
-body {
-  margin: 0;
-  background: #020617;
-  font-family: system-ui, -apple-system, Segoe UI;
-  color: #e5e7eb;
-  min-height: 100vh;
-  display: flex;
-  justify-content: center;
-  align-items: center;
+body{
+  margin:0;
+  background:#020617;
+  font-family:system-ui;
+  color:#e5e7eb;
+  min-height:100vh;
+  display:flex;
+  justify-content:center;
+  align-items:center;
 }
-.card {
-  width: 380px;
-  background: #0f172a;
-  border-radius: 18px;
-  padding: 26px;
-  border: 1px solid #1e293b;
+.card{
+  width:380px;
+  background:#0f172a;
+  border-radius:18px;
+  padding:26px;
+  border:1px solid #1e293b;
 }
-h2 {
-  text-align: center;
-  margin-top: 0;
+h2{text-align:center;margin-top:0}
+#status{
+  font-size:12px;
+  color:#38bdf8;
+  text-align:center;
+  margin-bottom:8px;
 }
-#status {
-  font-size: 12px;
-  color: #38bdf8;
-  text-align: center;
-  margin: 8px 0;
+#question{
+  min-height:60px;
+  font-size:15px;
+  margin:12px 0;
 }
-#question {
-  min-height: 60px;
-  font-size: 15px;
-  margin: 10px 0;
+textarea{
+  width:100%;
+  min-height:90px;
+  border-radius:10px;
+  border:none;
+  padding:10px;
 }
-textarea {
-  width: 100%;
-  min-height: 90px;
-  border-radius: 10px;
-  border: none;
-  padding: 10px;
-  font-size: 14px;
+button{
+  width:100%;
+  padding:14px;
+  border-radius:12px;
+  border:none;
+  background:#2563eb;
+  color:white;
+  font-weight:600;
+  margin-top:8px;
 }
-button {
-  width: 100%;
-  padding: 14px;
-  margin-top: 8px;
-  border-radius: 12px;
-  border: none;
-  background: #2563eb;
-  color: white;
-  font-weight: 600;
-}
-button.secondary {
-  background: #1e293b;
+button.secondary{
+  background:#1e293b;
 }
 </style>
 </head>
@@ -69,144 +65,122 @@ button.secondary {
 
 <h2>Evalis AI Interview</h2>
 
-<input type="file" id="resumeInput" accept=".pdf,.txt" />
+<input type="file" id="resumeInput" accept=".pdf,.txt">
 <div id="status">Upload resume to begin</div>
 
 <div id="question"></div>
 
-<textarea id="answer" placeholder="Type your answer here..." disabled></textarea>
+<textarea id="answer" placeholder="Speak or type your answer…" disabled></textarea>
 
-<button id="recordBtn" class="secondary" disabled>🎤 Speak Answer</button>
-<button id="submitBtn" disabled>Submit</button>
+<button id="micBtn" class="secondary" disabled>🎤 Speak</button>
+<button id="nextBtn" disabled>Next</button>
 
 </div>
 
 <script>
-/* ================= PDF CONFIG ================= */
+/* ---------- PDF SETUP ---------- */
 const pdfjsLib = window['pdfjs-dist/build/pdf'];
 pdfjsLib.GlobalWorkerOptions.workerSrc =
-  "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+ "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
 
-/* ================= RESUME PARSER ================= */
-async function parseResume(file) {
-  let text = "";
-
-  if (file.type.includes("pdf")) {
-    const buf = await file.arrayBuffer();
-    const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
-
-    for (let i = 1; i <= pdf.numPages; i++) {
-      const page = await pdf.getPage(i);
-      const content = await page.getTextContent();
-      text += content.items.map(i => i.str).join(" ");
-    }
-  } else {
-    text = await file.text();
-  }
-
-  text = text.toLowerCase();
-  console.log("RESUME TEXT:", text);
-
-  return {
-    role: text.match(/(content evaluator|hr|recruiter|developer|engineer)/)?.[0] || "professional",
-    company: text.match(/(telus|google|amazon|meta|accenture)/)?.[0] || "company",
-    skills: [...text.matchAll(/(nlp|ai|python|javascript|seo|quality|analysis)/g)].map(m => m[0])
-  };
+/* ---------- RESUME PARSER (NON-AI) ---------- */
+async function parseResume(file){
+ let text="";
+ if(file.type.includes("pdf")){
+   const buf=await file.arrayBuffer();
+   const pdf=await pdfjsLib.getDocument(buf).promise;
+   for(let i=1;i<=pdf.numPages;i++){
+     const page=await pdf.getPage(i);
+     const c=await page.getTextContent();
+     text+=c.items.map(x=>x.str).join(" ");
+   }
+ }else{
+   text=await file.text();
+ }
+ text=text.toLowerCase();
+ return{
+   role:text.match(/(recruiter|hr|developer|engineer|analyst)/)?.[0]||"professional",
+   skills:[...text.matchAll(/(python|java|javascript|ai|recruitment|seo|nlp)/g)].map(m=>m[0])
+ };
 }
 
-/* ================= INTERVIEW ENGINE ================= */
-function createInterview(profile) {
-  return {
-    profile,
-    index: 0,
-    questions: [
-      `You worked as a ${profile.role} at ${profile.company}. What were your responsibilities?`,
-      `How did you use ${profile.skills[0] || "your skills"} in your daily work?`,
-      `Describe a challenging situation you handled in this role.`,
-      `What measurable impact did your work create?`
-    ]
-  };
+/* ---------- INTERVIEW LOGIC ---------- */
+function buildQuestions(p){
+ return[
+  `You worked as a ${p.role}. What were your main responsibilities?`,
+  `How did you use ${p.skills[0]||"your skills"} in your work?`,
+  `Tell me about a challenge you faced in this role.`,
+  `What impact did your work create?`
+ ];
 }
 
-function decideNext(answer, interview) {
-  if (answer.trim().length < 40) {
-    return "Can you explain that in more detail?";
-  }
-  interview.index++;
-  return interview.questions[interview.index] || null;
+let questions=[],index=0;
+
+/* ---------- SPEECH ---------- */
+const synth=window.speechSynthesis;
+const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+let recog;
+
+function speak(t){
+ synth.cancel();
+ const u=new SpeechSynthesisUtterance(t);
+ u.onend=()=>status.innerText="Listening…";
+ status.innerText="Evalis AI Speaking";
+ synth.speak(u);
+ question.innerText=t;
 }
 
-/* ================= UI FLOW ================= */
-const resumeInput = document.getElementById("resumeInput");
-const statusEl = document.getElementById("status");
-const questionEl = document.getElementById("question");
-const answerEl = document.getElementById("answer");
-const submitBtn = document.getElementById("submitBtn");
-const recordBtn = document.getElementById("recordBtn");
+/* ---------- ELEMENTS ---------- */
+const resumeInput=document.getElementById("resumeInput");
+const status=document.getElementById("status");
+const question=document.getElementById("question");
+const answer=document.getElementById("answer");
+const micBtn=document.getElementById("micBtn");
+const nextBtn=document.getElementById("nextBtn");
 
-let interview = null;
-
-resumeInput.addEventListener("change", async () => {
-  statusEl.innerText = "Parsing resume...";
-  answerEl.value = "";
-  answerEl.disabled = true;
-  submitBtn.disabled = true;
-  recordBtn.disabled = true;
-
-  const profile = await parseResume(resumeInput.files[0]);
-  interview = createInterview(profile);
-
-  questionEl.innerText = interview.questions[0];
-  statusEl.innerText = "Interview started";
-  answerEl.disabled = false;
-  submitBtn.disabled = false;
-  recordBtn.disabled = false;
-});
-
-submitBtn.onclick = () => {
-  const next = decideNext(answerEl.value, interview);
-  answerEl.value = "";
-
-  if (!next) {
-    questionEl.innerText = "Interview completed ✅";
-    statusEl.innerText = "Thank you";
-    submitBtn.disabled = true;
-    recordBtn.disabled = true;
-    answerEl.disabled = true;
-    return;
-  }
-
-  questionEl.innerText = next;
+/* ---------- FLOW ---------- */
+resumeInput.onchange=async()=>{
+ status.innerText="Parsing resume…";
+ const profile=await parseResume(resumeInput.files[0]);
+ questions=buildQuestions(profile);
+ index=0;
+ answer.disabled=false;
+ micBtn.disabled=false;
+ nextBtn.disabled=false;
+ speak(questions[0]);
 };
 
-/* ================= VOICE (Cloudflare Worker STT) ================= */
-recordBtn.onclick = async () => {
-  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-  const recorder = new MediaRecorder(stream);
-  const chunks = [];
+/* ---------- MIC ---------- */
+micBtn.onclick=()=>{
+ if(!SR){
+   alert("Use Chrome for voice input");
+   return;
+ }
+ recog=new SR();
+ recog.lang="en-US";
+ recog.onresult=e=>{
+   answer.value=e.results[0][0].transcript;
+ };
+ recog.start();
+};
 
-  recorder.ondataavailable = e => chunks.push(e.data);
-  recorder.onstop = async () => {
-    const blob = new Blob(chunks, { type: "audio/webm" });
-    const fd = new FormData();
-    fd.append("audio", blob, "answer.webm");
-
-    statusEl.innerText = "Listening...";
-
-    const res = await fetch(
-      "https://evalis-ai.simpaticohconsultancy.workers.dev",
-      { method: "POST", body: fd }
-    );
-
-    const data = await res.json();
-    answerEl.value = data.transcript || "";
-    statusEl.innerText = "Answer captured";
-  };
-
-  recorder.start();
-  setTimeout(() => recorder.stop(), 5000);
+/* ---------- NEXT ---------- */
+nextBtn.onclick=()=>{
+ if(answer.value.trim().length<30){
+   speak("Can you explain that in more detail?");
+   return;
+ }
+ index++;
+ if(index>=questions.length){
+   question.innerText="Interview completed ✅";
+   status.innerText="Thank you";
+   micBtn.disabled=true;
+   nextBtn.disabled=true;
+   return;
+ }
+ speak(questions[index]);
+ answer.value="";
 };
 </script>
-
 </body>
 </html>
