@@ -93,7 +93,8 @@ async function parseResume(file) {
 
   if (file.type.includes("pdf")) {
     const buf = await file.arrayBuffer();
-    const pdf = await pdfjsLib.getDocument(buf).promise;
+    const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
+
     for (let i = 1; i <= pdf.numPages; i++) {
       const page = await pdf.getPage(i);
       const content = await page.getTextContent();
@@ -104,6 +105,7 @@ async function parseResume(file) {
   }
 
   text = text.toLowerCase();
+  console.log("RESUME TEXT:", text);
 
   return {
     role: text.match(/(content evaluator|hr|recruiter|developer|engineer)/)?.[0] || "professional",
@@ -134,7 +136,7 @@ function decideNext(answer, interview) {
   return interview.questions[interview.index] || null;
 }
 
-/* ================= UI + FLOW ================= */
+/* ================= UI FLOW ================= */
 const resumeInput = document.getElementById("resumeInput");
 const statusEl = document.getElementById("status");
 const questionEl = document.getElementById("question");
@@ -144,12 +146,8 @@ const recordBtn = document.getElementById("recordBtn");
 
 let interview = null;
 
-/* 🔥 RESET EVERYTHING ON NEW UPLOAD */
 resumeInput.addEventListener("change", async () => {
-  if (!resumeInput.files.length) return;
-
-  statusEl.innerText = "Parsing resume…";
-  questionEl.innerText = "";
+  statusEl.innerText = "Parsing resume...";
   answerEl.value = "";
   answerEl.disabled = true;
   submitBtn.disabled = true;
@@ -166,49 +164,47 @@ resumeInput.addEventListener("change", async () => {
 });
 
 submitBtn.onclick = () => {
-  if (!interview) return;
-
-  const answer = answerEl.value;
+  const next = decideNext(answerEl.value, interview);
   answerEl.value = "";
 
-  const next = decideNext(answer, interview);
   if (!next) {
     questionEl.innerText = "Interview completed ✅";
     statusEl.innerText = "Thank you";
-    answerEl.disabled = true;
     submitBtn.disabled = true;
     recordBtn.disabled = true;
+    answerEl.disabled = true;
     return;
   }
+
   questionEl.innerText = next;
 };
 
-/* ================= VOICE (STT via Cloudflare Worker) ================= */
+/* ================= VOICE (Cloudflare Worker STT) ================= */
 recordBtn.onclick = async () => {
   const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-  const rec = new MediaRecorder(stream);
+  const recorder = new MediaRecorder(stream);
   const chunks = [];
 
-  rec.ondataavailable = e => chunks.push(e.data);
-  rec.onstop = async () => {
+  recorder.ondataavailable = e => chunks.push(e.data);
+  recorder.onstop = async () => {
     const blob = new Blob(chunks, { type: "audio/webm" });
     const fd = new FormData();
     fd.append("audio", blob, "answer.webm");
 
-    statusEl.innerText = "Listening…";
+    statusEl.innerText = "Listening...";
 
     const res = await fetch(
       "https://evalis-ai.simpaticohconsultancy.workers.dev",
       { method: "POST", body: fd }
     );
 
-    const { transcript } = await res.json();
-    answerEl.value = transcript;
+    const data = await res.json();
+    answerEl.value = data.transcript || "";
     statusEl.innerText = "Answer captured";
   };
 
-  rec.start();
-  setTimeout(() => rec.stop(), 5000);
+  recorder.start();
+  setTimeout(() => recorder.stop(), 5000);
 };
 </script>
 
