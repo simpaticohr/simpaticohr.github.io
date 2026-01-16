@@ -11,7 +11,7 @@
 body {
   margin: 0;
   background: #020617;
-  font-family: system-ui;
+  font-family: system-ui, -apple-system, Segoe UI;
   color: #e5e7eb;
   min-height: 100vh;
   display: flex;
@@ -25,20 +25,41 @@ body {
   padding: 26px;
   border: 1px solid #1e293b;
 }
+h2 {
+  text-align: center;
+  margin-top: 0;
+}
+#status {
+  font-size: 12px;
+  color: #38bdf8;
+  text-align: center;
+  margin: 8px 0;
+}
+#question {
+  min-height: 60px;
+  font-size: 15px;
+  margin: 10px 0;
+}
+textarea {
+  width: 100%;
+  min-height: 90px;
+  border-radius: 10px;
+  border: none;
+  padding: 10px;
+  font-size: 14px;
+}
 button {
   width: 100%;
   padding: 14px;
+  margin-top: 8px;
   border-radius: 12px;
   border: none;
   background: #2563eb;
   color: white;
   font-weight: 600;
 }
-textarea {
-  width: 100%;
-  min-height: 90px;
-  margin: 10px 0;
-  border-radius: 10px;
+button.secondary {
+  background: #1e293b;
 }
 </style>
 </head>
@@ -49,25 +70,27 @@ textarea {
 <h2>Evalis AI Interview</h2>
 
 <input type="file" id="resumeInput" accept=".pdf,.txt" />
-<p id="status">Upload resume to begin</p>
-<p id="question"></p>
+<div id="status">Upload resume to begin</div>
 
-<textarea id="answer" placeholder="Type answer..."></textarea>
+<div id="question"></div>
 
-<button id="recordBtn">🎤 Speak Answer</button>
-<button id="submitBtn">Submit</button>
+<textarea id="answer" placeholder="Type your answer here..." disabled></textarea>
+
+<button id="recordBtn" class="secondary" disabled>🎤 Speak Answer</button>
+<button id="submitBtn" disabled>Submit</button>
 
 </div>
 
 <script>
-/* ===== PDF CONFIG ===== */
+/* ================= PDF CONFIG ================= */
 const pdfjsLib = window['pdfjs-dist/build/pdf'];
 pdfjsLib.GlobalWorkerOptions.workerSrc =
   "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
 
-/* ===== RESUME PARSER ===== */
+/* ================= RESUME PARSER ================= */
 async function parseResume(file) {
   let text = "";
+
   if (file.type.includes("pdf")) {
     const buf = await file.arrayBuffer();
     const pdf = await pdfjsLib.getDocument(buf).promise;
@@ -79,77 +102,111 @@ async function parseResume(file) {
   } else {
     text = await file.text();
   }
+
   text = text.toLowerCase();
+
   return {
-    role: text.match(/(content evaluator|developer|engineer|hr)/)?.[0] || "professional",
-    skills: [...text.matchAll(/(python|javascript|ai|seo|nlp|quality)/g)].map(m => m[0]),
-    company: text.match(/(google|amazon|telus|meta)/)?.[0] || "company"
+    role: text.match(/(content evaluator|hr|recruiter|developer|engineer)/)?.[0] || "professional",
+    company: text.match(/(telus|google|amazon|meta|accenture)/)?.[0] || "company",
+    skills: [...text.matchAll(/(nlp|ai|python|javascript|seo|quality|analysis)/g)].map(m => m[0])
   };
 }
 
-/* ===== INTERVIEW ENGINE (BRAIN) ===== */
-function createInterview(p) {
+/* ================= INTERVIEW ENGINE ================= */
+function createInterview(profile) {
   return {
-    p,
+    profile,
     index: 0,
     questions: [
-      `You worked as a ${p.role} at ${p.company}. What were your responsibilities?`,
-      `How did you use ${p.skills[0] || "your skills"} in real work?`,
-      `Describe a challenge you faced in this role.`,
+      `You worked as a ${profile.role} at ${profile.company}. What were your responsibilities?`,
+      `How did you use ${profile.skills[0] || "your skills"} in your daily work?`,
+      `Describe a challenging situation you handled in this role.`,
       `What measurable impact did your work create?`
     ]
   };
 }
 
-function decideNext(answer, i) {
-  if (answer.length < 40)
+function decideNext(answer, interview) {
+  if (answer.trim().length < 40) {
     return "Can you explain that in more detail?";
-  i.index++;
-  return i.questions[i.index] || null;
+  }
+  interview.index++;
+  return interview.questions[interview.index] || null;
 }
 
-/* ===== VOICE + FLOW ===== */
-let interview;
+/* ================= UI + FLOW ================= */
 const resumeInput = document.getElementById("resumeInput");
-const questionEl = document.getElementById("question");
 const statusEl = document.getElementById("status");
+const questionEl = document.getElementById("question");
 const answerEl = document.getElementById("answer");
+const submitBtn = document.getElementById("submitBtn");
+const recordBtn = document.getElementById("recordBtn");
 
-resumeInput.onchange = async () => {
+let interview = null;
+
+/* 🔥 RESET EVERYTHING ON NEW UPLOAD */
+resumeInput.addEventListener("change", async () => {
+  if (!resumeInput.files.length) return;
+
+  statusEl.innerText = "Parsing resume…";
+  questionEl.innerText = "";
+  answerEl.value = "";
+  answerEl.disabled = true;
+  submitBtn.disabled = true;
+  recordBtn.disabled = true;
+
   const profile = await parseResume(resumeInput.files[0]);
   interview = createInterview(profile);
+
   questionEl.innerText = interview.questions[0];
   statusEl.innerText = "Interview started";
-};
+  answerEl.disabled = false;
+  submitBtn.disabled = false;
+  recordBtn.disabled = false;
+});
 
-document.getElementById("submitBtn").onclick = () => {
-  const next = decideNext(answerEl.value, interview);
+submitBtn.onclick = () => {
+  if (!interview) return;
+
+  const answer = answerEl.value;
   answerEl.value = "";
+
+  const next = decideNext(answer, interview);
   if (!next) {
-    questionEl.innerText = "Interview complete ✅";
+    questionEl.innerText = "Interview completed ✅";
+    statusEl.innerText = "Thank you";
+    answerEl.disabled = true;
+    submitBtn.disabled = true;
+    recordBtn.disabled = true;
     return;
   }
   questionEl.innerText = next;
 };
 
-/* ===== VOICE RECORD ===== */
-document.getElementById("recordBtn").onclick = async () => {
+/* ================= VOICE (STT via Cloudflare Worker) ================= */
+recordBtn.onclick = async () => {
   const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
   const rec = new MediaRecorder(stream);
-  let chunks = [];
+  const chunks = [];
+
   rec.ondataavailable = e => chunks.push(e.data);
   rec.onstop = async () => {
     const blob = new Blob(chunks, { type: "audio/webm" });
     const fd = new FormData();
-    fd.append("audio", blob);
+    fd.append("audio", blob, "answer.webm");
 
-    const r = await fetch(
+    statusEl.innerText = "Listening…";
+
+    const res = await fetch(
       "https://evalis-ai.simpaticohconsultancy.workers.dev",
       { method: "POST", body: fd }
     );
-    const { transcript } = await r.json();
+
+    const { transcript } = await res.json();
     answerEl.value = transcript;
+    statusEl.innerText = "Answer captured";
   };
+
   rec.start();
   setTimeout(() => rec.stop(), 5000);
 };
