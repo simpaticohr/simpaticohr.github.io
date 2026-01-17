@@ -92,25 +92,43 @@ const stopBtn = document.getElementById("stopBtn");
 recordBtn.onclick = async () => {
   try {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    recorder = new MediaRecorder(stream, { mimeType: "audio/webm" });
+
+    // ✅ DO NOT FORCE mimeType (important)
+    recorder = new MediaRecorder(stream);
     chunks = [];
 
-    recorder.ondataavailable = e => chunks.push(e.data);
+    recorder.ondataavailable = e => {
+      if (e.data.size > 0) chunks.push(e.data);
+    };
 
     recorder.onstop = async () => {
       statusEl.innerText = "Evaluating your English...";
       recordBtn.disabled = true;
       stopBtn.disabled = true;
 
-      const blob = new Blob(chunks, { type: "audio/webm" });
+      const blob = new Blob(chunks);
+      if (blob.size === 0) {
+        statusEl.innerText = "No audio captured. Try again.";
+        recordBtn.disabled = false;
+        return;
+      }
+
       const form = new FormData();
       form.append("audio", blob, "speech.webm");
 
       try {
-        const res = await fetch(WORKER_URL, { method: "POST", body: form });
-        if (!res.ok) throw new Error("Worker error");
+        const res = await fetch(WORKER_URL, {
+          method: "POST",
+          body: form
+        });
 
-        const data = await res.json();
+        const text = await res.text();
+
+        if (!res.ok) {
+          throw new Error(text);
+        }
+
+        const data = JSON.parse(text);
 
         outputEl.innerHTML = `
           <strong>You said:</strong><br>${data.transcript}<br><br>
@@ -121,7 +139,8 @@ recordBtn.onclick = async () => {
 
         statusEl.innerText = "Completed";
       } catch (err) {
-        statusEl.innerText = "Evaluation failed. Please try again.";
+        console.error(err);
+        statusEl.innerText = "Evaluation failed: " + err.message;
         outputEl.innerHTML = "";
       } finally {
         recordBtn.disabled = false;
