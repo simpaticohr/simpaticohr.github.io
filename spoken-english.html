@@ -68,31 +68,39 @@ button.secondary {
 
   <div id="output" class="result"></div>
 </div>
+
 <script>
 let recorder;
 let chunks = [];
+let stream;
 
 const statusEl = document.getElementById("status");
 const outputEl = document.getElementById("output");
-const recordBtn = document.getElementById("recordBtn");
+const startBtn = document.getElementById("startBtn");
 const stopBtn = document.getElementById("stopBtn");
 
 const WORKER_URL = "https://evalis-ai.simpaticohrconsultancy.workers.dev";
 
-recordBtn.onclick = async () => {
+startBtn.onclick = async () => {
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    recorder = new MediaRecorder(stream);
+    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+    recorder = new MediaRecorder(stream, {
+      mimeType: "audio/webm"
+    });
+
     chunks = [];
 
-    recorder.ondataavailable = e => chunks.push(e.data);
+    recorder.ondataavailable = e => {
+      if (e.data.size > 0) chunks.push(e.data);
+    };
 
     recorder.onstop = async () => {
-      statusEl.innerText = "Evaluating...";
-      recordBtn.disabled = true;
+      statusEl.textContent = "Evaluating...";
+      startBtn.disabled = true;
       stopBtn.disabled = true;
 
-      const blob = new Blob(chunks, { type: recorder.mimeType });
+      const blob = new Blob(chunks, { type: "audio/webm" });
       const form = new FormData();
       form.append("audio", blob, "speech.webm");
 
@@ -105,24 +113,25 @@ recordBtn.onclick = async () => {
         const data = await res.json();
 
         outputEl.innerHTML = `
-          <strong>You said:</strong><br>${data.transcript || "-"}<br><br>
-          <strong>Feedback:</strong><br>${data.feedback || "-"}<br><br>
+          <strong>You said:</strong><br>${data.transcript || "(No speech detected)"}<br><br>
+          <strong>Feedback:</strong><br>${data.feedback || "Please speak clearly."}<br>
           <div class="score">${data.score ?? 0}/10</div>
         `;
 
-        statusEl.innerText = "Completed";
+        statusEl.textContent = "Completed";
 
-      } catch (e) {
-        statusEl.innerText = "Evaluation failed.";
+      } catch {
+        statusEl.textContent = "Evaluation failed.";
         outputEl.innerHTML = "";
       } finally {
-        recordBtn.disabled = false;
+        startBtn.disabled = false;
+        stream.getTracks().forEach(t => t.stop());
       }
     };
 
     recorder.start();
-    statusEl.innerText = "Speaking...";
-    recordBtn.disabled = true;
+    statusEl.textContent = "Speaking...";
+    startBtn.disabled = true;
     stopBtn.disabled = false;
 
     setTimeout(() => {
@@ -135,7 +144,9 @@ recordBtn.onclick = async () => {
 };
 
 stopBtn.onclick = () => {
-  if (recorder && recorder.state === "recording") recorder.stop();
+  if (recorder && recorder.state === "recording") {
+    recorder.stop();
+  }
 };
 </script>
 
