@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Spoken English Practice | Simpatico HR</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+
+<style>
+body {
+  margin: 0;
+  background: #020617;
+  font-family: system-ui;
+  color: #e5e7eb;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 100vh;
+}
+
+.card {
+  width: 420px;
+  background: #0f172a;
+  border-radius: 18px;
+  padding: 28px;
+  border: 1px solid #1e293b;
+}
+
+h2 {
+  text-align: center;
+  margin-top: 0;
+}
+
+#status {
+  font-size: 13px;
+  color: #38bdf8;
+  text-align: center;
+  margin: 10px 0;
+}
+
+button {
+  width: 100%;
+  padding: 14px;
+  border-radius: 12px;
+  border: none;
+  background: #2563eb;
+  color: white;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+button.secondary {
+  background: #1e293b;
+  margin-top: 10px;
+}
+
+.result {
+  margin-top: 18px;
+  font-size: 14px;
+  line-height: 1.6;
+}
+.score {
+  font-size: 32px;
+  font-weight: 700;
+  margin-top: 10px;
+  text-align: center;
+}
+</style>
+</head>
+
+<body>
+<div class="card">
+
+<h2>Spoken English Practice</h2>
+
+<div id="status">Tap start and speak for 5 seconds</div>
+
+<button id="recordBtn">🎤 Start Speaking</button>
+<button id="stopBtn" class="secondary" disabled>Stop</button>
+
+<div id="output" class="result"></div>
+
+</div>
+
+<script>
+let recorder;
+let chunks = [];
+
+const statusEl = document.getElementById("status");
+const outputEl = document.getElementById("output");
+const recordBtn = document.getElementById("recordBtn");
+const stopBtn = document.getElementById("stopBtn");
+
+recordBtn.onclick = async () => {
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  recorder = new MediaRecorder(stream);
+  chunks = [];
+
+  recorder.ondataavailable = e => chunks.push(e.data);
+
+  recorder.onstop = async () => {
+    statusEl.innerText = "Evaluating your English...";
+    const blob = new Blob(chunks, { type: "audio/webm" });
+
+    const form = new FormData();
+    form.append("audio", blob, "speech.webm");
+
+    const res = await fetch(
+      "https://evalis-ai.simpaticohconsultancy.workers.dev",
+      { method: "POST", body: form }
+    );
+
+    const data = await res.json();
+
+    outputEl.innerHTML = `
+      <strong>You said:</strong><br>${data.transcript}<br><br>
+      <strong>Feedback:</strong><br>${data.feedback}<br>
+      <strong>Improvement:</strong> ${data.improvement}<br>
+      <div class="score">${data.score}/10</div>
+    `;
+    statusEl.innerText = "Completed";
+  };
+
+  recorder.start();
+  statusEl.innerText = "Speaking...";
+  recordBtn.disabled = true;
+  stopBtn.disabled = false;
+
+  setTimeout(() => recorder.stop(), 5000);
+};
+
+stopBtn.onclick = () => {
+  recorder.stop();
+};
+</script>
+
+</body>
+</html>
