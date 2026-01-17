@@ -9,7 +9,7 @@
 body {
   margin: 0;
   background: #020617;
-  font-family: system-ui;
+  font-family: system-ui, -apple-system, Segoe UI;
   color: #e5e7eb;
   display: flex;
   justify-content: center;
@@ -19,22 +19,25 @@ body {
 
 .card {
   width: 420px;
+  max-width: 92%;
   background: #0f172a;
   border-radius: 18px;
   padding: 28px;
   border: 1px solid #1e293b;
+  box-shadow: 0 20px 40px rgba(0,0,0,.35);
 }
 
 h2 {
   text-align: center;
   margin-top: 0;
+  margin-bottom: 6px;
 }
 
 #status {
   font-size: 13px;
   color: #38bdf8;
   text-align: center;
-  margin: 10px 0;
+  margin: 12px 0;
 }
 
 button {
@@ -53,6 +56,11 @@ button.secondary {
   margin-top: 10px;
 }
 
+button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 .result {
   margin-top: 18px;
   font-size: 14px;
@@ -60,28 +68,31 @@ button.secondary {
 }
 
 .score {
-  font-size: 32px;
+  font-size: 34px;
   font-weight: 700;
-  margin-top: 10px;
+  margin-top: 12px;
   text-align: center;
+  color: #22c55e;
 }
 </style>
 </head>
 
 <body>
+
 <div class="card">
+  <h2>Spoken English Practice</h2>
+  <div id="status">Tap start and speak for 5 seconds</div>
 
-<h2>Spoken English Practice</h2>
+  <button id="recordBtn">🎤 Start Speaking</button>
+  <button id="stopBtn" class="secondary" disabled>Stop</button>
 
-<div id="status">Tap start and speak for 5 seconds</div>
-
-<button id="recordBtn">🎤 Start Speaking</button>
-<button id="stopBtn" class="secondary" disabled>Stop</button>
-
-<div id="output" class="result"></div>
-
+  <div id="output" class="result"></div>
 </div>
+
 <script>
+const WORKER_URL =
+  "https://evalis-ai.simpaticohrconsultancy.workers.dev";
+
 let recorder;
 let chunks = [];
 
@@ -90,11 +101,10 @@ const outputEl = document.getElementById("output");
 const recordBtn = document.getElementById("recordBtn");
 const stopBtn = document.getElementById("stopBtn");
 
-const WORKER_URL = "https://evalis-ai.simpaticohrconsultancy.workers.dev";
-
 recordBtn.onclick = async () => {
   try {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
     recorder = new MediaRecorder(stream);
     chunks = [];
 
@@ -105,29 +115,36 @@ recordBtn.onclick = async () => {
       recordBtn.disabled = true;
       stopBtn.disabled = true;
 
-      // ✅ FIXED AUDIO FORMAT
+      /* ✅ FORCE SAFE MIME TYPE */
       const blob = new Blob(chunks, { type: "audio/webm" });
 
-      const form = new FormData();
-      form.append("audio", blob, "speech.wav");
+      const formData = new FormData();
+      formData.append("audio", blob, "speech.webm");
 
       try {
         const res = await fetch(WORKER_URL, {
           method: "POST",
-          body: form
+          body: formData
         });
 
         if (!res.ok) {
-          const errText = await res.text();
-          throw new Error(errText);
+          throw new Error(await res.text());
         }
 
         const data = await res.json();
 
         outputEl.innerHTML = `
-          <strong>You said:</strong><br>${data.transcript}<br><br>
-          <strong>Feedback:</strong><br>${data.feedback}<br><br>
-          ${data.follow_up ? `<strong>Try this:</strong><br>${data.follow_up}<br><br>` : ""}
+          <strong>You said:</strong><br>
+          ${data.transcript}<br><br>
+
+          <strong>Feedback:</strong><br>
+          ${data.feedback}<br><br>
+
+          ${data.follow_up
+            ? `<strong>Try this:</strong><br>${data.follow_up}<br><br>`
+            : ""
+          }
+
           <div class="score">${data.score}/10</div>
         `;
 
@@ -146,11 +163,14 @@ recordBtn.onclick = async () => {
     recordBtn.disabled = true;
     stopBtn.disabled = false;
 
+    /* ⏱ Auto-stop after 5 seconds */
     setTimeout(() => {
-      if (recorder.state === "recording") recorder.stop();
+      if (recorder && recorder.state === "recording") {
+        recorder.stop();
+      }
     }, 5000);
 
-  } catch (err) {
+  } catch {
     alert("Microphone permission denied.");
   }
 };
@@ -161,7 +181,6 @@ stopBtn.onclick = () => {
   }
 };
 </script>
-
 
 </body>
 </html>
