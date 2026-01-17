@@ -1,77 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Spoken English Practice | Simpatico HR</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+
+<style>
+body {
+  margin: 0;
+  background: radial-gradient(circle at top, #020617, #000);
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  color: #e5e7eb;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 100vh;
+}
+
+.card {
+  width: 360px;
+  background: #0f172a;
+  border-radius: 18px;
+  padding: 24px;
+  border: 1px solid #1e293b;
+  box-shadow: 0 30px 80px rgba(0,0,0,.6);
+}
+
+h2 {
+  text-align: center;
+  margin: 0;
+  font-size: 22px;
+}
+
+#status {
+  text-align: center;
+  font-size: 13px;
+  color: #38bdf8;
+  margin: 8px 0 14px;
+}
+
+button {
+  width: 100%;
+  padding: 14px;
+  border-radius: 12px;
+  border: none;
+  background: #2563eb;
+  color: #fff;
+  font-weight: 600;
+  font-size: 15px;
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+button.secondary {
+  background: #1e293b;
+  margin-top: 10px;
+}
+
+.result {
+  margin-top: 18px;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.score {
+  margin-top: 14px;
+  font-size: 32px;
+  font-weight: 800;
+  text-align: center;
+}
+</style>
+</head>
+
+<body>
+
+<div class="card">
+  <h2>Spoken English Practice</h2>
+  <div id="status">Tap start and speak for 5 seconds</div>
+
+  <button id="startBtn">🎤 Start Speaking</button>
+  <button id="stopBtn" class="secondary" disabled>Stop</button>
+
+  <div id="output" class="result"></div>
+</div>
+
 <script>
-let audioContext, processor, input, stream;
-let audioData = [];
+let recorder;
+let chunks = [];
+let stream;
+
+const startBtn = document.getElementById("startBtn");
+const stopBtn = document.getElementById("stopBtn");
+const statusEl = document.getElementById("status");
+const outputEl = document.getElementById("output");
 
 const WORKER_URL = "https://evalis-ai.simpaticohrconsultancy.workers.dev";
 
-async function startRecording() {
-  stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-  audioContext = new AudioContext({ sampleRate: 16000 });
+startBtn.addEventListener("click", async () => {
+  outputEl.innerHTML = "";
+  statusEl.textContent = "Requesting microphone...";
 
-  input = audioContext.createMediaStreamSource(stream);
-  processor = audioContext.createScriptProcessor(4096, 1, 1);
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
 
-  processor.onaudioprocess = e => {
-    audioData.push(new Float32Array(e.inputBuffer.getChannelData(0)));
-  };
+    recorder = new MediaRecorder(stream, {
+      mimeType: "audio/webm;codecs=opus"
+    });
 
-  input.connect(processor);
-  processor.connect(audioContext.destination);
+    chunks = [];
 
-  setTimeout(stopRecording, 5000);
-}
+    recorder.ondataavailable = e => {
+      if (e.data.size > 0) chunks.push(e.data);
+    };
 
-async function stopRecording() {
-  processor.disconnect();
-  input.disconnect();
-  stream.getTracks().forEach(t => t.stop());
+    recorder.onstop = async () => {
+      statusEl.textContent = "Evaluating...";
+      startBtn.disabled = true;
+      stopBtn.disabled = true;
 
-  const wavBlob = encodeWAV(audioData, audioContext.sampleRate);
+      const blob = new Blob(chunks, { type: "audio/webm" });
+      const buffer = await blob.arrayBuffer();
 
-  await fetch(WORKER_URL, {
-    method: "POST",
-    headers: { "Content-Type": "audio/wav" },
-    body: wavBlob
-  });
-}
+      try {
+        const res = await fetch(WORKER_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/octet-stream" },
+          body: buffer
+        });
 
-function encodeWAV(buffers, sampleRate) {
-  const length = buffers.reduce((a, b) => a + b.length, 0);
-  const data = new Float32Array(length);
-  let offset = 0;
+        const data = await res.json();
 
-  buffers.forEach(b => {
-    data.set(b, offset);
-    offset += b.length;
-  });
+        outputEl.innerHTML = `
+          <strong>You said:</strong><br>
+          ${data.transcript || "-"}<br><br>
 
-  const buffer = new ArrayBuffer(44 + data.length * 2);
-  const view = new DataView(buffer);
+          <strong>Feedback:</strong><br>
+          ${data.feedback || "-"}<br>
 
-  function writeString(v, o, s) {
-    for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i));
+          <div class="score">${data.score ?? 0}/10</div>
+        `;
+
+        statusEl.textContent = "Completed";
+
+      } catch {
+        statusEl.textContent = "Evaluation failed.";
+        outputEl.innerHTML = "<strong>Error:</strong> Server unavailable.";
+      } finally {
+        startBtn.disabled = false;
+        stream.getTracks().forEach(t => t.stop());
+      }
+    };
+
+    recorder.start();
+    statusEl.textContent = "Speaking...";
+    startBtn.disabled = true;
+    stopBtn.disabled = false;
+
+    setTimeout(() => {
+      if (recorder && recorder.state === "recording") recorder.stop();
+    }, 5000);
+
+  } catch {
+    statusEl.textContent = "Microphone access denied.";
   }
+});
 
-  writeString(view, 0, "RIFF");
-  view.setUint32(4, 36 + data.length * 2, true);
-  writeString(view, 8, "WAVE");
-  writeString(view, 12, "fmt ");
-  view.setUint32(16, 16, true);
-  view.setUint16(20, 1, true);
-  view.setUint16(22, 1, true);
-  view.setUint32(24, sampleRate, true);
-  view.setUint32(28, sampleRate * 2, true);
-  view.setUint16(32, 2, true);
-  view.setUint16(34, 16, true);
-  writeString(view, 36, "data");
-  view.setUint32(40, data.length * 2, true);
-
-  let index = 44;
-  data.forEach(s => {
-    view.setInt16(index, Math.max(-1, Math.min(1, s)) * 0x7fff, true);
-    index += 2;
-  });
-
-  return new Blob([view], { type: "audio/wav" });
-}
+stopBtn.addEventListener("click", () => {
+  if (recorder && recorder.state === "recording") recorder.stop();
+});
 </script>
+
+</body>
+</html>
