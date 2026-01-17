@@ -61,7 +61,7 @@ button.secondary {
 <body>
 <div class="card">
   <h2>Spoken English Practice</h2>
-  <div id="status">Tap start and speak for 5 seconds</div>
+  <div id="status">Tap start and speak clearly for 5 seconds</div>
 
   <button id="startBtn">🎤 Start Speaking</button>
   <button id="stopBtn" class="secondary" disabled>Stop</button>
@@ -73,6 +73,7 @@ button.secondary {
 let recorder;
 let chunks = [];
 let stream;
+let audioContext;
 
 const statusEl = document.getElementById("status");
 const outputEl = document.getElementById("output");
@@ -83,22 +84,37 @@ const WORKER_URL = "https://evalis-ai.simpaticohrconsultancy.workers.dev";
 
 startBtn.onclick = async () => {
   try {
-    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-
-    recorder = new MediaRecorder(stream, {
-      mimeType: "audio/webm"
+    stream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true
+      }
     });
 
+    /* 🔊 MOBILE MIC BOOST (CRITICAL FIX) */
+    audioContext = new AudioContext();
+    const source = audioContext.createMediaStreamSource(stream);
+    const gainNode = audioContext.createGain();
+    gainNode.gain.value = 3.0; // boost volume
+    source.connect(gainNode);
+
+    recorder = new MediaRecorder(stream, { mimeType: "audio/webm" });
     chunks = [];
 
     recorder.ondataavailable = e => {
-      if (e.data.size > 0) chunks.push(e.data);
+      if (e.data && e.data.size > 0) chunks.push(e.data);
     };
 
     recorder.onstop = async () => {
-      statusEl.textContent = "Evaluating...";
-      startBtn.disabled = true;
       stopBtn.disabled = true;
+      statusEl.textContent = "Evaluating your English...";
+
+      if (chunks.length === 0) {
+        statusEl.textContent = "No audio captured.";
+        startBtn.disabled = false;
+        return;
+      }
 
       const blob = new Blob(chunks, { type: "audio/webm" });
       const form = new FormData();
@@ -113,19 +129,24 @@ startBtn.onclick = async () => {
         const data = await res.json();
 
         outputEl.innerHTML = `
-          <strong>You said:</strong><br>${data.transcript || "(No speech detected)"}<br><br>
-          <strong>Feedback:</strong><br>${data.feedback || "Please speak clearly."}<br>
+          <strong>You said:</strong><br>
+          ${data.transcript || "(No speech detected)"}<br><br>
+
+          <strong>Feedback:</strong><br>
+          ${data.feedback || "Please speak clearly and continuously."}
+
           <div class="score">${data.score ?? 0}/10</div>
         `;
 
         statusEl.textContent = "Completed";
 
-      } catch {
+      } catch (err) {
         statusEl.textContent = "Evaluation failed.";
         outputEl.innerHTML = "";
       } finally {
         startBtn.disabled = false;
         stream.getTracks().forEach(t => t.stop());
+        audioContext && audioContext.close();
       }
     };
 
@@ -138,7 +159,7 @@ startBtn.onclick = async () => {
       if (recorder.state === "recording") recorder.stop();
     }, 5000);
 
-  } catch {
+  } catch (err) {
     alert("Microphone permission denied.");
   }
 };
