@@ -68,12 +68,13 @@ button.secondary {
 
   <div id="output" class="result"></div>
 </div>
-
 <script>
 let recorder;
 let chunks = [];
 let stream;
 let audioContext;
+let analyser;
+let hasSound = false;
 
 const statusEl = document.getElementById("status");
 const outputEl = document.getElementById("output");
@@ -84,39 +85,47 @@ const WORKER_URL = "https://evalis-ai.simpaticohrconsultancy.workers.dev";
 
 startBtn.onclick = async () => {
   try {
-    stream = await navigator.mediaDevices.getUserMedia({
-      audio: {
-        echoCancellation: true,
-        noiseSuppression: true,
-        autoGainControl: true
-      }
-    });
+    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
 
-    /* 🔊 MOBILE MIC BOOST (CRITICAL FIX) */
+    // 🔥 Force microphone activation
     audioContext = new AudioContext();
     const source = audioContext.createMediaStreamSource(stream);
-    const gainNode = audioContext.createGain();
-    gainNode.gain.value = 3.0; // boost volume
-    source.connect(gainNode);
+    analyser = audioContext.createAnalyser();
+    source.connect(analyser);
 
-    recorder = new MediaRecorder(stream, { mimeType: "audio/webm" });
+    const dataArray = new Uint8Array(analyser.fftSize);
+
+    hasSound = false;
+    const soundCheck = setInterval(() => {
+      analyser.getByteTimeDomainData(dataArray);
+      const volume = dataArray.reduce((a, b) => a + Math.abs(b - 128), 0);
+      if (volume > 300) hasSound = true;
+    }, 200);
+
+    const mimeType = MediaRecorder.isTypeSupported("audio/webm")
+      ? "audio/webm"
+      : "audio/ogg";
+
+    recorder = new MediaRecorder(stream, { mimeType });
     chunks = [];
 
     recorder.ondataavailable = e => {
-      if (e.data && e.data.size > 0) chunks.push(e.data);
+      if (e.data.size > 0) chunks.push(e.data);
     };
 
     recorder.onstop = async () => {
-      stopBtn.disabled = true;
-      statusEl.textContent = "Evaluating your English...";
+      clearInterval(soundCheck);
+      audioContext.close();
 
-      if (chunks.length === 0) {
-        statusEl.textContent = "No audio captured.";
-        startBtn.disabled = false;
+      if (!hasSound) {
+        statusEl.textContent = "No voice detected. Please speak louder.";
+        cleanup();
         return;
       }
 
-      const blob = new Blob(chunks, { type: "audio/webm" });
+      statusEl.textContent = "Evaluating your English…";
+
+      const blob = new Blob(chunks, { type: mimeType });
       const form = new FormData();
       form.append("audio", blob, "speech.webm");
 
@@ -129,46 +138,42 @@ startBtn.onclick = async () => {
         const data = await res.json();
 
         outputEl.innerHTML = `
-          <strong>You said:</strong><br>
-          ${data.transcript || "(No speech detected)"}<br><br>
-
-          <strong>Feedback:</strong><br>
-          ${data.feedback || "Please speak clearly and continuously."}
-
-          <div class="score">${data.score ?? 0}/10</div>
+          <strong>You said:</strong><br>${data.transcript}<br><br>
+          <strong>Feedback:</strong><br>${data.feedback}
+          <div class="score">${data.score}/10</div>
         `;
 
         statusEl.textContent = "Completed";
-
-      } catch (err) {
+      } catch {
         statusEl.textContent = "Evaluation failed.";
-        outputEl.innerHTML = "";
       } finally {
-        startBtn.disabled = false;
-        stream.getTracks().forEach(t => t.stop());
-        audioContext && audioContext.close();
+        cleanup();
       }
     };
 
-    recorder.start();
-    statusEl.textContent = "Speaking...";
+    recorder.start(1000);
+    statusEl.textContent = "Speaking… Speak continuously!";
     startBtn.disabled = true;
     stopBtn.disabled = false;
 
     setTimeout(() => {
       if (recorder.state === "recording") recorder.stop();
-    }, 5000);
+    }, 8000);
 
-  } catch (err) {
+  } catch {
     alert("Microphone permission denied.");
   }
 };
 
 stopBtn.onclick = () => {
-  if (recorder && recorder.state === "recording") {
-    recorder.stop();
-  }
+  if (recorder && recorder.state === "recording") recorder.stop();
 };
+
+function cleanup() {
+  startBtn.disabled = false;
+  stopBtn.disabled = true;
+  stream.getTracks().forEach(t => t.stop());
+}
 </script>
 
 </body>
