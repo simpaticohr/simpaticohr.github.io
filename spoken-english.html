@@ -23,14 +23,17 @@ body {
   border-radius: 18px;
   padding: 28px;
   border: 1px solid #1e293b;
-  text-align: center;
 }
 
-h2 { margin-top: 0; }
+h2 {
+  text-align: center;
+  margin-top: 0;
+}
 
 #status {
   font-size: 13px;
   color: #38bdf8;
+  text-align: center;
   margin: 10px 0;
 }
 
@@ -60,6 +63,7 @@ button.secondary {
   font-size: 32px;
   font-weight: 700;
   margin-top: 10px;
+  text-align: center;
 }
 </style>
 </head>
@@ -82,58 +86,44 @@ button.secondary {
 let recorder;
 let chunks = [];
 
-const WORKER_URL = "https://evalis-ai.simpaticohrconsultancy.workers.dev";
-
 const statusEl = document.getElementById("status");
 const outputEl = document.getElementById("output");
 const recordBtn = document.getElementById("recordBtn");
 const stopBtn = document.getElementById("stopBtn");
 
+const WORKER_URL = "https://evalis-ai.simpaticohrconsultancy.workers.dev";
+
 recordBtn.onclick = async () => {
+  outputEl.innerHTML = "";
+  statusEl.innerText = "Requesting microphone...";
+
   try {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-
-    // ✅ DO NOT FORCE mimeType (important)
     recorder = new MediaRecorder(stream);
     chunks = [];
 
-    recorder.ondataavailable = e => {
-      if (e.data.size > 0) chunks.push(e.data);
-    };
+    recorder.ondataavailable = e => chunks.push(e.data);
 
     recorder.onstop = async () => {
       statusEl.innerText = "Evaluating your English...";
       recordBtn.disabled = true;
       stopBtn.disabled = true;
 
-      const blob = new Blob(chunks);
-      if (blob.size === 0) {
-        statusEl.innerText = "No audio captured. Try again.";
-        recordBtn.disabled = false;
-        return;
-      }
-
-      const form = new FormData();
-      form.append("audio", blob, "speech.webm");
-
       try {
+        const blob = new Blob(chunks, { type: recorder.mimeType });
         const buffer = await blob.arrayBuffer();
 
-fetch(WORKER_URL, {
-  method: "POST",
-  headers: {
-    "Content-Type": "audio/webm"
-  },
-  body: buffer
-});
+        const response = await fetch(WORKER_URL, {
+          method: "POST",
+          headers: { "Content-Type": recorder.mimeType },
+          body: buffer
+        });
 
-        const text = await res.text();
-
-        if (!res.ok) {
-          throw new Error(text);
+        if (!response.ok) {
+          throw new Error(`Server error (${response.status})`);
         }
 
-        const data = JSON.parse(text);
+        const data = await response.json();
 
         outputEl.innerHTML = `
           <strong>You said:</strong><br>${data.transcript}<br><br>
@@ -143,10 +133,9 @@ fetch(WORKER_URL, {
         `;
 
         statusEl.innerText = "Completed";
-      } catch (err) {
-        console.error(err);
-        statusEl.innerText = "Evaluation failed: " + err.message;
-        outputEl.innerHTML = "";
+      } catch (error) {
+        console.error(error);
+        statusEl.innerText = "Evaluation failed. Please try again.";
       } finally {
         recordBtn.disabled = false;
       }
@@ -161,13 +150,16 @@ fetch(WORKER_URL, {
       if (recorder.state === "recording") recorder.stop();
     }, 5000);
 
-  } catch {
-    alert("Microphone permission is required.");
+  } catch (error) {
+    alert("Microphone permission denied.");
+    statusEl.innerText = "Microphone access required";
   }
 };
 
 stopBtn.onclick = () => {
-  if (recorder && recorder.state === "recording") recorder.stop();
+  if (recorder && recorder.state === "recording") {
+    recorder.stop();
+  }
 };
 </script>
 
