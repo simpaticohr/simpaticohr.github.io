@@ -94,12 +94,13 @@ const stopBtn = document.getElementById("stopBtn");
 const WORKER_URL = "https://evalis-ai.simpaticohrconsultancy.workers.dev";
 
 recordBtn.onclick = async () => {
-  outputEl.innerHTML = "";
-  statusEl.innerText = "Requesting microphone...";
-
   try {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    recorder = new MediaRecorder(stream);
+
+    recorder = new MediaRecorder(stream, {
+      mimeType: "audio/webm"
+    });
+
     chunks = [];
 
     recorder.ondataavailable = e => chunks.push(e.data);
@@ -109,33 +110,40 @@ recordBtn.onclick = async () => {
       recordBtn.disabled = true;
       stopBtn.disabled = true;
 
-      try {
-        const blob = new Blob(chunks, { type: recorder.mimeType });
-        const buffer = await blob.arrayBuffer();
+      const webmBlob = new Blob(chunks, { type: "audio/webm" });
 
-        const response = await fetch(WORKER_URL, {
+      // ✅ Convert to WAV
+      const audioCtx = new AudioContext();
+      const arrayBuffer = await webmBlob.arrayBuffer();
+      const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+
+      const wavBlob = bufferToWav(audioBuffer);
+
+      const formData = new FormData();
+      formData.append("audio", wavBlob, "speech.wav");
+
+      try {
+        const res = await fetch(WORKER_URL, {
           method: "POST",
-          headers: { "Content-Type": recorder.mimeType },
-          body: buffer
+          body: formData
         });
 
-        if (!response.ok) {
-          throw new Error(`Server error (${response.status})`);
-        }
+        const data = await res.json();
 
-        const data = await response.json();
+        if (data.error) throw new Error(data.error);
 
         outputEl.innerHTML = `
           <strong>You said:</strong><br>${data.transcript}<br><br>
           <strong>Feedback:</strong><br>${data.feedback}<br><br>
-          ${data.follow_up ? `<strong>Try this:</strong><br>${data.follow_up}<br><br>` : ""}
+          <strong>Try this:</strong><br>${data.follow_up}<br><br>
           <div class="score">${data.score}/10</div>
         `;
 
         statusEl.innerText = "Completed";
-      } catch (error) {
-        console.error(error);
+      } catch (err) {
+        console.error(err);
         statusEl.innerText = "Evaluation failed. Please try again.";
+        outputEl.innerHTML = "";
       } finally {
         recordBtn.disabled = false;
       }
@@ -146,21 +154,57 @@ recordBtn.onclick = async () => {
     recordBtn.disabled = true;
     stopBtn.disabled = false;
 
-    setTimeout(() => {
-      if (recorder.state === "recording") recorder.stop();
-    }, 5000);
+    setTimeout(() => recorder.stop(), 5000);
 
-  } catch (error) {
+  } catch (err) {
     alert("Microphone permission denied.");
-    statusEl.innerText = "Microphone access required";
   }
 };
 
 stopBtn.onclick = () => {
-  if (recorder && recorder.state === "recording") {
-    recorder.stop();
-  }
+  if (recorder && recorder.state === "recording") recorder.stop();
 };
+
+/* WAV CONVERTER */
+function bufferToWav(buffer) {
+  const numOfChan = buffer.numberOfChannels;
+  const length = buffer.length * numOfChan * 2 + 44;
+  const bufferArray = new ArrayBuffer(length);
+  const view = new DataView(bufferArray);
+
+  let offset = 0;
+
+  const writeString = s => {
+    for (let i = 0; i < s.length; i++) {
+      view.setUint8(offset++, s.charCodeAt(i));
+    }
+  };
+
+  writeString("RIFF");
+  view.setUint32(offset, length - 8, true); offset += 4;
+  writeString("WAVE");
+  writeString("fmt ");
+  view.setUint32(offset, 16, true); offset += 4;
+  view.setUint16(offset, 1, true); offset += 2;
+  view.setUint16(offset, numOfChan, true); offset += 2;
+  view.setUint32(offset, buffer.sampleRate, true); offset += 4;
+  view.setUint32(offset, buffer.sampleRate * numOfChan * 2, true); offset += 4;
+  view.setUint16(offset, numOfChan * 2, true); offset += 2;
+  view.setUint16(offset, 16, true); offset += 2;
+  writeString("data");
+  view.setUint32(offset, length - offset - 4, true); offset += 4;
+
+  for (let i = 0; i < buffer.length; i++) {
+    for (let ch = 0; ch < numOfChan; ch++) {
+      let sample = buffer.getChannelData(ch)[i];
+      sample = Math.max(-1, Math.min(1, sample));
+      view.setInt16(offset, sample * 0x7fff, true);
+      offset += 2;
+    }
+  }
+
+  return new Blob([view], { type: "audio/wav" });
+}
 </script>
 
 </body>
