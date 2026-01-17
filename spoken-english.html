@@ -58,6 +58,7 @@ button.secondary {
   font-size: 14px;
   line-height: 1.6;
 }
+
 .score {
   font-size: 32px;
   font-weight: 700;
@@ -90,52 +91,74 @@ const outputEl = document.getElementById("output");
 const recordBtn = document.getElementById("recordBtn");
 const stopBtn = document.getElementById("stopBtn");
 
+const WORKER_URL = "https://evalis-ai.simpaticohrconsultancy.workers.dev";
+
 recordBtn.onclick = async () => {
-  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-  recorder = new MediaRecorder(stream);
-  chunks = [];
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    recorder = new MediaRecorder(stream);
+    chunks = [];
 
-  recorder.ondataavailable = e => chunks.push(e.data);
+    recorder.ondataavailable = e => chunks.push(e.data);
 
-  recorder.onstop = async () => {
-    statusEl.innerText = "Evaluating your English...";
-    const blob = new Blob(chunks, { type: recorder.mimeType });
+    recorder.onstop = async () => {
+      statusEl.innerText = "Evaluating your English...";
+      recordBtn.disabled = true;
+      stopBtn.disabled = true;
 
-    const form = new FormData();
-    form.append("audio", blob, "speech.webm");
+      const blob = new Blob(chunks, { type: recorder.mimeType });
 
-    const res = await fetch(
-      "https://evalis-ai.simpaticohconsultancy.workers.dev",
-      { method: "POST", body: form }
-    );
+      const form = new FormData();
+      form.append("audio", blob, "speech.webm");
 
-    const data = await res.json();
+      try {
+        const res = await fetch(WORKER_URL, {
+          method: "POST",
+          body: form
+        });
 
-    outputEl.innerHTML = `
-  <strong>You said:</strong><br>${data.transcript}<br><br>
+        if (!res.ok) {
+          const errText = await res.text();
+          throw new Error(errText);
+        }
 
-  <strong>Feedback:</strong><br>${data.feedback}<br><br>
+        const data = await res.json();
 
-  ${data.follow_up 
-    ? `<strong>Try this:</strong><br>${data.follow_up}<br><br>` 
-    : ""
+        outputEl.innerHTML = `
+          <strong>You said:</strong><br>${data.transcript}<br><br>
+          <strong>Feedback:</strong><br>${data.feedback}<br><br>
+          ${data.follow_up ? `<strong>Try this:</strong><br>${data.follow_up}<br><br>` : ""}
+          <div class="score">${data.score}/10</div>
+        `;
+
+        statusEl.innerText = "Completed";
+      } catch (err) {
+        console.error(err);
+        statusEl.innerText = "Evaluation failed. Please try again.";
+        outputEl.innerHTML = "";
+      } finally {
+        recordBtn.disabled = false;
+      }
+    };
+
+    recorder.start();
+    statusEl.innerText = "Speaking...";
+    recordBtn.disabled = true;
+    stopBtn.disabled = false;
+
+    setTimeout(() => {
+      if (recorder.state === "recording") recorder.stop();
+    }, 5000);
+
+  } catch (err) {
+    alert("Microphone permission denied.");
   }
-
-  <div class="score">${data.score}/10</div>
-`;
-    statusEl.innerText = "Completed";
-  };
-
-  recorder.start();
-  statusEl.innerText = "Speaking...";
-  recordBtn.disabled = true;
-  stopBtn.disabled = false;
-
-  setTimeout(() => recorder.stop(), 5000);
 };
 
 stopBtn.onclick = () => {
-  recorder.stop();
+  if (recorder && recorder.state === "recording") {
+    recorder.stop();
+  }
 };
 </script>
 
