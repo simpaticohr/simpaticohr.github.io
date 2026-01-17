@@ -1,94 +1,206 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
+  <meta charset="UTF-8" />
   <title>Apply | Simpatico HR</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 
+  <!-- Icons -->
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" rel="stylesheet">
+
+  <!-- Supabase SDK -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
   <style>
     body {
-      font-family: system-ui;
+      font-family: system-ui, -apple-system;
       background: #f5f7fb;
-      padding: 40px;
+      margin: 0;
+      padding: 0;
     }
+
+    .container {
+      max-width: 520px;
+      margin: 80px auto;
+      padding: 0 20px;
+    }
+
     .card {
-      max-width: 600px;
-      margin: auto;
       background: white;
-      padding: 30px;
-      border-radius: 16px;
-      box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+      border-radius: 20px;
+      box-shadow: 0 20px 40px rgba(0,45,90,0.1);
+      padding: 35px;
     }
-    input, button {
+
+    h1 {
+      color: #002d5a;
+      margin-bottom: 25px;
+    }
+
+    label {
+      display: block;
+      font-weight: 600;
+      margin-bottom: 6px;
+      font-size: 14px;
+    }
+
+    input {
       width: 100%;
       padding: 14px;
-      margin-top: 12px;
-      border-radius: 10px;
-      border: 1px solid #ccc;
+      border-radius: 12px;
+      border: 1px solid #dbe3ec;
+      margin-bottom: 20px;
+      font-size: 15px;
     }
+
+    input:focus {
+      outline: none;
+      border-color: #00c2ff;
+    }
+
     button {
+      width: 100%;
+      padding: 16px;
       background: #002d5a;
       color: white;
-      font-weight: 700;
       border: none;
+      border-radius: 14px;
+      font-weight: 700;
+      font-size: 16px;
+      cursor: pointer;
+    }
+
+    button:hover {
+      opacity: 0.95;
+    }
+
+    .status {
+      margin-top: 18px;
+      font-weight: 600;
+      text-align: center;
+    }
+
+    .note {
+      font-size: 13px;
+      color: #64748b;
+      margin-top: 10px;
+      text-align: center;
     }
   </style>
 </head>
 
 <body>
 
-<div class="card">
-  <h2>Apply for this job</h2>
+<div class="container">
+  <div class="card">
+    <h1>Apply for this job</h1>
 
-  <form id="applyForm">
-    <input id="full_name" placeholder="Full name" required>
-    <input id="email" type="email" placeholder="Email" required>
-    <input id="resume_url" placeholder="CV / LinkedIn / Drive link" required>
+    <form id="applyForm">
+      <label>Full Name</label>
+      <input id="full_name" required placeholder="Your full name">
 
-    <button type="submit">Submit Application</button>
-    <p id="status"></p>
-  </form>
+      <label>Email Address</label>
+      <input id="email" type="email" required placeholder="you@example.com">
+
+      <label>Upload CV (PDF / DOC / DOCX)</label>
+      <input id="resume_file" type="file" accept=".pdf,.doc,.docx" required>
+
+      <button type="submit">
+        Submit Application
+      </button>
+
+      <div id="status" class="status"></div>
+      <div class="note">
+        Your data is used only for recruitment purposes.
+      </div>
+    </form>
+  </div>
 </div>
 
 <script>
+  /* =============================
+     SUPABASE CONFIG
+  ============================== */
   const SUPABASE_URL = "https://cvkxtsvgnynxexmemfuy.supabase.co";
-  const SUPABASE_ANON_KEY = "YOUR_REAL_ANON_KEY";
+  const SUPABASE_ANON_KEY = "PASTE_YOUR_REAL_ANON_KEY_HERE";
 
-  const supabase = window.supabase.createClient(
+  const supabaseClient = supabase.createClient(
     SUPABASE_URL,
     SUPABASE_ANON_KEY
   );
 
+  /* =============================
+     GET JOB ID FROM URL
+  ============================== */
   const params = new URLSearchParams(window.location.search);
-  const job_id = params.get("job_id");
+  const jobId = params.get("job_id");
 
+  if (!jobId) {
+    document.body.innerHTML = "<h2 style='text-align:center'>Invalid job link</h2>";
+  }
+
+  /* =============================
+     FORM SUBMIT
+  ============================== */
   document.getElementById("applyForm").addEventListener("submit", async (e) => {
     e.preventDefault();
 
     const status = document.getElementById("status");
-    status.textContent = "Submitting...";
+    status.style.color = "#555";
+    status.textContent = "Submitting application…";
 
-    const { error } = await supabase
+    const fullName = document.getElementById("full_name").value;
+    const email = document.getElementById("email").value;
+    const file = document.getElementById("resume_file").files[0];
+
+    if (file.size > 5 * 1024 * 1024) {
+      status.style.color = "red";
+      status.textContent = "CV must be under 5 MB";
+      return;
+    }
+
+    /* =============================
+       UPLOAD CV TO STORAGE
+    ============================== */
+    const filePath = `cv-${Date.now()}-${file.name}`;
+
+    const { error: uploadError } = await supabaseClient
+      .storage
+      .from("resumes")
+      .upload(filePath, file);
+
+    if (uploadError) {
+      console.error(uploadError);
+      status.style.color = "red";
+      status.textContent = "CV upload failed";
+      return;
+    }
+
+    const resumeUrl = `${SUPABASE_URL}/storage/v1/object/public/resumes/${filePath}`;
+
+    /* =============================
+       INSERT CANDIDATE
+    ============================== */
+    const { error } = await supabaseClient
       .from("candidates")
       .insert([{
-        full_name: document.getElementById("full_name").value,
-        email: document.getElementById("email").value,
-        resume_url: document.getElementById("resume_url").value,
-        job_id: job_id,
+        full_name: fullName,
+        email: email,
+        resume_url: resumeUrl,
+        job_id: jobId,
         status: "applied"
       }]);
 
     if (error) {
+      console.error(error);
       status.style.color = "red";
       status.textContent = "Submission failed";
-      console.error(error);
-    } else {
-      status.style.color = "green";
-      status.textContent = "Application submitted successfully ✅";
-      e.target.reset();
+      return;
     }
+
+    status.style.color = "green";
+    status.textContent = "Application submitted successfully ✅";
+    e.target.reset();
   });
 </script>
 
