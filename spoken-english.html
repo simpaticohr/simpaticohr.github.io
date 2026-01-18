@@ -6,65 +6,81 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 
 <style>
-* { box-sizing: border-box; }
 body {
   margin: 0;
   min-height: 100vh;
-  background: radial-gradient(circle at top, #020617, #020617);
-  font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
-  color: #e5e7eb;
   display: flex;
   align-items: center;
   justify-content: center;
+  background: radial-gradient(circle at top, #020617, #000);
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  color: #e5e7eb;
 }
+
 .card {
   width: 360px;
-  background: linear-gradient(180deg, #0f172a, #020617);
-  border-radius: 16px;
-  padding: 24px;
+  max-width: 92%;
+  background: #0f172a;
   border: 1px solid #1e293b;
-  box-shadow: 0 10px 40px rgba(0,0,0,.5);
+  border-radius: 18px;
+  padding: 24px;
+  box-shadow: 0 20px 60px rgba(0,0,0,.6);
 }
+
 h2 {
+  text-align: center;
   margin: 0;
-  text-align: center;
 }
-#status {
-  margin: 10px 0 16px;
+
+.status {
+  text-align: center;
   font-size: 13px;
+  margin: 8px 0 16px;
   color: #38bdf8;
-  text-align: center;
 }
+
 button {
   width: 100%;
   padding: 14px;
   border-radius: 12px;
   border: none;
-  font-weight: 600;
   cursor: pointer;
+  font-weight: 600;
+  font-size: 15px;
 }
+
 #startBtn {
   background: #2563eb;
   color: white;
 }
+
 #stopBtn {
-  margin-top: 10px;
   background: #1e293b;
   color: #94a3b8;
-}
-#output {
-  margin-top: 16px;
-  font-size: 14px;
-  line-height: 1.6;
-}
-.score {
-  font-size: 32px;
-  text-align: center;
   margin-top: 10px;
-  font-weight: 700;
 }
+
+#stopBtn:disabled {
+  opacity: 0.5;
+}
+
+.result {
+  margin-top: 18px;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.score {
+  text-align: center;
+  font-size: 32px;
+  font-weight: 700;
+  margin-top: 12px;
+}
+
 .error {
+  margin-top: 10px;
   color: #f87171;
+  font-size: 13px;
   text-align: center;
 }
 </style>
@@ -73,66 +89,83 @@ button {
 <body>
 <div class="card">
   <h2>Spoken English Practice</h2>
-  <div id="status">Tap start and speak for 5 seconds</div>
+  <div id="status" class="status">Tap start and speak clearly</div>
 
   <button id="startBtn">🎤 Start Speaking</button>
   <button id="stopBtn" disabled>Stop</button>
 
-  <div id="output"></div>
+  <div id="result" class="result"></div>
+  <div id="error" class="error"></div>
 </div>
 
 <script>
-const WORKER_URL =
-  "https://evalis-ai.simpaticohrconsultancy.workers.dev";
+const WORKER_URL = "https://evalis-ai.simpaticohhrconsultancy.workers.dev"; 
+// ⚠️ VERIFY spelling exactly matches your Worker domain
 
-let recorder, stream, chunks = [];
+let mediaRecorder;
+let audioChunks = [];
+let stream;
+let timeoutId;
 
-const statusEl = document.getElementById("status");
-const outputEl = document.getElementById("output");
 const startBtn = document.getElementById("startBtn");
 const stopBtn = document.getElementById("stopBtn");
+const statusEl = document.getElementById("status");
+const resultEl = document.getElementById("result");
+const errorEl = document.getElementById("error");
+
+function resetUI() {
+  startBtn.disabled = false;
+  stopBtn.disabled = true;
+  clearTimeout(timeoutId);
+  if (stream) stream.getTracks().forEach(t => t.stop());
+}
 
 startBtn.onclick = async () => {
-  outputEl.innerHTML = "";
-  statusEl.textContent = "Requesting microphone...";
+  errorEl.textContent = "";
+  resultEl.innerHTML = "";
+
   try {
     stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    recorder = new MediaRecorder(stream, { mimeType: "audio/webm" });
-    chunks = [];
 
-    recorder.ondataavailable = e => {
-      if (e.data.size) chunks.push(e.data);
+    mediaRecorder = new MediaRecorder(stream, { mimeType: "audio/webm" });
+    audioChunks = [];
+
+    mediaRecorder.ondataavailable = e => {
+      if (e.data.size > 0) audioChunks.push(e.data);
     };
 
-    recorder.onstop = sendAudio;
+    mediaRecorder.onstop = sendAudio;
 
-    recorder.start();
-    statusEl.textContent = "Speaking...";
+    mediaRecorder.start();
+    statusEl.textContent = "Listening...";
     startBtn.disabled = true;
     stopBtn.disabled = false;
 
-    setTimeout(() => {
-      if (recorder.state === "recording") recorder.stop();
+    timeoutId = setTimeout(() => {
+      if (mediaRecorder.state === "recording") mediaRecorder.stop();
     }, 5000);
 
   } catch {
-    statusEl.textContent = "Microphone permission denied.";
+    errorEl.textContent = "Microphone permission denied.";
+    resetUI();
   }
 };
 
 stopBtn.onclick = () => {
-  if (recorder && recorder.state === "recording") recorder.stop();
+  if (mediaRecorder && mediaRecorder.state === "recording") {
+    mediaRecorder.stop();
+  }
 };
 
 async function sendAudio() {
   statusEl.textContent = "Evaluating...";
   stopBtn.disabled = true;
 
-  const blob = new Blob(chunks, { type: "audio/webm" });
-  const form = new FormData();
-  form.append("audio", blob, "speech.webm");
-
   try {
+    const blob = new Blob(audioChunks, { type: "audio/webm" });
+    const form = new FormData();
+    form.append("audio", blob, "speech.webm");
+
     const res = await fetch(WORKER_URL, {
       method: "POST",
       body: form
@@ -142,24 +175,21 @@ async function sendAudio() {
 
     const data = await res.json();
 
-    outputEl.innerHTML = `
-      <strong>You said:</strong><br>${data.transcript || "-"}<br><br>
-      <strong>Feedback:</strong><br>${data.feedback || "-"}
+    resultEl.innerHTML = `
+      <strong>You said:</strong><br>
+      ${data.transcript || "(No speech detected)"}<br><br>
+      <strong>Feedback:</strong><br>
+      ${data.feedback || "Good attempt."}
       <div class="score">${data.score ?? 0}/10</div>
     `;
 
     statusEl.textContent = "Completed";
 
-  } catch (err) {
-    statusEl.textContent = "Server unavailable.";
-    outputEl.innerHTML = `
-      <div class="error">
-        ❌ Audio evaluation blocked by server
-      </div>
-    `;
+  } catch {
+    errorEl.textContent = "Server unavailable.";
+    statusEl.textContent = "Error";
   } finally {
-    startBtn.disabled = false;
-    stream?.getTracks().forEach(t => t.stop());
+    resetUI();
   }
 }
 </script>
