@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
-<title>Spoken English Practice | SimpaticoHR</title>
+<title>Spoken English Practice | Simpatico HR</title>
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 
 <style>
@@ -10,47 +10,48 @@ body {
   margin: 0;
   min-height: 100vh;
   background: radial-gradient(circle at top, #0f172a, #020617);
-  font-family: system-ui, -apple-system, Segoe UI, Roboto;
-  color: #e5e7eb;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
   display: flex;
   align-items: center;
   justify-content: center;
+  color: #e5e7eb;
 }
 
 .card {
-  width: 360px;
-  background: rgba(15,23,42,0.9);
+  width: 340px;
+  background: rgba(15, 23, 42, 0.85);
   border: 1px solid #1e293b;
-  border-radius: 18px;
-  padding: 24px;
-  box-shadow: 0 20px 60px rgba(0,0,0,.4);
+  border-radius: 16px;
+  padding: 22px;
+  box-shadow: 0 20px 40px rgba(0,0,0,0.4);
 }
 
 h2 {
-  margin: 0;
+  margin: 0 0 6px;
   text-align: center;
 }
 
 #status {
-  margin-top: 6px;
-  font-size: 13px;
   text-align: center;
+  font-size: 13px;
   color: #38bdf8;
+  min-height: 18px;
 }
 
 button {
   width: 100%;
   padding: 14px;
+  margin-top: 10px;
   border-radius: 12px;
   border: none;
+  font-size: 15px;
   font-weight: 600;
   cursor: pointer;
-  margin-top: 14px;
 }
 
 #startBtn {
   background: #2563eb;
-  color: white;
+  color: #fff;
 }
 
 #stopBtn {
@@ -59,19 +60,19 @@ button {
 }
 
 button:disabled {
-  opacity: .6;
+  opacity: 0.5;
   cursor: not-allowed;
 }
 
 .result {
-  margin-top: 18px;
+  margin-top: 16px;
   font-size: 14px;
-  line-height: 1.6;
+  line-height: 1.5;
 }
 
 .score {
   margin-top: 10px;
-  font-size: 32px;
+  font-size: 28px;
   font-weight: 700;
   text-align: center;
 }
@@ -90,69 +91,31 @@ button:disabled {
 </div>
 
 <script>
-const WORKER_URL =
-  "https://evalis-ai.simpaticohrconsultancy.workers.dev";
+const WORKER_URL = "https://evalis-ai.simpaticohrconsultancy.workers.dev";
 
-let recorder;
-let chunks = [];
-let stream;
-
+const startBtn = document.getElementById("startBtn");
+const stopBtn = document.getElementById("stopBtn");
 const statusEl = document.getElementById("status");
 const outputEl = document.getElementById("output");
-const startBtn = document.getElementById("startBtn");
-const stopBtn  = document.getElementById("stopBtn");
 
-startBtn.onclick = async () => {
-  outputEl.innerHTML = "";
-  statusEl.textContent = "Listening…";
+let recorder;
+let stream;
+let chunks = [];
 
+async function startRecording() {
   try {
     stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    recorder = new MediaRecorder(stream, { mimeType: "audio/webm" });
+    recorder = new MediaRecorder(stream);
     chunks = [];
 
     recorder.ondataavailable = e => {
       if (e.data.size > 0) chunks.push(e.data);
     };
 
-    recorder.onstop = async () => {
-      statusEl.textContent = "Evaluating…";
-
-      const blob = new Blob(chunks, { type: "audio/webm" });
-      const form = new FormData();
-      form.append("audio", blob, "speech.webm");
-
-      try {
-        const res = await fetch(WORKER_URL, {
-          method: "POST",
-          body: form
-        });
-
-        if (!res.ok) throw new Error("Server unavailable");
-
-        const data = await res.json();
-
-        outputEl.innerHTML = `
-          <strong>You said:</strong><br>
-          ${data.transcript || "-"}<br><br>
-          <strong>Feedback:</strong><br>
-          ${data.feedback || "-"}
-          <div class="score">${data.score ?? 0}/10</div>
-        `;
-
-        statusEl.textContent = "Completed";
-
-      } catch (err) {
-        statusEl.textContent = "Server unavailable.";
-        outputEl.innerHTML = "";
-      } finally {
-        stream.getTracks().forEach(t => t.stop());
-        startBtn.disabled = false;
-        stopBtn.disabled = true;
-      }
-    };
+    recorder.onstop = sendAudio;
 
     recorder.start();
+    statusEl.textContent = "Speaking...";
     startBtn.disabled = true;
     stopBtn.disabled = false;
 
@@ -160,11 +123,48 @@ startBtn.onclick = async () => {
       if (recorder.state === "recording") recorder.stop();
     }, 5000);
 
-  } catch {
+  } catch (err) {
     statusEl.textContent = "Microphone permission denied.";
   }
-};
+}
 
+async function sendAudio() {
+  stopBtn.disabled = true;
+  statusEl.textContent = "Evaluating...";
+
+  stream.getTracks().forEach(t => t.stop());
+
+  const blob = new Blob(chunks, { type: "audio/webm" });
+  const form = new FormData();
+  form.append("audio", blob, "speech.webm");
+
+  try {
+    const res = await fetch(WORKER_URL, {
+      method: "POST",
+      body: form
+    });
+
+    if (!res.ok) throw new Error("Server error");
+
+    const data = await res.json();
+
+    outputEl.innerHTML = `
+      <strong>You said:</strong><br>${data.transcript}<br><br>
+      <strong>Feedback:</strong><br>${data.feedback}
+      <div class="score">${data.score}/10</div>
+    `;
+
+    statusEl.textContent = "Completed";
+
+  } catch (err) {
+    statusEl.textContent = "Server unavailable.";
+    outputEl.innerHTML = "";
+  } finally {
+    startBtn.disabled = false;
+  }
+}
+
+startBtn.onclick = startRecording;
 stopBtn.onclick = () => {
   if (recorder && recorder.state === "recording") recorder.stop();
 };
