@@ -1,140 +1,85 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-    <meta charset="UTF-8">
-    <title>AI Interviewer | Career Lab</title>
+    <title>Career Lab AI</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
     <style>
-        body { font-family: sans-serif; background: #0f172a; color: white; text-align: center; padding: 20px; }
-        .card { max-width: 400px; margin: auto; background: #1e293b; padding: 20px; border-radius: 20px; }
-        .pulse { width: 50px; height: 50px; background: #3b82f6; border-radius: 50%; margin: 20px auto; animation: p 1.5s infinite; display: none; }
-        @keyframes p { 0% { box-shadow: 0 0 0 0 rgba(59,130,246,0.7); } 100% { box-shadow: 0 0 0 20px rgba(0,0,0,0); } }
-        #log { background: #000; padding: 10px; height: 150px; overflow-y: auto; text-align: left; font-size: 12px; margin-top: 10px; border-radius: 10px; color: #adbac7; }
-        button { width: 100%; padding: 15px; margin-top: 10px; border-radius: 10px; border: none; background: #3b82f6; color: white; font-weight: bold; cursor: pointer; }
-        button:disabled { background: #475569; }
-        #debug { color: #facc15; font-size: 12px; margin-top: 5px; }
+        body { background: #0f172a; color: white; font-family: sans-serif; text-align: center; padding: 40px; }
+        .box { max-width: 400px; margin: auto; background: #1e293b; padding: 20px; border-radius: 15px; }
+        #log { height: 200px; overflow-y: auto; background: #000; margin: 10px 0; padding: 10px; font-size: 13px; text-align: left; }
+        button { width: 100%; padding: 15px; background: #3b82f6; border: none; color: white; cursor: pointer; border-radius: 10px; }
     </style>
 </head>
 <body>
-
-<div class="card">
-    <h2>Career Lab AI</h2>
-    <p id="status">Upload CV to Start</p>
-    <div id="debug">System Ready</div>
-    
-    <input type="file" id="cvInput" style="margin: 10px 0;">
-    <div id="visual" class="pulse"></div>
-    
-    <button id="actionBtn" disabled>Start Interview</button>
-    <div id="log"></div>
-</div>
+    <div class="box">
+        <h3>Career Lab</h3>
+        <input type="file" id="cv" style="margin-bottom: 20px;">
+        <div id="log">Upload your CV to begin...</div>
+        <button id="btn" disabled>Start Interview</button>
+    </div>
 
 <script>
-const WORKER_URL = "https://evalis-ai.simpaticohrconsultancy.workers.dev";
-let history = [];
-let cvText = "";
-let isInterviewing = false;
-let isBusy = false;
+const URL = "https://evalis-ai.simpaticohrconsultancy.workers.dev";
+let chatHistory = [], resume = "", active = false, busy = false;
 
-// 1. CV Parsing
-document.getElementById('cvInput').onchange = async (e) => {
+document.getElementById('cv').onchange = async (e) => {
     const file = e.target.files[0];
-    document.getElementById('debug').innerText = "Status: Parsing CV...";
     if (file.type === "application/pdf") {
         const pdf = await pdfjsLib.getDocument(new Uint8Array(await file.arrayBuffer())).promise;
-        let t = "";
-        for(let i=1; i<=pdf.numPages; i++) t += (await (await pdf.getPage(i)).getTextContent()).items.map(s=>s.str).join(" ");
-        cvText = t;
-    } else { cvText = await file.text(); }
-    document.getElementById('actionBtn').disabled = false;
-    document.getElementById('debug').innerText = "Status: CV Ready";
+        for(let i=1; i<=pdf.numPages; i++) resume += (await (await pdf.getPage(i)).getTextContent()).items.map(s=>s.str).join(" ");
+    } else { resume = await file.text(); }
+    document.getElementById('btn').disabled = false;
 };
 
-// 2. Speech Logic
-function speak(text) {
-    if (!text || text === "undefined") {
-        isBusy = false;
-        document.getElementById('debug').innerText = "Error: Bot tried to say nothing.";
-        return;
-    }
+function aiSpeak(text) {
+    if (!text) { busy = false; return; }
+    window.speechSynthesis.cancel(); // Reset
     const u = new SpeechSynthesisUtterance(text);
     document.getElementById('log').innerHTML += `<p><b>AI:</b> ${text}</p>`;
-    
-    u.onend = () => {
-        isBusy = false;
-        if (isInterviewing) startTurn();
-    };
+    u.onend = () => { busy = false; if(active) startLoop(); };
     window.speechSynthesis.speak(u);
 }
 
-// 3. Recording Turn
-async function startTurn() {
-    if (isBusy || !isInterviewing) return;
-    try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        const recorder = new MediaRecorder(stream);
-        const chunks = [];
-        
-        document.getElementById('visual').style.display = "block";
-        document.getElementById('debug').innerText = "Status: Listening...";
+async function startLoop() {
+    if (busy || !active) return;
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const rec = new MediaRecorder(stream);
+    const chunks = [];
+    
+    rec.ondataavailable = e => chunks.push(e.data);
+    rec.onstop = async () => {
+        busy = true;
+        stream.getTracks().forEach(t => t.stop());
+        const fd = new FormData();
+        fd.append("audio", new Blob(chunks));
+        fd.append("cvText", resume);
+        fd.append("history", JSON.stringify(chatHistory));
 
-        recorder.ondataavailable = e => chunks.push(e.data);
-        recorder.onstop = async () => {
-            document.getElementById('visual').style.display = "none";
-            if (chunks.length === 0) { isBusy = false; return; }
-
-            isBusy = true;
-            document.getElementById('debug').innerText = "Status: Transcribing & Thinking...";
+        try {
+            const res = await fetch(URL, { method: "POST", body: fd });
+            const data = await res.json();
             
-            const fd = new FormData();
-            fd.append("audio", new Blob(chunks, { type: "audio/webm" }));
-            fd.append("mode", "interview");
-            fd.append("cvText", cvText);
-            fd.append("history", JSON.stringify(history));
-
-            try {
-                const res = await fetch(WORKER_URL, { method: "POST", body: fd });
-                const data = await res.json();
-                
-                // Debugging the incoming data
-                console.log("Server Response:", data);
-
-                if (data.nextQuestion) {
-                    history = data.newHistory || history;
-                    speak(data.nextQuestion);
-                } else if (data.error) {
-                    speak("I encountered an error: " + data.error);
-                }
-            } catch (err) {
-                document.getElementById('debug').innerText = "Status: Network Error";
-                isBusy = false;
-                setTimeout(startTurn, 3000);
+            // SYNC CHECK: Use 'reply' and 'history' to match the Worker
+            if (data.reply) {
+                chatHistory = data.history;
+                aiSpeak(data.reply);
             }
-        };
-
-        recorder.start();
-        setTimeout(() => { if(recorder.state === "recording") recorder.stop(); }, 6000);
-    } catch (e) { document.getElementById('debug').innerText = "Status: Mic Blocked"; }
+        } catch (err) { 
+            busy = false; 
+            aiSpeak("I lost connection. One second..."); 
+        }
+    };
+    rec.start();
+    setTimeout(() => rec.stop(), 5000); // 5-second turns
 }
 
-// 4. Action Button
-document.getElementById('actionBtn').onclick = async () => {
-    const btn = document.getElementById('actionBtn');
-    if (btn.innerText === "Start Interview") {
-        isInterviewing = true;
-        btn.innerText = "Stop & Evaluate";
-        speak("Hello. I've reviewed your resume. Please introduce yourself.");
+document.getElementById('btn').onclick = () => {
+    active = !active;
+    if (active) {
+        document.getElementById('btn').innerText = "Stop Interview";
+        aiSpeak("I have your resume. Let's start. Tell me about your background.");
     } else {
-        isInterviewing = false;
-        btn.disabled = true;
-        btn.innerText = "Loading Report...";
-        const fd = new FormData();
-        fd.append("mode", "evaluate");
-        fd.append("history", JSON.stringify(history));
-        const res = await fetch(WORKER_URL, { method: "POST", body: fd });
-        const data = await res.json();
-        document.getElementById('log').innerHTML = `<div style="background:white;color:black;padding:10px;border-radius:10px;">${data.report}</div>`;
-        document.getElementById('debug').innerText = "Status: Done";
+        location.reload(); // Quick reset
     }
 };
 </script>
