@@ -3,194 +3,261 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Career Lab | AI Interviewer</title>
+<title>Evalis AI – Mock Interview</title>
+
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+
 <style>
-  :root { --accent: #2563eb; --bg: #0f172a; --danger: #dc2626; }
-  body { font-family: 'Inter', system-ui, sans-serif; background: var(--bg); color: white; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; }
-  .card { width: 90%; max-width: 420px; background: rgba(255,255,255,0.05); padding: 30px; border-radius: 24px; border: 1px solid rgba(255,255,255,0.1); text-align: center; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.5); }
-  .pulse { width: 60px; height: 60px; background: var(--accent); border-radius: 50%; margin: 20px auto; display: none; animation: pulse-ring 1.5s infinite; }
-  @keyframes pulse-ring { 0% { box-shadow: 0 0 0 0 rgba(37, 99, 235, 0.7); } 100% { box-shadow: 0 0 0 20px rgba(37, 99, 235, 0); } }
-  button { width: 100%; padding: 16px; border-radius: 12px; border: none; background: var(--accent); color: white; font-weight: 700; cursor: pointer; margin-top: 10px; transition: 0.2s; }
-  button:disabled { background: #475569; cursor: not-allowed; opacity: 0.5; }
-  #endBtn { background: var(--danger); display: none; }
-  #log { background: rgba(0,0,0,0.3); padding: 15px; border-radius: 12px; height: 180px; overflow-y: auto; font-size: 13px; text-align: left; margin-top: 20px; color: #cbd5e1; border: 1px solid rgba(255,255,255,0.1); }
-  #status { font-size: 14px; color: #94a3b8; margin-bottom: 15px; }
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  background: linear-gradient(180deg,#020617,#020617);
+  color: #e5e7eb;
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.container {
+  width: 92%;
+  max-width: 420px;
+  background: rgba(15,23,42,.9);
+  border-radius: 20px;
+  padding: 22px;
+  box-shadow: 0 20px 50px rgba(0,0,0,.6);
+}
+
+h2 {
+  margin: 0;
+  text-align: center;
+  font-size: 22px;
+}
+
+.status {
+  text-align: center;
+  font-size: 14px;
+  margin-top: 6px;
+  color: #94a3b8;
+}
+
+.pulse {
+  width: 54px;
+  height: 54px;
+  margin: 16px auto;
+  background: #2563eb;
+  border-radius: 50%;
+  display: none;
+  animation: pulse 1.4s infinite;
+}
+
+@keyframes pulse {
+  0% { box-shadow: 0 0 0 0 rgba(37,99,235,.7); }
+  100% { box-shadow: 0 0 0 28px rgba(0,0,0,0); }
+}
+
+input[type=file] {
+  width: 100%;
+  margin: 12px 0;
+  color: #cbd5f5;
+}
+
+button {
+  width: 100%;
+  padding: 14px;
+  border-radius: 14px;
+  border: none;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  margin-top: 10px;
+}
+
+.start {
+  background: #2563eb;
+  color: #fff;
+}
+
+.stop {
+  background: #dc2626;
+  color: #fff;
+}
+
+button:disabled {
+  opacity: .6;
+  cursor: not-allowed;
+}
+
+.log {
+  margin-top: 14px;
+  background: rgba(255,255,255,.06);
+  padding: 14px;
+  border-radius: 14px;
+  font-size: 13px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.log p {
+  margin: 6px 0;
+}
+
+.ai { color: #93c5fd; }
+.user { color: #a7f3d0; }
 </style>
 </head>
-<body>
 
-<div class="card">
-  <h2>Career Lab AI</h2>
-  <p id="status">Upload Resume to Start</p>
-  
-  <input type="file" id="cvFile" accept=".pdf,.txt" style="margin-bottom: 15px; font-size: 12px; width: 100%;">
-  
-  <div id="micVisual" class="pulse"></div>
-  
-  <button id="startBtn" disabled>🎤 Start Interview</button>
-  <button id="endBtn">🛑 End & Evaluate</button>
-  
-  <div id="log">Welcome. Please upload a PDF or Text resume to begin your voice session.</div>
+<body>
+<div class="container">
+
+<h2>AI Interviewer</h2>
+<div class="status" id="status">Upload resume to begin</div>
+<div class="pulse" id="pulse"></div>
+
+<input id="cvFile" type="file" accept=".pdf,.txt">
+
+<button id="mainBtn" class="start" disabled>Start Interview</button>
+
+<div class="log" id="log"></div>
+
 </div>
 
 <script>
-/* --- CONFIG --- */
-const API_URL = "https://evalis-ai.simpaticohrconsultancy.workers.dev";
-const pdfjsLib = window['pdfjs-dist/build/pdf'];
-pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+/* ================= CONFIG ================= */
+const WORKER_URL = "https://evalis-ai.simpaticohrconsultancy.workers.dev";
 
-/* --- STATE --- */
-let chatHistory = [];
-let isInterviewActive = false;
-let isProcessing = false; // Lock to prevent overlapping requests
-let globalCVText = "";
-const synth = window.speechSynthesis;
+/* ================= STATE ================= */
+let cvText = "";
+let history = [];
+let recorder, stream;
+let isRunning = false;
+let isBusy = false;
 
+/* ================= HELPERS ================= */
 const statusEl = document.getElementById("status");
-const logEl = document.getElementById("log");
-const micVisual = document.getElementById("micVisual");
-const startBtn = document.getElementById("startBtn");
-const endBtn = document.getElementById("endBtn");
-const cvInput = document.getElementById("cvFile");
+const pulse = document.getElementById("pulse");
+const log = document.getElementById("log");
+const btn = document.getElementById("mainBtn");
 
-/* --- 1. CV PARSER --- */
-cvInput.onchange = async (e) => {
+function addLog(text, cls) {
+  log.innerHTML += `<p class="${cls}">${text}</p>`;
+  log.scrollTop = log.scrollHeight;
+}
+
+/* ================= PDF / TXT ================= */
+document.getElementById("cvFile").onchange = async e => {
   const file = e.target.files[0];
   if (!file) return;
-  statusEl.innerText = "Reading Resume...";
-  try {
-    if (file.type === "application/pdf") {
-      const reader = new FileReader();
-      reader.onload = async function() {
-        const loadingTask = pdfjsLib.getDocument(new Uint8Array(this.result));
-        const pdf = await loadingTask.promise;
-        let text = "";
-        for (let i = 1; i <= pdf.numPages; i++) {
-          const page = await pdf.getPage(i);
-          const content = await page.getTextContent();
-          text += content.items.map(s => s.str).join(" ");
-        }
-        globalCVText = text;
-        finishSetup();
-      };
-      reader.readAsArrayBuffer(file);
-    } else {
-      globalCVText = await file.text();
-      finishSetup();
+
+  statusEl.innerText = "Reading resume…";
+
+  if (file.type === "application/pdf") {
+    const pdf = await pdfjsLib.getDocument(new Uint8Array(await file.arrayBuffer())).promise;
+    let text = "";
+    for (let i = 1; i <= pdf.numPages; i++) {
+      const page = await pdf.getPage(i);
+      const content = await page.getTextContent();
+      text += content.items.map(i => i.str).join(" ") + " ";
     }
-  } catch (err) { statusEl.innerText = "Error loading file."; }
+    cvText = text;
+  } else {
+    cvText = await file.text();
+  }
+
+  statusEl.innerText = "Ready to start interview";
+  btn.disabled = false;
 };
 
-function finishSetup() {
-  statusEl.innerText = "Resume Loaded";
-  startBtn.disabled = false;
+/* ================= SPEECH ================= */
+function speak(text) {
+  addLog("AI: " + text, "ai");
+  const u = new SpeechSynthesisUtterance(text);
+  u.onend = () => isRunning && startListening();
+  speechSynthesis.speak(u);
 }
 
-/* --- 2. THE VOICE LOOP --- */
+/* ================= LISTEN ================= */
+async function startListening() {
+  if (isBusy) return;
 
-
-function aiSpeak(text) {
-  if (!text || text === "undefined") { isProcessing = false; return; }
-  
-  logEl.innerHTML += `<br><b>AI:</b> ${text}`;
-  logEl.scrollTop = logEl.scrollHeight;
-
-  const utterance = new SpeechSynthesisUtterance(text);
-  
-  // CRITICAL: Only unlock the "Analyzing" state AFTER the AI finishes talking
-  utterance.onend = () => {
-    isProcessing = false; 
-    if (isInterviewActive) startRecording(); 
-  };
-  
-  synth.speak(utterance);
-}
-
-async function startRecording() {
-  if (isProcessing || !isInterviewActive) return;
-  
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    const recorder = new MediaRecorder(stream);
+    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    recorder = new MediaRecorder(stream);
     const chunks = [];
 
-    micVisual.style.display = "block";
-    statusEl.innerText = "Listening...";
+    pulse.style.display = "block";
+    statusEl.innerText = "Listening…";
 
-    recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
-    
+    recorder.ondataavailable = e => chunks.push(e.data);
+
     recorder.onstop = async () => {
-      if (chunks.length === 0) { isProcessing = false; return; }
-      
-      isProcessing = true; // Lock the system
-      micVisual.style.display = "none";
-      statusEl.innerText = "Analyzing...";
-      stream.getTracks().forEach(t => t.stop());
+      pulse.style.display = "none";
+      if (!isRunning) return;
+
+      isBusy = true;
+      statusEl.innerText = "Analyzing…";
 
       const fd = new FormData();
       fd.append("audio", new Blob(chunks, { type: "audio/webm" }));
       fd.append("mode", "interview");
-      fd.append("cvText", globalCVText);
-      fd.append("history", JSON.stringify(chatHistory));
+      fd.append("cvText", cvText);
+      fd.append("history", JSON.stringify(history));
 
       try {
-        const res = await fetch(API_URL, { method: "POST", body: fd });
-        if (!res.ok) throw new Error("Worker Error");
+        const res = await fetch(WORKER_URL, { method: "POST", body: fd });
         const data = await res.json();
-        
-        if (data.nextQuestion) {
-          chatHistory = data.newHistory || chatHistory;
-          aiSpeak(data.nextQuestion);
-        }
-      } catch (err) {
-        statusEl.innerText = "Connection Error. Tap to retry.";
-        isProcessing = false;
-        // Allows manual recovery if network drops
+
+        history = data.newHistory || history;
+        isBusy = false;
+        speak(data.nextQuestion);
+
+      } catch {
+        isBusy = false;
+        statusEl.innerText = "Network issue – retrying…";
+        setTimeout(startListening, 2500);
       }
     };
 
     recorder.start();
-    // 7-second auto-stop for snappy conversation
-    setTimeout(() => { if(recorder.state === "recording") recorder.stop(); }, 7000);
-    
-  } catch (err) {
-    statusEl.innerText = "Mic Error. Check permissions.";
-    isInterviewActive = false;
+    setTimeout(() => recorder.state === "recording" && recorder.stop(), 7000);
+
+  } catch {
+    statusEl.innerText = "Microphone access denied";
   }
 }
 
-/* --- 3. ACTIONS --- */
-startBtn.onclick = () => {
-  isInterviewActive = true;
-  startBtn.style.display = "none";
-  cvInput.style.display = "none";
-  endBtn.style.display = "block";
-  aiSpeak("I have analyzed your resume. Let's start the interview. Can you tell me about yourself and your professional background?");
-};
+/* ================= BUTTON ================= */
+btn.onclick = async () => {
+  if (!isRunning) {
+    isRunning = true;
+    btn.className = "stop";
+    btn.innerText = "End & Generate Report";
+    speak("Welcome. I have reviewed your resume. Please introduce yourself.");
+  } else {
+    isRunning = false;
+    speechSynthesis.cancel();
+    recorder && recorder.stop();
+    stream && stream.getTracks().forEach(t => t.stop());
 
-endBtn.onclick = async () => {
-  isInterviewActive = false;
-  synth.cancel(); // Stop AI from talking
-  statusEl.innerText = "Generating Final Report...";
-  endBtn.disabled = true;
+    btn.disabled = true;
+    btn.innerText = "Generating report…";
+    statusEl.innerText = "Final evaluation…";
 
-  const fd = new FormData();
-  fd.append("mode", "evaluate");
-  fd.append("history", JSON.stringify(chatHistory));
+    const fd = new FormData();
+    fd.append("mode", "evaluate");
+    fd.append("history", JSON.stringify(history));
 
-  try {
-    const res = await fetch(API_URL, { method: "POST", body: fd });
+    const res = await fetch(WORKER_URL, { method: "POST", body: fd });
     const data = await res.json();
-    logEl.innerHTML = `<div style="background:#1e293b; padding:15px; border-radius:10px; border-left:4px solid var(--accent); margin-top:10px;">
-      <h3 style="margin:0 0 10px 0;">Interview Report</h3>
-      <p style="white-space: pre-wrap;">${data.report}</p>
-    </div>`;
-    statusEl.innerText = "Session Complete";
-  } catch (err) {
-    statusEl.innerText = "Error generating report.";
+
+    statusEl.innerText = "Interview completed";
+    log.innerHTML =
+      `<div style="background:#fff;color:#000;padding:14px;border-radius:12px">
+       <h3>Final Feedback</h3>${data.report}</div>`;
   }
 };
 </script>
+
 </body>
 </html>
