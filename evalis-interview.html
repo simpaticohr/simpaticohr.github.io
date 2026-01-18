@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI Technical Interview</title>
+    <title>Mercor Style AI Interview</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
     <style>
         :root { --accent: #2563eb; --bg: #0f172a; }
@@ -14,8 +14,6 @@
         #transcript { height: 200px; overflow-y: auto; background: #0f172a; border-radius: 12px; padding: 15px; text-align: left; font-size: 14px; margin-top: 20px; border: 1px solid #334155; }
         button { width: 100%; padding: 16px; border-radius: 12px; border: none; background: var(--accent); color: white; font-weight: bold; cursor: pointer; font-size: 16px; }
         button:disabled { opacity: 0.3; cursor: not-allowed; }
-        .user-line { color: #94a3b8; margin-bottom: 8px; }
-        .ai-line { color: #60a5fa; margin-bottom: 15px; }
     </style>
 </head>
 <body>
@@ -68,11 +66,11 @@
             rec.ondataavailable = e => chunks.push(e.data);
             rec.onstop = async () => {
                 if(!active) return;
-                document.getElementById('status').innerText = "Processing...";
+                document.getElementById('status').innerText = "Processing Answer...";
                 busy = true;
 
-                // FIX: Send as FormData to avoid "Type mismatch"
                 const fd = new FormData();
+                // Send as a binary file to avoid "Type mismatch"
                 fd.append("audio", new Blob(chunks, {type: 'audio/webm'}), "voice.webm");
                 fd.append("resume", cvText);
                 fd.append("history", JSON.stringify(history));
@@ -83,25 +81,26 @@
                     
                     if (data.error) {
                         console.error("Worker Error:", data.error);
-                        busy = false; startTurn();
+                        busy = false; 
+                        startTurn();
                     } else {
                         history = data.history;
                         updateTranscript(data.userText, data.reply);
                         speak(data.reply);
                     }
                 } catch (err) { 
-                    busy = false; startTurn(); 
+                    busy = false; 
+                    startTurn(); 
                 }
                 stream.getTracks().forEach(t => t.stop());
             };
 
             rec.start();
-            // Automatically stop and process after 6 seconds of speech
+            // Automatically process after 6 seconds of recording
             setTimeout(() => { if(rec.state === "recording") rec.stop(); }, 6000); 
-        } catch (err) { alert("Mic required for interview."); }
+        } catch (err) { alert("Microphone access required."); }
     }
 
-    // 3. Text-to-Speech and Loop Trigger
     function speak(text) {
         window.speechSynthesis.cancel();
         const ut = new SpeechSynthesisUtterance(text);
@@ -109,31 +108,28 @@
         
         ut.onend = () => { 
             busy = false; 
-            if(active) setTimeout(startTurn, 400); // Continuous loop trigger
+            if(active) setTimeout(startTurn, 300); // Continuous loop trigger
         };
         window.speechSynthesis.speak(ut);
     }
 
     function updateTranscript(user, ai) {
         const box = document.getElementById('transcript');
-        if(user) box.innerHTML += `<div class="user-line"><b>You:</b> ${user}</div>`;
-        box.innerHTML += `<div class="ai-line"><b>AI:</b> ${ai}</div>`;
+        if(user) box.innerHTML += `<div style="color: #94a3b8;"><b>You:</b> ${user}</div>`;
+        box.innerHTML += `<div style="color: #60a5fa; margin-bottom: 10px;"><b>AI:</b> ${ai}</div>`;
         box.scrollTop = box.scrollHeight;
     }
 
-    // 4. 15-Minute Countdown
     function startTimer() {
         timerInterval = setInterval(() => {
             timeLeft--;
             let m = Math.floor(timeLeft / 60), s = timeLeft % 60;
             document.getElementById('timer').innerText = `${m}:${s < 10 ? '0' : ''}${s}`;
-
             if (timeLeft <= 0) {
                 clearInterval(timerInterval);
                 active = false;
-                speak("The 15-minute interview window has now closed. Thank you for your time.");
-                document.getElementById('status').innerText = "Interview Finished";
-                setTimeout(() => location.reload(), 8000); // Auto-close
+                speak("The 15-minute interview window has now closed. Thank you.");
+                setTimeout(() => location.reload(), 8000);
             }
         }, 1000);
     }
@@ -142,7 +138,7 @@
         active = true;
         document.getElementById('startBtn').style.display = "none";
         startTimer();
-        speak("I have reviewed your resume. Let's begin the technical interview. Can you please introduce yourself?");
+        speak("I have reviewed your resume. Let's begin. Can you please introduce yourself?");
     };
 </script>
 </body>
