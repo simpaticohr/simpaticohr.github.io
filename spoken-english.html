@@ -6,74 +6,65 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 
 <style>
+* { box-sizing: border-box; }
 body {
   margin: 0;
   min-height: 100vh;
-  background: radial-gradient(circle at top, #0f172a, #020617);
+  background: radial-gradient(circle at top, #020617, #020617);
   font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  color: #e5e7eb;
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #e5e7eb;
 }
-
 .card {
-  width: 340px;
-  background: rgba(15, 23, 42, 0.85);
-  border: 1px solid #1e293b;
+  width: 360px;
+  background: linear-gradient(180deg, #0f172a, #020617);
   border-radius: 16px;
-  padding: 22px;
-  box-shadow: 0 20px 40px rgba(0,0,0,0.4);
+  padding: 24px;
+  border: 1px solid #1e293b;
+  box-shadow: 0 10px 40px rgba(0,0,0,.5);
 }
-
 h2 {
-  margin: 0 0 6px;
+  margin: 0;
   text-align: center;
 }
-
 #status {
-  text-align: center;
+  margin: 10px 0 16px;
   font-size: 13px;
   color: #38bdf8;
-  min-height: 18px;
+  text-align: center;
 }
-
 button {
   width: 100%;
   padding: 14px;
-  margin-top: 10px;
   border-radius: 12px;
   border: none;
-  font-size: 15px;
   font-weight: 600;
   cursor: pointer;
 }
-
 #startBtn {
   background: #2563eb;
-  color: #fff;
+  color: white;
 }
-
 #stopBtn {
+  margin-top: 10px;
   background: #1e293b;
-  color: #cbd5f5;
+  color: #94a3b8;
 }
-
-button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.result {
+#output {
   margin-top: 16px;
   font-size: 14px;
-  line-height: 1.5;
+  line-height: 1.6;
 }
-
 .score {
+  font-size: 32px;
+  text-align: center;
   margin-top: 10px;
-  font-size: 28px;
   font-weight: 700;
+}
+.error {
+  color: #f87171;
   text-align: center;
 }
 </style>
@@ -87,29 +78,30 @@ button:disabled {
   <button id="startBtn">🎤 Start Speaking</button>
   <button id="stopBtn" disabled>Stop</button>
 
-  <div id="output" class="result"></div>
+  <div id="output"></div>
 </div>
 
 <script>
-const WORKER_URL = "https://evalis-ai.simpaticohrconsultancy.workers.dev";
+const WORKER_URL =
+  "https://evalis-ai.simpaticohrconsultancy.workers.dev";
 
-const startBtn = document.getElementById("startBtn");
-const stopBtn = document.getElementById("stopBtn");
+let recorder, stream, chunks = [];
+
 const statusEl = document.getElementById("status");
 const outputEl = document.getElementById("output");
+const startBtn = document.getElementById("startBtn");
+const stopBtn = document.getElementById("stopBtn");
 
-let recorder;
-let stream;
-let chunks = [];
-
-async function startRecording() {
+startBtn.onclick = async () => {
+  outputEl.innerHTML = "";
+  statusEl.textContent = "Requesting microphone...";
   try {
     stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    recorder = new MediaRecorder(stream);
+    recorder = new MediaRecorder(stream, { mimeType: "audio/webm" });
     chunks = [];
 
     recorder.ondataavailable = e => {
-      if (e.data.size > 0) chunks.push(e.data);
+      if (e.data.size) chunks.push(e.data);
     };
 
     recorder.onstop = sendAudio;
@@ -123,16 +115,18 @@ async function startRecording() {
       if (recorder.state === "recording") recorder.stop();
     }, 5000);
 
-  } catch (err) {
+  } catch {
     statusEl.textContent = "Microphone permission denied.";
   }
-}
+};
+
+stopBtn.onclick = () => {
+  if (recorder && recorder.state === "recording") recorder.stop();
+};
 
 async function sendAudio() {
-  stopBtn.disabled = true;
   statusEl.textContent = "Evaluating...";
-
-  stream.getTracks().forEach(t => t.stop());
+  stopBtn.disabled = true;
 
   const blob = new Blob(chunks, { type: "audio/webm" });
   const form = new FormData();
@@ -144,30 +138,30 @@ async function sendAudio() {
       body: form
     });
 
-    if (!res.ok) throw new Error("Server error");
+    if (!res.ok) throw new Error("Server unavailable");
 
     const data = await res.json();
 
     outputEl.innerHTML = `
-      <strong>You said:</strong><br>${data.transcript}<br><br>
-      <strong>Feedback:</strong><br>${data.feedback}
-      <div class="score">${data.score}/10</div>
+      <strong>You said:</strong><br>${data.transcript || "-"}<br><br>
+      <strong>Feedback:</strong><br>${data.feedback || "-"}
+      <div class="score">${data.score ?? 0}/10</div>
     `;
 
     statusEl.textContent = "Completed";
 
   } catch (err) {
     statusEl.textContent = "Server unavailable.";
-    outputEl.innerHTML = "";
+    outputEl.innerHTML = `
+      <div class="error">
+        ❌ Audio evaluation blocked by server
+      </div>
+    `;
   } finally {
     startBtn.disabled = false;
+    stream?.getTracks().forEach(t => t.stop());
   }
 }
-
-startBtn.onclick = startRecording;
-stopBtn.onclick = () => {
-  if (recorder && recorder.state === "recording") recorder.stop();
-};
 </script>
 </body>
 </html>
