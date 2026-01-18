@@ -15,7 +15,6 @@
   button:disabled { background: #475569; cursor: not-allowed; }
   #endBtn { background: var(--danger); display: none; }
   #log { background: rgba(0,0,0,0.3); padding: 15px; border-radius: 12px; height: 220px; overflow-y: auto; font-size: 13px; text-align: left; margin-top: 20px; color: #cbd5e1; border: 1px solid rgba(255,255,255,0.05); }
-  .report-box { background: #1e293b; padding: 15px; border-radius: 10px; border-left: 4px solid var(--accent); margin-top: 10px; }
 </style>
 </head>
 <body>
@@ -27,19 +26,17 @@
   <div id="micVisual" class="pulse"></div>
   <button id="startBtn" disabled>🎤 Start Interview</button>
   <button id="endBtn">🛑 End & Generate Report</button>
-  <div id="log">Welcome. Upload your resume to start.</div>
+  <div id="log">Welcome. Please upload your resume.</div>
 </div>
 
 <script>
-/* ===== CONFIG ===== */
 const API_URL = "https://evalis-ai.simpaticohrconsultancy.workers.dev";
 const pdfjsLib = window['pdfjs-dist/build/pdf'];
 pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 
-/* ===== STATE ===== */
 let chatHistory = [];
 let isInterviewActive = false;
-let isProcessing = false; // The critical lock
+let isProcessing = false; 
 let globalCVText = "";
 const synth = window.speechSynthesis;
 
@@ -49,10 +46,10 @@ const micVisual = document.getElementById("micVisual");
 const startBtn = document.getElementById("startBtn");
 const endBtn = document.getElementById("endBtn");
 
-/* ===== 1. PDF PARSER ===== */
+// 1. PDF Resume Parser
 document.getElementById("cvFile").onchange = async (e) => {
   const file = e.target.files[0];
-  statusEl.innerText = "Reading CV...";
+  statusEl.innerText = "Processing CV...";
   try {
     if (file.type === "application/pdf") {
       const reader = new FileReader();
@@ -74,29 +71,23 @@ document.getElementById("cvFile").onchange = async (e) => {
       statusEl.innerText = "Resume Ready";
       startBtn.disabled = false;
     }
-  } catch (err) { statusEl.innerText = "Error loading CV."; }
+  } catch (err) { statusEl.innerText = "CV Error."; }
 };
 
-/* ===== 2. VOICE OUTPUT ===== */
+// 2. AI Speaking (Releases processing lock ONLY after speaking)
 function aiSpeak(text) {
-  if (!text || text === "undefined") {
-    isProcessing = false;
-    return;
-  }
-  
+  if (!text || text === "undefined") { isProcessing = false; return; }
   logEl.innerHTML += `<br><b>AI:</b> ${text}`;
   logEl.scrollTop = logEl.scrollHeight;
-
   const utterance = new SpeechSynthesisUtterance(text);
   utterance.onend = () => { 
-    isProcessing = false; // Release lock only after speaking finishes
+    isProcessing = false; 
     if (isInterviewActive) startRecording(); 
   };
   synth.speak(utterance);
 }
 
-/* ===== 3. VOICE INPUT (MERCOR-STYLE) ===== */
-
+// 3. Robust Recording Loop (Fixes "Network Error")
 async function startRecording() {
   if (isProcessing || !isInterviewActive) return;
   
@@ -104,14 +95,15 @@ async function startRecording() {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     const recorder = new MediaRecorder(stream);
     const chunks = [];
-
     micVisual.style.display = "block";
     statusEl.innerText = "Listening...";
 
-    recorder.ondataavailable = e => chunks.push(e.data);
+    recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
     
     recorder.onstop = async () => {
-      isProcessing = true; // Lock state
+      if (chunks.length === 0) { isProcessing = false; startRecording(); return; }
+      
+      isProcessing = true;
       micVisual.style.display = "none";
       statusEl.innerText = "Analyzing your answer...";
       stream.getTracks().forEach(t => t.stop());
@@ -123,15 +115,13 @@ async function startRecording() {
       fd.append("history", JSON.stringify(chatHistory));
 
       try {
-        // High-speed transcription via Whisper Large v3 Turbo
         const res = await fetch(API_URL, { method: "POST", body: fd });
+        if (!res.ok) throw new Error("Worker Timeout");
         const data = await res.json();
         
         if (data.nextQuestion) {
           chatHistory = data.newHistory || chatHistory;
           aiSpeak(data.nextQuestion);
-        } else {
-          throw new Error("Invalid response");
         }
       } catch (err) {
         statusEl.innerText = "Network Error. Retrying...";
@@ -143,42 +133,28 @@ async function startRecording() {
     recorder.start();
     setTimeout(() => { if(recorder.state === "recording") recorder.stop(); }, 8000);
     
-  } catch (err) {
-    statusEl.innerText = "Mic Error.";
-    isInterviewActive = false;
-  }
+  } catch (err) { statusEl.innerText = "Mic Error."; isInterviewActive = false; }
 }
 
-/* ===== 4. HANDLERS ===== */
 startBtn.onclick = () => {
   isInterviewActive = true;
   startBtn.style.display = "none";
   endBtn.style.display = "block";
   document.getElementById("cvFile").style.display = "none";
-  // Initial prompt uses Llama 3.3 70B for deep CV context
-  aiSpeak("I've reviewed your background. Based on your resume, can you walk me through your most significant technical achievement?");
+  aiSpeak("I've reviewed your resume. Based on your achievement, tell me how you handle technical challenges?");
 };
 
 endBtn.onclick = async () => {
   isInterviewActive = false;
   synth.cancel();
-  statusEl.innerText = "Generating Final Report...";
-  endBtn.disabled = true;
-
+  statusEl.innerText = "Evaluating Session...";
   const fd = new FormData();
   fd.append("mode", "evaluate");
   fd.append("history", JSON.stringify(chatHistory));
-
-  try {
-    const res = await fetch(API_URL, { method: "POST", body: fd });
-    const data = await res.json();
-    
-    logEl.innerHTML = `<div class="report-box">
-      <h3>Interview Performance Report</h3>
-      <p style="white-space: pre-wrap;">${data.report}</p>
-    </div>`;
-    statusEl.innerText = "Interview Complete";
-  } catch (err) { statusEl.innerText = "Report failed."; }
+  const res = await fetch(API_URL, { method: "POST", body: fd });
+  const data = await res.json();
+  logEl.innerHTML = `<div style="background:#1e293b; padding:15px; border-radius:10px;"><h3>Final Report</h3><p>${data.report}</p></div>`;
+  statusEl.innerText = "Complete";
 };
 </script>
 </body>
