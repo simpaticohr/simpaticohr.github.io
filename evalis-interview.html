@@ -1,59 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>AI Mock Interview</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+body {
+  font-family: system-ui, sans-serif;
+  background: #0b1d3a;
+  color: white;
+  margin: 0;
+  padding: 30px;
+}
+.card {
+  max-width: 500px;
+  margin: auto;
+  background: rgba(255,255,255,0.08);
+  padding: 20px;
+  border-radius: 14px;
+}
+button {
+  width: 100%;
+  padding: 12px;
+  margin-top: 10px;
+  font-weight: 600;
+}
+pre {
+  background: rgba(0,0,0,0.4);
+  padding: 10px;
+  border-radius: 8px;
+}
+</style>
+</head>
+
+<body>
+<div class="card">
+  <h2>AI Mock Interview</h2>
+  <p id="status">Click start to begin</p>
+
+  <button id="start">🎤 Start Interview</button>
+  <pre id="log"></pre>
+</div>
+
 <script>
-let chatHistory = [];
-let isInterviewActive = false;
-const synth = window.speechSynthesis;
+/* ===== CONFIG ===== */
 const API_URL = "https://evalis-ai.simpaticohrconsultancy.workers.dev";
 
-// 🔊 AI speaks first, then listens
+/* ===== STATE ===== */
+let chatHistory = [];
+let isInterviewActive = false;
+let globalExtractedCVText = ""; // SAFE DEFAULT
+
+const synth = window.speechSynthesis;
+const statusEl = document.getElementById("status");
+const logEl = document.getElementById("log");
+
+/* ===== AI SPEAK ===== */
 function aiSpeak(text) {
-  const utter = new SpeechSynthesisUtterance(text);
-  utter.onend = () => {
-    if (isInterviewActive) startListening();
+  logEl.textContent += "\nAI: " + text;
+  const u = new SpeechSynthesisUtterance(text);
+  u.onend = () => {
+    if (isInterviewActive) startRecording();
   };
-  synth.speak(utter);
+  synth.speak(u);
 }
 
-// 🎤 Record user answer
-async function startListening() {
+/* ===== RECORD ===== */
+async function startRecording() {
   const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
   const recorder = new MediaRecorder(stream);
   const chunks = [];
 
   recorder.ondataavailable = e => chunks.push(e.data);
-
   recorder.onstop = async () => {
     stream.getTracks().forEach(t => t.stop());
 
     const fd = new FormData();
     fd.append("audio", new Blob(chunks, { type: "audio/webm" }));
     fd.append("mode", "interview");
-    fd.append("candidate_id", candidateId);
-    fd.append("job_id", jobId);
+    fd.append("cvText", globalExtractedCVText);
     fd.append("history", JSON.stringify(chatHistory));
 
     const res = await fetch(API_URL, { method: "POST", body: fd });
     const data = await res.json();
 
-    // Interview finished?
-    if (data.complete) {
-      showFinalReport(data.report);
-      isInterviewActive = false;
-      return;
-    }
-
-    chatHistory = data.newHistory;
-    aiSpeak(data.nextQuestion);
+    chatHistory = data.newHistory || chatHistory;
+    aiSpeak(data.nextQuestion || "Next question.");
   };
 
   recorder.start();
-  setTimeout(() => {
-    if (recorder.state === "recording") recorder.stop();
-  }, 8000);
+  setTimeout(() => recorder.stop(), 7000);
 }
 
-// ▶️ Start interview
-function startInterview() {
+/* ===== START ===== */
+document.getElementById("start").onclick = () => {
   isInterviewActive = true;
-  aiSpeak("Hello. Let's begin your interview. Please introduce yourself.");
-}
+  statusEl.textContent = "Interview started";
+  aiSpeak("Tell me about yourself.");
+};
 </script>
+</body>
+</html>
