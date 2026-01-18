@@ -2,101 +2,123 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
-<title>AI Mock Interview</title>
+<title>AI Mock Interview | Simpatico HR</title>
 <meta name="viewport" content="width=device-width, initial-scale=1" />
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <style>
-body {
-  font-family: system-ui, sans-serif;
-  background: #0b1d3a;
-  color: white;
-  margin: 0;
-  padding: 30px;
-}
-.card {
-  max-width: 500px;
-  margin: auto;
-  background: rgba(255,255,255,0.08);
-  padding: 20px;
-  border-radius: 14px;
-}
-button {
-  width: 100%;
-  padding: 12px;
-  margin-top: 10px;
-  font-weight: 600;
-}
-pre {
-  background: rgba(0,0,0,0.4);
-  padding: 10px;
-  border-radius: 8px;
-}
+  :root { --accent: #2563eb; --bg: #0b1d3a; }
+  body { font-family: 'Inter', sans-serif; background: var(--bg); color: white; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; }
+  .card { width: 90%; max-width: 450px; background: rgba(255,255,255,0.05); padding: 30px; border-radius: 24px; border: 1px solid rgba(255,255,255,0.1); text-align: center; }
+  .pulse { width: 80px; height: 80px; background: var(--accent); border-radius: 50%; margin: 20px auto; display: none; animation: pulse-animation 1.5s infinite; }
+  @keyframes pulse-animation { 0% { box-shadow: 0 0 0 0px rgba(37, 99, 235, 0.7); } 100% { box-shadow: 0 0 0 20px rgba(37, 99, 235, 0); } }
+  button { width: 100%; padding: 15px; border-radius: 12px; border: none; background: var(--accent); color: white; font-weight: 700; cursor: pointer; margin-top: 15px; }
+  button:disabled { background: #475569; cursor: not-allowed; }
+  #log { background: rgba(0,0,0,0.3); padding: 15px; border-radius: 12px; height: 150px; overflow-y: auto; font-size: 13px; text-align: left; margin-top: 20px; color: #cbd5e1; }
 </style>
 </head>
-
 <body>
-<div class="card">
-  <h2>AI Mock Interview</h2>
-  <p id="status">Click start to begin</p>
 
-  <button id="start">🎤 Start Interview</button>
-  <pre id="log"></pre>
+<div class="card">
+  <h2>AI Interviewer</h2>
+  <p id="status">Upload CV to begin</p>
+  
+  <input type="file" id="cvFile" accept=".pdf,.txt" style="margin-bottom: 10px; font-size: 12px;">
+  <div id="micVisual" class="pulse"></div>
+  
+  <button id="startBtn" disabled>🎤 Start Interview</button>
+  <div id="log">Welcome. Upload your resume to start a voice-to-voice mock session.</div>
 </div>
 
 <script>
-/* ===== CONFIG ===== */
 const API_URL = "https://evalis-ai.simpaticohrconsultancy.workers.dev";
-
-/* ===== STATE ===== */
 let chatHistory = [];
 let isInterviewActive = false;
-let globalExtractedCVText = ""; // SAFE DEFAULT
+let globalCVText = "";
 
 const synth = window.speechSynthesis;
 const statusEl = document.getElementById("status");
 const logEl = document.getElementById("log");
+const micVisual = document.getElementById("micVisual");
 
-/* ===== AI SPEAK ===== */
-function aiSpeak(text) {
-  logEl.textContent += "\nAI: " + text;
-  const u = new SpeechSynthesisUtterance(text);
-  u.onend = () => {
-    if (isInterviewActive) startRecording();
-  };
-  synth.speak(u);
+// 1. PDF Parser to populate globalCVText
+document.getElementById("cvFile").onchange = async (e) => {
+  const file = e.target.files[0];
+  statusEl.innerText = "Reading CV...";
+  if (file.type === "application/pdf") {
+    const reader = new FileReader();
+    reader.onload = async function() {
+      const loadingTask = pdfjsLib.getDocument(new Uint8Array(this.result));
+      const pdf = await loadingTask.promise;
+      let text = "";
+      for (let i = 1; i <= pdf.numPages; i++) {
+        const page = await pdf.getPage(i);
+        const content = await page.getTextContent();
+        text += content.items.map(s => s.str).join(" ");
+      }
+      globalCVText = text;
+      finishLoading();
+    };
+    reader.readAsArrayBuffer(file);
+  } else {
+    globalCVText = await file.text();
+    finishLoading();
+  }
+};
+
+function finishLoading() {
+  statusEl.innerText = "CV Processed";
+  document.getElementById("startBtn").disabled = false;
 }
 
-/* ===== RECORD ===== */
+// 2. AI Speaking (Triggers Mic when done)
+function aiSpeak(text) {
+  logEl.innerHTML += `<br><b>AI:</b> ${text}`;
+  logEl.scrollTop = logEl.scrollHeight;
+  const utterance = new SpeechSynthesisUtterance(text);
+  utterance.onend = () => { if (isInterviewActive) startRecording(); };
+  synth.speak(utterance);
+}
+
+// 3. Continuous Recording Loop
 async function startRecording() {
   const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
   const recorder = new MediaRecorder(stream);
   const chunks = [];
 
+  micVisual.style.display = "block";
+  statusEl.innerText = "Listening...";
+
   recorder.ondataavailable = e => chunks.push(e.data);
   recorder.onstop = async () => {
+    micVisual.style.display = "none";
+    statusEl.innerText = "Processing...";
     stream.getTracks().forEach(t => t.stop());
 
     const fd = new FormData();
     fd.append("audio", new Blob(chunks, { type: "audio/webm" }));
     fd.append("mode", "interview");
-    fd.append("cvText", globalExtractedCVText);
+    fd.append("cvText", globalCVText);
     fd.append("history", JSON.stringify(chatHistory));
 
-    const res = await fetch(API_URL, { method: "POST", body: fd });
-    const data = await res.json();
-
-    chatHistory = data.newHistory || chatHistory;
-    aiSpeak(data.nextQuestion || "Next question.");
+    try {
+      const res = await fetch(API_URL, { method: "POST", body: fd });
+      const data = await res.json();
+      chatHistory = data.newHistory || chatHistory;
+      aiSpeak(data.nextQuestion);
+    } catch (err) {
+      statusEl.innerText = "Error connecting to AI";
+    }
   };
 
   recorder.start();
-  setTimeout(() => recorder.stop(), 7000);
+  setTimeout(() => { if(recorder.state === "recording") recorder.stop(); }, 8000);
 }
 
-/* ===== START ===== */
-document.getElementById("start").onclick = () => {
+document.getElementById("startBtn").onclick = () => {
   isInterviewActive = true;
-  statusEl.textContent = "Interview started";
-  aiSpeak("Tell me about yourself.");
+  document.getElementById("startBtn").style.display = "none";
+  document.getElementById("cvFile").style.display = "none";
+  aiSpeak("Thank you for uploading your resume. I've reviewed your background. To start, can you introduce yourself and tell me about your most significant professional achievement?");
 };
 </script>
 </body>
