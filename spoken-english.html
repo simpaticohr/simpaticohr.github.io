@@ -1,176 +1,108 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <title>Spoken English Practice | Simpatico HR</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<meta charset="UTF-8">
+<title>Spoken English | Simpatico HR</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
 
-  <style>
-    * { box-sizing: border-box; font-family: system-ui, sans-serif; }
-
-    body {
-      margin: 0;
-      height: 100vh;
-      background: radial-gradient(circle at top, #0b1c3d, #020617);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      color: #fff;
-    }
-
-    .card {
-      width: 340px;
-      background: rgba(255,255,255,0.06);
-      backdrop-filter: blur(14px);
-      border-radius: 16px;
-      padding: 20px;
-      text-align: center;
-      box-shadow: 0 20px 60px rgba(0,0,0,.4);
-    }
-
-    h2 { margin: 0 0 6px; }
-    .status { font-size: 13px; opacity: .8; margin-bottom: 14px; }
-
-    button {
-      width: 100%;
-      border: none;
-      border-radius: 10px;
-      padding: 12px;
-      font-size: 15px;
-      cursor: pointer;
-    }
-
-    .start {
-      background: #2563eb;
-      color: #fff;
-      margin-bottom: 10px;
-    }
-
-    .stop {
-      background: #374151;
-      color: #9ca3af;
-    }
-
-    .box {
-      margin-top: 14px;
-      font-size: 13px;
-      text-align: left;
-      opacity: .9;
-      max-height: 120px;
-      overflow-y: auto;
-    }
-
-    .score {
-      margin-top: 10px;
-      font-size: 22px;
-      font-weight: bold;
-    }
-  </style>
+<style>
+body {
+  margin: 0;
+  background: #020617;
+  font-family: system-ui;
+  color: #e5e7eb;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 100vh;
+}
+.card {
+  width: 420px;
+  background: #0f172a;
+  border-radius: 18px;
+  padding: 28px;
+  border: 1px solid #1e293b;
+}
+h2 { text-align:center; margin:0 }
+#status {
+  font-size: 13px;
+  color: #38bdf8;
+  text-align: center;
+  margin: 10px 0;
+}
+button {
+  width: 100%;
+  padding: 14px;
+  border-radius: 12px;
+  border: none;
+  background: #2563eb;
+  color: white;
+  font-weight: 600;
+}
+button.secondary {
+  background: #1e293b;
+  margin-top: 10px;
+}
+.result {
+  margin-top: 18px;
+  font-size: 14px;
+}
+.score {
+  font-size: 34px;
+  font-weight: 700;
+  text-align: center;
+}
+</style>
 </head>
-<body>
 
+<body>
 <div class="card">
   <h2>Spoken English Practice</h2>
-  <div class="status" id="status">Tap start and speak (5–8 sec)</div>
+  <div id="status">Speak for 5 seconds</div>
 
-  <button class="start" onclick="startSpeaking()">🎤 Start Speaking</button>
-  <button class="stop" onclick="stopSpeaking()">Stop</button>
+  <button id="start">🎤 Start</button>
+  <button id="stop" class="secondary" disabled>Stop</button>
 
-  <div class="box"><b>You said:</b><br><span id="transcript"></span></div>
-  <div class="box"><b>Feedback:</b><br><span id="feedback"></span></div>
-  <div class="score" id="score"></div>
+  <div id="out" class="result"></div>
 </div>
 
 <script>
-  const API_URL = "https://evalis-ai.simpaticohrconsultancy.workers.dev/";
+const WORKER = "https://evalis-ai.simpaticohrconsultancy.workers.dev";
+let rec, chunks = [], stream;
 
-  let recognition;
-  let finalText = "";
-  let listening = false;
-  let autoStopTimer;
+start.onclick = async () => {
+  stream = await navigator.mediaDevices.getUserMedia({ audio:true });
+  rec = new MediaRecorder(stream);
+  chunks = [];
 
-  function initRecognition() {
-    recognition = new webkitSpeechRecognition();
-    recognition.lang = "en-US";
-    recognition.continuous = false;        // 🔒 IMPORTANT
-    recognition.interimResults = false;    // 🔒 IMPORTANT
+  rec.ondataavailable = e => chunks.push(e.data);
+  rec.onstop = async () => {
+    status.textContent = "Evaluating...";
+    const blob = new Blob(chunks, { type:"audio/webm" });
+    const fd = new FormData();
+    fd.append("audio", blob);
 
-    recognition.onresult = (e) => {
-      finalText = e.results[0][0].transcript.trim();
-      document.getElementById("transcript").innerText = finalText;
-    };
+    const r = await fetch(WORKER, { method:"POST", body:fd });
+    const d = await r.json();
 
-    recognition.onerror = () => stopSpeaking();
-    recognition.onend = () => listening && stopSpeaking();
-  }
+    out.innerHTML = `
+      <b>You said:</b><br>${d.transcript}<br><br>
+      <b>Feedback:</b><br>${d.feedback}<br>
+      <div class="score">${d.score}/10</div>
+    `;
+    status.textContent = "Completed";
+    stream.getTracks().forEach(t=>t.stop());
+    start.disabled = false;
+  };
 
-  function startSpeaking() {
-    if (!("webkitSpeechRecognition" in window)) {
-      alert("Speech recognition not supported");
-      return;
-    }
+  rec.start();
+  status.textContent = "Speaking...";
+  start.disabled = true;
+  stop.disabled = false;
+  setTimeout(()=>rec.stop(),5000);
+};
 
-    initRecognition();
-    finalText = "";
-    listening = true;
-
-    document.getElementById("transcript").innerText = "";
-    document.getElementById("feedback").innerText = "";
-    document.getElementById("score").innerText = "";
-    document.getElementById("status").innerText = "Listening... Speak clearly";
-
-    recognition.start();
-
-    autoStopTimer = setTimeout(stopSpeaking, 8000); // ⏱ auto stop
-  }
-
-  function stopSpeaking() {
-    if (!listening) return;
-    listening = false;
-
-    clearTimeout(autoStopTimer);
-    recognition.stop();
-
-    document.getElementById("status").innerText = "Processing...";
-    evaluateSpeech();
-  }
-
-  async function evaluateSpeech() {
-    if (!finalText) {
-      fallback();
-      return;
-    }
-
-    const controller = new AbortController();
-    setTimeout(() => controller.abort(), 7000);
-
-    try {
-      const res = await fetch(API_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: finalText }),
-        signal: controller.signal
-      });
-
-      const data = await res.json();
-      document.getElementById("feedback").innerText =
-        data.feedback || "Good attempt. Keep practicing!";
-      document.getElementById("score").innerText =
-        (data.score ?? 6) + " / 10";
-      document.getElementById("status").innerText = "Completed";
-
-    } catch {
-      fallback();
-    }
-  }
-
-  function fallback() {
-    document.getElementById("feedback").innerText =
-      "Speech captured successfully. Practice daily to improve fluency.";
-    document.getElementById("score").innerText = "6 / 10";
-    document.getElementById("status").innerText = "Completed";
-  }
+stop.onclick = ()=>rec.stop();
 </script>
-
 </body>
 </html>
