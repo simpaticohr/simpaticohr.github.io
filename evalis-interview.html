@@ -3,23 +3,22 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Career Lab | AI Interviewer</title>
+<title>AI Interviewer | Career Lab</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <style>
   :root { --accent: #2563eb; --bg: #0f172a; --danger: #dc2626; }
-  body { font-family: 'Inter', system-ui, sans-serif; background: var(--bg); color: white; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; }
+  body { font-family: 'Inter', system-ui, -apple-system, sans-serif; background: var(--bg); color: white; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; }
   .card { width: 90%; max-width: 420px; background: rgba(255,255,255,0.05); padding: 30px; border-radius: 24px; border: 1px solid rgba(255,255,255,0.1); text-align: center; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.5); }
   
-  /* Voice Visualizer Pulse */
-  .pulse { width: 60px; height: 60px; background: var(--accent); border-radius: 50%; margin: 20px auto; display: none; animation: pulse-ring 1.5s infinite; }
+  .pulse { width: 64px; height: 64px; background: var(--accent); border-radius: 50%; margin: 20px auto; display: none; animation: pulse-ring 1.5s infinite; }
   @keyframes pulse-ring { 0% { box-shadow: 0 0 0 0 rgba(37, 99, 235, 0.7); } 100% { box-shadow: 0 0 0 20px rgba(37, 99, 235, 0); } }
   
-  button { width: 100%; padding: 16px; border-radius: 12px; border: none; background: var(--accent); color: white; font-weight: 700; cursor: pointer; margin-top: 10px; transition: 0.2s; }
-  button:disabled { background: #475569; cursor: not-allowed; opacity: 0.5; }
+  button { width: 100%; padding: 16px; border-radius: 12px; border: none; background: var(--accent); color: white; font-weight: 700; cursor: pointer; margin-top: 10px; transition: all 0.2s; }
+  button:disabled { background: #475569; cursor: not-allowed; opacity: 0.6; }
   #endBtn { background: var(--danger); display: none; }
   
-  #log { background: rgba(0,0,0,0.3); padding: 15px; border-radius: 12px; height: 180px; overflow-y: auto; font-size: 13px; text-align: left; margin-top: 20px; color: #cbd5e1; border: 1px solid rgba(255,255,255,0.1); }
-  #status { font-size: 14px; color: #94a3b8; margin-bottom: 15px; }
+  #log { background: rgba(0,0,0,0.3); padding: 15px; border-radius: 12px; height: 200px; overflow-y: auto; font-size: 13px; text-align: left; margin-top: 20px; color: #cbd5e1; border: 1px solid rgba(255,255,255,0.1); line-height: 1.5; }
+  #status { font-size: 14px; color: #94a3b8; margin-bottom: 15px; font-weight: 500; }
   .report-box { background: #1e293b; padding: 15px; border-radius: 10px; border-left: 4px solid var(--accent); margin-top: 10px; }
 </style>
 </head>
@@ -36,7 +35,7 @@
   <button id="startBtn" disabled>🎤 Start Interview</button>
   <button id="endBtn">🛑 End & Evaluate</button>
   
-  <div id="log">Welcome. Please upload a PDF or Text resume to begin your voice session.</div>
+  <div id="log">Welcome. Upload your resume to begin a multi-turn voice interview session.</div>
 </div>
 
 <script>
@@ -45,7 +44,7 @@ const API_URL = "https://evalis-ai.simpaticohrconsultancy.workers.dev";
 const pdfjsLib = window['pdfjs-dist/build/pdf'];
 pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 
-/* --- APP STATE --- */
+/* --- STATE MANAGEMENT --- */
 let chatHistory = [];
 let isInterviewActive = false;
 let isProcessing = false; 
@@ -59,11 +58,11 @@ const startBtn = document.getElementById("startBtn");
 const endBtn = document.getElementById("endBtn");
 const cvInput = document.getElementById("cvFile");
 
-/* --- 1. RESUME PARSER --- */
+/* --- 1. RESUME PARSING --- */
 cvInput.onchange = async (e) => {
   const file = e.target.files[0];
   if (!file) return;
-  statusEl.innerText = "Reading Resume...";
+  statusEl.innerText = "Parsing Resume...";
   try {
     if (file.type === "application/pdf") {
       const reader = new FileReader();
@@ -77,43 +76,47 @@ cvInput.onchange = async (e) => {
           text += content.items.map(s => s.str).join(" ");
         }
         globalCVText = text;
-        finishSetup();
+        statusEl.innerText = "Resume Ready";
+        startBtn.disabled = false;
       };
       reader.readAsArrayBuffer(file);
     } else {
       globalCVText = await file.text();
-      finishSetup();
+      statusEl.innerText = "Resume Ready";
+      startBtn.disabled = false;
     }
-  } catch (err) { statusEl.innerText = "Error loading file."; }
+  } catch (err) { statusEl.innerText = "Error loading CV."; }
 };
 
-function finishSetup() {
-  statusEl.innerText = "Resume Loaded";
-  startBtn.disabled = false;
-}
-
-/* --- 2. VOICE-TO-VOICE LOOP --- */
-
-
+/* --- 2. THE VOICE LOOP --- */
 function aiSpeak(text) {
-  if (!text || text === "undefined") { isProcessing = false; return; }
+  // Fix: Prevent the "undefined" loop
+  if (!text || text === "undefined" || text.trim() === "") {
+    console.warn("AI received invalid text. Skipping speech.");
+    isProcessing = false;
+    return;
+  }
   
   logEl.innerHTML += `<br><b>AI:</b> ${text}`;
   logEl.scrollTop = logEl.scrollHeight;
 
   const utterance = new SpeechSynthesisUtterance(text);
   
-  // THE KEY FIX: Only release the 'isProcessing' lock AFTER the AI finishes talking
+  // Strict Lock: Only start the next recording turn when speech ends
   utterance.onend = () => {
     isProcessing = false; 
-    if (isInterviewActive) startRecording(); 
+    if (isInterviewActive) {
+      setTimeout(startRecording, 400); // Tiny buffer for UX
+    }
   };
   
+  utterance.onerror = () => { isProcessing = false; };
+  
+  synth.cancel(); // Clear any queued speech
   synth.speak(utterance);
 }
 
 async function startRecording() {
-  // Prevent overlapping if we are already processing an answer or interview has ended
   if (isProcessing || !isInterviewActive) return;
   
   try {
@@ -127,13 +130,18 @@ async function startRecording() {
     recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
     
     recorder.onstop = async () => {
-      // Prevent network error by not sending empty audio blobs
-      if (chunks.length === 0) { isProcessing = false; return; }
-      
-      isProcessing = true; // Lock the system until AI responds and speaks
       micVisual.style.display = "none";
-      statusEl.innerText = "Analyzing your answer...";
       stream.getTracks().forEach(t => t.stop());
+
+      // Validation: If no sound was captured, don't ping the worker
+      if (chunks.length === 0) {
+        isProcessing = false;
+        if (isInterviewActive) startRecording();
+        return;
+      }
+      
+      isProcessing = true; 
+      statusEl.innerText = "Analyzing...";
 
       const fd = new FormData();
       fd.append("audio", new Blob(chunks, { type: "audio/webm" }));
@@ -143,47 +151,48 @@ async function startRecording() {
 
       try {
         const res = await fetch(API_URL, { method: "POST", body: fd });
-        if (!res.ok) throw new Error("Worker Timeout/Error");
+        if (!res.ok) throw new Error("Worker Error");
         
         const data = await res.json();
-        if (data.nextQuestion) {
+        if (data.nextQuestion && data.nextQuestion !== "undefined") {
           chatHistory = data.newHistory || chatHistory;
           aiSpeak(data.nextQuestion);
+        } else {
+          throw new Error("Invalid AI Data");
         }
       } catch (err) {
         console.error(err);
-        statusEl.innerText = "Connection lost. Try speaking again.";
+        statusEl.innerText = "Network Error. Speak again.";
         isProcessing = false;
-        // Allow the loop to resume if a manual trigger is needed
-        setTimeout(() => { if(isInterviewActive) startRecording(); }, 3000);
+        setTimeout(() => { if(isInterviewActive) startRecording(); }, 2000);
       }
     };
 
     recorder.start();
-    // Auto-stop user recording after 7 seconds to keep it snappy
-    setTimeout(() => { if(recorder.state === "recording") recorder.stop(); }, 7000);
+    // Auto-stop user response after 8 seconds
+    setTimeout(() => { if(recorder.state === "recording") recorder.stop(); }, 8000);
     
   } catch (err) {
-    statusEl.innerText = "Mic access denied.";
+    statusEl.innerText = "Mic Error. Check permissions.";
     isInterviewActive = false;
   }
 }
 
-/* --- 3. CONTROLS --- */
+/* --- 3. UI CONTROLS --- */
 startBtn.onclick = () => {
   isInterviewActive = true;
   startBtn.style.display = "none";
   cvInput.style.display = "none";
   endBtn.style.display = "block";
   
-  // Initial question uses Llama 3.3 70B context for high technical accuracy
-  aiSpeak("I've reviewed your resume. Based on your background, can you walk me through your most significant technical achievement?");
+  // First Question: Uses Llama 3.3 70B for deep CV context
+  aiSpeak("I've analyzed your background. Can you walk me through your most significant technical project or achievement?");
 };
 
 endBtn.onclick = async () => {
   isInterviewActive = false;
-  synth.cancel(); // Stop any ongoing speech
-  statusEl.innerText = "Evaluating Session...";
+  synth.cancel(); 
+  statusEl.innerText = "Generating Feedback...";
   endBtn.disabled = true;
 
   const fd = new FormData();
@@ -197,12 +206,11 @@ endBtn.onclick = async () => {
     logEl.innerHTML = `
       <div class="report-box">
         <h3 style="margin-top:0; color:#60a5fa;">Interview Performance Report</h3>
-        <p style="white-space: pre-wrap; line-height:1.5;">${data.report}</p>
+        <p style="white-space: pre-wrap;">${data.report}</p>
       </div>`;
     statusEl.innerText = "Interview Complete";
-    logEl.scrollTop = 0;
   } catch (err) {
-    statusEl.innerText = "Error generating final report.";
+    statusEl.innerText = "Evaluation failed.";
     endBtn.disabled = false;
   }
 };
