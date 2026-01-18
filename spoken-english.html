@@ -2,134 +2,214 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
-<title>Spoken English Practice</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Spoken English Practice | Simpatico HR</title>
+
 <style>
-body {
-  margin: 0;
-  height: 100vh;
-  background: linear-gradient(135deg,#020b2d,#061a4f);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-family: system-ui;
-  color: #fff;
-}
-.card {
-  background: rgba(255,255,255,0.08);
-  padding: 20px;
-  border-radius: 14px;
-  width: 320px;
-  text-align: center;
-}
-button {
-  width: 100%;
-  padding: 12px;
-  margin: 6px 0;
-  border-radius: 8px;
-  border: none;
-  font-size: 15px;
-}
-.start { background:#2563eb;color:#fff }
-.stop { background:#374151;color:#ccc }
-.small { font-size:13px;opacity:.85 }
-.score { font-size:26px;margin-top:8px }
+  html, body {
+    margin: 0;
+    height: 100%;
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+    background: radial-gradient(circle at top, #0a1a3a, #050b1c);
+    color: #fff;
+  }
+
+  .container {
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .card {
+    width: 320px;
+    background: rgba(255,255,255,0.06);
+    backdrop-filter: blur(10px);
+    border-radius: 14px;
+    padding: 20px;
+    text-align: center;
+    box-shadow: 0 10px 40px rgba(0,0,0,.4);
+  }
+
+  h2 {
+    margin: 0 0 6px;
+    font-size: 18px;
+  }
+
+  .status {
+    font-size: 13px;
+    opacity: .85;
+    margin-bottom: 14px;
+  }
+
+  button {
+    width: 100%;
+    padding: 12px;
+    border-radius: 8px;
+    border: none;
+    font-size: 15px;
+    cursor: pointer;
+  }
+
+  #startBtn {
+    background: #2d6cff;
+    color: #fff;
+  }
+
+  #stopBtn {
+    margin-top: 8px;
+    background: #444;
+    color: #aaa;
+  }
+
+  .box {
+    margin-top: 14px;
+    text-align: left;
+    font-size: 13px;
+    line-height: 1.4;
+  }
+
+  .label {
+    opacity: .7;
+  }
+
+  .score {
+    margin-top: 10px;
+    font-size: 22px;
+    font-weight: bold;
+    text-align: center;
+  }
 </style>
 </head>
+
 <body>
+<div class="container">
+  <div class="card">
 
-<div class="card">
-  <h3>Spoken English Practice</h3>
-  <div id="status" class="small">Tap start and speak</div>
+    <h2>Spoken English Practice</h2>
+    <div class="status" id="status">Tap start and speak</div>
 
-  <button class="start" onclick="start()">🎤 Start Speaking</button>
-  <button class="stop" onclick="stop()">Stop</button>
+    <button id="startBtn">🎤 Start Speaking</button>
+    <button id="stopBtn" disabled>Stop</button>
 
-  <div class="small">You said:</div>
-  <div id="text" class="small"></div>
+    <div class="box">
+      <div class="label">You said:</div>
+      <div id="said">—</div>
+    </div>
 
-  <div class="small">Feedback:</div>
-  <div id="feedback" class="small"></div>
+    <div class="box">
+      <div class="label">Feedback:</div>
+      <div id="feedback">—</div>
+    </div>
 
-  <div id="score" class="score"></div>
+    <div class="score" id="score">—</div>
+
+  </div>
 </div>
 
 <script>
-let recognition;
-let transcriptText = "";
+/* =========================
+   SPOKEN ENGLISH FRONTEND
+   ========================= */
+
+const API_URL = "https://evalis-ai.simpaticohrconsultancy.workers.dev/";
 
 const startBtn = document.getElementById("startBtn");
 const stopBtn = document.getElementById("stopBtn");
-const saidBox = document.getElementById("said");
-const feedbackBox = document.getElementById("feedback");
-const scoreBox = document.getElementById("score");
-const statusBox = document.getElementById("status");
+const statusEl = document.getElementById("status");
+const saidEl = document.getElementById("said");
+const feedbackEl = document.getElementById("feedback");
+const scoreEl = document.getElementById("score");
 
-if ("webkitSpeechRecognition" in window) {
+let recognition;
+let transcript = "";
+let isListening = false;
+
+/* Browser support check */
+if (!("webkitSpeechRecognition" in window)) {
+  statusEl.innerText = "Speech not supported on this browser";
+  startBtn.disabled = true;
+} else {
   recognition = new webkitSpeechRecognition();
+  recognition.lang = "en-US";
   recognition.continuous = false;
   recognition.interimResults = false;
-  recognition.lang = "en-US";
 
   recognition.onstart = () => {
-    statusBox.innerText = "Listening...";
-    transcriptText = "";
+    isListening = true;
+    transcript = "";
+    statusEl.innerText = "Listening… Speak clearly (5–10 sec)";
+    startBtn.disabled = true;
+    stopBtn.disabled = false;
   };
 
   recognition.onresult = (event) => {
-    transcriptText = event.results[0][0].transcript;
-    saidBox.innerText = transcriptText;
+    transcript = event.results[0][0].transcript.trim();
+    saidEl.innerText = transcript;
   };
 
   recognition.onerror = () => {
-    statusBox.innerText = "Speech error";
+    statusEl.innerText = "Speech recognition error";
+    resetButtons();
   };
 
-  recognition.onend = async () => {
-    if (!transcriptText) {
-      statusBox.innerText = "No speech detected";
+  recognition.onend = () => {
+    isListening = false;
+    stopBtn.disabled = true;
+
+    if (!transcript) {
+      statusEl.innerText = "No speech detected";
+      resetButtons();
       return;
     }
 
-    statusBox.innerText = "Evaluating...";
-
-    try {
-      const res = await fetch(
-        "https://evalis-ai.simpaticohhrconsultancy.workers.dev/",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json"
-          },
-          body: JSON.stringify({
-            transcript: transcriptText
-          })
-        }
-      );
-
-      const data = await res.json();
-
-      feedbackBox.innerText = data.feedback || "No feedback";
-      scoreBox.innerText = `${data.score}/10`;
-      statusBox.innerText = "Completed";
-
-    } catch (e) {
-      statusBox.innerText = "Server error";
-      feedbackBox.innerText = "Evaluation failed";
-      scoreBox.innerText = "0/10";
-    }
+    evaluateSpeech(transcript);
   };
 }
 
 startBtn.onclick = () => {
-  feedbackBox.innerText = "";
-  scoreBox.innerText = "";
+  feedbackEl.innerText = "—";
+  scoreEl.innerText = "—";
+  saidEl.innerText = "—";
   recognition.start();
 };
 
 stopBtn.onclick = () => {
-  recognition.stop();
+  if (isListening) recognition.stop();
 };
+
+function resetButtons() {
+  startBtn.disabled = false;
+  stopBtn.disabled = true;
+}
+
+/* =========================
+   SEND TEXT TO BACKEND
+   ========================= */
+async function evaluateSpeech(text) {
+  statusEl.innerText = "Evaluating…";
+
+  try {
+    const res = await fetch(API_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ transcript: text })
+    });
+
+    const data = await res.json();
+
+    feedbackEl.innerText = data.feedback || "No feedback received";
+    scoreEl.innerText = (data.score ?? 0) + " / 10";
+    statusEl.innerText = "Completed";
+
+  } catch (err) {
+    statusEl.innerText = "Server error";
+    feedbackEl.innerText = "Evaluation failed";
+    scoreEl.innerText = "0 / 10";
+  }
+
+  resetButtons();
+}
 </script>
 </body>
 </html>
