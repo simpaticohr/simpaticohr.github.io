@@ -6,119 +6,196 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <style>
-  :root { --accent: #2563eb; --bg: #0b1d3a; }
-  body { font-family: 'Inter', sans-serif; background: var(--bg); color: white; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; }
-  .card { width: 90%; max-width: 450px; background: rgba(255,255,255,0.05); padding: 30px; border-radius: 24px; border: 1px solid rgba(255,255,255,0.1); text-align: center; }
+  :root { --accent: #2563eb; --bg: #0b1d3a; --danger: #dc2626; }
+  body { font-family: 'Inter', system-ui, -apple-system, sans-serif; background: var(--bg); color: white; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; }
+  .card { width: 90%; max-width: 450px; background: rgba(255,255,255,0.05); padding: 30px; border-radius: 24px; border: 1px solid rgba(255,255,255,0.1); text-align: center; box-shadow: 0 20px 50px rgba(0,0,0,0.3); }
+  
+  /* Voice Visualizer Pulse */
   .pulse { width: 80px; height: 80px; background: var(--accent); border-radius: 50%; margin: 20px auto; display: none; animation: pulse-animation 1.5s infinite; }
   @keyframes pulse-animation { 0% { box-shadow: 0 0 0 0px rgba(37, 99, 235, 0.7); } 100% { box-shadow: 0 0 0 20px rgba(37, 99, 235, 0); } }
-  button { width: 100%; padding: 15px; border-radius: 12px; border: none; background: var(--accent); color: white; font-weight: 700; cursor: pointer; margin-top: 15px; }
+  
+  button { width: 100%; padding: 15px; border-radius: 12px; border: none; background: var(--accent); color: white; font-weight: 700; cursor: pointer; margin-top: 15px; transition: 0.2s; }
   button:disabled { background: #475569; cursor: not-allowed; }
-  #log { background: rgba(0,0,0,0.3); padding: 15px; border-radius: 12px; height: 150px; overflow-y: auto; font-size: 13px; text-align: left; margin-top: 20px; color: #cbd5e1; }
+  button:hover:not(:disabled) { opacity: 0.9; transform: translateY(-1px); }
+  #endBtn { background: var(--danger); display: none; }
+  
+  #log { background: rgba(0,0,0,0.3); padding: 15px; border-radius: 12px; height: 200px; overflow-y: auto; font-size: 13px; text-align: left; margin-top: 20px; color: #cbd5e1; border: 1px solid rgba(255,255,255,0.05); }
+  #status { font-size: 14px; color: #94a3b8; margin-bottom: 20px; }
+  .report-box { background: #1e293b; padding: 15px; border-radius: 10px; border-left: 4px solid var(--accent); margin-top: 10px; }
 </style>
 </head>
 <body>
 
 <div class="card">
   <h2>AI Interviewer</h2>
-  <p id="status">Upload CV to begin</p>
+  <p id="status">Upload your CV to begin the session</p>
   
-  <input type="file" id="cvFile" accept=".pdf,.txt" style="margin-bottom: 10px; font-size: 12px;">
+  <input type="file" id="cvFile" accept=".pdf,.txt" style="margin-bottom: 10px; font-size: 12px; width: 100%;">
+  
   <div id="micVisual" class="pulse"></div>
   
   <button id="startBtn" disabled>🎤 Start Interview</button>
-  <div id="log">Welcome. Upload your resume to start a voice-to-voice mock session.</div>
+  <button id="endBtn">🛑 End & Generate Report</button>
+  
+  <div id="log">Welcome to Career Lab. Please upload a PDF or Text resume to start your recruiter-style mock interview.</div>
 </div>
 
 <script>
+/* ===== CONFIG ===== */
 const API_URL = "https://evalis-ai.simpaticohrconsultancy.workers.dev";
+const pdfjsLib = window['pdfjs-dist/build/pdf'];
+pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+/* ===== STATE ===== */
 let chatHistory = [];
 let isInterviewActive = false;
 let globalCVText = "";
-
 const synth = window.speechSynthesis;
+
+/* ===== DOM ELEMENTS ===== */
 const statusEl = document.getElementById("status");
 const logEl = document.getElementById("log");
 const micVisual = document.getElementById("micVisual");
+const startBtn = document.getElementById("startBtn");
+const endBtn = document.getElementById("endBtn");
+const cvInput = document.getElementById("cvFile");
 
-// 1. PDF Parser to populate globalCVText
-document.getElementById("cvFile").onchange = async (e) => {
+/* ===== 1. RESUME PARSING ===== */
+cvInput.onchange = async (e) => {
   const file = e.target.files[0];
-  statusEl.innerText = "Reading CV...";
-  if (file.type === "application/pdf") {
-    const reader = new FileReader();
-    reader.onload = async function() {
-      const loadingTask = pdfjsLib.getDocument(new Uint8Array(this.result));
-      const pdf = await loadingTask.promise;
-      let text = "";
-      for (let i = 1; i <= pdf.numPages; i++) {
-        const page = await pdf.getPage(i);
-        const content = await page.getTextContent();
-        text += content.items.map(s => s.str).join(" ");
-      }
-      globalCVText = text;
-      finishLoading();
-    };
-    reader.readAsArrayBuffer(file);
-  } else {
-    globalCVText = await file.text();
-    finishLoading();
+  if (!file) return;
+
+  statusEl.innerText = "Processing resume...";
+  try {
+    if (file.type === "application/pdf") {
+      const reader = new FileReader();
+      reader.onload = async function() {
+        const loadingTask = pdfjsLib.getDocument(new Uint8Array(this.result));
+        const pdf = await loadingTask.promise;
+        let text = "";
+        for (let i = 1; i <= pdf.numPages; i++) {
+          const page = await pdf.getPage(i);
+          const content = await page.getTextContent();
+          text += content.items.map(s => s.str).join(" ");
+        }
+        globalCVText = text;
+        readyToStart();
+      };
+      reader.readAsArrayBuffer(file);
+    } else {
+      globalCVText = await file.text();
+      readyToStart();
+    }
+  } catch (err) {
+    statusEl.innerText = "Error reading file. Try a different format.";
   }
 };
 
-function finishLoading() {
-  statusEl.innerText = "CV Processed";
-  document.getElementById("startBtn").disabled = false;
+function readyToStart() {
+  statusEl.innerText = "Resume Ready";
+  startBtn.disabled = false;
 }
 
-// 2. AI Speaking (Triggers Mic when done)
+/* ===== 2. VOICE ENGINE ===== */
 function aiSpeak(text) {
+  if (!text) return;
+  
+  // Clear "undefined" errors often seen in mobile STT
   logEl.innerHTML += `<br><b>AI:</b> ${text}`;
   logEl.scrollTop = logEl.scrollHeight;
+
   const utterance = new SpeechSynthesisUtterance(text);
-  utterance.onend = () => { if (isInterviewActive) startRecording(); };
+  
+  // Continuous Loop: Trigger mic only after AI finishes speaking
+  utterance.onend = () => { 
+    if (isInterviewActive) startRecording(); 
+  };
+  
   synth.speak(utterance);
 }
 
-// 3. Continuous Recording Loop
+/* ===== 3. RECORDING LOOP ===== */
 async function startRecording() {
-  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-  const recorder = new MediaRecorder(stream);
-  const chunks = [];
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const recorder = new MediaRecorder(stream);
+    const chunks = [];
 
-  micVisual.style.display = "block";
-  statusEl.innerText = "Listening...";
+    micVisual.style.display = "block";
+    statusEl.innerText = "Interviewer is listening...";
 
-  recorder.ondataavailable = e => chunks.push(e.data);
-  recorder.onstop = async () => {
-    micVisual.style.display = "none";
-    statusEl.innerText = "Processing...";
-    stream.getTracks().forEach(t => t.stop());
+    recorder.ondataavailable = e => chunks.push(e.data);
+    
+    recorder.onstop = async () => {
+      micVisual.style.display = "none";
+      statusEl.innerText = "Analyzing your answer...";
+      stream.getTracks().forEach(t => t.stop());
 
-    const fd = new FormData();
-    fd.append("audio", new Blob(chunks, { type: "audio/webm" }));
-    fd.append("mode", "interview");
-    fd.append("cvText", globalCVText);
-    fd.append("history", JSON.stringify(chatHistory));
+      const fd = new FormData();
+      fd.append("audio", new Blob(chunks, { type: "audio/webm" }));
+      fd.append("mode", "interview");
+      fd.append("cvText", globalCVText);
+      fd.append("history", JSON.stringify(chatHistory));
 
-    try {
-      const res = await fetch(API_URL, { method: "POST", body: fd });
-      const data = await res.json();
-      chatHistory = data.newHistory || chatHistory;
-      aiSpeak(data.nextQuestion);
-    } catch (err) {
-      statusEl.innerText = "Error connecting to AI";
-    }
-  };
+      try {
+        const res = await fetch(API_URL, { method: "POST", body: fd });
+        const data = await res.json();
+        
+        if (data.nextQuestion) {
+          chatHistory = data.newHistory || chatHistory;
+          aiSpeak(data.nextQuestion);
+        }
+      } catch (err) {
+        statusEl.innerText = "Connection lost. Try again.";
+      }
+    };
 
-  recorder.start();
-  setTimeout(() => { if(recorder.state === "recording") recorder.stop(); }, 8000);
+    recorder.start();
+    // 8-second window per answer to keep it snappy like Mercor
+    setTimeout(() => { if(recorder.state === "recording") recorder.stop(); }, 8000);
+    
+  } catch (err) {
+    statusEl.innerText = "Mic access denied.";
+    isInterviewActive = false;
+  }
 }
 
-document.getElementById("startBtn").onclick = () => {
+/* ===== 4. ACTIONS ===== */
+startBtn.onclick = () => {
   isInterviewActive = true;
-  document.getElementById("startBtn").style.display = "none";
-  document.getElementById("cvFile").style.display = "none";
-  aiSpeak("Thank you for uploading your resume. I've reviewed your background. To start, can you introduce yourself and tell me about your most significant professional achievement?");
+  startBtn.style.display = "none";
+  cvInput.style.display = "none";
+  endBtn.style.display = "block";
+  
+  // Use Llama 3.3 70B for the opener to ensure CV context is used
+  aiSpeak("Thank you. I've analyzed your background. Let's begin. Based on your experience, could you describe your most challenging project and how you handled it?");
+};
+
+endBtn.onclick = async () => {
+  isInterviewActive = false;
+  synth.cancel(); // Stop AI from talking
+  statusEl.innerText = "Generating Final Evaluation...";
+  endBtn.disabled = true;
+
+  const fd = new FormData();
+  fd.append("mode", "evaluate");
+  fd.append("history", JSON.stringify(chatHistory));
+
+  try {
+    const res = await fetch(API_URL, { method: "POST", body: fd });
+    const data = await res.json();
+    
+    logEl.innerHTML = `
+      <div class="report-box">
+        <h3 style="margin-top:0; color:#60a5fa;">Final Interview Report</h3>
+        <p style="white-space: pre-wrap; line-height:1.5;">${data.report}</p>
+      </div>
+    `;
+    statusEl.innerText = "Interview Complete";
+    logEl.scrollTop = 0;
+  } catch (err) {
+    statusEl.innerText = "Error generating report.";
+  }
 };
 </script>
 </body>
