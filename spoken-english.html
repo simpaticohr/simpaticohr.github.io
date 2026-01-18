@@ -4,74 +4,74 @@
 <meta charset="UTF-8" />
 <title>Spoken English Practice</title>
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-
 <style>
-body {
-  margin: 0;
-  height: 100vh;
-  background: radial-gradient(circle at top, #0b1d3a, #020617);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-family: system-ui;
-  color: #fff;
-}
-
-.card {
-  width: 280px;
-  background: rgba(255,255,255,0.08);
-  backdrop-filter: blur(12px);
-  border-radius: 14px;
-  padding: 18px;
-  text-align: center;
-}
-
-button {
-  width: 100%;
-  padding: 10px;
-  border: none;
-  border-radius: 8px;
-  margin-top: 8px;
-  font-size: 14px;
-}
-
-.start { background:#2563eb; color:#fff; }
-.stop { background:#374151; color:#ccc; }
-
-small { color:#cbd5f5; }
-
-pre {
-  text-align:left;
-  white-space:pre-wrap;
-  font-size:12px;
-}
-
-.score {
-  font-size:22px;
-  margin-top:8px;
-}
+  body {
+    margin: 0;
+    height: 100vh;
+    background: radial-gradient(circle at top, #0b1d3a, #020617);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: system-ui, -apple-system, sans-serif;
+    color: #fff;
+  }
+  .card {
+    width: 90%;
+    max-width: 320px;
+    background: rgba(255,255,255,0.08);
+    backdrop-filter: blur(12px);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 20px;
+    padding: 24px;
+    text-align: center;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+  }
+  button {
+    width: 100%;
+    padding: 12px;
+    border: none;
+    border-radius: 10px;
+    margin-top: 10px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: opacity 0.2s;
+  }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  .start { background: #2563eb; color: #fff; }
+  .stop { background: #374151; color: #ccc; }
+  
+  pre {
+    text-align: left;
+    white-space: pre-wrap;
+    font-size: 13px;
+    background: rgba(0,0,0,0.2);
+    padding: 12px;
+    border-radius: 8px;
+    margin-top: 15px;
+    max-height: 120px;
+    overflow-y: auto;
+    border: 1px solid rgba(255,255,255,0.05);
+  }
+  .score { font-size: 32px; font-weight: bold; margin-top: 10px; color: #60a5fa; }
+  small { color: #94a3b8; display: block; margin-bottom: 10px; }
 </style>
 </head>
-
 <body>
 <div class="card">
-  <h3>Spoken English Practice</h3>
+  <h3>English Practice</h3>
   <small id="status">Tap start and speak</small>
-
   <button class="start" id="start">🎤 Start Speaking</button>
   <button class="stop" id="stop" disabled>Stop</button>
-
-  <pre id="said"></pre>
-  <pre id="feedback"></pre>
-  <div class="score" id="score"></div>
+  <div id="results" style="display:none;">
+    <pre id="said"></pre>
+    <pre id="feedback"></pre>
+    <div class="score" id="score"></div>
+  </div>
 </div>
 
 <script>
 const API = "https://evalis-ai.simpaticohrconsultancy.workers.dev";
-
-let recorder;
-let chunks = [];
-let stopTimer;
+let recorder, chunks = [], stopTimer;
 
 const startBtn = document.getElementById("start");
 const stopBtn = document.getElementById("stop");
@@ -79,67 +79,52 @@ const status = document.getElementById("status");
 const said = document.getElementById("said");
 const feedback = document.getElementById("feedback");
 const scoreBox = document.getElementById("score");
+const results = document.getElementById("results");
 
 startBtn.onclick = async () => {
-  chunks = [];
-  said.textContent = "";
-  feedback.textContent = "";
-  scoreBox.textContent = "";
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    chunks = [];
+    results.style.display = "none";
+    status.textContent = "Listening (max 6s)...";
+    
+    recorder = new MediaRecorder(stream);
+    recorder.ondataavailable = e => chunks.push(e.data);
+    recorder.onstop = () => {
+      stream.getTracks().forEach(t => t.stop());
+      sendAudio();
+    };
 
-  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    recorder.start();
+    startBtn.disabled = true;
+    stopBtn.disabled = false;
 
-  recorder = new MediaRecorder(stream, {
-    mimeType: "audio/webm;codecs=opus"
-  });
-
-  recorder.ondataavailable = e => chunks.push(e.data);
-
-  recorder.onstop = sendAudio;
-
-  recorder.start();
-  status.textContent = "Listening...";
-  startBtn.disabled = true;
-  stopBtn.disabled = false;
-
-  // ✅ AUTO STOP after 6 seconds (CRITICAL)
-  stopTimer = setTimeout(() => {
-    if (recorder.state === "recording") recorder.stop();
-  }, 6000);
-};
-
-stopBtn.onclick = () => {
-  clearTimeout(stopTimer);
-  if (recorder && recorder.state === "recording") {
-    recorder.stop();
+    stopTimer = setTimeout(() => { if(recorder.state === "recording") recorder.stop(); }, 6000);
+  } catch (e) {
+    status.textContent = "Mic Error: " + e.message;
   }
 };
+
+stopBtn.onclick = () => { clearTimeout(stopTimer); recorder.stop(); };
 
 async function sendAudio() {
-  status.textContent = "Processing...";
+  status.textContent = "Analyzing speech...";
   stopBtn.disabled = true;
-
   const blob = new Blob(chunks, { type: "audio/webm" });
   const form = new FormData();
-  form.append("audio", blob, "speech.webm");
+  form.append("audio", blob);
 
   try {
-    const res = await fetch(API, {
-      method: "POST",
-      body: form
-    });
-
+    const res = await fetch(API, { method: "POST", body: form });
     const data = await res.json();
-
-    said.textContent = "You said:\n" + (data.transcript || "(none)");
-    feedback.textContent = "Feedback:\n" + (data.feedback || "No feedback");
-    scoreBox.textContent = (data.score ?? 0) + " / 10";
-    status.textContent = "Completed";
+    results.style.display = "block";
+    said.textContent = "You: " + data.transcript;
+    feedback.textContent = data.feedback;
+    scoreBox.textContent = data.score + "/10";
+    status.textContent = "Done!";
   } catch (e) {
-    feedback.textContent = "Feedback:\nServer error";
-    scoreBox.textContent = "0 / 10";
-    status.textContent = "Error";
+    status.textContent = "Server Error";
   }
-
   startBtn.disabled = false;
 }
 </script>
