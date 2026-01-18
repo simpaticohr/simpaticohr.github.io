@@ -56,59 +56,80 @@ button {
 
 <script>
 let recognition;
-let finalText = "";
+let transcriptText = "";
 
-function start() {
-  finalText = "";
-  document.getElementById("text").innerText = "";
-  document.getElementById("feedback").innerText = "";
-  document.getElementById("score").innerText = "";
-  document.getElementById("status").innerText = "Listening…";
+const startBtn = document.getElementById("startBtn");
+const stopBtn = document.getElementById("stopBtn");
+const saidBox = document.getElementById("said");
+const feedbackBox = document.getElementById("feedback");
+const scoreBox = document.getElementById("score");
+const statusBox = document.getElementById("status");
 
-  recognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
-  recognition.lang = "en-US";
-  recognition.continuous = true;
+if ("webkitSpeechRecognition" in window) {
+  recognition = new webkitSpeechRecognition();
+  recognition.continuous = false;
   recognition.interimResults = false;
+  recognition.lang = "en-US";
 
-  recognition.onresult = e => {
-    for (let i = e.resultIndex; i < e.results.length; i++) {
-      if (e.results[i].isFinal) {
-        finalText += e.results[i][0].transcript + " ";
-      }
-    }
-    document.getElementById("text").innerText = finalText.trim();
+  recognition.onstart = () => {
+    statusBox.innerText = "Listening...";
+    transcriptText = "";
   };
 
-  recognition.start();
-}
+  recognition.onresult = (event) => {
+    transcriptText = event.results[0][0].transcript;
+    saidBox.innerText = transcriptText;
+  };
 
-async function stop() {
-  if (!recognition) return;
-  recognition.stop();
-  document.getElementById("status").innerText = "Evaluating…";
+  recognition.onerror = () => {
+    statusBox.innerText = "Speech error";
+  };
 
-  if (!finalText.trim()) {
-    document.getElementById("status").innerText = "No speech detected";
-    return;
-  }
-
-  const res = await fetch(
-    "https://evalis-ai.simpaticohrconsultancy.workers.dev/",
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ transcript: finalText })
+  recognition.onend = async () => {
+    if (!transcriptText) {
+      statusBox.innerText = "No speech detected";
+      return;
     }
-  );
 
-  const data = await res.json();
+    statusBox.innerText = "Evaluating...";
 
-  document.getElementById("feedback").innerText = data.feedback || "";
-  document.getElementById("score").innerText =
-    data.score !== undefined ? `${data.score}/10` : "";
-  document.getElementById("status").innerText = "Completed";
+    try {
+      const res = await fetch(
+        "https://evalis-ai.simpaticohhrconsultancy.workers.dev/",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            transcript: transcriptText
+          })
+        }
+      );
+
+      const data = await res.json();
+
+      feedbackBox.innerText = data.feedback || "No feedback";
+      scoreBox.innerText = `${data.score}/10`;
+      statusBox.innerText = "Completed";
+
+    } catch (e) {
+      statusBox.innerText = "Server error";
+      feedbackBox.innerText = "Evaluation failed";
+      scoreBox.innerText = "0/10";
+    }
+  };
 }
-</script>
 
+startBtn.onclick = () => {
+  feedbackBox.innerText = "";
+  scoreBox.innerText = "";
+  recognition.start();
+};
+
+stopBtn.onclick = () => {
+  recognition.stop();
+};
+</script>
 </body>
 </html>
