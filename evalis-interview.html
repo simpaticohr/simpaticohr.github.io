@@ -1,150 +1,261 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <title>Career Lab AI</title>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-    <style>
-        :root { --accent: #2563eb; --bg: #0f172a; }
-        body { font-family: 'Inter', sans-serif; background: var(--bg); color: white; display: flex; justify-content: center; padding: 20px; }
-        .card { width: 100%; max-width: 440px; background: rgba(255,255,255,0.05); padding: 30px; border-radius: 24px; border: 1px solid rgba(255,255,255,0.1); text-align: center; }
-        .pulse { width: 60px; height: 60px; background: var(--accent); border-radius: 50%; margin: 20px auto; display: none; animation: pulse-ring 1.2s infinite; }
-        @keyframes pulse-ring { 0% { box-shadow: 0 0 0 0 rgba(37, 99, 235, 0.7); } 100% { box-shadow: 0 0 0 20px rgba(37, 99, 235, 0); } }
-        button { width: 100%; padding: 16px; border-radius: 12px; border: none; background: var(--accent); color: white; font-weight: bold; cursor: pointer; margin-top: 10px; }
-        button:disabled { opacity: 0.5; cursor: not-allowed; }
-        #log { background: rgba(0,0,0,0.3); padding: 15px; border-radius: 12px; height: 200px; overflow-y: auto; font-size: 14px; text-align: left; margin-top: 20px; border: 1px solid rgba(255,255,255,0.1); }
-        .err { color: #f87171; font-weight: bold; }
-    </style>
-</head>
-<body>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Career Lab AI – Voice Interview</title>
 
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+
+<style>
+:root {
+  --bg:#0f172a;
+  --card:#111827;
+  --accent:#2563eb;
+  --danger:#dc2626;
+  --text:#e5e7eb;
+  --muted:#94a3b8;
+}
+*{box-sizing:border-box}
+body{
+  margin:0;
+  background:var(--bg);
+  font-family:system-ui,-apple-system,Segoe UI,Roboto;
+  color:var(--text);
+  min-height:100vh;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  padding:16px;
+}
+.card{
+  width:100%;
+  max-width:420px;
+  background:rgba(255,255,255,.04);
+  border:1px solid rgba(255,255,255,.08);
+  border-radius:22px;
+  padding:26px;
+  backdrop-filter:blur(10px);
+}
+h2{margin:0 0 6px}
+#status{color:var(--muted);font-size:14px;margin-bottom:14px}
+input[type=file]{
+  width:100%;
+  margin-bottom:14px;
+  color:var(--muted);
+}
+button{
+  width:100%;
+  border:none;
+  padding:14px;
+  border-radius:14px;
+  font-weight:700;
+  font-size:15px;
+  cursor:pointer;
+}
+#startBtn{background:var(--accent);color:white}
+#endBtn{background:var(--danger);color:white;display:none}
+button:disabled{opacity:.6}
+
+.pulse{
+  width:68px;height:68px;
+  border-radius:50%;
+  background:var(--accent);
+  margin:18px auto;
+  display:none;
+  animation:pulse 1.5s infinite;
+}
+@keyframes pulse{
+  0%{box-shadow:0 0 0 0 rgba(37,99,235,.7)}
+  100%{box-shadow:0 0 0 26px rgba(37,99,235,0)}
+}
+#log{
+  margin-top:16px;
+  background:rgba(0,0,0,.35);
+  border:1px solid rgba(255,255,255,.08);
+  border-radius:14px;
+  padding:14px;
+  height:220px;
+  overflow-y:auto;
+  font-size:13px;
+  line-height:1.55;
+}
+.report{
+  background:#020617;
+  border-left:4px solid var(--accent);
+  padding:14px;
+  border-radius:10px;
+}
+</style>
+</head>
+
+<body>
 <div class="card">
-    <h2>Career Lab AI</h2>
-    <p id="status">Upload CV to Start</p>
-    <input type="file" id="cvInput" accept=".pdf,.txt" style="margin-bottom: 20px; width: 100%;">
-    <div id="micVisual" class="pulse"></div>
-    <button id="mainBtn" disabled>Start Interview</button>
-    <div id="log">Welcome. Please upload your resume.</div>
+  <h2>Career Lab AI</h2>
+  <div id="status">Upload your resume to begin</div>
+
+  <input id="cvFile" type="file" accept=".pdf,.txt">
+
+  <div id="mic" class="pulse"></div>
+
+  <button id="startBtn" disabled>🎤 Start Interview</button>
+  <button id="endBtn">🛑 End & Evaluate</button>
+
+  <div id="log">AI ready.</div>
 </div>
 
 <script>
-    const WORKER_URL = "https://evalis-ai.simpaticohrconsultancy.workers.dev";
-    let history = [], cvText = "", active = false, busy = false;
-    const synth = window.speechSynthesis;
+/* ================= CONFIG ================= */
+const WORKER_URL = "https://evalis-ai.simpaticohrconsultancy.workers.dev";
+pdfjsLib.GlobalWorkerOptions.workerSrc =
+  "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
 
-    // 1. FIXED CV PARSING
-    document.getElementById('cvInput').onchange = async (e) => {
-        const file = e.target.files[0];
-        if (!file) return;
-        document.getElementById('status').innerText = "Processing CV...";
-        try {
-            if (file.type === "application/pdf") {
-                const pdfjsLib = window['pdfjs-dist/build/pdf'];
-                pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-                const loadingTask = pdfjsLib.getDocument(new Uint8Array(await file.arrayBuffer()));
-                const pdf = await loadingTask.promise;
-                let text = "";
-                for (let i = 1; i <= pdf.numPages; i++) {
-                    const page = await pdf.getPage(i);
-                    const content = await page.getTextContent();
-                    text += content.items.map(s => s.str).join(" ") + " ";
-                }
-                cvText = text;
-            } else { cvText = await file.text(); }
-            document.getElementById('status').innerText = "CV Ready";
-            document.getElementById('mainBtn').disabled = false;
-        } catch (err) { document.getElementById('status').innerText = "Error reading PDF"; }
+/* ================= STATE ================= */
+let cvText = "";
+let history = [];
+let active = false;
+let busy = false;
+const synth = speechSynthesis;
+
+/* ================= UI ================= */
+const statusEl = document.getElementById("status");
+const logEl = document.getElementById("log");
+const micEl = document.getElementById("mic");
+const startBtn = document.getElementById("startBtn");
+const endBtn = document.getElementById("endBtn");
+const cvFile = document.getElementById("cvFile");
+
+/* ================= RESUME PARSER ================= */
+cvFile.onchange = async () => {
+  const file = cvFile.files[0];
+  if (!file) return;
+  statusEl.innerText = "Reading resume...";
+  try {
+    if (file.type === "application/pdf") {
+      const pdf = await pdfjsLib.getDocument(new Uint8Array(await file.arrayBuffer())).promise;
+      let text = "";
+      for (let i = 1; i <= pdf.numPages; i++) {
+        const page = await pdf.getPage(i);
+        const content = await page.getTextContent();
+        text += content.items.map(x => x.str).join(" ") + "\n";
+      }
+      cvText = text;
+    } else {
+      cvText = await file.text();
+    }
+    statusEl.innerText = "Resume loaded";
+    startBtn.disabled = false;
+  } catch {
+    statusEl.innerText = "Resume read failed";
+  }
+};
+
+/* ================= AI SPEAK ================= */
+function speakAI(text){
+  if (!text || text === "undefined") {
+    busy = false;
+    statusEl.innerText = "AI error. Tap Start.";
+    return;
+  }
+  logEl.innerHTML += `<div><b>AI:</b> ${text}</div>`;
+  logEl.scrollTop = logEl.scrollHeight;
+
+  synth.cancel();
+  const u = new SpeechSynthesisUtterance(text);
+  u.onend = () => {
+    busy = false;
+    if (active) setTimeout(startRecording, 600);
+  };
+  synth.speak(u);
+}
+
+/* ================= RECORD ================= */
+async function startRecording(){
+  if (!active || busy) return;
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({audio:true});
+    const rec = new MediaRecorder(stream);
+    const chunks = [];
+
+    micEl.style.display = "block";
+    statusEl.innerText = "Listening...";
+
+    rec.ondataavailable = e => chunks.push(e.data);
+
+    rec.onstop = async () => {
+      micEl.style.display = "none";
+      stream.getTracks().forEach(t => t.stop());
+
+      const blob = new Blob(chunks, {type:"audio/webm"});
+      if (blob.size < 1500) {
+        busy = false;
+        statusEl.innerText = "Speak clearly. Tap Start.";
+        active = false;
+        startBtn.style.display = "block";
+        return;
+      }
+
+      busy = true;
+      statusEl.innerText = "Analyzing...";
+
+      const fd = new FormData();
+      fd.append("audio", blob);
+      fd.append("mode", "interview");
+      fd.append("cvText", cvText);
+      fd.append("history", JSON.stringify(history));
+
+      try {
+        const res = await fetch(WORKER_URL,{method:"POST",body:fd});
+        if (!res.ok) throw 0;
+        const data = await res.json();
+        history = data.newHistory || history;
+        speakAI(data.nextQuestion);
+      } catch {
+        busy = false;
+        active = false;
+        statusEl.innerText = "Network error. Tap Start.";
+        startBtn.style.display = "block";
+      }
     };
 
-    // 2. FIXED AI SPEECH (Handles "undefined" and locks turns)
-    function speak(text) {
-        if (!text || text === "undefined") {
-            busy = false;
-            return;
-        }
-        const log = document.getElementById('log');
-        log.innerHTML += `<p><b>AI:</b> ${text}</p>`;
-        log.scrollTop = log.scrollHeight;
+    rec.start();
+    setTimeout(()=>rec.state==="recording"&&rec.stop(),8000);
 
-        const utterance = new SpeechSynthesisUtterance(text);
-        utterance.onend = () => {
-            busy = false;
-            if (active) setTimeout(startTurn, 500);
-        };
-        synth.cancel();
-        synth.speak(utterance);
-    }
+  } catch {
+    statusEl.innerText = "Mic permission denied";
+    active = false;
+  }
+}
 
-    // 3. FIXED AUDIO HANDLING (Prevents 5006 Error)
-    async function startTurn() {
-        if (busy || !active) return;
-        try {
-            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-            const recorder = new MediaRecorder(stream);
-            const chunks = [];
+/* ================= BUTTONS ================= */
+startBtn.onclick = () => {
+  active = true;
+  startBtn.style.display = "none";
+  cvFile.style.display = "none";
+  endBtn.style.display = "block";
+  speakAI("I have reviewed your resume. Please introduce yourself and highlight your key strengths.");
+};
 
-            document.getElementById('micVisual').style.display = "block";
-            document.getElementById('status').innerText = "Listening...";
+endBtn.onclick = async () => {
+  active = false;
+  synth.cancel();
+  statusEl.innerText = "Generating report...";
+  endBtn.disabled = true;
 
-            recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
-            recorder.onstop = async () => {
-                document.getElementById('micVisual').style.display = "none";
-                stream.getTracks().forEach(t => t.stop());
+  const fd = new FormData();
+  fd.append("mode","evaluate");
+  fd.append("history",JSON.stringify(history));
 
-                if (chunks.length === 0) {
-                    busy = false;
-                    if (active) startTurn();
-                    return;
-                }
-
-                busy = true;
-                document.getElementById('status').innerText = "Analyzing...";
-
-                const audioBlob = new Blob(chunks, { type: 'audio/webm' });
-                const formData = new FormData();
-                formData.append("audio", audioBlob, "user_voice.webm"); // Added filename for better Worker parsing
-                formData.append("mode", "interview");
-                formData.append("cvText", cvText);
-                formData.append("history", JSON.stringify(history));
-
-                try {
-                    const res = await fetch(WORKER_URL, { method: "POST", body: formData });
-                    const data = await res.json();
-                    
-                    if (data.reply) {
-                        history = data.history || history;
-                        speak(data.reply);
-                    } else if (data.error) {
-                        document.getElementById('log').innerHTML += `<p class="err">System Error: ${data.error}</p>`;
-                        busy = false;
-                    }
-                } catch (err) {
-                    document.getElementById('status').innerText = "Connection lost. Retrying...";
-                    busy = false;
-                    setTimeout(startTurn, 3000);
-                }
-            };
-
-            recorder.start();
-            setTimeout(() => { if (recorder.state === "recording") recorder.stop(); }, 6000);
-        } catch (e) { document.getElementById('status').innerText = "Mic Access Denied"; }
-    }
-
-    // 4. BUTTON CONTROL
-    document.getElementById('mainBtn').onclick = () => {
-        const btn = document.getElementById('mainBtn');
-        if (!active) {
-            active = true;
-            btn.innerText = "Stop Interview";
-            btn.style.background = "#dc2626";
-            speak("I have reviewed your resume. Let's begin. Can you introduce yourself?");
-        } else {
-            active = false;
-            synth.cancel();
-            location.reload(); 
-        }
-    };
+  try{
+    const res = await fetch(WORKER_URL,{method:"POST",body:fd});
+    const data = await res.json();
+    logEl.innerHTML = `<div class="report"><h3>Interview Report</h3><pre>${data.report}</pre></div>`;
+    statusEl.innerText = "Completed";
+  }catch{
+    statusEl.innerText = "Report failed";
+    endBtn.disabled = false;
+  }
+};
 </script>
-
 </body>
 </html>
