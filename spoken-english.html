@@ -6,141 +6,198 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 
   <style>
-    * { box-sizing: border-box; font-family: system-ui, -apple-system, Segoe UI, Roboto; }
+    * { box-sizing: border-box; font-family: system-ui, -apple-system, BlinkMacSystemFont; }
+
     body {
       margin: 0;
       height: 100vh;
-      background: radial-gradient(circle at top, #0f1b3d, #050914);
+      background: radial-gradient(circle at top, #0f1c3f, #020617);
       display: flex;
       align-items: center;
       justify-content: center;
-      color: #fff;
+      color: #e5e7eb;
     }
+
     .card {
-      width: 320px;
-      padding: 22px;
+      width: 92%;
+      max-width: 360px;
+      background: rgba(15, 23, 42, 0.9);
       border-radius: 14px;
-      background: rgba(255,255,255,0.06);
-      box-shadow: 0 20px 40px rgba(0,0,0,0.4);
+      padding: 20px;
+      box-shadow: 0 25px 60px rgba(0,0,0,.6);
       text-align: center;
     }
+
     h2 { margin: 0 0 6px; font-size: 20px; }
-    .status { font-size: 12px; opacity: 0.8; margin-bottom: 14px; }
+    .status { font-size: 13px; color: #93c5fd; min-height: 18px; }
+
     button {
       width: 100%;
       padding: 12px;
-      margin-top: 10px;
-      border-radius: 8px;
+      border-radius: 10px;
       border: none;
+      margin-top: 14px;
       font-size: 15px;
       cursor: pointer;
     }
-    .start { background: #2563eb; color: white; }
-    .stop { background: #334155; color: #ccc; }
-    .disabled { opacity: 0.6; pointer-events: none; }
+
+    .start {
+      background: #2563eb;
+      color: white;
+    }
+
+    .stop {
+      background: #374151;
+      color: #d1d5db;
+    }
+
     .result {
       margin-top: 14px;
-      font-size: 14px;
       text-align: left;
+      font-size: 13px;
+      color: #d1d5db;
     }
+
     .score {
       margin-top: 10px;
       font-size: 26px;
       font-weight: bold;
       text-align: center;
+      color: #22c55e;
     }
-    .error {
-      margin-top: 10px;
-      font-size: 12px;
-      color: #ff6b6b;
-    }
+
+    .error { color: #f87171; }
   </style>
 </head>
 
 <body>
   <div class="card">
     <h2>Spoken English Practice</h2>
-    <div id="status" class="status">Tap start & speak for 5–10 seconds</div>
+    <div id="status" class="status">Tap start and speak (5–10 sec)</div>
 
     <button id="startBtn" class="start">🎤 Start Speaking</button>
-    <button id="stopBtn" class="stop disabled">Stop</button>
+    <button id="stopBtn" class="stop" disabled>Stop</button>
 
     <div id="result" class="result"></div>
     <div id="score" class="score"></div>
-    <div id="error" class="error"></div>
   </div>
 
 <script>
-const API_URL = "https://evalis-ai.simpaticohrconsultancy.workers.dev/";
+/* ---------- CONFIG ---------- */
+const API_URL = "https://evalis-ai.simpaticohrconsultancy.workers.dev/evaluate";
 
-let mediaRecorder;
-let audioChunks = [];
+/* ---------- STATE ---------- */
+let recognition;
+let finalTranscript = "";
+let listening = false;
 
-const startBtn = document.getElementById("startBtn");
-const stopBtn  = document.getElementById("stopBtn");
+/* ---------- INIT ---------- */
 const statusEl = document.getElementById("status");
 const resultEl = document.getElementById("result");
-const scoreEl  = document.getElementById("score");
-const errorEl  = document.getElementById("error");
+const scoreEl = document.getElementById("score");
+const startBtn = document.getElementById("startBtn");
+const stopBtn = document.getElementById("stopBtn");
 
-startBtn.onclick = async () => {
-  errorEl.textContent = "";
-  resultEl.textContent = "";
-  scoreEl.textContent = "";
-  audioChunks = [];
+/* ---------- SUPPORT CHECK ---------- */
+window.SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+if (!window.SpeechRecognition) {
+  statusEl.innerHTML = "<span class='error'>Speech recognition not supported on this browser.</span>";
+  startBtn.disabled = true;
+}
+
+/* ---------- SETUP ---------- */
+function setupRecognition() {
+  recognition = new SpeechRecognition();
+  recognition.lang = "en-US";
+  recognition.continuous = true;
+  recognition.interimResults = true;
+
+  recognition.onstart = () => {
+    listening = true;
+    finalTranscript = "";
+    statusEl.textContent = "Listening… Speak clearly";
+    startBtn.disabled = true;
+    stopBtn.disabled = false;
+  };
+
+  recognition.onresult = (event) => {
+    let interim = "";
+    for (let i = event.resultIndex; i < event.results.length; i++) {
+      const text = event.results[i][0].transcript;
+      if (event.results[i].isFinal) {
+        finalTranscript += text + " ";
+      } else {
+        interim += text;
+      }
+    }
+    resultEl.innerHTML = `<strong>You said:</strong><br>${finalTranscript}<em>${interim}</em>`;
+  };
+
+  recognition.onerror = (e) => {
+    statusEl.innerHTML = "<span class='error'>Mic error. Check permission.</span>";
+    resetUI();
+  };
+
+  recognition.onend = () => {
+    if (listening) evaluateSpeech();
+  };
+}
+
+/* ---------- CONTROLS ---------- */
+startBtn.onclick = () => {
+  setupRecognition();
+  recognition.start();
+};
+
+stopBtn.onclick = () => {
+  listening = false;
+  recognition.stop();
+  statusEl.textContent = "Processing…";
+};
+
+/* ---------- AI EVALUATION ---------- */
+async function evaluateSpeech() {
+  stopBtn.disabled = true;
+
+  if (!finalTranscript.trim()) {
+    statusEl.innerHTML = "<span class='error'>No speech detected.</span>";
+    resetUI();
+    return;
+  }
 
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    mediaRecorder = new MediaRecorder(stream);
-    mediaRecorder.start();
+    const res = await fetch(API_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ transcript: finalTranscript.trim() })
+    });
 
-    mediaRecorder.ondataavailable = e => audioChunks.push(e.data);
+    if (!res.ok) throw new Error("Server error");
 
-    statusEl.textContent = "Listening… Speak clearly (5–10 sec)";
-    startBtn.classList.add("disabled");
-    stopBtn.classList.remove("disabled");
+    const data = await res.json();
+
+    statusEl.textContent = "Completed";
+    resultEl.innerHTML = `<strong>Feedback:</strong><br>${data.feedback}`;
+    scoreEl.textContent = `${data.score}/10`;
 
   } catch (err) {
-    errorEl.textContent = "Microphone permission denied.";
+    statusEl.innerHTML = "<span class='error'>Server unavailable.</span>";
+  } finally {
+    resetUI(false);
   }
-};
+}
 
-stopBtn.onclick = async () => {
-  stopBtn.classList.add("disabled");
-  statusEl.textContent = "Processing…";
-
-  mediaRecorder.stop();
-
-  mediaRecorder.onstop = async () => {
-    const audioBlob = new Blob(audioChunks, { type: "audio/webm" });
-    const formData = new FormData();
-    formData.append("audio", audioBlob, "speech.webm");
-
-    try {
-      const res = await fetch(API_URL, {
-        method: "POST",
-        body: formData
-      });
-
-      if (!res.ok) throw new Error("Server error");
-
-      const data = await res.json();
-
-      resultEl.innerHTML =
-        `<strong>You said:</strong><br>${data.transcript || "-"}` +
-        `<br><br><strong>Feedback:</strong><br>${data.feedback || "-"}`;
-
-      scoreEl.textContent = `${data.score ?? 0}/10`;
-      statusEl.textContent = "Completed";
-
-    } catch (e) {
-      errorEl.textContent = "Server unavailable or blocked request.";
-      statusEl.textContent = "Error";
-    }
-
-    startBtn.classList.remove("disabled");
-  };
-};
+/* ---------- RESET ---------- */
+function resetUI(clear = true) {
+  listening = false;
+  startBtn.disabled = false;
+  stopBtn.disabled = true;
+  if (clear) {
+    resultEl.innerHTML = "";
+    scoreEl.textContent = "";
+  }
+}
 </script>
 </body>
 </html>
