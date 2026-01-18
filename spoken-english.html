@@ -8,89 +8,78 @@
 <style>
 body {
   margin: 0;
-  background: radial-gradient(circle at top, #020617, #000);
-  font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  background: #020617;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont;
   color: #e5e7eb;
   display: flex;
   justify-content: center;
   align-items: center;
   min-height: 100vh;
 }
-
 .card {
-  width: 360px;
+  width: 380px;
   background: #0f172a;
-  border-radius: 18px;
+  border-radius: 16px;
   padding: 24px;
   border: 1px solid #1e293b;
-  box-shadow: 0 30px 80px rgba(0,0,0,.6);
 }
-
 h2 {
   text-align: center;
   margin: 0;
-  font-size: 22px;
 }
-
 #status {
   text-align: center;
   font-size: 13px;
   color: #38bdf8;
-  margin: 8px 0 14px;
+  margin: 10px 0 16px;
 }
-
 button {
   width: 100%;
   padding: 14px;
   border-radius: 12px;
   border: none;
-  background: #2563eb;
-  color: #fff;
   font-weight: 600;
-  font-size: 15px;
   cursor: pointer;
 }
-
-button:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
+#startBtn {
+  background: #2563eb;
+  color: #fff;
 }
-
-button.secondary {
+#stopBtn {
   background: #1e293b;
+  color: #fff;
   margin-top: 10px;
 }
-
 .result {
-  margin-top: 18px;
+  margin-top: 16px;
   font-size: 14px;
-  line-height: 1.6;
+  line-height: 1.5;
 }
-
 .score {
-  margin-top: 14px;
-  font-size: 32px;
-  font-weight: 800;
   text-align: center;
+  font-size: 32px;
+  font-weight: 700;
+  margin-top: 12px;
 }
 </style>
 </head>
 
 <body>
-
 <div class="card">
   <h2>Spoken English Practice</h2>
   <div id="status">Tap start and speak for 5 seconds</div>
 
   <button id="startBtn">🎤 Start Speaking</button>
-  <button id="stopBtn" class="secondary" disabled>Stop</button>
+  <button id="stopBtn" disabled>Stop</button>
 
   <div id="output" class="result"></div>
 </div>
 
 <script>
+const WORKER_URL = "https://evalis-ai.simpaticohconsultancy.workers.dev";
+
 let recorder;
-let chunks = [];
+let audioChunks = [];
 let stream;
 
 const startBtn = document.getElementById("startBtn");
@@ -98,23 +87,15 @@ const stopBtn = document.getElementById("stopBtn");
 const statusEl = document.getElementById("status");
 const outputEl = document.getElementById("output");
 
-const WORKER_URL = "https://evalis-ai.simpaticohrconsultancy.workers.dev";
-
-startBtn.addEventListener("click", async () => {
-  outputEl.innerHTML = "";
-  statusEl.textContent = "Requesting microphone...";
-
+startBtn.onclick = async () => {
   try {
     stream = await navigator.mediaDevices.getUserMedia({ audio: true });
 
-    recorder = new MediaRecorder(stream, {
-      mimeType: "audio/webm;codecs=opus"
-    });
-
-    chunks = [];
+    recorder = new MediaRecorder(stream, { mimeType: "audio/webm" });
+    audioChunks = [];
 
     recorder.ondataavailable = e => {
-      if (e.data.size > 0) chunks.push(e.data);
+      if (e.data.size > 0) audioChunks.push(e.data);
     };
 
     recorder.onstop = async () => {
@@ -122,13 +103,15 @@ startBtn.addEventListener("click", async () => {
       startBtn.disabled = true;
       stopBtn.disabled = true;
 
-      const blob = new Blob(chunks, { type: "audio/webm" });
+      const blob = new Blob(audioChunks, { type: "audio/webm" });
       const buffer = await blob.arrayBuffer();
 
       try {
         const res = await fetch(WORKER_URL, {
           method: "POST",
-          headers: { "Content-Type": "application/octet-stream" },
+          headers: {
+            "Content-Type": "application/octet-stream"
+          },
           body: buffer
         });
 
@@ -136,23 +119,23 @@ startBtn.addEventListener("click", async () => {
 
         outputEl.innerHTML = `
           <strong>You said:</strong><br>
-          ${data.transcript || "-"}<br><br>
+          ${data.transcript || "(No speech detected)"}<br><br>
 
           <strong>Feedback:</strong><br>
-          ${data.feedback || "-"}<br>
+          ${data.feedback || "Try again."}
 
           <div class="score">${data.score ?? 0}/10</div>
         `;
 
         statusEl.textContent = "Completed";
 
-      } catch {
-        statusEl.textContent = "Evaluation failed.";
-        outputEl.innerHTML = "<strong>Error:</strong> Server unavailable.";
-      } finally {
-        startBtn.disabled = false;
-        stream.getTracks().forEach(t => t.stop());
+      } catch (err) {
+        statusEl.textContent = "Server unavailable.";
+        outputEl.innerHTML = "";
       }
+
+      stream.getTracks().forEach(t => t.stop());
+      startBtn.disabled = false;
     };
 
     recorder.start();
@@ -161,18 +144,19 @@ startBtn.addEventListener("click", async () => {
     stopBtn.disabled = false;
 
     setTimeout(() => {
-      if (recorder && recorder.state === "recording") recorder.stop();
+      if (recorder.state === "recording") recorder.stop();
     }, 5000);
 
-  } catch {
-    statusEl.textContent = "Microphone access denied.";
+  } catch (err) {
+    alert("Microphone permission denied.");
   }
-});
+};
 
-stopBtn.addEventListener("click", () => {
-  if (recorder && recorder.state === "recording") recorder.stop();
-});
+stopBtn.onclick = () => {
+  if (recorder && recorder.state === "recording") {
+    recorder.stop();
+  }
+};
 </script>
-
 </body>
 </html>
