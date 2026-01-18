@@ -1,260 +1,141 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Career Lab AI – Voice Interview</title>
-
-<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-
-<style>
-:root {
-  --bg:#0f172a;
-  --card:#111827;
-  --accent:#2563eb;
-  --danger:#dc2626;
-  --text:#e5e7eb;
-  --muted:#94a3b8;
-}
-*{box-sizing:border-box}
-body{
-  margin:0;
-  background:var(--bg);
-  font-family:system-ui,-apple-system,Segoe UI,Roboto;
-  color:var(--text);
-  min-height:100vh;
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  padding:16px;
-}
-.card{
-  width:100%;
-  max-width:420px;
-  background:rgba(255,255,255,.04);
-  border:1px solid rgba(255,255,255,.08);
-  border-radius:22px;
-  padding:26px;
-  backdrop-filter:blur(10px);
-}
-h2{margin:0 0 6px}
-#status{color:var(--muted);font-size:14px;margin-bottom:14px}
-input[type=file]{
-  width:100%;
-  margin-bottom:14px;
-  color:var(--muted);
-}
-button{
-  width:100%;
-  border:none;
-  padding:14px;
-  border-radius:14px;
-  font-weight:700;
-  font-size:15px;
-  cursor:pointer;
-}
-#startBtn{background:var(--accent);color:white}
-#endBtn{background:var(--danger);color:white;display:none}
-button:disabled{opacity:.6}
-
-.pulse{
-  width:68px;height:68px;
-  border-radius:50%;
-  background:var(--accent);
-  margin:18px auto;
-  display:none;
-  animation:pulse 1.5s infinite;
-}
-@keyframes pulse{
-  0%{box-shadow:0 0 0 0 rgba(37,99,235,.7)}
-  100%{box-shadow:0 0 0 26px rgba(37,99,235,0)}
-}
-#log{
-  margin-top:16px;
-  background:rgba(0,0,0,.35);
-  border:1px solid rgba(255,255,255,.08);
-  border-radius:14px;
-  padding:14px;
-  height:220px;
-  overflow-y:auto;
-  font-size:13px;
-  line-height:1.55;
-}
-.report{
-  background:#020617;
-  border-left:4px solid var(--accent);
-  padding:14px;
-  border-radius:10px;
-}
-</style>
+    <meta charset="UTF-8">
+    <title>AI Interviewer | Career Lab</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <style>
+        body { font-family: sans-serif; background: #0f172a; color: white; text-align: center; padding: 20px; }
+        .card { max-width: 400px; margin: auto; background: #1e293b; padding: 20px; border-radius: 20px; }
+        .pulse { width: 50px; height: 50px; background: #3b82f6; border-radius: 50%; margin: 20px auto; animation: p 1.5s infinite; display: none; }
+        @keyframes p { 0% { box-shadow: 0 0 0 0 rgba(59,130,246,0.7); } 100% { box-shadow: 0 0 0 20px rgba(0,0,0,0); } }
+        #log { background: #000; padding: 10px; height: 150px; overflow-y: auto; text-align: left; font-size: 12px; margin-top: 10px; border-radius: 10px; color: #adbac7; }
+        button { width: 100%; padding: 15px; margin-top: 10px; border-radius: 10px; border: none; background: #3b82f6; color: white; font-weight: bold; cursor: pointer; }
+        button:disabled { background: #475569; }
+        #debug { color: #facc15; font-size: 12px; margin-top: 5px; }
+    </style>
 </head>
-
 <body>
+
 <div class="card">
-  <h2>Career Lab AI</h2>
-  <div id="status">Upload your resume to begin</div>
-
-  <input id="cvFile" type="file" accept=".pdf,.txt">
-
-  <div id="mic" class="pulse"></div>
-
-  <button id="startBtn" disabled>🎤 Start Interview</button>
-  <button id="endBtn">🛑 End & Evaluate</button>
-
-  <div id="log">AI ready.</div>
+    <h2>Career Lab AI</h2>
+    <p id="status">Upload CV to Start</p>
+    <div id="debug">System Ready</div>
+    
+    <input type="file" id="cvInput" style="margin: 10px 0;">
+    <div id="visual" class="pulse"></div>
+    
+    <button id="actionBtn" disabled>Start Interview</button>
+    <div id="log"></div>
 </div>
 
 <script>
-/* ================= CONFIG ================= */
 const WORKER_URL = "https://evalis-ai.simpaticohrconsultancy.workers.dev";
-pdfjsLib.GlobalWorkerOptions.workerSrc =
-  "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
-
-/* ================= STATE ================= */
-let cvText = "";
 let history = [];
-let active = false;
-let busy = false;
-const synth = speechSynthesis;
+let cvText = "";
+let isInterviewing = false;
+let isBusy = false;
 
-/* ================= UI ================= */
-const statusEl = document.getElementById("status");
-const logEl = document.getElementById("log");
-const micEl = document.getElementById("mic");
-const startBtn = document.getElementById("startBtn");
-const endBtn = document.getElementById("endBtn");
-const cvFile = document.getElementById("cvFile");
-
-/* ================= RESUME PARSER ================= */
-cvFile.onchange = async () => {
-  const file = cvFile.files[0];
-  if (!file) return;
-  statusEl.innerText = "Reading resume...";
-  try {
+// 1. CV Parsing
+document.getElementById('cvInput').onchange = async (e) => {
+    const file = e.target.files[0];
+    document.getElementById('debug').innerText = "Status: Parsing CV...";
     if (file.type === "application/pdf") {
-      const pdf = await pdfjsLib.getDocument(new Uint8Array(await file.arrayBuffer())).promise;
-      let text = "";
-      for (let i = 1; i <= pdf.numPages; i++) {
-        const page = await pdf.getPage(i);
-        const content = await page.getTextContent();
-        text += content.items.map(x => x.str).join(" ") + "\n";
-      }
-      cvText = text;
-    } else {
-      cvText = await file.text();
-    }
-    statusEl.innerText = "Resume loaded";
-    startBtn.disabled = false;
-  } catch {
-    statusEl.innerText = "Resume read failed";
-  }
+        const pdf = await pdfjsLib.getDocument(new Uint8Array(await file.arrayBuffer())).promise;
+        let t = "";
+        for(let i=1; i<=pdf.numPages; i++) t += (await (await pdf.getPage(i)).getTextContent()).items.map(s=>s.str).join(" ");
+        cvText = t;
+    } else { cvText = await file.text(); }
+    document.getElementById('actionBtn').disabled = false;
+    document.getElementById('debug').innerText = "Status: CV Ready";
 };
 
-/* ================= AI SPEAK ================= */
-function speakAI(text){
-  if (!text || text === "undefined") {
-    busy = false;
-    statusEl.innerText = "AI error. Tap Start.";
-    return;
-  }
-  logEl.innerHTML += `<div><b>AI:</b> ${text}</div>`;
-  logEl.scrollTop = logEl.scrollHeight;
-
-  synth.cancel();
-  const u = new SpeechSynthesisUtterance(text);
-  u.onend = () => {
-    busy = false;
-    if (active) setTimeout(startRecording, 600);
-  };
-  synth.speak(u);
-}
-
-/* ================= RECORD ================= */
-async function startRecording(){
-  if (!active || busy) return;
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({audio:true});
-    const rec = new MediaRecorder(stream);
-    const chunks = [];
-
-    micEl.style.display = "block";
-    statusEl.innerText = "Listening...";
-
-    rec.ondataavailable = e => chunks.push(e.data);
-
-    rec.onstop = async () => {
-      micEl.style.display = "none";
-      stream.getTracks().forEach(t => t.stop());
-
-      const blob = new Blob(chunks, {type:"audio/webm"});
-      if (blob.size < 1500) {
-        busy = false;
-        statusEl.innerText = "Speak clearly. Tap Start.";
-        active = false;
-        startBtn.style.display = "block";
+// 2. Speech Logic
+function speak(text) {
+    if (!text || text === "undefined") {
+        isBusy = false;
+        document.getElementById('debug').innerText = "Error: Bot tried to say nothing.";
         return;
-      }
-
-      busy = true;
-      statusEl.innerText = "Analyzing...";
-
-      const fd = new FormData();
-      fd.append("audio", blob);
-      fd.append("mode", "interview");
-      fd.append("cvText", cvText);
-      fd.append("history", JSON.stringify(history));
-
-      try {
-        const res = await fetch(WORKER_URL,{method:"POST",body:fd});
-        if (!res.ok) throw 0;
-        const data = await res.json();
-        history = data.newHistory || history;
-        speakAI(data.nextQuestion);
-      } catch {
-        busy = false;
-        active = false;
-        statusEl.innerText = "Network error. Tap Start.";
-        startBtn.style.display = "block";
-      }
+    }
+    const u = new SpeechSynthesisUtterance(text);
+    document.getElementById('log').innerHTML += `<p><b>AI:</b> ${text}</p>`;
+    
+    u.onend = () => {
+        isBusy = false;
+        if (isInterviewing) startTurn();
     };
-
-    rec.start();
-    setTimeout(()=>rec.state==="recording"&&rec.stop(),8000);
-
-  } catch {
-    statusEl.innerText = "Mic permission denied";
-    active = false;
-  }
+    window.speechSynthesis.speak(u);
 }
 
-/* ================= BUTTONS ================= */
-startBtn.onclick = () => {
-  active = true;
-  startBtn.style.display = "none";
-  cvFile.style.display = "none";
-  endBtn.style.display = "block";
-  speakAI("I have reviewed your resume. Please introduce yourself and highlight your key strengths.");
-};
+// 3. Recording Turn
+async function startTurn() {
+    if (isBusy || !isInterviewing) return;
+    try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const recorder = new MediaRecorder(stream);
+        const chunks = [];
+        
+        document.getElementById('visual').style.display = "block";
+        document.getElementById('debug').innerText = "Status: Listening...";
 
-endBtn.onclick = async () => {
-  active = false;
-  synth.cancel();
-  statusEl.innerText = "Generating report...";
-  endBtn.disabled = true;
+        recorder.ondataavailable = e => chunks.push(e.data);
+        recorder.onstop = async () => {
+            document.getElementById('visual').style.display = "none";
+            if (chunks.length === 0) { isBusy = false; return; }
 
-  const fd = new FormData();
-  fd.append("mode","evaluate");
-  fd.append("history",JSON.stringify(history));
+            isBusy = true;
+            document.getElementById('debug').innerText = "Status: Transcribing & Thinking...";
+            
+            const fd = new FormData();
+            fd.append("audio", new Blob(chunks, { type: "audio/webm" }));
+            fd.append("mode", "interview");
+            fd.append("cvText", cvText);
+            fd.append("history", JSON.stringify(history));
 
-  try{
-    const res = await fetch(WORKER_URL,{method:"POST",body:fd});
-    const data = await res.json();
-    logEl.innerHTML = `<div class="report"><h3>Interview Report</h3><pre>${data.report}</pre></div>`;
-    statusEl.innerText = "Completed";
-  }catch{
-    statusEl.innerText = "Report failed";
-    endBtn.disabled = false;
-  }
+            try {
+                const res = await fetch(WORKER_URL, { method: "POST", body: fd });
+                const data = await res.json();
+                
+                // Debugging the incoming data
+                console.log("Server Response:", data);
+
+                if (data.nextQuestion) {
+                    history = data.newHistory || history;
+                    speak(data.nextQuestion);
+                } else if (data.error) {
+                    speak("I encountered an error: " + data.error);
+                }
+            } catch (err) {
+                document.getElementById('debug').innerText = "Status: Network Error";
+                isBusy = false;
+                setTimeout(startTurn, 3000);
+            }
+        };
+
+        recorder.start();
+        setTimeout(() => { if(recorder.state === "recording") recorder.stop(); }, 6000);
+    } catch (e) { document.getElementById('debug').innerText = "Status: Mic Blocked"; }
+}
+
+// 4. Action Button
+document.getElementById('actionBtn').onclick = async () => {
+    const btn = document.getElementById('actionBtn');
+    if (btn.innerText === "Start Interview") {
+        isInterviewing = true;
+        btn.innerText = "Stop & Evaluate";
+        speak("Hello. I've reviewed your resume. Please introduce yourself.");
+    } else {
+        isInterviewing = false;
+        btn.disabled = true;
+        btn.innerText = "Loading Report...";
+        const fd = new FormData();
+        fd.append("mode", "evaluate");
+        fd.append("history", JSON.stringify(history));
+        const res = await fetch(WORKER_URL, { method: "POST", body: fd });
+        const data = await res.json();
+        document.getElementById('log').innerHTML = `<div style="background:white;color:black;padding:10px;border-radius:10px;">${data.report}</div>`;
+        document.getElementById('debug').innerText = "Status: Done";
+    }
 };
 </script>
 </body>
