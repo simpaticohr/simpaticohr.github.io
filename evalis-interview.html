@@ -1,38 +1,59 @@
+<script>
 let chatHistory = [];
 let isInterviewActive = false;
 const synth = window.speechSynthesis;
+const API_URL = "https://evalis-ai.simpaticohrconsultancy.workers.dev";
 
-// 🔊 Function: AI speaks and then triggers the mic
+// 🔊 AI speaks first, then listens
 function aiSpeak(text) {
-  const utterance = new SpeechSynthesisUtterance(text);
-  utterance.onend = () => {
-    if (isInterviewActive) startContinuousListen(); // 🎤 Listen immediately after speaking
+  const utter = new SpeechSynthesisUtterance(text);
+  utter.onend = () => {
+    if (isInterviewActive) startListening();
   };
-  synth.speak(utterance);
+  synth.speak(utter);
 }
 
-// 🎤 Function: Continuous recording cycle
-async function startContinuousListen() {
+// 🎤 Record user answer
+async function startListening() {
   const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
   const recorder = new MediaRecorder(stream);
   const chunks = [];
 
   recorder.ondataavailable = e => chunks.push(e.data);
+
   recorder.onstop = async () => {
+    stream.getTracks().forEach(t => t.stop());
+
     const fd = new FormData();
     fd.append("audio", new Blob(chunks, { type: "audio/webm" }));
     fd.append("mode", "interview");
-    fd.append("cvText", globalExtractedCVText); 
+    fd.append("candidate_id", candidateId);
+    fd.append("job_id", jobId);
     fd.append("history", JSON.stringify(chatHistory));
 
     const res = await fetch(API_URL, { method: "POST", body: fd });
     const data = await res.json();
-    
+
+    // Interview finished?
+    if (data.complete) {
+      showFinalReport(data.report);
+      isInterviewActive = false;
+      return;
+    }
+
     chatHistory = data.newHistory;
-    aiSpeak(data.nextQuestion); // 🔄 Back to AI speaking
+    aiSpeak(data.nextQuestion);
   };
 
   recorder.start();
-  // Auto-stop recording after 8 seconds of user speaking
-  setTimeout(() => { if (recorder.state === "recording") recorder.stop(); }, 8000);
+  setTimeout(() => {
+    if (recorder.state === "recording") recorder.stop();
+  }, 8000);
 }
+
+// ▶️ Start interview
+function startInterview() {
+  isInterviewActive = true;
+  aiSpeak("Hello. Let's begin your interview. Please introduce yourself.");
+}
+</script>
