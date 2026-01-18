@@ -6,94 +6,53 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 
   <style>
-    * {
-      box-sizing: border-box;
-      font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
-    }
-
+    * { box-sizing: border-box; font-family: system-ui, -apple-system, Segoe UI, Roboto; }
     body {
       margin: 0;
       height: 100vh;
-      background: radial-gradient(circle at top, #0f172a, #020617);
+      background: radial-gradient(circle at top, #0f1b3d, #050914);
       display: flex;
       align-items: center;
       justify-content: center;
-      color: #e5e7eb;
+      color: #fff;
     }
-
     .card {
       width: 320px;
-      background: rgba(15, 23, 42, 0.85);
+      padding: 22px;
       border-radius: 14px;
-      padding: 20px;
-      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
+      background: rgba(255,255,255,0.06);
+      box-shadow: 0 20px 40px rgba(0,0,0,0.4);
       text-align: center;
     }
-
-    h2 {
-      margin: 0 0 6px;
-      font-size: 20px;
-    }
-
-    .status {
-      font-size: 13px;
-      color: #93c5fd;
-      min-height: 18px;
-      margin-bottom: 12px;
-    }
-
+    h2 { margin: 0 0 6px; font-size: 20px; }
+    .status { font-size: 12px; opacity: 0.8; margin-bottom: 14px; }
     button {
       width: 100%;
       padding: 12px;
+      margin-top: 10px;
       border-radius: 8px;
       border: none;
       font-size: 15px;
-      font-weight: 600;
       cursor: pointer;
     }
-
-    #startBtn {
-      background: #2563eb;
-      color: white;
-    }
-
-    #stopBtn {
-      margin-top: 8px;
-      background: #334155;
-      color: #cbd5f5;
-      display: none;
-    }
-
+    .start { background: #2563eb; color: white; }
+    .stop { background: #334155; color: #ccc; }
+    .disabled { opacity: 0.6; pointer-events: none; }
     .result {
       margin-top: 14px;
+      font-size: 14px;
       text-align: left;
-      font-size: 13px;
-      display: none;
     }
-
-    .label {
-      color: #9ca3af;
-      margin-bottom: 4px;
-    }
-
-    .box {
-      background: rgba(2, 6, 23, 0.6);
-      border-radius: 8px;
-      padding: 8px;
-      margin-bottom: 8px;
-    }
-
     .score {
-      font-size: 28px;
+      margin-top: 10px;
+      font-size: 26px;
       font-weight: bold;
       text-align: center;
-      margin-top: 6px;
     }
-
     .error {
-      color: #f87171;
-      margin-top: 8px;
-      font-size: 13px;
+      margin-top: 10px;
+      font-size: 12px;
+      color: #ff6b6b;
     }
   </style>
 </head>
@@ -101,103 +60,87 @@
 <body>
   <div class="card">
     <h2>Spoken English Practice</h2>
-    <div id="status" class="status">Ready</div>
+    <div id="status" class="status">Tap start & speak for 5–10 seconds</div>
 
-    <button id="startBtn">🎤 Start Speaking</button>
-    <button id="stopBtn">Stop</button>
+    <button id="startBtn" class="start">🎤 Start Speaking</button>
+    <button id="stopBtn" class="stop disabled">Stop</button>
 
+    <div id="result" class="result"></div>
+    <div id="score" class="score"></div>
     <div id="error" class="error"></div>
-
-    <div id="result" class="result">
-      <div class="label">You said:</div>
-      <div id="transcript" class="box"></div>
-
-      <div class="label">Feedback:</div>
-      <div id="feedback" class="box"></div>
-
-      <div id="score" class="score"></div>
-    </div>
   </div>
 
-  <script>
-    // 🔴 MUST MATCH YOUR WORKER EXACTLY
-    const WORKER_URL =
-      "https://evalis-ai.simpaticohhrconsultancy.workers.dev";
+<script>
+const API_URL = "https://evalis-ai.simpaticohrconsultancy.workers.dev/";
 
-    let mediaRecorder;
-    let audioChunks = [];
+let mediaRecorder;
+let audioChunks = [];
 
-    const startBtn = document.getElementById("startBtn");
-    const stopBtn = document.getElementById("stopBtn");
-    const statusEl = document.getElementById("status");
-    const errorEl = document.getElementById("error");
-    const resultEl = document.getElementById("result");
-    const transcriptEl = document.getElementById("transcript");
-    const feedbackEl = document.getElementById("feedback");
-    const scoreEl = document.getElementById("score");
+const startBtn = document.getElementById("startBtn");
+const stopBtn  = document.getElementById("stopBtn");
+const statusEl = document.getElementById("status");
+const resultEl = document.getElementById("result");
+const scoreEl  = document.getElementById("score");
+const errorEl  = document.getElementById("error");
 
-    startBtn.onclick = async () => {
-      errorEl.textContent = "";
-      resultEl.style.display = "none";
+startBtn.onclick = async () => {
+  errorEl.textContent = "";
+  resultEl.textContent = "";
+  scoreEl.textContent = "";
+  audioChunks = [];
 
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    mediaRecorder = new MediaRecorder(stream);
+    mediaRecorder.start();
 
-        audioChunks = [];
-        mediaRecorder = new MediaRecorder(stream, {
-          mimeType: "audio/webm"
-        });
+    mediaRecorder.ondataavailable = e => audioChunks.push(e.data);
 
-        mediaRecorder.ondataavailable = e => {
-          if (e.data.size > 0) audioChunks.push(e.data);
-        };
+    statusEl.textContent = "Listening… Speak clearly (5–10 sec)";
+    startBtn.classList.add("disabled");
+    stopBtn.classList.remove("disabled");
 
-        mediaRecorder.onstop = sendAudio;
+  } catch (err) {
+    errorEl.textContent = "Microphone permission denied.";
+  }
+};
 
-        mediaRecorder.start();
-        statusEl.textContent = "Listening… Speak clearly (5–10 sec)";
-        startBtn.disabled = true;
-        stopBtn.style.display = "block";
-      } catch (err) {
-        errorEl.textContent = "Microphone permission denied.";
-      }
-    };
+stopBtn.onclick = async () => {
+  stopBtn.classList.add("disabled");
+  statusEl.textContent = "Processing…";
 
-    stopBtn.onclick = () => {
-      if (mediaRecorder && mediaRecorder.state !== "inactive") {
-        mediaRecorder.stop();
-      }
-      startBtn.disabled = false;
-      stopBtn.style.display = "none";
-      statusEl.textContent = "Processing…";
-    };
+  mediaRecorder.stop();
 
-    async function sendAudio() {
-      try {
-        const audioBlob = new Blob(audioChunks, { type: "audio/webm" });
-        const formData = new FormData();
-        formData.append("audio", audioBlob, "speech.webm");
+  mediaRecorder.onstop = async () => {
+    const audioBlob = new Blob(audioChunks, { type: "audio/webm" });
+    const formData = new FormData();
+    formData.append("audio", audioBlob, "speech.webm");
 
-        const res = await fetch(WORKER_URL, {
-          method: "POST",
-          body: formData
-        });
+    try {
+      const res = await fetch(API_URL, {
+        method: "POST",
+        body: formData
+      });
 
-        if (!res.ok) throw new Error("Server unavailable");
+      if (!res.ok) throw new Error("Server error");
 
-        const data = await res.json();
+      const data = await res.json();
 
-        transcriptEl.textContent = data.transcript || "-";
-        feedbackEl.textContent = data.feedback || "-";
-        scoreEl.textContent = `${data.score || 0}/10`;
+      resultEl.innerHTML =
+        `<strong>You said:</strong><br>${data.transcript || "-"}` +
+        `<br><br><strong>Feedback:</strong><br>${data.feedback || "-"}`;
 
-        resultEl.style.display = "block";
-        statusEl.textContent = "Completed";
-      } catch (err) {
-        statusEl.textContent = "Error";
-        errorEl.textContent = "Server unavailable.";
-      }
+      scoreEl.textContent = `${data.score ?? 0}/10`;
+      statusEl.textContent = "Completed";
+
+    } catch (e) {
+      errorEl.textContent = "Server unavailable or blocked request.";
+      statusEl.textContent = "Error";
     }
-  </script>
+
+    startBtn.classList.remove("disabled");
+  };
+};
+</script>
 </body>
 </html>
