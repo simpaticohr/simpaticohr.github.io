@@ -2,17 +2,17 @@ let chatHistory = [];
 let isInterviewActive = false;
 const synth = window.speechSynthesis;
 
-// 1. AI SPEAKS & THEN LISTENS
+// 🔊 Function: AI speaks and then triggers the mic
 function aiSpeak(text) {
-  const utter = new SpeechSynthesisUtterance(text);
-  utter.onend = () => {
-    if (isInterviewActive) startRecordingCycle(); // Start listening only AFTER AI finishes
+  const utterance = new SpeechSynthesisUtterance(text);
+  utterance.onend = () => {
+    if (isInterviewActive) startContinuousListen(); // 🎤 Listen immediately after speaking
   };
-  synth.speak(utter);
+  synth.speak(utterance);
 }
 
-// 2. CONTINUOUS CYCLE
-async function startRecordingCycle() {
+// 🎤 Function: Continuous recording cycle
+async function startContinuousListen() {
   const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
   const recorder = new MediaRecorder(stream);
   const chunks = [];
@@ -20,19 +20,19 @@ async function startRecordingCycle() {
   recorder.ondataavailable = e => chunks.push(e.data);
   recorder.onstop = async () => {
     const fd = new FormData();
-    fd.append("audio", new Blob(chunks));
+    fd.append("audio", new Blob(chunks, { type: "audio/webm" }));
     fd.append("mode", "interview");
-    fd.append("cvText", extractedCVText);
+    fd.append("cvText", globalExtractedCVText); 
     fd.append("history", JSON.stringify(chatHistory));
 
     const res = await fetch(API_URL, { method: "POST", body: fd });
     const data = await res.json();
     
     chatHistory = data.newHistory;
-    aiSpeak(data.nextQuestion); // AI talks, then trigger next cycle
+    aiSpeak(data.nextQuestion); // 🔄 Back to AI speaking
   };
 
   recorder.start();
-  // Automatically "Submit" after 7 seconds of speaking
-  setTimeout(() => { if(recorder.state === "recording") recorder.stop(); }, 7000);
+  // Auto-stop recording after 8 seconds of user speaking
+  setTimeout(() => { if (recorder.state === "recording") recorder.stop(); }, 8000);
 }
