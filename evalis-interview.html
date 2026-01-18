@@ -1,235 +1,38 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>Mock Interview | Simpatico HR</title>
+let chatHistory = [];
+let isInterviewActive = false;
+const synth = window.speechSynthesis;
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-
-<style>
-body {
-  margin: 0;
-  background: #020617;
-  font-family: system-ui, -apple-system, Segoe UI;
-  color: #e5e7eb;
-  min-height: 100vh;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-}
-
-.card {
-  width: 420px;
-  background: #0f172a;
-  border-radius: 18px;
-  padding: 26px;
-  border: 1px solid #1e293b;
-}
-
-h2 {
-  text-align: center;
-  margin-top: 0;
-}
-
-#status {
-  font-size: 12px;
-  color: #38bdf8;
-  text-align: center;
-  margin: 10px 0;
-}
-
-#question {
-  min-height: 70px;
-  font-size: 15px;
-  margin: 14px 0;
-  line-height: 1.5;
-}
-
-textarea {
-  width: 100%;
-  min-height: 90px;
-  border-radius: 10px;
-  border: none;
-  padding: 10px;
-  font-size: 14px;
-  resize: vertical;
-}
-
-button {
-  width: 100%;
-  padding: 14px;
-  margin-top: 10px;
-  border-radius: 12px;
-  border: none;
-  background: #2563eb;
-  color: white;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-button:disabled {
-  background: #1e293b;
-  color: #64748b;
-  cursor: not-allowed;
-}
-
-.result {
-  text-align: center;
-  margin-top: 20px;
-}
-
-.score {
-  font-size: 36px;
-  font-weight: 700;
-  margin-bottom: 6px;
-}
-</style>
-</head>
-
-<body>
-<div class="card">
-
-<h2>Mock Interview</h2>
-
-<input type="file" id="resumeInput" accept=".pdf,.txt" />
-
-<div id="status">Upload your resume to begin</div>
-
-<div id="question"></div>
-
-<textarea id="answer" placeholder="Type your answer here..." disabled></textarea>
-
-<button id="submitBtn" disabled>Submit Answer</button>
-
-<div id="result" class="result"></div>
-
-</div>
-
-<script>
-/* ================= PDF SETUP ================= */
-const pdfjsLib = window['pdfjs-dist/build/pdf'];
-pdfjsLib.GlobalWorkerOptions.workerSrc =
-  "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
-
-/* ================= RESUME PARSER ================= */
-async function parseResume(file) {
-  let text = "";
-
-  if (file.type.includes("pdf")) {
-    const buf = await file.arrayBuffer();
-    const pdf = await pdfjsLib.getDocument(buf).promise;
-    for (let i = 1; i <= pdf.numPages; i++) {
-      const page = await pdf.getPage(i);
-      const content = await page.getTextContent();
-      text += content.items.map(i => i.str).join(" ");
-    }
-  } else {
-    text = await file.text();
-  }
-
-  text = text.toLowerCase();
-
-  return {
-    role: text.match(/(recruiter|hr|engineer|developer|analyst|manager)/)?.[0] || "professional",
-    skills: [...text.matchAll(/(python|javascript|excel|recruitment|sourcing|sql|communication)/g)].map(m => m[0]),
-    company: text.match(/(google|amazon|accenture|tcs|infosys|wipro)/)?.[0] || "your organization"
+// 1. AI SPEAKS & THEN LISTENS
+function aiSpeak(text) {
+  const utter = new SpeechSynthesisUtterance(text);
+  utter.onend = () => {
+    if (isInterviewActive) startRecordingCycle(); // Start listening only AFTER AI finishes
   };
+  synth.speak(utter);
 }
 
-/* ================= INTERVIEW ENGINE ================= */
-function createInterview(profile) {
-  return {
-    profile,
-    index: 0,
-    depth: 0,
-    maxDepth: 2,
-    score: 0,
-    questions: [
-      `You worked as a ${profile.role} at ${profile.company}. What were your core responsibilities?`,
-      `How did you use ${profile.skills[0] || "your skills"} in your work?`,
-      `Describe a challenging situation you handled in this role.`,
-      `What measurable impact did your work create?`
-    ]
+// 2. CONTINUOUS CYCLE
+async function startRecordingCycle() {
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  const recorder = new MediaRecorder(stream);
+  const chunks = [];
+
+  recorder.ondataavailable = e => chunks.push(e.data);
+  recorder.onstop = async () => {
+    const fd = new FormData();
+    fd.append("audio", new Blob(chunks));
+    fd.append("mode", "interview");
+    fd.append("cvText", extractedCVText);
+    fd.append("history", JSON.stringify(chatHistory));
+
+    const res = await fetch(API_URL, { method: "POST", body: fd });
+    const data = await res.json();
+    
+    chatHistory = data.newHistory;
+    aiSpeak(data.nextQuestion); // AI talks, then trigger next cycle
   };
+
+  recorder.start();
+  // Automatically "Submit" after 7 seconds of speaking
+  setTimeout(() => { if(recorder.state === "recording") recorder.stop(); }, 7000);
 }
-
-function decideNext(answer, interview) {
-  const words = answer.trim().split(" ").length;
-
-  if (words < 30 && interview.depth === 0) {
-    interview.depth++;
-    return "Can you explain that in more detail?";
-  }
-
-  interview.depth = 0;
-  interview.score += Math.min(25, Math.floor(words / 4));
-  interview.index++;
-
-  return interview.questions[interview.index] || null;
-}
-
-/* ================= UI FLOW ================= */
-const resumeInput = document.getElementById("resumeInput");
-const statusEl = document.getElementById("status");
-const questionEl = document.getElementById("question");
-const answerEl = document.getElementById("answer");
-const submitBtn = document.getElementById("submitBtn");
-const resultEl = document.getElementById("result");
-
-let interview = null;
-
-resumeInput.addEventListener("change", async () => {
-  if (!resumeInput.files.length) return;
-
-  statusEl.innerText = "Parsing resume…";
-  questionEl.innerText = "";
-  answerEl.value = "";
-  resultEl.innerHTML = "";
-
-  const profile = await parseResume(resumeInput.files[0]);
-  interview = createInterview(profile);
-
-  questionEl.innerText = interview.questions[0];
-  statusEl.innerText = "Interview started";
-  answerEl.disabled = false;
-  submitBtn.disabled = false;
-});
-
-submitBtn.onclick = () => {
-  if (!interview) return;
-
-  const answer = answerEl.value.trim();
-  if (!answer) return;
-
-  answerEl.value = "";
-
-  const next = decideNext(answer, interview);
-
-  if (!next) {
-    finishInterview();
-    return;
-  }
-
-  questionEl.innerText = next;
-};
-
-function finishInterview() {
-  answerEl.disabled = true;
-  submitBtn.disabled = true;
-
-  const percent = Math.min(100, interview.score);
-
-  questionEl.innerText = "Interview Completed";
-
-  resultEl.innerHTML = `
-    <div class="score">${percent}%</div>
-    <p>${percent >= 70 ? "Strong interview performance" : "Needs improvement"}</p>
-  `;
-
-  statusEl.innerText = "Completed";
-}
-</script>
-
-</body>
-</html>
