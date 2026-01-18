@@ -2,214 +2,113 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Spoken English Practice | Simpatico HR</title>
-
+<title>Spoken English Practice</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
 <style>
-  html, body {
-    margin: 0;
-    height: 100%;
-    font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
-    background: radial-gradient(circle at top, #0a1a3a, #050b1c);
-    color: #fff;
-  }
-
-  .container {
-    height: 100%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
-
-  .card {
-    width: 320px;
-    background: rgba(255,255,255,0.06);
-    backdrop-filter: blur(10px);
-    border-radius: 14px;
-    padding: 20px;
-    text-align: center;
-    box-shadow: 0 10px 40px rgba(0,0,0,.4);
-  }
-
-  h2 {
-    margin: 0 0 6px;
-    font-size: 18px;
-  }
-
-  .status {
-    font-size: 13px;
-    opacity: .85;
-    margin-bottom: 14px;
-  }
-
-  button {
-    width: 100%;
-    padding: 12px;
-    border-radius: 8px;
-    border: none;
-    font-size: 15px;
-    cursor: pointer;
-  }
-
-  #startBtn {
-    background: #2d6cff;
-    color: #fff;
-  }
-
-  #stopBtn {
-    margin-top: 8px;
-    background: #444;
-    color: #aaa;
-  }
-
-  .box {
-    margin-top: 14px;
-    text-align: left;
-    font-size: 13px;
-    line-height: 1.4;
-  }
-
-  .label {
-    opacity: .7;
-  }
-
-  .score {
-    margin-top: 10px;
-    font-size: 22px;
-    font-weight: bold;
-    text-align: center;
-  }
+body {
+  margin: 0;
+  height: 100vh;
+  background: radial-gradient(circle at top, #0b1d3a, #020617);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont;
+  color: #fff;
+}
+.card {
+  width: 280px;
+  background: rgba(255,255,255,0.08);
+  backdrop-filter: blur(12px);
+  border-radius: 14px;
+  padding: 18px;
+  text-align: center;
+}
+button {
+  width: 100%;
+  padding: 10px;
+  border: none;
+  border-radius: 8px;
+  margin-top: 8px;
+  font-size: 14px;
+}
+.start { background:#2563eb; color:#fff; }
+.stop { background:#374151; color:#ccc; }
+small { color:#cbd5f5; }
+pre {
+  text-align:left;
+  white-space:pre-wrap;
+  font-size:12px;
+}
+.score {
+  font-size:22px;
+  margin-top:8px;
+}
 </style>
 </head>
 
 <body>
-<div class="container">
-  <div class="card">
+<div class="card">
+  <h3>Spoken English Practice</h3>
+  <small id="status">Tap start and speak</small>
 
-    <h2>Spoken English Practice</h2>
-    <div class="status" id="status">Tap start and speak</div>
+  <button class="start" id="start">🎤 Start Speaking</button>
+  <button class="stop" id="stop" disabled>Stop</button>
 
-    <button id="startBtn">🎤 Start Speaking</button>
-    <button id="stopBtn" disabled>Stop</button>
-
-    <div class="box">
-      <div class="label">You said:</div>
-      <div id="said">—</div>
-    </div>
-
-    <div class="box">
-      <div class="label">Feedback:</div>
-      <div id="feedback">—</div>
-    </div>
-
-    <div class="score" id="score">—</div>
-
-  </div>
+  <pre id="said"></pre>
+  <pre id="feedback"></pre>
+  <div class="score" id="score"></div>
 </div>
 
 <script>
-/* =========================
-   SPOKEN ENGLISH FRONTEND
-   ========================= */
+const API = "https://evalis-ai.simpaticohrconsultancy.workers.dev";
 
-const API_URL = "https://evalis-ai.simpaticohrconsultancy.workers.dev/";
+let recorder, audioChunks = [];
 
-const startBtn = document.getElementById("startBtn");
-const stopBtn = document.getElementById("stopBtn");
-const statusEl = document.getElementById("status");
-const saidEl = document.getElementById("said");
-const feedbackEl = document.getElementById("feedback");
-const scoreEl = document.getElementById("score");
+const startBtn = document.getElementById("start");
+const stopBtn = document.getElementById("stop");
+const status = document.getElementById("status");
+const said = document.getElementById("said");
+const feedback = document.getElementById("feedback");
+const scoreBox = document.getElementById("score");
 
-let recognition;
-let transcript = "";
-let isListening = false;
-
-/* Browser support check */
-if (!("webkitSpeechRecognition" in window)) {
-  statusEl.innerText = "Speech not supported on this browser";
+startBtn.onclick = async () => {
+  audioChunks = [];
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  recorder = new MediaRecorder(stream);
+  recorder.ondataavailable = e => audioChunks.push(e.data);
+  recorder.start();
+  status.textContent = "Listening...";
   startBtn.disabled = true;
-} else {
-  recognition = new webkitSpeechRecognition();
-  recognition.lang = "en-US";
-  recognition.continuous = false;
-  recognition.interimResults = false;
+  stopBtn.disabled = false;
+};
 
-  recognition.onstart = () => {
-    isListening = true;
-    transcript = "";
-    statusEl.innerText = "Listening… Speak clearly (5–10 sec)";
-    startBtn.disabled = true;
-    stopBtn.disabled = false;
-  };
+stopBtn.onclick = async () => {
+  recorder.stop();
+  status.textContent = "Processing...";
+  stopBtn.disabled = true;
 
-  recognition.onresult = (event) => {
-    transcript = event.results[0][0].transcript.trim();
-    saidEl.innerText = transcript;
-  };
+  recorder.onstop = async () => {
+    const audioBlob = new Blob(audioChunks, { type: "audio/webm" });
+    const form = new FormData();
+    form.append("audio", audioBlob, "speech.webm");
 
-  recognition.onerror = () => {
-    statusEl.innerText = "Speech recognition error";
-    resetButtons();
-  };
+    try {
+      const res = await fetch(API, { method: "POST", body: form });
+      const data = await res.json();
 
-  recognition.onend = () => {
-    isListening = false;
-    stopBtn.disabled = true;
-
-    if (!transcript) {
-      statusEl.innerText = "No speech detected";
-      resetButtons();
-      return;
+      said.textContent = "You said:\n" + (data.transcript || "");
+      feedback.textContent = "Feedback:\n" + (data.feedback || "");
+      scoreBox.textContent = data.score + " / 10";
+      status.textContent = "Completed";
+    } catch {
+      feedback.textContent = "Feedback:\nServer error";
+      scoreBox.textContent = "0 / 10";
+      status.textContent = "Error";
     }
 
-    evaluateSpeech(transcript);
+    startBtn.disabled = false;
   };
-}
-
-startBtn.onclick = () => {
-  feedbackEl.innerText = "—";
-  scoreEl.innerText = "—";
-  saidEl.innerText = "—";
-  recognition.start();
 };
-
-stopBtn.onclick = () => {
-  if (isListening) recognition.stop();
-};
-
-function resetButtons() {
-  startBtn.disabled = false;
-  stopBtn.disabled = true;
-}
-
-/* =========================
-   SEND TEXT TO BACKEND
-   ========================= */
-async function evaluateSpeech(text) {
-  statusEl.innerText = "Evaluating…";
-
-  try {
-    const res = await fetch(API_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ transcript: text })
-    });
-
-    const data = await res.json();
-
-    feedbackEl.innerText = data.feedback || "No feedback received";
-    scoreEl.innerText = (data.score ?? 0) + " / 10";
-    statusEl.innerText = "Completed";
-
-  } catch (err) {
-    statusEl.innerText = "Server error";
-    feedbackEl.innerText = "Evaluation failed";
-    scoreEl.innerText = "0 / 10";
-  }
-
-  resetButtons();
-}
 </script>
 </body>
 </html>
