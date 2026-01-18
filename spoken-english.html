@@ -3,199 +3,166 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>Spoken English Practice</title>
+<title>Spoken English Practice | Simpatico</title>
 
 <style>
-html,body{
-  margin:0;
-  height:100%;
-  font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
-  background: radial-gradient(circle at top, #0b1b3a, #020617);
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  color:#fff;
+body {
+  margin: 0;
+  height: 100vh;
+  background: radial-gradient(circle at top, #0f172a, #020617);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont;
+  color: white;
 }
-.card{
-  width:320px;
-  background:rgba(255,255,255,0.06);
-  border-radius:16px;
-  padding:20px;
-  text-align:center;
-  box-shadow:0 20px 60px rgba(0,0,0,.5);
+
+.card {
+  width: 320px;
+  background: rgba(15, 23, 42, 0.85);
+  backdrop-filter: blur(12px);
+  border-radius: 16px;
+  padding: 20px;
+  box-shadow: 0 0 40px rgba(0,0,0,0.4);
+  text-align: center;
 }
-h2{margin:0 0 6px}
-.status{
-  font-size:13px;
-  opacity:.85;
-  margin-bottom:14px;
+
+h2 {
+  margin: 0 0 6px;
+  font-size: 20px;
 }
-button{
-  width:100%;
-  padding:12px;
-  border:none;
-  border-radius:10px;
-  font-size:15px;
-  cursor:pointer;
+
+.status {
+  font-size: 13px;
+  color: #94a3b8;
+  margin-bottom: 14px;
 }
-#start{
-  background:#2563eb;
-  color:#fff;
+
+button {
+  width: 100%;
+  border: none;
+  padding: 12px;
+  border-radius: 10px;
+  font-size: 15px;
+  margin-top: 10px;
+  cursor: pointer;
 }
-#stop{
-  background:#334155;
-  color:#cbd5f5;
-  margin-top:8px;
+
+.start {
+  background: #2563eb;
+  color: white;
 }
-#stop:disabled{opacity:.5}
-.result{
-  text-align:left;
-  margin-top:14px;
-  font-size:13px;
+
+.stop {
+  background: #334155;
+  color: #cbd5f5;
 }
-.score{
-  text-align:center;
-  font-size:28px;
-  font-weight:700;
-  margin-top:8px;
+
+.result {
+  text-align: left;
+  font-size: 13px;
+  margin-top: 14px;
+  color: #e5e7eb;
 }
-small{opacity:.7}
+
+.score {
+  font-size: 22px;
+  font-weight: bold;
+  text-align: center;
+  margin-top: 10px;
+}
 </style>
 </head>
 
 <body>
+
 <div class="card">
   <h2>Spoken English Practice</h2>
-  <div class="status" id="status">Tap Start & speak for 5 seconds</div>
+  <div class="status" id="status">Press start and speak for 5–10 seconds</div>
 
-  <button id="start">🎤 Start Speaking</button>
-  <button id="stop" disabled>Stop</button>
+  <button class="start" id="startBtn">🎤 Start Speaking</button>
+  <button class="stop" id="stopBtn" disabled>Stop</button>
 
   <div class="result" id="output"></div>
+  <div class="score" id="score"></div>
 </div>
 
 <script>
-/* ================= CONFIG ================= */
-const API_URL = "https://evalis-ai.simpaticohrconsultancy.workers.dev";
-const MAX_TIME = 5000; // 5 sec
+let recorder;
+let audioChunks = [];
+let stream;
 
-/* ================= STATE ================= */
-let audioCtx, processor, source, stream;
-let recording = false;
-let chunks = [];
+const WORKER_URL = "https://evalis-ai.simpaticoh rconsultancy.workers.dev/";
 
-/* ================= ELEMENTS ================= */
-const startBtn = document.getElementById("start");
-const stopBtn  = document.getElementById("stop");
 const statusEl = document.getElementById("status");
-const outputEl = document.getElementById("output");
+const startBtn = document.getElementById("startBtn");
+const stopBtn = document.getElementById("stopBtn");
+const output = document.getElementById("output");
+const scoreEl = document.getElementById("score");
 
-/* ================= START ================= */
 startBtn.onclick = async () => {
-  outputEl.innerHTML = "";
+  output.innerHTML = "";
+  scoreEl.innerHTML = "";
+  audioChunks = [];
+
+  stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+  recorder = new MediaRecorder(stream, {
+    mimeType: "audio/webm"
+  });
+
+  recorder.ondataavailable = e => {
+    if (e.data.size > 0) audioChunks.push(e.data);
+  };
+
+  recorder.start();
   statusEl.textContent = "Listening… Speak clearly";
   startBtn.disabled = true;
   stopBtn.disabled = false;
-
-  stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-  audioCtx = new AudioContext({ sampleRate: 16000 });
-  source = audioCtx.createMediaStreamSource(stream);
-  processor = audioCtx.createScriptProcessor(4096,1,1);
-
-  chunks = [];
-  recording = true;
-
-  processor.onaudioprocess = e => {
-    if (!recording) return;
-    chunks.push(new Float32Array(e.inputBuffer.getChannelData(0)));
-  };
-
-  source.connect(processor);
-  processor.connect(audioCtx.destination);
-
-  setTimeout(stopRecording, MAX_TIME);
 };
 
-/* ================= STOP ================= */
-stopBtn.onclick = stopRecording;
-
-async function stopRecording(){
-  if(!recording) return;
-  recording = false;
-
-  processor.disconnect();
-  source.disconnect();
-  stream.getTracks().forEach(t=>t.stop());
-
-  statusEl.textContent = "Processing…";
-  startBtn.disabled = false;
+stopBtn.onclick = async () => {
   stopBtn.disabled = true;
+  statusEl.textContent = "Processing…";
 
-  const wav = encodeWAV(flatten(chunks), audioCtx.sampleRate);
-  const fd = new FormData();
-  fd.append("audio", wav, "speech.wav");
+  recorder.stop();
+  recorder.onstop = async () => {
+    stream.getTracks().forEach(t => t.stop());
 
-  try{
-    const res = await fetch(API_URL,{method:"POST",body:fd});
-    const data = await res.json();
+    const audioBlob = new Blob(audioChunks, { type: "audio/webm" });
 
-    renderResult(data);
-    statusEl.textContent = "Completed";
-  }catch(e){
-    statusEl.textContent = "Server error";
-    outputEl.innerHTML = "<small>Unable to evaluate speech.</small>";
-  }
-}
+    if (audioBlob.size < 5000) {
+      statusEl.textContent = "No speech detected";
+      startBtn.disabled = false;
+      return;
+    }
 
-/* ================= UI ================= */
-function renderResult(d){
-  outputEl.innerHTML = `
-    <b>You said:</b><br>${d.transcript || "(no speech detected)"}<br><br>
-    <b>Feedback:</b><br>${d.feedback || "No feedback"}<br>
-    <div class="score">${d.score ?? "-"}/10</div>
-  `;
-}
+    const form = new FormData();
+    form.append("audio", audioBlob, "speech.webm");
 
-/* ================= AUDIO HELPERS ================= */
-function flatten(chunks){
-  let len = chunks.reduce((s,c)=>s+c.length,0);
-  let out = new Float32Array(len);
-  let off = 0;
-  chunks.forEach(c=>{out.set(c,off);off+=c.length});
-  return out;
-}
+    try {
+      const res = await fetch(WORKER_URL, {
+        method: "POST",
+        body: form
+      });
 
-function encodeWAV(samples, rate){
-  const buf = new ArrayBuffer(44 + samples.length*2);
-  const view = new DataView(buf);
+      const data = await res.json();
 
-  write(view,0,"RIFF");
-  view.setUint32(4,36+samples.length*2,true);
-  write(view,8,"WAVE");
-  write(view,12,"fmt ");
-  view.setUint32(16,16,true);
-  view.setUint16(20,1,true);
-  view.setUint16(22,1,true);
-  view.setUint32(24,rate,true);
-  view.setUint32(28,rate*2,true);
-  view.setUint16(32,2,true);
-  view.setUint16(34,16,true);
-  write(view,36,"data");
-  view.setUint32(40,samples.length*2,true);
+      output.innerHTML = `
+        <strong>You said:</strong><br>${data.transcript || "(none)"}<br><br>
+        <strong>Feedback:</strong><br>${data.feedback || "—"}
+      `;
 
-  let o=44;
-  samples.forEach(s=>{
-    const v=Math.max(-1,Math.min(1,s));
-    view.setInt16(o,v<0?v*0x8000:v*0x7fff,true);
-    o+=2;
-  });
+      scoreEl.textContent = `${data.score}/10`;
+      statusEl.textContent = "Completed";
+    } catch (err) {
+      statusEl.textContent = "Server error";
+    }
 
-  return new Blob([view],{type:"audio/wav"});
-}
-
-function write(v,o,s){
-  for(let i=0;i<s.length;i++)v.setUint8(o+i,s.charCodeAt(i));
-}
+    startBtn.disabled = false;
+  };
+};
 </script>
+
 </body>
 </html>
