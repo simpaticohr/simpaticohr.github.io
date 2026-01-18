@@ -8,71 +8,52 @@
     <style>
         :root { --accent: #2563eb; --bg: #0f172a; }
         body { font-family: sans-serif; background: var(--bg); color: white; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; }
-        .card { width: 90%; max-width: 400px; background: #1e293b; padding: 30px; border-radius: 20px; text-align: center; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+        .card { width: 90%; max-width: 400px; background: #1e293b; padding: 30px; border-radius: 20px; text-align: center; }
         .pulse { width: 60px; height: 60px; background: var(--accent); border-radius: 50%; margin: 20px auto; display: none; animation: pulse 1.5s infinite; }
         @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(37,99,235,0.7); } 100% { box-shadow: 0 0 0 20px rgba(37,99,235,0); } }
-        button { width: 100%; padding: 15px; border-radius: 10px; border: none; background: var(--accent); color: white; font-weight: bold; cursor: pointer; transition: 0.3s; }
-        button:disabled { opacity: 0.3; cursor: not-allowed; }
+        button { width: 100%; padding: 15px; border-radius: 10px; border: none; background: var(--accent); color: white; font-weight: bold; cursor: pointer; }
+        button:disabled { opacity: 0.3; }
         #log { background: rgba(0,0,0,0.2); height: 180px; overflow-y: auto; margin-top: 20px; padding: 10px; text-align: left; font-size: 14px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.1); }
-        input[type="file"] { margin: 15px 0; font-size: 12px; color: #94a3b8; }
     </style>
 </head>
 <body>
-
-<div class="card">
-    <h2>Career Lab AI</h2>
-    <p id="status" style="font-size: 13px; color: #94a3b8;">Upload PDF Resume to Start</p>
-    <input type="file" id="cvInput" accept=".pdf">
-    <div id="mic" class="pulse"></div>
-    <button id="btn" disabled>Start Interview</button>
-    <div id="log"></div>
-</div>
+    <div class="card">
+        <h2>Career Lab AI</h2>
+        <p id="status">Upload PDF Resume to Start</p>
+        <input type="file" id="cvInput" accept=".pdf" style="margin-bottom: 20px; width: 100%;">
+        <div id="mic" class="pulse"></div>
+        <button id="btn" disabled>Start Interview</button>
+        <div id="log"></div>
+    </div>
 
 <script>
-    // UPDATE THIS TO YOUR ACTUAL WORKER URL
     const WORKER_URL = "https://evalis-ai.simpaticohrconsultancy.workers.dev";
-    
-    let history = [];
-    let cvText = "";
-    let active = false;
-    let busy = false;
+    let history = [], cvText = "", active = false, busy = false;
 
-    // 1. PDF Text Extraction
+    // 1. PDF Parsing
     document.getElementById('cvInput').onchange = async (e) => {
         const file = e.target.files[0];
-        if (!file) return;
-
         const reader = new FileReader();
         reader.onload = async () => {
-            try {
-                const pdfjsLib = window['pdfjs-dist/build/pdf'];
-                pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-                
-                const pdf = await pdfjsLib.getDocument({data: new Uint8Array(reader.result)}).promise;
-                let extractedText = "";
-                
-                for(let i=1; i<=pdf.numPages; i++) {
-                    const page = await pdf.getPage(i);
-                    const content = await page.getTextContent();
-                    extractedText += content.items.map(s => s.str).join(" ") + " ";
-                }
-                
-                cvText = extractedText.trim();
-                document.getElementById('status').innerText = "Resume Parsed Successfully";
-                document.getElementById('btn').disabled = false;
-                console.log("Resume Content Loaded:", cvText.substring(0, 100) + "...");
-            } catch (err) {
-                document.getElementById('status').innerText = "Error reading PDF. Try again.";
-                console.error(err);
+            const pdfjsLib = window['pdfjs-dist/build/pdf'];
+            pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+            const pdf = await pdfjsLib.getDocument({data: new Uint8Array(reader.result)}).promise;
+            let text = "";
+            for(let i=1; i<=pdf.numPages; i++) {
+                const page = await pdf.getPage(i);
+                const content = await page.getTextContent();
+                text += content.items.map(s => s.str).join(" ") + " ";
             }
+            cvText = text.trim();
+            document.getElementById('status').innerText = "Resume Parsed Successfully";
+            document.getElementById('btn').disabled = false;
         };
         reader.readAsArrayBuffer(file);
     };
 
-    // 2. Main Interview Turn Logic
+    // 2. Main Logic
     async function startTurn() {
         if(!active || busy) return;
-
         try {
             const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
             const rec = new MediaRecorder(stream);
@@ -82,14 +63,12 @@
             document.getElementById('status').innerText = "Listening...";
 
             rec.ondataavailable = e => chunks.push(e.data);
-            
             rec.onstop = async () => {
                 document.getElementById('mic').style.display = "none";
                 document.getElementById('status').innerText = "Analyzing Answer...";
                 busy = true;
 
                 const fd = new FormData();
-                // FIX: Sending as a Blob with a specific filename 'voice.webm'
                 fd.append("audio", new Blob(chunks, {type: 'audio/webm'}), "voice.webm");
                 fd.append("cvText", cvText);
                 fd.append("history", JSON.stringify(history));
@@ -97,67 +76,35 @@
                 try {
                     const res = await fetch(WORKER_URL, { method: "POST", body: fd });
                     const data = await res.json();
-                    
-                    if (data.error) {
-                        console.error("Worker Error:", data.error);
-                        // Don't add errors to history to prevent the "technical glitch" loop
-                        speak("I'm sorry, I had a connection issue. Could you say that again?");
-                    } else {
-                        history = data.history || history;
-                        speak(data.reply);
-                    }
+                    if (!data.error) history = data.history;
+                    speak(data.reply);
                 } catch (err) { 
                     busy = false;
-                    document.getElementById('status').innerText = "Network Error";
-                    speak("I'm having trouble connecting to my brain. Please try again.");
+                    speak("I had a connection issue. Can you repeat?");
                 }
-                
-                // Close the mic stream to save battery/privacy
-                stream.getTracks().forEach(track => track.stop());
+                stream.getTracks().forEach(t => t.stop());
             };
 
             rec.start();
-            // Record for 5 seconds per turn
             setTimeout(() => { if(rec.state === "recording") rec.stop(); }, 5000); 
-            
-        } catch (err) {
-            document.getElementById('status').innerText = "Mic Access Denied";
-            alert("Please allow microphone access to use this AI.");
-        }
+        } catch (err) { alert("Mic access denied"); }
     }
 
-    // 3. Text-to-Speech Logic
     function speak(text) {
-        window.speechSynthesis.cancel(); // Stop any current talking
+        window.speechSynthesis.cancel();
         const ut = new SpeechSynthesisUtterance(text);
-        
-        // Update UI Log
-        const log = document.getElementById('log');
-        log.innerHTML += `<p style="margin: 8px 0; border-bottom: 1px solid #334155; padding-bottom: 4px;"><b>AI:</b> ${text}</p>`;
-        log.scrollTop = log.scrollHeight;
-        
-        ut.onend = () => { 
-            busy = false; 
-            if(active) {
-                // Wait half a second after AI finishes before listening again
-                setTimeout(startTurn, 600); 
-            }
-        };
-        
+        document.getElementById('log').innerHTML += `<p><b>AI:</b> ${text}</p>`;
+        document.getElementById('log').scrollTop = document.getElementById('log').scrollHeight;
+        ut.onend = () => { busy = false; if(active) setTimeout(startTurn, 600); };
         window.speechSynthesis.speak(ut);
     }
 
-    // 4. Start/Stop Button
     document.getElementById('btn').onclick = () => {
         if(!active) {
             active = true;
             document.getElementById('btn').innerText = "End Interview";
-            document.getElementById('btn').style.background = "#ef4444";
-            speak("I have reviewed your resume. Let's begin the interview. Could you please introduce yourself and your professional background?");
-        } else {
-            // Refresh to reset the session
-            location.reload();
-        }
+            speak("I have reviewed your resume. Let's begin the interview. Could you please introduce yourself?");
+        } else { location.reload(); }
     };
 </script>
 </body>
