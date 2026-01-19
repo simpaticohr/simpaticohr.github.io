@@ -2,142 +2,127 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Evalis AI – CV Interview</title>
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Evalis AI – Live Interview</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 
 <style>
 body {
-  margin:0;
-  background:#0f172a;
-  color:#fff;
-  font-family:system-ui,sans-serif;
-  display:flex;
-  justify-content:center;
-  align-items:center;
-  min-height:100vh;
+  margin: 0;
+  min-height: 100vh;
+  background: radial-gradient(circle at top, #0b1d3a, #020617);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: system-ui;
+  color: white;
 }
 .card {
-  width:440px;
-  background:#1e293b;
-  padding:26px;
-  border-radius:20px;
-  box-shadow:0 20px 40px rgba(0,0,0,.5);
+  width: 92%;
+  max-width: 460px;
+  background: rgba(255,255,255,0.08);
+  backdrop-filter: blur(14px);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 22px;
+  padding: 26px;
+  box-shadow: 0 15px 40px rgba(0,0,0,0.6);
 }
-h2 { margin-top:0; text-align:center; }
 button {
-  width:100%;
-  padding:14px;
-  border:none;
-  border-radius:12px;
-  background:#4f46e5;
-  color:white;
-  font-weight:700;
-  cursor:pointer;
-  margin-top:10px;
+  width: 100%;
+  padding: 15px;
+  margin-top: 12px;
+  border: none;
+  border-radius: 12px;
+  background: #4f46e5;
+  color: white;
+  font-weight: 700;
+  cursor: pointer;
 }
-button:disabled { opacity:.5; cursor:not-allowed; }
+button:disabled { opacity: 0.5; cursor: not-allowed; }
 #status {
-  text-align:center;
-  font-size:13px;
-  color:#94a3b8;
-  margin-bottom:10px;
+  font-size: 12px;
+  color: #94a3b8;
+  text-align: center;
+  margin-bottom: 10px;
 }
 #log {
-  margin-top:15px;
-  background:#020617;
-  padding:15px;
-  height:240px;
-  overflow-y:auto;
-  border-radius:12px;
-  font-size:14px;
-  border:1px solid #334155;
+  margin-top: 18px;
+  background: #020617;
+  padding: 14px;
+  height: 220px;
+  overflow-y: auto;
+  border-radius: 14px;
+  font-size: 14px;
+  border: 1px solid #334155;
 }
-.ai { color:#a5b4fc; margin-bottom:10px; }
-.user { color:#94a3b8; font-style:italic; margin-bottom:8px; }
-input[type=file] {
-  width:100%;
-  margin-bottom:10px;
-  font-size:12px;
-}
+.ai { color:#a5b4fc; margin-bottom: 10px; }
+.user { color:#94a3b8; font-style: italic; margin-bottom: 10px; }
 </style>
 </head>
+
 <body>
-
 <div class="card">
-  <h2>Evalis AI Interview</h2>
-  <div id="status">Upload CV to begin</div>
+  <h3>Evalis AI – Live Interview</h3>
+  <div id="status">Upload CV to start</div>
 
-  <input type="file" id="cvInput" accept=".pdf,.txt">
+  <input type="file" id="cvInput" accept=".pdf">
   <button id="startBtn" disabled>Start Interview</button>
-  <button id="finishBtn" style="display:none;background:#ef4444">
-    Finish & Get Score
-  </button>
+  <button id="endBtn" style="display:none;background:#ef4444">Finish Interview</button>
 
   <div id="log"></div>
 </div>
 
 <script>
 /* ================= CONFIG ================= */
-const WORKER_URL = "https://evalis-ai.simpaticohrconsultancy.workers.dev";
+const API = "https://evalis-ai.simpaticohrconsultancy.workers.dev";
+pdfjsLib.GlobalWorkerOptions.workerSrc =
+  "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
 
 /* ================= STATE ================= */
-let recognition;
-let listening = false;
-let speaking = false;
-let history = [];
 let cvText = "";
+let history = [];
+let interviewActive = false;
+let recognition;
 
-/* ================= UI ================= */
+/* ================= UI HELPERS ================= */
 const logBox = document.getElementById("log");
 const statusEl = document.getElementById("status");
-const startBtn = document.getElementById("startBtn");
-const finishBtn = document.getElementById("finishBtn");
-const cvInput = document.getElementById("cvInput");
 
 function log(cls, text) {
-  const d = document.createElement("div");
-  d.className = cls;
-  d.textContent = text;
-  logBox.appendChild(d);
+  const div = document.createElement("div");
+  div.className = cls;
+  div.textContent = text;
+  logBox.appendChild(div);
   logBox.scrollTop = logBox.scrollHeight;
 }
 
-/* ================= CV LOAD ================= */
-cvInput.onchange = async () => {
-  const file = cvInput.files[0];
-  if (!file) return;
-
-  statusEl.textContent = "Reading CV…";
-
-  if (file.type === "text/plain") {
-    cvText = await file.text();
-  } else {
-    cvText = "PDF CV uploaded (content processed server-side)";
+/* ================= PDF PARSER ================= */
+document.getElementById("cvInput").onchange = async e => {
+  const file = e.target.files[0];
+  const pdf = await pdfjsLib.getDocument(await file.arrayBuffer()).promise;
+  let text = "";
+  for (let i = 1; i <= pdf.numPages; i++) {
+    const page = await pdf.getPage(i);
+    const content = await page.getTextContent();
+    text += content.items.map(s => s.str).join(" ") + " ";
   }
-
+  cvText = text.trim();
   statusEl.textContent = "CV loaded. Ready.";
-  startBtn.disabled = false;
+  document.getElementById("startBtn").disabled = false;
 };
 
-/* ================= SPEAK ================= */
+/* ================= SPEECH OUTPUT ================= */
 function speak(text) {
-  if (!text) return;
-  speaking = true;
   log("ai", "AI: " + text);
-
   speechSynthesis.cancel();
   const u = new SpeechSynthesisUtterance(text);
-  u.rate = 0.95;
-
   u.onend = () => {
-    speaking = false;
-    if (listening) recognition.start();
+    if (interviewActive) recognition.start(); // 🔁 reopen mic
   };
-
   speechSynthesis.speak(u);
 }
 
-/* ================= SPEECH RECOGNITION (VAD) ================= */
+/* ================= SPEECH INPUT (REAL VAD) ================= */
 function initRecognition() {
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   recognition = new SR();
@@ -145,71 +130,62 @@ function initRecognition() {
   recognition.continuous = false;
   recognition.interimResults = false;
 
-  recognition.onresult = async (e) => {
+  recognition.onresult = async e => {
     const transcript = e.results[0][0].transcript.trim();
-    if (!transcript) return;
-
     log("user", "You: " + transcript);
     statusEl.textContent = "Thinking…";
 
-    const res = await fetch(WORKER_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ transcript, history, cvText })
-    });
+    const fd = new FormData();
+    fd.append("mode", "interview");
+    fd.append("cvText", cvText);
+    fd.append("history", JSON.stringify(history));
+    fd.append("text", transcript);
 
+    const res = await fetch(API, { method: "POST", body: fd });
     const data = await res.json();
-    history = data.history || history;
+
+    history = data.history;
     speak(data.reply);
   };
 
   recognition.onerror = () => {
-    if (listening && !speaking) recognition.start();
-  };
-
-  recognition.onend = () => {
-    if (listening && !speaking) recognition.start();
+    if (interviewActive) recognition.start();
   };
 }
 
 /* ================= START ================= */
-startBtn.onclick = async () => {
+document.getElementById("startBtn").onclick = async () => {
+  interviewActive = true;
   initRecognition();
-  listening = true;
-  startBtn.style.display = "none";
-  finishBtn.style.display = "block";
+  document.getElementById("startBtn").style.display = "none";
+  document.getElementById("endBtn").style.display = "block";
+  statusEl.textContent = "Interview started";
 
-  statusEl.textContent = "Interview started…";
+  const fd = new FormData();
+  fd.append("mode", "start");
+  fd.append("cvText", cvText);
 
-  const res = await fetch(WORKER_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ mode: "start", cvText })
-  });
-
+  const res = await fetch(API, { method: "POST", body: fd });
   const data = await res.json();
-  history = data.history || [];
+  history = data.history;
   speak(data.reply);
 };
 
-/* ================= FINISH & SCORE ================= */
-finishBtn.onclick = async () => {
-  listening = false;
-  speechSynthesis.cancel();
+/* ================= END ================= */
+document.getElementById("endBtn").onclick = async () => {
+  interviewActive = false;
   recognition.stop();
-  statusEl.textContent = "Evaluating interview…";
+  speechSynthesis.cancel();
+  statusEl.textContent = "Generating report…";
 
-  const res = await fetch(WORKER_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ mode: "score", history, cvText })
-  });
+  const fd = new FormData();
+  fd.append("mode", "score");
+  fd.append("history", JSON.stringify(history));
 
+  const res = await fetch(API, { method: "POST", body: fd });
   const data = await res.json();
-  log("ai", "FINAL EVALUATION:");
-  log("ai", data.reply);
+  log("ai", "FINAL REPORT:\n" + data.reply);
 };
 </script>
-
 </body>
 </html>
