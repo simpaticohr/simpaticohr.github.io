@@ -1,153 +1,241 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Elite AI Interviewer</title>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-    <style>
-        :root { --accent: #4f46e5; --bg: #0f172a; --card: #1e293b; }
-        body { font-family: 'Inter', sans-serif; background: var(--bg); color: white; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; }
-        .container { width: 90%; max-width: 500px; background: var(--card); padding: 40px; border-radius: 24px; text-align: center; border: 1px solid #334155; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.5); }
-        .timer { font-size: 3.5rem; font-weight: 800; color: var(--accent); margin: 20px 0; font-family: 'Courier New', monospace; }
-        #status { font-size: 14px; color: #94a3b8; margin-bottom: 20px; text-transform: uppercase; letter-spacing: 2px; }
-        button { width: 100%; padding: 18px; border-radius: 12px; border: none; background: var(--accent); color: white; font-weight: bold; cursor: pointer; transition: 0.3s; font-size: 16px; }
-        button:disabled { background: #334155; cursor: not-allowed; opacity: 0.6; }
-        #transcript { height: 200px; overflow-y: auto; background: #0b0f1a; margin-top: 25px; padding: 20px; border-radius: 12px; text-align: left; font-size: 14px; border: 1px solid #334155; line-height: 1.6; }
-        .ai-text { color: #818cf8; margin-bottom: 12px; font-weight: 500; }
-        .user-text { color: #94a3b8; font-style: italic; margin-bottom: 8px; border-bottom: 1px solid #1e293b; padding-bottom: 5px; }
-    </style>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Evalis AI Interview</title>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+
+<style>
+:root {
+  --bg:#0f172a;
+  --card:#1e293b;
+  --accent:#4f46e5;
+  --text:#e5e7eb;
+}
+body {
+  margin:0;
+  background:var(--bg);
+  color:var(--text);
+  font-family:Inter,system-ui,sans-serif;
+  display:flex;
+  justify-content:center;
+  align-items:center;
+  min-height:100vh;
+}
+.card {
+  width:92%;
+  max-width:460px;
+  background:var(--card);
+  padding:28px;
+  border-radius:22px;
+  border:1px solid #334155;
+  box-shadow:0 25px 50px rgba(0,0,0,.5);
+  text-align:center;
+}
+#status {
+  font-size:13px;
+  color:#94a3b8;
+  letter-spacing:1px;
+  margin-bottom:12px;
+}
+#timer {
+  font-family:monospace;
+  font-size:3rem;
+  color:var(--accent);
+  margin:10px 0 20px;
+}
+button {
+  width:100%;
+  padding:16px;
+  border:none;
+  border-radius:12px;
+  background:var(--accent);
+  color:white;
+  font-weight:700;
+  font-size:16px;
+  cursor:pointer;
+}
+button:disabled {
+  opacity:.5;
+  cursor:not-allowed;
+}
+#transcript {
+  margin-top:20px;
+  background:#020617;
+  border:1px solid #334155;
+  border-radius:12px;
+  height:200px;
+  overflow-y:auto;
+  padding:15px;
+  text-align:left;
+  font-size:14px;
+}
+.ai { color:#818cf8; margin-bottom:10px; }
+.user { color:#94a3b8; font-style:italic; margin-bottom:8px; }
+</style>
 </head>
+
 <body>
 
-<div class="container">
-    <div id="status">Upload Resume to Initialize</div>
-    <div class="timer" id="timer">15:00</div>
-    <input type="file" id="cvInput" accept=".pdf" style="margin-bottom: 20px; font-size: 12px; color: #94a3b8;">
-    <button id="startBtn" disabled>Start Technical Interview</button>
-    <div id="transcript"></div>
+<div class="card">
+  <div id="status">Upload resume to initialize</div>
+  <div id="timer">15:00</div>
+
+  <input type="file" id="cvInput" accept=".pdf" style="margin-bottom:15px;font-size:12px;color:#94a3b8">
+
+  <button id="startBtn" disabled>Start Interview</button>
+
+  <div id="transcript"></div>
 </div>
 
 <script>
-    // 1. CONFIGURATION
-    const WORKER_URL = "https://evalis-ai.simpaticohrconsultancy.workers.dev";
-    let history = [], cvText = "", active = false, busy = false, timeLeft = 900;
+/* ================= CONFIG ================= */
+const WORKER_URL = "https://evalis-ai.simpaticohrconsultancy.workers.dev";
 
-    // 2. PDF PARSER - Extracts text from resume for LLM context
-    document.getElementById('cvInput').onchange = async (e) => {
-        const file = e.target.files[0];
-        const reader = new FileReader();
-        reader.onload = async () => {
-            const pdfjsLib = window['pdfjs-dist/build/pdf'];
-            pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-            const pdf = await pdfjsLib.getDocument({data: new Uint8Array(reader.result)}).promise;
-            let text = "";
-            for(let i=1; i<=pdf.numPages; i++){
-                const page = await pdf.getPage(i);
-                const content = await page.getTextContent();
-                text += content.items.map(s => s.str).join(" ") + " ";
-            }
-            cvText = text.trim();
-            document.getElementById('status').innerText = "CV SYNCED - READY";
-            document.getElementById('startBtn').disabled = false;
-        };
-        reader.readAsArrayBuffer(file);
-    };
+/* ================= STATE ================= */
+let cvText = "";
+let history = [];
+let active = false;
+let busy = false;
+let timeLeft = 900;
 
-    // 3. CONTINUOUS VOICE LOOP - Automatically listens after AI finishes
-    async function startTurn() {
-        if(!active || busy || timeLeft <= 0) return;
+/* ================= PDF PARSER ================= */
+pdfjsLib.GlobalWorkerOptions.workerSrc =
+  "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
 
-        try {
-            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-            const rec = new MediaRecorder(stream);
-            const chunks = [];
-            document.getElementById('status').innerText = "Interviewer Listening...";
+document.getElementById("cvInput").onchange = async e => {
+  const file = e.target.files[0];
+  if (!file) return;
 
-            rec.ondataavailable = e => chunks.push(e.data);
-            rec.onstop = async () => {
-                if(!active) return;
-                busy = true;
-                document.getElementById('status').innerText = "Thinking...";
+  document.getElementById("status").innerText = "Parsing resume…";
 
-                const fd = new FormData();
-                fd.append("mode", "interview");
-                fd.append("audio", new Blob(chunks, {type: 'audio/webm'}), "voice.webm");
-                fd.append("cvText", cvText);
-                fd.append("history", JSON.stringify(history));
+  const buffer = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument(buffer).promise;
 
-                try {
-                    const res = await fetch(WORKER_URL, { method: "POST", body: fd });
-                    const data = await res.json();
-                    if(data.reply) {
-                        history = data.history;
-                        updateTranscript(data.transcript, data.reply);
-                        speak(data.reply); // This triggers the next listening cycle
-                    }
-                } catch (err) { busy = false; startTurn(); }
-                stream.getTracks().forEach(t => t.stop());
-            };
+  let text = "";
+  for (let i=1;i<=pdf.numPages;i++) {
+    const page = await pdf.getPage(i);
+    const content = await page.getTextContent();
+    text += content.items.map(i=>i.str).join(" ")+" ";
+  }
 
-            rec.start();
-            // Automatically stop recording after 8 seconds of technical response
-            setTimeout(() => { if(rec.state === "recording") rec.stop(); }, 8000); 
-        } catch (err) { alert("Microphone access is required for the interview."); }
+  cvText = text.trim();
+  document.getElementById("status").innerText = "Resume loaded";
+  document.getElementById("startBtn").disabled = false;
+};
+
+/* ================= SPEAK ================= */
+function speak(text){
+  if (!text) return;
+
+  addAI(text);
+  document.getElementById("status").innerText = "Interviewer speaking…";
+
+  const u = new SpeechSynthesisUtterance(text);
+  u.rate = 1;
+  u.pitch = 0.95;
+
+  u.onend = () => {
+    busy = false;
+    if (active) setTimeout(startTurn, 800);
+  };
+
+  speechSynthesis.cancel();
+  speechSynthesis.speak(u);
+}
+
+/* ================= LISTEN ================= */
+async function startTurn(){
+  if (!active || busy || timeLeft<=0) return;
+  busy = true;
+
+  document.getElementById("status").innerText = "Listening…";
+
+  const stream = await navigator.mediaDevices.getUserMedia({audio:true});
+  const rec = new MediaRecorder(stream);
+  const chunks = [];
+
+  rec.ondataavailable = e => chunks.push(e.data);
+
+  rec.onstop = async () => {
+    stream.getTracks().forEach(t=>t.stop());
+    document.getElementById("status").innerText = "Thinking…";
+
+    const fd = new FormData();
+    fd.append("mode","interview");
+    fd.append("audio", new Blob(chunks,{type:"audio/webm"}));
+    fd.append("cvText", cvText);
+    fd.append("history", JSON.stringify(history));
+
+    try {
+      const res = await fetch(WORKER_URL,{method:"POST",body:fd});
+      const data = await res.json();
+
+      history = data.history || history;
+      addUser(data.transcript);
+      speak(data.reply);
+
+    } catch {
+      busy = false;
+      speak("Please repeat that.");
     }
+  };
 
-    // 4. SPEECH ENGINE - Uses Web Speech API for low-latency output
-    function speak(text) {
-        window.speechSynthesis.cancel();
-        const ut = new SpeechSynthesisUtterance(text);
-        ut.pitch = 0.9; // Professional tone
-        ut.rate = 1.0;
-        document.getElementById('status').innerText = "Interviewer Speaking...";
-        
-        ut.onend = () => { 
-            busy = false; 
-            if(active) setTimeout(startTurn, 300); // RE-OPEN MIC IMMEDIATELY
-        };
-        window.speechSynthesis.speak(ut);
+  rec.start();
+  setTimeout(()=>rec.state==="recording"&&rec.stop(),7000);
+}
+
+/* ================= TIMER ================= */
+function startTimer(){
+  setInterval(()=>{
+    if (!active) return;
+    timeLeft--;
+    const m=Math.floor(timeLeft/60);
+    const s=timeLeft%60;
+    document.getElementById("timer").innerText =
+      `${m}:${s<10?"0":""}${s}`;
+    if (timeLeft<=0){
+      active=false;
+      speak("The interview has concluded. Thank you.");
     }
+  },1000);
+}
 
-    // 5. UI UPDATES
-    function updateTranscript(user, ai) {
-        const log = document.getElementById('transcript');
-        if(user) log.innerHTML += `<div class="user-text">You: ${user}</div>`;
-        log.innerHTML += `<div class="ai-text">AI: ${ai}</div>`;
-        log.scrollTop = log.scrollHeight;
-    }
+/* ================= UI HELPERS ================= */
+function addAI(t){
+  document.getElementById("transcript").innerHTML +=
+    `<div class="ai">AI: ${t}</div>`;
+}
+function addUser(t){
+  if (!t) return;
+  document.getElementById("transcript").innerHTML +=
+    `<div class="user">You: ${t}</div>`;
+}
 
-    function startTimer() {
-        const interval = setInterval(() => {
-            if(timeLeft <= 0) {
-                clearInterval(interval);
-                active = false;
-                speak("The 15-minute technical assessment has concluded. Thank you.");
-                return;
-            }
-            timeLeft--;
-            const m = Math.floor(timeLeft / 60), s = timeLeft % 60;
-            document.getElementById('timer').innerText = `${m}:${s < 10 ? '0' : ''}${s}`;
-        }, 1000);
-    }
+/* ================= START ================= */
+document.getElementById("startBtn").onclick = async () => {
+  if (cvText.length<200){
+    alert("Resume text too short.");
+    return;
+  }
 
-    // 6. INITIALIZATION - Sends 'mode: start' to get first CV-based question
-    document.getElementById('startBtn').onclick = async () => {
-        active = true;
-        document.getElementById('startBtn').style.display = "none";
-        startTimer();
-        
-        const fd = new FormData();
-        fd.append("mode", "start");
-        fd.append("cvText", cvText);
-        
-        try {
-            const res = await fetch(WORKER_URL, { method: "POST", body: fd });
-            const data = await res.json();
-            history = data.history;
-            speak(data.reply);
-        } catch(e) { speak("System initialized. I have reviewed your resume. Let's begin."); }
-    };
+  active=true;
+  busy=true;
+  document.getElementById("startBtn").style.display="none";
+  startTimer();
+
+  const fd = new FormData();
+  fd.append("mode","start");
+  fd.append("cvText",cvText);
+
+  const res = await fetch(WORKER_URL,{method:"POST",body:fd});
+  const data = await res.json();
+
+  history = data.history || [];
+  speak(data.reply);
+};
 </script>
 
 </body>
