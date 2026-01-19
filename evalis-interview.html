@@ -1,4 +1,4 @@
-// --- Continuous Listening Loop ---
+// --- Continuous Logic Loop ---
 async function startTurn() {
     if(!active || busy || timeLeft <= 0) return;
     
@@ -6,34 +6,33 @@ async function startTurn() {
     const rec = new MediaRecorder(stream);
     const chunks = [];
     
-    document.getElementById('status').innerText = "INTERVIEWER LISTENING...";
-
+    document.getElementById('status').innerText = "LISTENING...";
     rec.ondataavailable = e => chunks.push(e.data);
+    
     rec.onstop = async () => {
         busy = true;
-        document.getElementById('status').innerText = "THINKING...";
+        document.getElementById('status').innerText = "ANALYZING DEPTH...";
         
         const fd = new FormData();
         fd.append("mode", "interview");
-        fd.append("audio", new Blob(chunks, {type: 'audio/webm'}), "a.webm");
+        fd.append("audio", new Blob(chunks), "a.webm");
         fd.append("cvText", cvText);
         fd.append("history", JSON.stringify(history));
 
         try {
             const res = await fetch(WORKER_URL, { method: "POST", body: fd });
             const data = await res.json();
-            
-            if (data.reply) {
+            if(data.reply) {
                 history = data.history;
                 updateTranscript(data.transcript, data.reply);
-                speak(data.reply); // Next question starts the loop again
+                speak(data.reply); // The "Perfect Loop": speech triggers next listen
             }
         } catch (e) { busy = false; startTurn(); }
         stream.getTracks().forEach(t => t.stop());
     };
 
     rec.start();
-    // VAD Simulation: AI listens for technical depth
+    // Simulate VAD: listens for a set technical explanation window
     setTimeout(() => { if(rec.state === "recording") rec.stop(); }, 8000); 
 }
 
@@ -42,7 +41,7 @@ function speak(text) {
     const ut = new SpeechSynthesisUtterance(text);
     ut.onend = () => { 
         busy = false; 
-        if(active) setTimeout(startTurn, 300); // RE-OPEN MIC IMMEDIATELY
+        if(active) setTimeout(startTurn, 300); // Immediate mic reactivation
     };
     window.speechSynthesis.speak(ut);
 }
