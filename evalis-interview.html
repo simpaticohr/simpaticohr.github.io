@@ -1,71 +1,73 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<title>Evalis AI Interviewer</title>
+<meta charset="UTF-8" />
+<title>Evalis AI Interview</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 
 <style>
 body {
-  background:#0f172a;
-  color:white;
-  font-family:sans-serif;
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  height:100vh;
-  margin:0;
+  margin: 0;
+  background: #0f172a;
+  color: #fff;
+  font-family: system-ui, sans-serif;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100vh;
 }
 .card {
-  width:420px;
-  background:#1e293b;
-  padding:25px;
-  border-radius:20px;
-  box-shadow:0 10px 30px rgba(0,0,0,.5);
+  width: 420px;
+  background: #1e293b;
+  padding: 24px;
+  border-radius: 18px;
+  box-shadow: 0 20px 40px rgba(0,0,0,.5);
 }
+h3 { margin-top: 0; }
 button {
-  width:100%;
-  padding:15px;
-  border:none;
-  border-radius:12px;
-  background:#4f46e5;
-  color:white;
-  font-weight:bold;
-  cursor:pointer;
-  margin-top:10px;
+  width: 100%;
+  padding: 14px;
+  border-radius: 12px;
+  border: none;
+  background: #4f46e5;
+  color: white;
+  font-weight: 600;
+  cursor: pointer;
+  margin-top: 10px;
 }
 button:disabled {
-  opacity:.5;
-  cursor:not-allowed;
+  opacity: .5;
+  cursor: not-allowed;
+}
+#status {
+  text-align: center;
+  font-size: 13px;
+  color: #94a3b8;
+  margin-bottom: 10px;
 }
 #log {
-  margin-top:20px;
-  background:#020617;
-  padding:15px;
-  height:200px;
-  overflow-y:auto;
-  border-radius:12px;
-  font-size:14px;
-  border:1px solid #334155;
+  margin-top: 16px;
+  height: 220px;
+  overflow-y: auto;
+  background: #020617;
+  border-radius: 12px;
+  padding: 12px;
+  font-size: 14px;
+  border: 1px solid #334155;
 }
-.ai { color:#a5b4fc; margin-bottom:10px; }
-.user { color:#94a3b8; font-style:italic; margin-bottom:10px; }
-#status {
-  text-align:center;
-  font-size:13px;
-  color:#94a3b8;
-  margin-bottom:10px;
-}
+.ai { color: #a5b4fc; margin-bottom: 10px; }
+.user { color: #94a3b8; font-style: italic; margin-bottom: 10px; }
 </style>
 </head>
 
 <body>
 <div class="card">
   <h3>Evalis AI Interview</h3>
-  <div id="status">Upload PDF Resume to Start</div>
+  <div id="status">Upload PDF resume to begin</div>
 
-  <input type="file" id="cvInput" accept=".pdf">
+  <input type="file" id="cvInput" accept=".pdf" />
   <button id="startBtn" disabled>Start Interview</button>
   <button id="scoreBtn" style="display:none;background:#ef4444;">Finish & Get Score</button>
 
@@ -73,147 +75,151 @@ button:disabled {
 </div>
 
 <script>
-/* ================= CONFIG ================= */
 const WORKER_URL = "https://evalis-ai.simpaticohrconsultancy.workers.dev";
 pdfjsLib.GlobalWorkerOptions.workerSrc =
   "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
 
-/* ================= STATE ================= */
 let cvText = "";
 let history = [];
 let active = false;
-let recording = false;
 
-/* ================= UI LOG ================= */
-function log(cls, text) {
-  const d = document.createElement("div");
-  d.className = cls;
-  d.textContent = text;
-  const box = document.getElementById("log");
-  box.appendChild(d);
-  box.scrollTop = box.scrollHeight;
+/* ---------- UI HELPERS ---------- */
+function logMsg(cls, text) {
+  const div = document.createElement("div");
+  div.className = cls;
+  div.textContent = text;
+  const log = document.getElementById("log");
+  log.appendChild(div);
+  log.scrollTop = log.scrollHeight;
 }
 
-/* ================= PDF ================= */
+function speak(text) {
+  if (!text) return;
+  logMsg("ai", "AI: " + text);
+  speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance(text);
+  u.onend = () => { if (active) listen(); };
+  speechSynthesis.speak(u);
+}
+
+/* ---------- PDF PARSER ---------- */
 document.getElementById("cvInput").onchange = async e => {
   const file = e.target.files[0];
   const pdf = await pdfjsLib.getDocument(await file.arrayBuffer()).promise;
   let text = "";
-
   for (let i = 1; i <= pdf.numPages; i++) {
     const page = await pdf.getPage(i);
     const content = await page.getTextContent();
-    text += content.items.map(x => x.str).join(" ") + " ";
+    text += content.items.map(s => s.str).join(" ") + " ";
   }
-
   cvText = text.trim();
-  document.getElementById("status").innerText = "Resume Loaded";
+  document.getElementById("status").textContent = "Resume loaded";
   document.getElementById("startBtn").disabled = false;
 };
 
-/* ================= SPEAK ================= */
-function speak(text) {
-  if (!text) return;
-
-  log("ai", "AI: " + text);
-  speechSynthesis.cancel();
-
-  const u = new SpeechSynthesisUtterance(text);
-  u.onend = () => active && listen();
-  speechSynthesis.speak(u);
-}
-
-/* ================= LISTEN (SAFE) ================= */
+/* ---------- AUDIO → WAV (CRITICAL) ---------- */
 async function listen() {
-  if (!active || recording) return;
-  recording = true;
+  if (!active) return;
 
-  let stream;
-  try {
-    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-  } catch {
-    recording = false;
-    document.getElementById("status").innerText = "Microphone permission denied";
-    return;
-  }
-
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
   const recorder = new MediaRecorder(stream);
   const chunks = [];
 
-  document.getElementById("status").innerText = "Listening…";
-
+  document.getElementById("status").textContent = "Listening…";
   recorder.ondataavailable = e => chunks.push(e.data);
 
   recorder.onstop = async () => {
     stream.getTracks().forEach(t => t.stop());
-    recording = false;
 
-    const blob = new Blob(chunks, { type:"audio/webm" });
+    const webm = new Blob(chunks, { type: "audio/webm" });
+    if (webm.size < 8000) return listen();
 
-    /* 🔒 HARD SILENCE GUARD */
-    if (blob.size < 8000) {
-      console.warn("Silent audio ignored");
-      listen();
-      return;
-    }
+    const buf = await webm.arrayBuffer();
+    const ctx = new AudioContext({ sampleRate: 16000 });
+    const audioBuf = await ctx.decodeAudioData(buf);
+    const wav = encodeWAV(audioBuf);
 
-    document.getElementById("status").innerText = "Thinking…";
+    document.getElementById("status").textContent = "Thinking…";
 
     const fd = new FormData();
     fd.append("mode", "interview");
-    fd.append("audio", blob);
+    fd.append("audio", new Blob([wav], { type: "audio/wav" }));
     fd.append("cvText", cvText);
     fd.append("history", JSON.stringify(history));
 
-    try {
-      const res = await fetch(WORKER_URL, { method:"POST", body:fd });
-      const data = await res.json();
+    const res = await fetch(WORKER_URL, { method: "POST", body: fd });
+    const data = await res.json();
 
-      if (data.transcript) log("user", "You: " + data.transcript);
-      history = data.history || history;
-
-      speak(data.reply);
-    } catch {
-      speak("I couldn’t hear that clearly. Please repeat.");
-    }
+    if (data.transcript) logMsg("user", "You: " + data.transcript);
+    history = data.history || history;
+    speak(data.reply);
   };
 
   recorder.start();
-  setTimeout(() => recorder.state === "recording" && recorder.stop(), 7000);
+  setTimeout(() => recorder.stop(), 7000);
 }
 
-/* ================= START ================= */
+/* ---------- WAV ENCODER ---------- */
+function encodeWAV(audioBuffer) {
+  const samples = audioBuffer.getChannelData(0);
+  const buffer = new ArrayBuffer(44 + samples.length * 2);
+  const view = new DataView(buffer);
+
+  function writeStr(o, s) {
+    for (let i = 0; i < s.length; i++) view.setUint8(o + i, s.charCodeAt(i));
+  }
+
+  writeStr(0, "RIFF");
+  view.setUint32(4, 36 + samples.length * 2, true);
+  writeStr(8, "WAVEfmt ");
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true);
+  view.setUint32(24, 16000, true);
+  view.setUint32(28, 32000, true);
+  view.setUint16(32, 2, true);
+  view.setUint16(34, 16, true);
+  writeStr(36, "data");
+  view.setUint32(40, samples.length * 2, true);
+
+  let offset = 44;
+  for (let i = 0; i < samples.length; i++, offset += 2) {
+    const s = Math.max(-1, Math.min(1, samples[i]));
+    view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+  }
+  return buffer;
+}
+
+/* ---------- START ---------- */
 document.getElementById("startBtn").onclick = async () => {
   active = true;
   document.getElementById("startBtn").style.display = "none";
   document.getElementById("scoreBtn").style.display = "block";
-  document.getElementById("status").innerText = "Analyzing CV…";
+  document.getElementById("status").textContent = "Analyzing CV…";
 
   const fd = new FormData();
   fd.append("mode", "start");
   fd.append("cvText", cvText);
 
-  const res = await fetch(WORKER_URL, { method:"POST", body:fd });
+  const res = await fetch(WORKER_URL, { method: "POST", body: fd });
   const data = await res.json();
-
   history = data.history || [];
   speak(data.reply);
 };
 
-/* ================= SCORE ================= */
+/* ---------- SCORE ---------- */
 document.getElementById("scoreBtn").onclick = async () => {
   active = false;
   speechSynthesis.cancel();
-  document.getElementById("status").innerText = "Generating final score…";
+  document.getElementById("status").textContent = "Final evaluation…";
 
   const fd = new FormData();
   fd.append("mode", "score");
   fd.append("history", JSON.stringify(history));
 
-  const res = await fetch(WORKER_URL, { method:"POST", body:fd });
+  const res = await fetch(WORKER_URL, { method: "POST", body: fd });
   const data = await res.json();
-
-  log("ai", "FINAL REPORT: " + data.reply);
+  logMsg("ai", "FINAL RESULT: " + data.reply);
 };
 </script>
 </body>
