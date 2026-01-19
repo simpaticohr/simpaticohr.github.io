@@ -1,74 +1,75 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-<meta charset="UTF-8" />
-<title>English Coach | Career Lab</title>
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<style>
-  body { margin: 0; height: 100vh; background: radial-gradient(circle at top, #0b1d3a, #020617); display: flex; align-items: center; justify-content: center; font-family: system-ui, sans-serif; color: #fff; }
-  .card { width: 90%; max-width: 350px; background: rgba(255,255,255,0.08); backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,0.1); border-radius: 24px; padding: 30px; text-align: center; }
-  button { width: 100%; padding: 14px; border: none; border-radius: 12px; margin-top: 10px; font-weight: 700; cursor: pointer; transition: 0.2s; }
-  .start { background: #6366f1; color: #fff; }
-  .stop { background: #ef4444; color: #fff; }
-  pre { text-align: left; white-space: pre-wrap; font-size: 13px; background: rgba(0,0,0,0.3); padding: 15px; border-radius: 10px; margin-top: 15px; border: 1px solid rgba(255,255,255,0.1); }
-  .score { font-size: 42px; font-weight: 800; color: #818cf8; margin: 15px 0; }
-  #status { color: #94a3b8; font-size: 14px; margin-bottom: 15px; display: block; }
-</style>
+    <title>English Coach</title>
+    <style>
+        body { background: #020617; color: white; font-family: sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; }
+        .card { background: #1e293b; padding: 30px; border-radius: 20px; width: 300px; text-align: center; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+        .btn { background: #2563eb; color: white; border: none; padding: 15px; border-radius: 10px; width: 100%; cursor: pointer; font-weight: bold; }
+        .btn:disabled { background: #475569; }
+        pre { background: #0f172a; padding: 10px; border-radius: 8px; font-size: 12px; text-align: left; white-space: pre-wrap; margin-top: 10px; }
+    </style>
 </head>
 <body>
-<div class="card">
-  <h3>English Practice</h3>
-  <span id="status">Ready to record</span>
-  <button class="start" id="start">🎤 Start (6s Max)</button>
-  <button class="stop" id="stop" style="display:none">Stop Now</button>
-  <div id="results" style="display:none;">
-    <div class="score" id="score"></div>
-    <pre id="said"></pre>
-    <pre id="feedback"></pre>
-    <button onclick="location.reload()" style="background:#334155; color:white">Try Again</button>
-  </div>
-</div>
+    <div class="card">
+        <h3>English Practice</h3>
+        <p id="status">Press start and speak</p>
+        <button id="recordBtn" class="btn">🎤 Start Speaking</button>
+        
+        <div id="results" style="display:none">
+            <h1 id="score" style="color:#60a5fa"></h1>
+            <pre id="said"></pre>
+            <pre id="feedback"></pre>
+            <button onclick="location.reload()" class="btn" style="background:#334155; margin-top:10px">Try Again</button>
+        </div>
+    </div>
 
 <script>
-const API = "https://spoken-english-coach.simpaticohrconsultancy.workers.dev"; // 🟢 Update to your new URL
-let recorder, chunks = [], timer;
+    const API = "https://YOUR-NEW-WORKER.workers.dev"; // 🟢 Replace with your new Worker URL
+    let recorder, chunks = [];
 
-const startBtn = document.getElementById("start");
-const stopBtn = document.getElementById("stop");
-const status = document.getElementById("status");
+    document.getElementById('recordBtn').onclick = async function() {
+        const btn = this;
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            recorder = new MediaRecorder(stream);
+            chunks = [];
+            
+            recorder.ondataavailable = e => chunks.push(e.data);
+            recorder.onstop = () => sendAudio();
+            
+            recorder.start();
+            btn.disabled = true;
+            document.getElementById('status').innerText = "Recording (5s)...";
+            
+            setTimeout(() => recorder.stop(), 5000);
+        } catch (e) {
+            document.getElementById('status').innerText = "Mic Error!";
+        }
+    };
 
-startBtn.onclick = async () => {
-  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-  recorder = new MediaRecorder(stream);
-  chunks = [];
-  recorder.ondataavailable = e => chunks.push(e.data);
-  recorder.onstop = () => { stream.getTracks().forEach(t => t.stop()); sendAudio(); };
-  
-  recorder.start();
-  startBtn.style.display = "none";
-  stopBtn.style.display = "block";
-  status.textContent = "Recording...";
-  timer = setTimeout(() => { if(recorder.state === "recording") recorder.stop(); }, 6000);
-};
+    async function sendAudio() {
+        document.getElementById('status').innerText = "Analyzing speech...";
+        const blob = new Blob(chunks, { type: "audio/webm" });
+        const form = new FormData();
+        form.append("audio", blob);
 
-stopBtn.onclick = () => { clearTimeout(timer); recorder.stop(); };
-
-async function sendAudio() {
-  status.textContent = "Analyzing speech...";
-  stopBtn.style.display = "none";
-  const blob = new Blob(chunks, { type: "audio/webm" });
-  const form = new FormData();
-  form.append("audio", blob);
-
-  const res = await fetch(API, { method: "POST", body: form });
-  const data = await res.json();
-  
-  document.getElementById("results").style.display = "block";
-  document.getElementById("said").textContent = "You: " + data.transcript;
-  document.getElementById("feedback").textContent = data.feedback;
-  document.getElementById("score").textContent = data.score + "/10";
-  status.textContent = "Analysis Complete";
-}
+        try {
+            const res = await fetch(API, { method: "POST", body: form });
+            if (!res.ok) throw new Error("Server Error");
+            const data = await res.json();
+            
+            document.getElementById('recordBtn').style.display = "none";
+            document.getElementById('status').style.display = "none";
+            document.getElementById('results').style.display = "block";
+            document.getElementById('score').innerText = data.score + "/10";
+            document.getElementById('said').innerText = "You: " + data.transcript;
+            document.getElementById('feedback').innerText = data.feedback;
+        } catch (e) {
+            document.getElementById('status').innerText = "Error: Check AI Binding!";
+            document.getElementById('recordBtn').disabled = false;
+        }
+    }
 </script>
 </body>
 </html>
