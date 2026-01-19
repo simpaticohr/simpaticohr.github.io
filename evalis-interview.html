@@ -2,34 +2,30 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Evalis AI - Technical Interviewer</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
     <style>
         body { background: #0f172a; color: white; font-family: sans-serif; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; }
         .card { width: 450px; background: #1e293b; padding: 30px; border-radius: 24px; box-shadow: 0 20px 50px rgba(0,0,0,0.6); border: 1px solid #334155; }
-        h2 { margin-top: 0; color: #f8fafc; text-align: center; }
-        .status-container { text-align: center; margin-bottom: 20px; }
-        #status { font-size: 14px; color: #94a3b8; }
+        h2 { margin-top: 0; text-align: center; }
+        #status { text-align: center; font-size: 14px; color: #94a3b8; margin-bottom: 20px; min-height: 20px; }
         input[type="file"] { width: 100%; margin: 15px 0; color: #94a3b8; }
-        button { width: 100%; padding: 16px; border: none; border-radius: 12px; font-weight: bold; cursor: pointer; transition: 0.2s; font-size: 16px; }
+        button { width: 100%; padding: 16px; border: none; border-radius: 12px; font-weight: bold; cursor: pointer; font-size: 16px; }
         #startBtn { background: #4f46e5; color: white; }
         #startBtn:disabled { background: #334155; cursor: not-allowed; }
         #scoreBtn { background: #ef4444; color: white; margin-top: 10px; }
-        #log { margin-top: 25px; height: 250px; overflow-y: auto; background: #020617; border-radius: 12px; padding: 15px; font-size: 14px; border: 1px solid #334155; line-height: 1.6; }
+        #log { margin-top: 25px; height: 250px; overflow-y: auto; background: #020617; border-radius: 12px; padding: 15px; font-size: 14px; border: 1px solid #334155; }
         .ai { color: #a5b4fc; margin-bottom: 12px; }
         .user { color: #94a3b8; font-style: italic; margin-bottom: 12px; border-left: 2px solid #4f46e5; padding-left: 10px; }
-        .recording-pulse { color: #ef4444; font-weight: bold; animation: pulse 1.5s infinite; }
-        @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
+        .pulse { color: #ef4444; font-weight: bold; animation: blink 1.5s infinite; }
+        @keyframes blink { 0% { opacity: 1; } 50% { opacity: 0.3; } 100% { opacity: 1; } }
     </style>
 </head>
 <body>
 
 <div class="card">
     <h2>Evalis AI Interview</h2>
-    <div class="status-container">
-        <div id="status">Please upload your PDF resume</div>
-    </div>
+    <div id="status">Upload PDF resume to begin</div>
 
     <input type="file" id="cvInput" accept=".pdf">
     <button id="startBtn" disabled>Start Interview</button>
@@ -39,7 +35,6 @@
 </div>
 
 <script>
-    // --- CONFIGURATION ---
     const WORKER_URL = "https://evalis-ai.simpaticohrconsultancy.workers.dev";
     pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
 
@@ -49,87 +44,73 @@
 
     const logBox = document.getElementById("log");
     const statusEl = document.getElementById("status");
-    const startBtn = document.getElementById("startBtn");
-    const scoreBtn = document.getElementById("scoreBtn");
 
-    const addLog = (role, text) => {
+    function addLog(role, text) {
         const div = document.createElement("div");
         div.className = role;
         div.innerText = (role === "ai" ? "AI: " : "You: ") + text;
         logBox.appendChild(div);
         logBox.scrollTop = logBox.scrollHeight;
-    };
+    }
 
-    // --- 1. PDF TEXT EXTRACTION ---
+    // --- 1. PDF Parser ---
     document.getElementById("cvInput").onchange = async (e) => {
         const file = e.target.files[0];
-        if (!file) return;
-        
-        statusEl.innerText = "Extracting resume text...";
-        try {
-            const arrayBuffer = await file.arrayBuffer();
-            const pdf = await pdfjsLib.getDocument(arrayBuffer).promise;
-            let text = "";
-            for (let i = 1; i <= pdf.numPages; i++) {
-                const page = await pdf.getPage(i);
-                const content = await page.getTextContent();
-                text += content.items.map(s => s.str).join(" ") + " ";
-            }
-            cvText = text.trim();
-            statusEl.innerText = "Resume loaded. Ready to start.";
-            startBtn.disabled = false;
-        } catch (err) {
-            statusEl.innerText = "Error reading PDF.";
+        const pdf = await pdfjsLib.getDocument(await file.arrayBuffer()).promise;
+        let text = "";
+        for (let i = 1; i <= pdf.numPages; i++) {
+            const page = await pdf.getPage(i);
+            const content = await page.getTextContent();
+            text += content.items.map(s => s.str).join(" ") + " ";
         }
+        cvText = text.trim();
+        statusEl.innerText = "Resume loaded. Ready.";
+        document.getElementById("startBtn").disabled = false;
     };
 
-    // --- 2. TEXT TO SPEECH ---
+    // --- 2. Speak (AI Output) ---
     function speak(text) {
         if (!text) return;
         addLog("ai", text);
-        window.speechSynthesis.cancel();
+        speechSynthesis.cancel();
         const u = new SpeechSynthesisUtterance(text);
-        u.onend = () => { if (active) captureRawAudio(); };
-        window.speechSynthesis.speak(u);
+        u.onend = () => { if (active) capturePCM(); };
+        speechSynthesis.speak(u);
     }
 
-    // --- 3. RAW PCM AUDIO CAPTURE (THE 5006 FIX) ---
-    async function captureRawAudio() {
+    // --- 3. RAW PCM CAPTURE (THE 5006 FIX) ---
+    async function capturePCM() {
         if (!active) return;
-
         try {
             const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-            const audioContext = new AudioContext({ sampleRate: 16000 }); // Whisper standard
-            const source = audioContext.createMediaStreamSource(stream);
-            const processor = audioContext.createScriptProcessor(4096, 1, 1);
+            const audioCtx = new AudioContext({ sampleRate: 16000 }); // Whisper Native Rate
+            const source = audioCtx.createMediaStreamSource(stream);
+            const processor = audioCtx.createScriptProcessor(4096, 1, 1);
+            let pcmBuffer = [];
 
-            let pcmData = [];
-            statusEl.innerHTML = '<span class="recording-pulse">🔴 AI is listening...</span>';
+            statusEl.innerHTML = '<span class="pulse">🔴 Listening (Raw PCM)...</span>';
 
             processor.onaudioprocess = (e) => {
-                const input = e.inputBuffer.getChannelData(0);
-                for (let i = 0; i < input.length; i++) {
-                    pcmData.push(input[i]); // Collect raw samples
+                const samples = e.inputBuffer.getChannelData(0);
+                for (let i = 0; i < samples.length; i++) {
+                    pcmBuffer.push(samples[i]); // Direct numeric capture
                 }
             };
 
             source.connect(processor);
-            processor.connect(audioContext.destination);
+            processor.connect(audioCtx.destination);
 
-            // Record for 6 seconds
             setTimeout(async () => {
                 stream.getTracks().forEach(t => t.stop());
                 processor.disconnect();
-                source.disconnect();
-                audioContext.close();
+                audioCtx.close();
 
-                if (pcmData.length < 1000) return captureRawAudio(); // Retry if silent
+                if (pcmBuffer.length < 1000) return capturePCM();
 
                 statusEl.innerText = "AI is thinking...";
-
                 const fd = new FormData();
                 fd.append("mode", "interview");
-                fd.append("audio_raw", JSON.stringify(pcmData)); // Send as numeric array
+                fd.append("audio_raw", JSON.stringify(pcmBuffer)); // Send as numeric list
                 fd.append("cvText", cvText);
                 fd.append("history", JSON.stringify(history));
 
@@ -140,45 +121,37 @@
                 history = data.history || history;
                 speak(data.reply);
             }, 6000);
-
         } catch (err) {
-            statusEl.innerText = "Microphone error. Please allow access.";
-            active = false;
+            statusEl.innerText = "Mic error: " + err.message;
         }
     }
 
-    // --- 4. START INTERVIEW ---
-    startBtn.onclick = async () => {
+    // --- 4. Controls ---
+    document.getElementById("startBtn").onclick = async () => {
         active = true;
-        startBtn.style.display = "none";
-        scoreBtn.style.display = "block";
-        statusEl.innerText = "Analyzing CV and generating first question...";
+        document.getElementById("startBtn").style.display = "none";
+        document.getElementById("scoreBtn").style.display = "block";
+        statusEl.innerText = "Starting interview...";
 
         const fd = new FormData();
         fd.append("mode", "start");
         fd.append("cvText", cvText);
-
         const res = await fetch(WORKER_URL, { method: "POST", body: fd });
         const data = await res.json();
         history = data.history;
         speak(data.reply);
     };
 
-    // --- 5. FINISH & SCORE ---
-    scoreBtn.onclick = async () => {
+    document.getElementById("scoreBtn").onclick = async () => {
         active = false;
-        window.speechSynthesis.cancel();
-        statusEl.innerText = "Calculating final technical score...";
-
+        statusEl.innerText = "Calculating score...";
         const fd = new FormData();
         fd.append("mode", "score");
         fd.append("history", JSON.stringify(history));
-
         const res = await fetch(WORKER_URL, { method: "POST", body: fd });
         const data = await res.json();
         addLog("ai", "FINAL EVALUATION: " + data.reply);
     };
 </script>
-
 </body>
 </html>
