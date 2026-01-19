@@ -6,13 +6,13 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
     <style>
         body { background: #0f172a; color: white; font-family: sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; }
-        .card { width: 420px; background: #1e293b; padding: 25px; border-radius: 20px; box-shadow: 0 15px 35px rgba(0,0,0,0.5); }
+        .card { width: 420px; background: #1e293b; padding: 25px; border-radius: 20px; box-shadow: 0 15px 35px rgba(0,0,0,0.5); border: 1px solid #334155; }
         #status { text-align: center; color: #94a3b8; margin-bottom: 15px; font-size: 14px; min-height: 20px; }
         button { width: 100%; padding: 14px; border-radius: 12px; border: none; background: #4f46e5; color: white; font-weight: bold; cursor: pointer; margin-top: 10px; }
         button:disabled { background: #334155; }
         #log { margin-top: 20px; height: 250px; overflow-y: auto; background: #020617; border-radius: 12px; padding: 12px; font-size: 14px; border: 1px solid #334155; }
         .ai { color: #a5b4fc; margin-bottom: 10px; }
-        .user { color: #94a3b8; margin-bottom: 10px; font-style: italic; }
+        .user { color: #94a3b8; margin-bottom: 10px; font-style: italic; border-left: 2px solid #4f46e5; padding-left: 8px; }
         .pulse { color: #ef4444; font-weight: bold; animation: blink 1.5s infinite; }
         @keyframes blink { 0% { opacity: 1; } 50% { opacity: 0.3; } 100% { opacity: 1; } }
     </style>
@@ -42,7 +42,7 @@
         logEl.scrollTop = logEl.scrollHeight;
     }
 
-    // PDF Parser
+    // PDF Extraction logic
     document.getElementById("cvInput").onchange = async (e) => {
         const file = e.target.files[0];
         const pdf = await pdfjsLib.getDocument(await file.arrayBuffer()).promise;
@@ -57,29 +57,32 @@
         document.getElementById("startBtn").disabled = false;
     };
 
-    // Text to Speech + Automatic Re-listening
+    // TTS Loop: Re-opens mic only AFTER AI stops talking
     function speak(text) {
         if (!text) return;
         logMsg("ai", text);
         speechSynthesis.cancel();
         const u = new SpeechSynthesisUtterance(text);
-        u.onend = () => { if (active) captureRaw(); };
+        u.onend = () => { if (active) captureRawPCM(); };
         speechSynthesis.speak(u);
     }
 
-    // Capture Raw PCM (Fixes Error 5006)
-    async function captureRaw() {
+    // --- THE FIX: CAPTURE RAW NUMERIC SAMPLES ---
+    async function captureRawPCM() {
         if (!active) return;
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        const audioCtx = new AudioContext({ sampleRate: 16000 });
+        const audioCtx = new AudioContext({ sampleRate: 16000 }); // Whisper Native Rate
         const source = audioCtx.createMediaStreamSource(stream);
         const processor = audioCtx.createScriptProcessor(4096, 1, 1);
-        let pcm = [];
+        let pcmData = [];
 
-        statusEl.innerHTML = '<span class="pulse">🔴 AI is listening...</span>';
+        statusEl.innerHTML = '<span class="pulse">🔴 Listening (Raw PCM)...</span>';
+
         processor.onaudioprocess = (e) => {
-            const data = e.inputBuffer.getChannelData(0);
-            for (let i = 0; i < data.length; i++) pcm.push(data[i]);
+            const samples = e.inputBuffer.getChannelData(0);
+            for (let i = 0; i < samples.length; i++) {
+                pcmData.push(samples[i]); // Push raw numbers
+            }
         };
 
         source.connect(processor);
@@ -90,10 +93,10 @@
             processor.disconnect();
             audioCtx.close();
 
-            statusEl.innerText = "AI Thinking...";
+            statusEl.innerText = "AI is thinking...";
             const fd = new FormData();
             fd.append("mode", "interview");
-            fd.append("audio_raw", JSON.stringify(pcm)); // Send as numeric array
+            fd.append("audio_raw", JSON.stringify(pcmData)); // SEND AS NUMERIC ARRAY
             fd.append("history", JSON.stringify(history));
 
             const res = await fetch(WORKER_URL, { method: "POST", body: fd });
@@ -101,13 +104,13 @@
             if (data.transcript) logMsg("user", data.transcript);
             history = data.history || history;
             speak(data.reply);
-        }, 6000); // 6 seconds recording
+        }, 5000); // 5-second capture
     }
 
     document.getElementById("startBtn").onclick = async () => {
         active = true;
         document.getElementById("startBtn").style.display = "none";
-        statusEl.innerText = "Analyzing CV...";
+        statusEl.innerText = "Initializing Interview...";
         const fd = new FormData();
         fd.append("mode", "start");
         fd.append("cvText", cvText);
