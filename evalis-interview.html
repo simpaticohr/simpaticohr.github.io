@@ -1,95 +1,94 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-    <meta charset="UTF-8">
-    <title>Elite AI Interviewer</title>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-    <style>
-        body { background: #0f172a; color: white; font-family: sans-serif; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; }
-        .box { width: 400px; background: #1e293b; padding: 30px; border-radius: 20px; text-align: center; border: 1px solid #334155; }
-        .timer { font-size: 2.5rem; margin: 20px 0; color: #60a5fa; font-family: monospace; }
-        button { width: 100%; padding: 15px; border-radius: 10px; border: none; background: #2563eb; color: white; font-weight: bold; cursor: pointer; }
-        #log { height: 150px; overflow-y: auto; background: #0f172a; margin-top: 20px; padding: 10px; font-size: 13px; text-align: left; }
-    </style>
+  <meta charset="UTF-8">
+  <title>AI Interview</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <style>
+    body { background:#0f172a;color:white;font-family:sans-serif;
+           display:flex;align-items:center;justify-content:center;height:100vh }
+    .card { width:420px;background:#1e293b;padding:25px;border-radius:20px }
+    button { width:100%;padding:14px;margin-top:10px;
+             background:#2563eb;border:none;color:white;font-weight:bold }
+    #log { margin-top:15px;font-size:14px;min-height:80px }
+  </style>
 </head>
 <body>
-    <div class="box">
-        <div id="status">Upload CV to Start</div>
-        <div class="timer" id="timer">15:00</div>
-        <input type="file" id="cvInput" accept=".pdf">
-        <button id="startBtn" disabled style="margin-top:20px;">Initialize Deep-Dive</button>
-        <div id="log"></div>
-    </div>
+
+<div class="card">
+  <h3>AI Interviewer</h3>
+  <input type="file" id="cv" accept=".pdf"><br><br>
+  <button id="start" disabled>Start Interview</button>
+  <div id="log"></div>
+</div>
 
 <script>
-    const WORKER_URL = "https://evalis-ai.simpaticohrconsultancy.workers.dev";
-    let history = [], cvText = "", active = false, busy = false, timeLeft = 900;
+const WORKER = "https://evalis-ai.simpaticohrconsultancy.workers.dev";
+const log = msg => document.getElementById("log").innerHTML += `<p>${msg}</p>`;
+let cvText = "", history = [], active = false;
 
-    // PDF Parser
-    document.getElementById('cvInput').onchange = async (e) => {
-        const file = e.target.files[0];
-        const reader = new FileReader();
-        reader.onload = async () => {
-            const pdfjsLib = window['pdfjs-dist/build/pdf'];
-            pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-            const pdf = await pdfjsLib.getDocument({data: new Uint8Array(reader.result)}).promise;
-            let text = "";
-            for(let i=1; i<=pdf.numPages; i++){
-                const page = await pdf.getPage(i);
-                const content = await page.getTextContent();
-                text += content.items.map(s => s.str).join(" ") + " ";
-            }
-            cvText = text.trim();
-            document.getElementById('status').innerText = "CV Ready";
-            document.getElementById('startBtn').disabled = false;
-        };
-        reader.readAsArrayBuffer(file);
-    };
+/* PDF PARSE */
+pdfjsLib.GlobalWorkerOptions.workerSrc =
+  "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
 
-    async function startTurn() {
-        if(!active || busy) return;
-        try {
-            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-            const rec = new MediaRecorder(stream);
-            const chunks = [];
-            document.getElementById('status').innerText = "LISTENING...";
-            rec.ondataavailable = e => chunks.push(e.data);
-            rec.onstop = async () => {
-                busy = true;
-                document.getElementById('status').innerText = "ANALYZING...";
-                const fd = new FormData();
-                fd.append("audio", new Blob(chunks), "v.webm");
-                fd.append("resume", cvText);
-                fd.append("history", JSON.stringify(history));
-                const res = await fetch(WORKER_URL, { method: "POST", body: fd });
-                const data = await res.json();
-                history = data.history;
-                speak(data.reply);
-                stream.getTracks().forEach(t => t.stop());
-            };
-            rec.start();
-            setTimeout(() => { if(rec.state === "recording") rec.stop(); }, 7000); 
-        } catch (err) { alert("Mic required."); }
-    }
+document.getElementById("cv").onchange = async e => {
+  const file = e.target.files[0];
+  const pdf = await pdfjsLib.getDocument(await file.arrayBuffer()).promise;
+  let text = "";
+  for (let i=1;i<=pdf.numPages;i++) {
+    const p = await pdf.getPage(i);
+    const c = await p.getTextContent();
+    text += c.items.map(x=>x.str).join(" ")+" ";
+  }
+  cvText = text.trim();
+  log("CV loaded");
+  document.getElementById("start").disabled = false;
+};
 
-    function speak(text) {
-        const ut = new SpeechSynthesisUtterance(text);
-        document.getElementById('status').innerText = "INTERVIEWER SPEAKING...";
-        ut.onend = () => { busy = false; if(active) setTimeout(startTurn, 300); };
-        window.speechSynthesis.speak(ut);
-    }
+/* START */
+document.getElementById("start").onclick = async () => {
+  active = true;
+  const fd = new FormData();
+  fd.append("mode","start");
+  fd.append("cvText",cvText);
 
-    document.getElementById('startBtn').onclick = async () => {
-        active = true;
-        document.getElementById('startBtn').style.display = "none";
-        // Start first CV-based question immediately
-        const fd = new FormData();
-        fd.append("resume", cvText);
-        fd.append("history", "[]");
-        const res = await fetch(WORKER_URL, { method: "POST", body: fd });
-        const data = await res.json();
-        speak(data.reply);
-    };
+  const res = await fetch(WORKER,{method:"POST",body:fd});
+  const data = await res.json();
+  history = data.history;
+
+  speak(data.reply);
+};
+
+/* SPEAK */
+function speak(text){
+  log("<b>AI:</b> "+text);
+  const u = new SpeechSynthesisUtterance(text);
+  u.onend = record;
+  speechSynthesis.speak(u);
+}
+
+/* RECORD */
+async function record(){
+  if(!active) return;
+  const stream = await navigator.mediaDevices.getUserMedia({audio:true});
+  const rec = new MediaRecorder(stream);
+  const chunks = [];
+  rec.ondataavailable = e=>chunks.push(e.data);
+  rec.onstop = async ()=>{
+    stream.getTracks().forEach(t=>t.stop());
+    const fd = new FormData();
+    fd.append("mode","interview");
+    fd.append("audio",new Blob(chunks));
+    fd.append("cvText",cvText);
+    fd.append("history",JSON.stringify(history));
+    const res = await fetch(WORKER,{method:"POST",body:fd});
+    const data = await res.json();
+    history = data.history;
+    speak(data.reply);
+  };
+  rec.start();
+  setTimeout(()=>rec.stop(),6000);
+}
 </script>
 </body>
 </html>
