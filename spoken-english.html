@@ -1,132 +1,159 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8" />
-<title>Spoken English Practice</title>
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<style>
-  body {
-    margin: 0;
-    height: 100vh;
-    background: radial-gradient(circle at top, #0b1d3a, #020617);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-family: system-ui, -apple-system, sans-serif;
-    color: #fff;
-  }
-  .card {
-    width: 90%;
-    max-width: 320px;
-    background: rgba(255,255,255,0.08);
-    backdrop-filter: blur(12px);
-    border: 1px solid rgba(255,255,255,0.1);
-    border-radius: 20px;
-    padding: 24px;
-    text-align: center;
-    box-shadow: 0 10px 30px rgba(0,0,0,0.5);
-  }
-  button {
-    width: 100%;
-    padding: 12px;
-    border: none;
-    border-radius: 10px;
-    margin-top: 10px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: opacity 0.2s;
-  }
-  button:disabled { opacity: 0.5; cursor: not-allowed; }
-  .start { background: #2563eb; color: #fff; }
-  .stop { background: #374151; color: #ccc; }
-  
-  pre {
-    text-align: left;
-    white-space: pre-wrap;
-    font-size: 13px;
-    background: rgba(0,0,0,0.2);
-    padding: 12px;
-    border-radius: 8px;
-    margin-top: 15px;
-    max-height: 120px;
-    overflow-y: auto;
-    border: 1px solid rgba(255,255,255,0.05);
-  }
-  .score { font-size: 32px; font-weight: bold; margin-top: 10px; color: #60a5fa; }
-  small { color: #94a3b8; display: block; margin-bottom: 10px; }
-</style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Evalis AI - Hands-Free Interviewer</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #0f172a; color: white; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
+        .card { background: #1e293b; padding: 2rem; border-radius: 1rem; box-shadow: 0 10px 25px rgba(0,0,0,0.5); width: 90%; max-width: 500px; text-align: center; }
+        .status-pill { display: inline-block; padding: 0.5rem 1rem; border-radius: 2rem; background: #334155; margin-bottom: 1rem; font-size: 0.875rem; transition: all 0.3s; }
+        .listening { background: #991b1b; color: white; animation: pulse 1.5s infinite; }
+        button { background: #3b82f6; color: white; border: none; padding: 1rem 2rem; border-radius: 0.5rem; cursor: pointer; font-weight: bold; width: 100%; font-size: 1rem; }
+        button:disabled { background: #475569; cursor: not-allowed; }
+        #chat { margin-top: 1.5rem; text-align: left; max-height: 200px; overflow-y: auto; font-size: 0.9rem; color: #cbd5e1; }
+        @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
+    </style>
 </head>
 <body>
+
 <div class="card">
-  <h3>English Practice</h3>
-  <small id="status">Tap start and speak</small>
-  <button class="start" id="start">🎤 Start Speaking</button>
-  <button class="stop" id="stop" disabled>Stop</button>
-  <div id="results" style="display:none;">
-    <pre id="said"></pre>
-    <pre id="feedback"></pre>
-    <div class="score" id="score"></div>
-  </div>
+    <h2>Evalis AI Interview</h2>
+    <div id="status" class="status-pill">Ready to start</div>
+    
+    <div style="margin-bottom: 1rem;">
+        <input type="file" id="cvInput" style="display:none">
+        <button id="startBtn" onclick="initInterview()">Start Hands-Free Interview</button>
+    </div>
+
+    <div id="chat"></div>
 </div>
 
 <script>
-const API = "https://evalis-ai.simpaticohrconsultancy.workers.dev";
-let recorder, chunks = [], stopTimer;
+    const WORKER_URL = "YOUR_CLOUDFLARE_WORKER_URL"; // 🔴 Replace this!
+    let history = [];
+    let audioCtx, processor, pcmBuffer = [];
+    let silenceStart = Date.now();
+    let isAISpeaking = false;
+    let isProcessing = false;
 
-const startBtn = document.getElementById("start");
-const stopBtn = document.getElementById("stop");
-const status = document.getElementById("status");
-const said = document.getElementById("said");
-const feedback = document.getElementById("feedback");
-const scoreBox = document.getElementById("score");
-const results = document.getElementById("results");
+    // VAD Settings
+    const SILENCE_THRESHOLD = 0.015; 
+    const SILENCE_DURATION = 1500; // 1.5 seconds triggers upload
 
-startBtn.onclick = async () => {
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    chunks = [];
-    results.style.display = "none";
-    status.textContent = "Listening (max 6s)...";
-    
-    recorder = new MediaRecorder(stream);
-    recorder.ondataavailable = e => chunks.push(e.data);
-    recorder.onstop = () => {
-      stream.getTracks().forEach(t => t.stop());
-      sendAudio();
-    };
+    const statusEl = document.getElementById('status');
+    const chatEl = document.getElementById('chat');
 
-    recorder.start();
-    startBtn.disabled = true;
-    stopBtn.disabled = false;
+    async function initInterview() {
+        document.getElementById('startBtn').disabled = true;
+        statusEl.innerText = "Initializing AI...";
+        
+        try {
+            // 1. Get Mic Access
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            audioCtx = new AudioContext({ sampleRate: 16000 });
+            const source = audioCtx.createMediaStreamSource(stream);
+            processor = audioCtx.createScriptProcessor(4096, 1, 1);
 
-    stopTimer = setTimeout(() => { if(recorder.state === "recording") recorder.stop(); }, 6000);
-  } catch (e) {
-    status.textContent = "Mic Error: " + e.message;
-  }
-};
+            // 2. Start the LLM conversation
+            const fd = new FormData();
+            fd.append("mode", "start");
+            fd.append("cvText", "Senior AI Specialist Candidate"); // Replace with file reader if needed
 
-stopBtn.onclick = () => { clearTimeout(stopTimer); recorder.stop(); };
+            const res = await fetch(WORKER_URL, { method: "POST", body: fd });
+            const data = await res.json();
+            
+            history = data.history;
+            addLog("AI", data.reply);
+            await speak(data.reply);
 
-async function sendAudio() {
-  status.textContent = "Analyzing speech...";
-  stopBtn.disabled = true;
-  const blob = new Blob(chunks, { type: "audio/webm" });
-  const form = new FormData();
-  form.append("audio", blob);
+            // 3. Activate Hands-Free VAD Logic
+            processor.onaudioprocess = handleAudio;
+            source.connect(processor);
+            processor.connect(audioCtx.destination);
+            
+            statusEl.innerText = "🔴 Listening (Hands-free)";
+            statusEl.classList.add('listening');
 
-  try {
-    const res = await fetch(API, { method: "POST", body: form });
-    const data = await res.json();
-    results.style.display = "block";
-    said.textContent = "You: " + data.transcript;
-    feedback.textContent = data.feedback;
-    scoreBox.textContent = data.score + "/10";
-    status.textContent = "Done!";
-  } catch (e) {
-    status.textContent = "Server Error";
-  }
-  startBtn.disabled = false;
-}
+        } catch (e) {
+            alert("Error: " + e.message);
+            statusEl.innerText = "Error";
+        }
+    }
+
+    function handleAudio(e) {
+        if (isProcessing) return;
+
+        const samples = e.inputBuffer.getChannelData(0);
+        let maxVal = 0;
+
+        for (let i = 0; i < samples.length; i++) {
+            pcmBuffer.push(samples[i]);
+            if (Math.abs(samples[i]) > maxVal) maxVal = Math.abs(samples[i]);
+        }
+
+        // 🔴 INTERRUPTION LOGIC: Stop AI if user starts talking
+        if (maxVal > SILENCE_THRESHOLD) {
+            if (isAISpeaking) {
+                window.speechSynthesis.cancel();
+                isAISpeaking = false;
+                pcmBuffer = []; // Wipe old audio
+            }
+            silenceStart = Date.now();
+        } 
+        // 🟢 VAD LOGIC: User stopped talking -> Send to AI
+        else if (Date.now() - silenceStart > SILENCE_DURATION && pcmBuffer.length > 16000) {
+            processTurn();
+        }
+    }
+
+    async function processTurn() {
+        isProcessing = true;
+        const currentAudio = [...pcmBuffer];
+        pcmBuffer = []; // Clear for next round
+        statusEl.innerText = "AI Thinking...";
+        statusEl.classList.remove('listening');
+
+        const fd = new FormData();
+        // 🔴 KEY FIX: JSON string of numbers prevents Error 5006
+        fd.append("audio_raw", JSON.stringify(currentAudio)); 
+        fd.append("history", JSON.stringify(history));
+
+        try {
+            const res = await fetch(WORKER_URL, { method: "POST", body: fd });
+            const data = await res.json();
+
+            if (data.transcript) addLog("You", data.transcript);
+            if (data.reply) {
+                addLog("AI", data.reply);
+                history = data.history;
+                await speak(data.reply);
+            }
+        } catch (e) {
+            console.error(e);
+        } finally {
+            isProcessing = false;
+            statusEl.innerText = "🔴 Listening (Hands-free)";
+            statusEl.classList.add('listening');
+            silenceStart = Date.now();
+        }
+    }
+
+    function speak(text) {
+        return new Promise((resolve) => {
+            const utterance = new SpeechSynthesisUtterance(text);
+            utterance.onstart = () => { isAISpeaking = true; };
+            utterance.onend = () => { isAISpeaking = false; resolve(); };
+            window.speechSynthesis.speak(utterance);
+        });
+    }
+
+    function addLog(role, text) {
+        const div = document.createElement('div');
+        div.innerHTML = `<strong>${role}:</strong> ${text}`;
+        chatEl.prepend(div);
+    }
 </script>
+
 </body>
 </html>
