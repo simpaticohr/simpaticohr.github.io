@@ -1,96 +1,165 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
 <meta charset="UTF-8">
 <title>Evalis AI Interview</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+
 <style>
-body{background:#0f172a;color:white;font-family:sans-serif;
-display:flex;justify-content:center;align-items:center;height:100vh}
-.card{width:420px;background:#1e293b;padding:25px;border-radius:18px}
-button{width:100%;padding:14px;margin-top:10px;background:#4f46e5;color:white;border:none}
-#log{height:160px;overflow:auto;background:#020617;margin-top:10px;padding:10px}
+body {
+  background:#0f172a;
+  color:white;
+  font-family:system-ui;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  height:100vh;
+  margin:0;
+}
+.card {
+  width:420px;
+  background:#1e293b;
+  padding:24px;
+  border-radius:18px;
+}
+button {
+  width:100%;
+  padding:14px;
+  border:none;
+  border-radius:10px;
+  background:#4f46e5;
+  color:white;
+  font-weight:bold;
+}
+button:disabled { opacity:.5 }
+#log {
+  margin-top:16px;
+  background:#020617;
+  padding:12px;
+  height:180px;
+  overflow:auto;
+  border-radius:10px;
+  font-size:13px;
+}
+.ai { color:#a5b4fc; margin-bottom:8px }
+.user { color:#94a3b8; font-style:italic; margin-bottom:6px }
+#status { text-align:center; font-size:12px; color:#94a3b8; margin-bottom:8px }
 </style>
 </head>
-<body>
 
+<body>
 <div class="card">
-<h3>Evalis AI Interview</h3>
-<input type="file" id="cv" accept=".pdf"><br>
-<button id="start" disabled>Start Interview</button>
-<div id="log"></div>
+  <h3>Evalis AI Interview</h3>
+
+  <div id="status">Upload resume to begin</div>
+
+  <input type="file" id="cv" accept=".pdf"><br><br>
+  <button id="start" disabled>Start Interview</button>
+
+  <div id="log"></div>
 </div>
 
 <script>
+/* ================= CONFIG ================= */
 const WORKER = "https://evalis-ai.simpaticohrconsultancy.workers.dev";
-let cvText="", history=[], active=false, busy=false;
-
 pdfjsLib.GlobalWorkerOptions.workerSrc =
-"https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+  "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
 
+let cvText = "";
+let history = [];
+let active = false;
+
+/* ================= LOG ================= */
+const log = (cls, txt) => {
+  const d = document.createElement("div");
+  d.className = cls;
+  d.innerText = txt;
+  document.getElementById("log").appendChild(d);
+  d.scrollIntoView();
+};
+
+/* ================= PDF ================= */
 cv.onchange = async e => {
-  const pdf = await pdfjsLib.getDocument(
-    await e.target.files[0].arrayBuffer()
-  ).promise;
-  let t="";
-  for(let i=1;i<=pdf.numPages;i++){
-    const p=await pdf.getPage(i);
-    const c=await p.getTextContent();
-    t+=c.items.map(x=>x.str).join(" ");
+  const pdf = await pdfjsLib.getDocument(await e.target.files[0].arrayBuffer()).promise;
+  let text = "";
+  for (let i = 1; i <= pdf.numPages; i++) {
+    const p = await pdf.getPage(i);
+    const c = await p.getTextContent();
+    text += c.items.map(x => x.str).join(" ");
   }
-  cvText=t;
-  start.disabled=false;
+  cvText = text.trim();
+  status.innerText = "Resume loaded";
+  start.disabled = false;
 };
 
-start.onclick = async ()=>{
-  active=true;
-  start.style.display="none";
-  const fd=new FormData();
-  fd.append("mode","start");
-  fd.append("cvText",cvText);
-  const r=await fetch(WORKER,{method:"POST",body:fd});
-  const d=await r.json();
-  history=d.history;
-  speak(d.reply);
-};
-
-function speak(text){
-  log("AI: "+text);
-  const u=new SpeechSynthesisUtterance(text);
-  u.onend=()=>listen();
+/* ================= SPEAK ================= */
+function speak(text) {
+  log("ai", "AI: " + text);
+  speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance(text);
+  u.onend = listen;
   speechSynthesis.speak(u);
 }
 
-async function listen(){
-  if(!active||busy) return;
-  busy=true;
-  const stream=await navigator.mediaDevices.getUserMedia({audio:true});
-  const rec=new MediaRecorder(stream);
-  const chunks=[];
-  rec.ondataavailable=e=>chunks.push(e.data);
-  rec.onstop=async()=>{
-    stream.getTracks().forEach(t=>t.stop());
-    busy=false;
-    const fd=new FormData();
+/* ================= LISTEN (SAFE) ================= */
+async function listen() {
+  if (!active) return;
+
+  const stream = await navigator.mediaDevices.getUserMedia({ audio:true });
+  const recorder = new MediaRecorder(stream);
+  const chunks = [];
+
+  recorder.ondataavailable = e => chunks.push(e.data);
+
+  recorder.onstop = async () => {
+    stream.getTracks().forEach(t => t.stop());
+
+    const blob = new Blob(chunks, { type:"audio/webm" });
+
+    // 🔒 HARD GUARD — prevents your error
+    if (blob.size < 8000) {
+      status.innerText = "Didn't catch that — speak again";
+      return listen();
+    }
+
+    status.innerText = "Thinking…";
+
+    const fd = new FormData();
     fd.append("mode","interview");
-    fd.append("audio",new Blob(chunks));
-    fd.append("cvText",cvText);
-    fd.append("history",JSON.stringify(history));
-    const r=await fetch(WORKER,{method:"POST",body:fd});
-    const d=await r.json();
-    history=d.history;
-    if(d.transcript) log("You: "+d.transcript);
-    speak(d.reply);
+    fd.append("audio", blob, "voice.webm");
+    fd.append("cvText", cvText);
+    fd.append("history", JSON.stringify(history));
+
+    const res = await fetch(WORKER,{ method:"POST", body:fd });
+    const data = await res.json();
+
+    if (data.transcript) log("user","You: "+data.transcript);
+    history = data.history || history;
+    speak(data.reply);
   };
-  rec.start();
-  setTimeout(()=>rec.stop(),7000);
+
+  status.innerText = "Listening…";
+  recorder.start();
+  setTimeout(() => recorder.stop(), 7000);
 }
 
-function log(t){
-  const l=document.getElementById("log");
-  l.innerHTML+=`<div>${t}</div>`;
-  l.scrollTop=l.scrollHeight;
-}
+/* ================= START ================= */
+start.onclick = async () => {
+  active = true;
+  start.style.display = "none";
+  status.innerText = "Analyzing CV…";
+
+  const fd = new FormData();
+  fd.append("mode","start");
+  fd.append("cvText", cvText);
+
+  const res = await fetch(WORKER,{ method:"POST", body:fd });
+  const data = await res.json();
+
+  history = data.history || [];
+  speak(data.reply);
+};
 </script>
 </body>
 </html>
