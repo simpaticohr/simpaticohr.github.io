@@ -7,19 +7,21 @@
     <style>
         body { background: #0f172a; color: white; font-family: sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; }
         .card { width: 420px; background: #1e293b; padding: 25px; border-radius: 20px; box-shadow: 0 15px 35px rgba(0,0,0,0.5); }
-        #status { text-align: center; color: #94a3b8; margin-bottom: 15px; font-size: 14px; }
-        button { width: 100%; padding: 14px; border-radius: 12px; border: none; background: #4f46e5; color: white; font-weight: bold; cursor: pointer; }
+        #status { text-align: center; color: #94a3b8; margin-bottom: 15px; font-size: 14px; min-height: 20px; }
+        button { width: 100%; padding: 14px; border-radius: 12px; border: none; background: #4f46e5; color: white; font-weight: bold; cursor: pointer; margin-top: 10px; }
         button:disabled { background: #334155; }
         #log { margin-top: 20px; height: 250px; overflow-y: auto; background: #020617; border-radius: 12px; padding: 12px; font-size: 14px; border: 1px solid #334155; }
         .ai { color: #a5b4fc; margin-bottom: 10px; }
         .user { color: #94a3b8; margin-bottom: 10px; font-style: italic; }
+        .pulse { color: #ef4444; font-weight: bold; animation: blink 1.5s infinite; }
+        @keyframes blink { 0% { opacity: 1; } 50% { opacity: 0.3; } 100% { opacity: 1; } }
     </style>
 </head>
 <body>
 <div class="card">
     <h3 style="text-align:center">Evalis AI Interview</h3>
     <div id="status">Upload CV to begin</div>
-    <input type="file" id="cvInput" accept=".pdf" style="width:100%; margin-bottom:10px">
+    <input type="file" id="cvInput" accept=".pdf" style="width:100%">
     <button id="startBtn" disabled>Start Interview</button>
     <div id="log"></div>
 </div>
@@ -40,6 +42,7 @@
         logEl.scrollTop = logEl.scrollHeight;
     }
 
+    // PDF Parser
     document.getElementById("cvInput").onchange = async (e) => {
         const file = e.target.files[0];
         const pdf = await pdfjsLib.getDocument(await file.arrayBuffer()).promise;
@@ -54,7 +57,9 @@
         document.getElementById("startBtn").disabled = false;
     };
 
+    // Text to Speech + Automatic Re-listening
     function speak(text) {
+        if (!text) return;
         logMsg("ai", text);
         speechSynthesis.cancel();
         const u = new SpeechSynthesisUtterance(text);
@@ -62,7 +67,7 @@
         speechSynthesis.speak(u);
     }
 
-    // --- RAW AUDIO CAPTURE FIX ---
+    // Capture Raw PCM (Fixes Error 5006)
     async function captureRaw() {
         if (!active) return;
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -71,7 +76,7 @@
         const processor = audioCtx.createScriptProcessor(4096, 1, 1);
         let pcm = [];
 
-        statusEl.innerText = "🔴 Listening...";
+        statusEl.innerHTML = '<span class="pulse">🔴 AI is listening...</span>';
         processor.onaudioprocess = (e) => {
             const data = e.inputBuffer.getChannelData(0);
             for (let i = 0; i < data.length; i++) pcm.push(data[i]);
@@ -88,7 +93,7 @@
             statusEl.innerText = "AI Thinking...";
             const fd = new FormData();
             fd.append("mode", "interview");
-            fd.append("audio_raw", JSON.stringify(pcm));
+            fd.append("audio_raw", JSON.stringify(pcm)); // Send as numeric array
             fd.append("history", JSON.stringify(history));
 
             const res = await fetch(WORKER_URL, { method: "POST", body: fd });
@@ -96,13 +101,13 @@
             if (data.transcript) logMsg("user", data.transcript);
             history = data.history || history;
             speak(data.reply);
-        }, 6000);
+        }, 6000); // 6 seconds recording
     }
 
     document.getElementById("startBtn").onclick = async () => {
         active = true;
         document.getElementById("startBtn").style.display = "none";
-        statusEl.innerText = "Initializing...";
+        statusEl.innerText = "Analyzing CV...";
         const fd = new FormData();
         fd.append("mode", "start");
         fd.append("cvText", cvText);
