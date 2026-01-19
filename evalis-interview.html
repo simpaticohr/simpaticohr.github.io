@@ -1,105 +1,183 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <title>Evalis AI Interview</title>
-  <style>
-    body {
-      background:#0f172a;
-      color:white;
-      font-family:sans-serif;
-      display:flex;
-      justify-content:center;
-      align-items:center;
-      height:100vh;
-    }
-    .card {
-      background:#1e293b;
-      padding:20px;
-      border-radius:16px;
-      width:420px;
-    }
-    button {
-      width:100%;
-      padding:12px;
-      margin-top:10px;
-      border:none;
-      border-radius:10px;
-      background:#4f46e5;
-      color:white;
-      font-weight:bold;
-    }
-    #log {
-      margin-top:15px;
-      background:#020617;
-      padding:12px;
-      height:220px;
-      overflow:auto;
-      border-radius:10px;
-      font-size:13px;
-    }
-  </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Evalis AI - Technical Interviewer</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <style>
+        body { background: #0f172a; color: white; font-family: sans-serif; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; }
+        .card { width: 450px; background: #1e293b; padding: 30px; border-radius: 24px; box-shadow: 0 20px 50px rgba(0,0,0,0.6); border: 1px solid #334155; }
+        h2 { margin-top: 0; color: #f8fafc; text-align: center; }
+        .status-container { text-align: center; margin-bottom: 20px; }
+        #status { font-size: 14px; color: #94a3b8; }
+        input[type="file"] { width: 100%; margin: 15px 0; color: #94a3b8; }
+        button { width: 100%; padding: 16px; border: none; border-radius: 12px; font-weight: bold; cursor: pointer; transition: 0.2s; font-size: 16px; }
+        #startBtn { background: #4f46e5; color: white; }
+        #startBtn:disabled { background: #334155; cursor: not-allowed; }
+        #scoreBtn { background: #ef4444; color: white; margin-top: 10px; }
+        #log { margin-top: 25px; height: 250px; overflow-y: auto; background: #020617; border-radius: 12px; padding: 15px; font-size: 14px; border: 1px solid #334155; line-height: 1.6; }
+        .ai { color: #a5b4fc; margin-bottom: 12px; }
+        .user { color: #94a3b8; font-style: italic; margin-bottom: 12px; border-left: 2px solid #4f46e5; padding-left: 10px; }
+        .recording-pulse { color: #ef4444; font-weight: bold; animation: pulse 1.5s infinite; }
+        @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
+    </style>
 </head>
 <body>
 
 <div class="card">
-  <h3>Evalis AI Interview</h3>
-  <button id="record">🎤 Speak (5 sec)</button>
-  <div id="log"></div>
+    <h2>Evalis AI Interview</h2>
+    <div class="status-container">
+        <div id="status">Please upload your PDF resume</div>
+    </div>
+
+    <input type="file" id="cvInput" accept=".pdf">
+    <button id="startBtn" disabled>Start Interview</button>
+    <button id="scoreBtn" style="display:none;">Finish Interview & Score</button>
+
+    <div id="log"></div>
 </div>
 
 <script>
-const WORKER_URL = "https://evalis-ai.simpaticohrconsultancy.workers.dev";
+    // --- CONFIGURATION ---
+    const WORKER_URL = "https://evalis-ai.simpaticohrconsultancy.workers.dev";
+    pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
 
-let audioCtx, source, processor, stream;
-let pcm = [];
+    let cvText = "";
+    let history = [];
+    let active = false;
 
-const log = t => {
-  const d = document.createElement("div");
-  d.textContent = t;
-  document.getElementById("log").appendChild(d);
-};
+    const logBox = document.getElementById("log");
+    const statusEl = document.getElementById("status");
+    const startBtn = document.getElementById("startBtn");
+    const scoreBtn = document.getElementById("scoreBtn");
 
-document.getElementById("record").onclick = async () => {
-  pcm = [];
-  audioCtx = new AudioContext({ sampleRate: 16000 });
-  stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-  source = audioCtx.createMediaStreamSource(stream);
+    const addLog = (role, text) => {
+        const div = document.createElement("div");
+        div.className = role;
+        div.innerText = (role === "ai" ? "AI: " : "You: ") + text;
+        logBox.appendChild(div);
+        logBox.scrollTop = logBox.scrollHeight;
+    };
 
-  processor = audioCtx.createScriptProcessor(4096, 1, 1);
-  source.connect(processor);
-  processor.connect(audioCtx.destination);
+    // --- 1. PDF TEXT EXTRACTION ---
+    document.getElementById("cvInput").onchange = async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        
+        statusEl.innerText = "Extracting resume text...";
+        try {
+            const arrayBuffer = await file.arrayBuffer();
+            const pdf = await pdfjsLib.getDocument(arrayBuffer).promise;
+            let text = "";
+            for (let i = 1; i <= pdf.numPages; i++) {
+                const page = await pdf.getPage(i);
+                const content = await page.getTextContent();
+                text += content.items.map(s => s.str).join(" ") + " ";
+            }
+            cvText = text.trim();
+            statusEl.innerText = "Resume loaded. Ready to start.";
+            startBtn.disabled = false;
+        } catch (err) {
+            statusEl.innerText = "Error reading PDF.";
+        }
+    };
 
-  processor.onaudioprocess = e => {
-    const input = e.inputBuffer.getChannelData(0);
-    pcm.push(...input);
-  };
+    // --- 2. TEXT TO SPEECH ---
+    function speak(text) {
+        if (!text) return;
+        addLog("ai", text);
+        window.speechSynthesis.cancel();
+        const u = new SpeechSynthesisUtterance(text);
+        u.onend = () => { if (active) captureRawAudio(); };
+        window.speechSynthesis.speak(u);
+    }
 
-  log("🎙️ Listening…");
-  setTimeout(stopAndSend, 5000);
-};
+    // --- 3. RAW PCM AUDIO CAPTURE (THE 5006 FIX) ---
+    async function captureRawAudio() {
+        if (!active) return;
 
-async function stopAndSend() {
-  processor.disconnect();
-  source.disconnect();
-  stream.getTracks().forEach(t => t.stop());
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            const audioContext = new AudioContext({ sampleRate: 16000 }); // Whisper standard
+            const source = audioContext.createMediaStreamSource(stream);
+            const processor = audioContext.createScriptProcessor(4096, 1, 1);
 
-  // Float32 → Int16 PCM
-  const pcm16 = pcm.map(v =>
-    Math.max(-1, Math.min(1, v)) * 32767
-  );
+            let pcmData = [];
+            statusEl.innerHTML = '<span class="recording-pulse">🔴 AI is listening...</span>';
 
-  log("📤 Sending to Whisper…");
+            processor.onaudioprocess = (e) => {
+                const input = e.inputBuffer.getChannelData(0);
+                for (let i = 0; i < input.length; i++) {
+                    pcmData.push(input[i]); // Collect raw samples
+                }
+            };
 
-  const fd = new FormData();
-  fd.append("mode", "interview");
-  fd.append("audio", new Blob([new Int16Array(pcm16)]));
+            source.connect(processor);
+            processor.connect(audioContext.destination);
 
-  const res = await fetch(WORKER_URL, { method: "POST", body: fd });
-  const data = await res.json();
+            // Record for 6 seconds
+            setTimeout(async () => {
+                stream.getTracks().forEach(t => t.stop());
+                processor.disconnect();
+                source.disconnect();
+                audioContext.close();
 
-  log("AI: " + data.reply);
-}
+                if (pcmData.length < 1000) return captureRawAudio(); // Retry if silent
+
+                statusEl.innerText = "AI is thinking...";
+
+                const fd = new FormData();
+                fd.append("mode", "interview");
+                fd.append("audio_raw", JSON.stringify(pcmData)); // Send as numeric array
+                fd.append("cvText", cvText);
+                fd.append("history", JSON.stringify(history));
+
+                const res = await fetch(WORKER_URL, { method: "POST", body: fd });
+                const data = await res.json();
+
+                if (data.transcript) addLog("user", data.transcript);
+                history = data.history || history;
+                speak(data.reply);
+            }, 6000);
+
+        } catch (err) {
+            statusEl.innerText = "Microphone error. Please allow access.";
+            active = false;
+        }
+    }
+
+    // --- 4. START INTERVIEW ---
+    startBtn.onclick = async () => {
+        active = true;
+        startBtn.style.display = "none";
+        scoreBtn.style.display = "block";
+        statusEl.innerText = "Analyzing CV and generating first question...";
+
+        const fd = new FormData();
+        fd.append("mode", "start");
+        fd.append("cvText", cvText);
+
+        const res = await fetch(WORKER_URL, { method: "POST", body: fd });
+        const data = await res.json();
+        history = data.history;
+        speak(data.reply);
+    };
+
+    // --- 5. FINISH & SCORE ---
+    scoreBtn.onclick = async () => {
+        active = false;
+        window.speechSynthesis.cancel();
+        statusEl.innerText = "Calculating final technical score...";
+
+        const fd = new FormData();
+        fd.append("mode", "score");
+        fd.append("history", JSON.stringify(history));
+
+        const res = await fetch(WORKER_URL, { method: "POST", body: fd });
+        const data = await res.json();
+        addLog("ai", "FINAL EVALUATION: " + data.reply);
+    };
 </script>
 
 </body>
