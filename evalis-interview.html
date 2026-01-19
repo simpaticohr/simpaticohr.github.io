@@ -1,124 +1,132 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <title>Evalis AI - Technical Interviewer</title>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-    <style>
-        body { background: #0f172a; color: white; font-family: sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; }
-        .card { width: 420px; background: #1e293b; padding: 25px; border-radius: 20px; box-shadow: 0 15px 35px rgba(0,0,0,0.5); border: 1px solid #334155; }
-        #status { text-align: center; color: #94a3b8; margin-bottom: 15px; font-size: 14px; min-height: 20px; }
-        button { width: 100%; padding: 14px; border-radius: 12px; border: none; background: #4f46e5; color: white; font-weight: bold; cursor: pointer; margin-top: 10px; }
-        button:disabled { background: #334155; }
-        #log { margin-top: 20px; height: 250px; overflow-y: auto; background: #020617; border-radius: 12px; padding: 12px; font-size: 14px; border: 1px solid #334155; }
-        .ai { color: #a5b4fc; margin-bottom: 10px; }
-        .user { color: #94a3b8; margin-bottom: 10px; font-style: italic; border-left: 2px solid #4f46e5; padding-left: 8px; }
-        .pulse { color: #ef4444; font-weight: bold; animation: blink 1.5s infinite; }
-        @keyframes blink { 0% { opacity: 1; } 50% { opacity: 0.3; } 100% { opacity: 1; } }
-    </style>
+<meta charset="UTF-8">
+<title>Evalis AI Interview</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<style>
+body {
+  background:#0f172a; color:white; font-family:sans-serif;
+  display:flex; justify-content:center; align-items:center; height:100vh;
+}
+.card {
+  width:420px; background:#1e293b; padding:25px;
+  border-radius:20px; box-shadow:0 20px 40px rgba(0,0,0,.5);
+}
+button {
+  width:100%; padding:14px; margin-top:10px;
+  background:#4f46e5; border:none; color:white; font-weight:bold;
+  border-radius:12px;
+}
+#log {
+  margin-top:15px; background:#020617; padding:12px;
+  height:200px; overflow:auto; border-radius:12px;
+}
+.ai { color:#a5b4fc; margin-bottom:10px; }
+.user { color:#94a3b8; font-style:italic; margin-bottom:10px; }
+</style>
 </head>
 <body>
+
 <div class="card">
-    <h3 style="text-align:center">Evalis AI Interview</h3>
-    <div id="status">Upload CV to begin</div>
-    <input type="file" id="cvInput" accept=".pdf" style="width:100%">
-    <button id="startBtn" disabled>Start Interview</button>
-    <div id="log"></div>
+  <h3>Evalis AI Interview</h3>
+  <input type="file" id="cv" accept=".pdf"><br>
+  <button id="start" disabled>Start Interview</button>
+  <div id="log"></div>
 </div>
 
 <script>
-    const WORKER_URL = "https://evalis-ai.simpaticohrconsultancy.workers.dev";
-    pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+const WORKER = "https://evalis-ai.simpaticohrconsultancy.workers.dev";
+let cvText = "", history = [], active = false;
 
-    let cvText = "", history = [], active = false;
-    const logEl = document.getElementById("log");
-    const statusEl = document.getElementById("status");
+/* ========= PDF ========= */
+pdfjsLib.GlobalWorkerOptions.workerSrc =
+  "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
 
-    function logMsg(role, text) {
-        const div = document.createElement("div");
-        div.className = role;
-        div.innerText = (role === "ai" ? "AI: " : "You: ") + text;
-        logEl.appendChild(div);
-        logEl.scrollTop = logEl.scrollHeight;
+cv.onchange = async e => {
+  const pdf = await pdfjsLib.getDocument(await e.target.files[0].arrayBuffer()).promise;
+  let text = "";
+  for (let i=1;i<=pdf.numPages;i++) {
+    const p = await pdf.getPage(i);
+    const c = await p.getTextContent();
+    text += c.items.map(x=>x.str).join(" ")+" ";
+  }
+  cvText = text.trim();
+  start.disabled = false;
+};
+
+/* ========= LOG ========= */
+const log = (cls, txt) => {
+  const d = document.createElement("div");
+  d.className = cls;
+  d.textContent = txt;
+  document.getElementById("log").appendChild(d);
+};
+
+/* ========= TTS ========= */
+function speak(text){
+  log("ai","AI: "+text);
+  const u = new SpeechSynthesisUtterance(text);
+  u.onend = () => active && listen();
+  speechSynthesis.cancel();
+  speechSynthesis.speak(u);
+}
+
+/* ========= PCM RECORDING ========= */
+async function recordPCM(seconds=5){
+  const stream = await navigator.mediaDevices.getUserMedia({ audio:true });
+  const ctx = new AudioContext({ sampleRate:16000 });
+  const src = ctx.createMediaStreamSource(stream);
+  const processor = ctx.createScriptProcessor(4096,1,1);
+
+  let pcm = [];
+  src.connect(processor);
+  processor.connect(ctx.destination);
+
+  processor.onaudioprocess = e => {
+    const input = e.inputBuffer.getChannelData(0);
+    for (let i=0;i<input.length;i++) {
+      pcm.push(Math.max(-1,Math.min(1,input[i]))*32767);
     }
+  };
 
-    // PDF Extraction logic
-    document.getElementById("cvInput").onchange = async (e) => {
-        const file = e.target.files[0];
-        const pdf = await pdfjsLib.getDocument(await file.arrayBuffer()).promise;
-        let text = "";
-        for (let i = 1; i <= pdf.numPages; i++) {
-            const page = await pdf.getPage(i);
-            const content = await page.getTextContent();
-            text += content.items.map(s => s.str).join(" ") + " ";
-        }
-        cvText = text.trim();
-        statusEl.innerText = "CV Loaded.";
-        document.getElementById("startBtn").disabled = false;
-    };
+  await new Promise(r=>setTimeout(r,seconds*1000));
+  stream.getTracks().forEach(t=>t.stop());
+  ctx.close();
 
-    // TTS Loop: Re-opens mic only AFTER AI stops talking
-    function speak(text) {
-        if (!text) return;
-        logMsg("ai", text);
-        speechSynthesis.cancel();
-        const u = new SpeechSynthesisUtterance(text);
-        u.onend = () => { if (active) captureRawPCM(); };
-        speechSynthesis.speak(u);
-    }
+  return new Int16Array(pcm);
+}
 
-    // --- THE FIX: CAPTURE RAW NUMERIC SAMPLES ---
-    async function captureRawPCM() {
-        if (!active) return;
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        const audioCtx = new AudioContext({ sampleRate: 16000 }); // Whisper Native Rate
-        const source = audioCtx.createMediaStreamSource(stream);
-        const processor = audioCtx.createScriptProcessor(4096, 1, 1);
-        let pcmData = [];
+/* ========= LISTEN ========= */
+async function listen(){
+  const pcm = await recordPCM(5);
+  if (pcm.length < 8000) return listen();
 
-        statusEl.innerHTML = '<span class="pulse">🔴 Listening (Raw PCM)...</span>';
+  const fd = new FormData();
+  fd.append("mode","interview");
+  fd.append("audio", new Blob([pcm.buffer]));
+  fd.append("history", JSON.stringify(history));
 
-        processor.onaudioprocess = (e) => {
-            const samples = e.inputBuffer.getChannelData(0);
-            for (let i = 0; i < samples.length; i++) {
-                pcmData.push(samples[i]); // Push raw numbers
-            }
-        };
+  const res = await fetch(WORKER,{ method:"POST", body:fd });
+  const data = await res.json();
 
-        source.connect(processor);
-        processor.connect(audioCtx.destination);
+  if (data.transcript) log("user","You: "+data.transcript);
+  history = data.history || history;
+  speak(data.reply);
+}
 
-        setTimeout(async () => {
-            stream.getTracks().forEach(t => t.stop());
-            processor.disconnect();
-            audioCtx.close();
+/* ========= START ========= */
+start.onclick = async ()=>{
+  active = true;
+  const fd = new FormData();
+  fd.append("mode","start");
+  fd.append("cvText",cvText);
 
-            statusEl.innerText = "AI is thinking...";
-            const fd = new FormData();
-            fd.append("mode", "interview");
-            fd.append("audio_raw", JSON.stringify(pcmData)); // SEND AS NUMERIC ARRAY
-            fd.append("history", JSON.stringify(history));
-
-            const res = await fetch(WORKER_URL, { method: "POST", body: fd });
-            const data = await res.json();
-            if (data.transcript) logMsg("user", data.transcript);
-            history = data.history || history;
-            speak(data.reply);
-        }, 5000); // 5-second capture
-    }
-
-    document.getElementById("startBtn").onclick = async () => {
-        active = true;
-        document.getElementById("startBtn").style.display = "none";
-        statusEl.innerText = "Initializing Interview...";
-        const fd = new FormData();
-        fd.append("mode", "start");
-        fd.append("cvText", cvText);
-        const res = await fetch(WORKER_URL, { method: "POST", body: fd });
-        const data = await res.json();
-        history = data.history;
-        speak(data.reply);
-    };
+  const res = await fetch(WORKER,{ method:"POST", body:fd });
+  const data = await res.json();
+  history = data.history;
+  speak(data.reply);
+};
 </script>
 </body>
 </html>
