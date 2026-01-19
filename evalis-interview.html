@@ -1,114 +1,195 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Evalis AI - Continuous Interview</title>
-    <style>
-        body { font-family: sans-serif; background: #0f172a; color: white; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
-        .card { background: #1e293b; padding: 2rem; border-radius: 1rem; width: 90%; max-width: 450px; text-align: center; border: 1px solid #334155; }
-        #status { font-size: 0.9rem; color: #94a3b8; margin: 15px 0; padding: 8px; border-radius: 5px; }
-        .active { color: #f87171; font-weight: bold; background: rgba(248, 113, 113, 0.1); }
-        button { background: #6366f1; color: white; border: none; padding: 12px 24px; border-radius: 8px; cursor: pointer; font-size: 1rem; width: 100%; }
-        #log { margin-top: 20px; text-align: left; height: 150px; overflow-y: auto; font-size: 0.85rem; border-top: 1px solid #334155; padding-top: 10px; }
-    </style>
+<meta charset="UTF-8">
+<title>Evalis AI – Live Interview</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<style>
+body {
+  margin:0;
+  background:#0f172a;
+  color:#fff;
+  font-family:system-ui,sans-serif;
+  display:flex;
+  justify-content:center;
+  align-items:center;
+  min-height:100vh;
+}
+.card {
+  width:420px;
+  background:#1e293b;
+  padding:26px;
+  border-radius:20px;
+  box-shadow:0 20px 40px rgba(0,0,0,.5);
+}
+h2 { margin-top:0; text-align:center; }
+button {
+  width:100%;
+  padding:14px;
+  border:none;
+  border-radius:12px;
+  background:#4f46e5;
+  color:white;
+  font-weight:700;
+  cursor:pointer;
+  margin-top:10px;
+}
+button:disabled { opacity:.5; cursor:not-allowed; }
+#status {
+  text-align:center;
+  font-size:13px;
+  color:#94a3b8;
+  margin-bottom:10px;
+}
+#log {
+  margin-top:15px;
+  background:#020617;
+  padding:15px;
+  height:220px;
+  overflow-y:auto;
+  border-radius:12px;
+  font-size:14px;
+  border:1px solid #334155;
+}
+.ai { color:#a5b4fc; margin-bottom:10px; }
+.user { color:#94a3b8; font-style:italic; margin-bottom:8px; }
+</style>
 </head>
 <body>
 
 <div class="card">
-    <h2>Evalis AI Interview</h2>
-    <div id="status">Press start to begin</div>
-    <button id="startBtn" onclick="startInterview()">Start Interview</button>
-    <div id="log"></div>
+  <h2>Evalis AI Interview</h2>
+  <div id="status">Click start to begin</div>
+  <button id="startBtn">Start Interview</button>
+  <button id="stopBtn" style="display:none;background:#ef4444">Stop Interview</button>
+  <div id="log"></div>
 </div>
 
 <script>
-    const WORKER_URL = "https://your-worker.your-subdomain.workers.dev"; // 🔴 Replace with your actual URL
-    let history = [];
-    let recognition;
-    let isAISpeaking = false;
+/* ================= CONFIG ================= */
+const WORKER_URL = "https://evalis-ai.simpaticohrconsultancy.workers.dev";
 
-    // Initialize Web Speech API
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (SpeechRecognition) {
-        recognition = new SpeechRecognition();
-        recognition.continuous = true;
-        recognition.interimResults = false;
-        recognition.lang = 'en-US';
+/* ================= STATE ================= */
+let recognition;
+let listening = false;
+let history = [];
+let speaking = false;
 
-        recognition.onresult = (event) => {
-            const transcript = event.results[event.results.length - 1][0].transcript.trim();
-            if (transcript) {
-                if (isAISpeaking) {
-                    window.speechSynthesis.cancel(); // 🔴 BARGE-IN: Stop AI if you talk
-                    isAISpeaking = false;
-                }
-                handleUserSpeech(transcript);
-            }
-        };
+/* ================= UI ================= */
+const logBox = document.getElementById("log");
+const statusEl = document.getElementById("status");
+const startBtn = document.getElementById("startBtn");
+const stopBtn = document.getElementById("stopBtn");
 
-        recognition.onerror = (e) => console.error("Speech Error:", e);
-        recognition.onend = () => recognition.start(); // Keep mic always open
+function log(cls, text) {
+  const d = document.createElement("div");
+  d.className = cls;
+  d.textContent = text;
+  logBox.appendChild(d);
+  logBox.scrollTop = logBox.scrollHeight;
+}
+
+/* ================= SPEECH SYNTH ================= */
+function speak(text) {
+  if (!text) return;
+  speaking = true;
+  log("ai", "AI: " + text);
+
+  speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance(text);
+  u.rate = 0.95;
+  u.pitch = 1;
+
+  u.onend = () => {
+    speaking = false;
+    if (listening) recognition.start();
+  };
+
+  speechSynthesis.speak(u);
+}
+
+/* ================= SPEECH RECOGNITION (VAD BUILT-IN) ================= */
+function initRecognition() {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) {
+    alert("SpeechRecognition not supported in this browser.");
+    return;
+  }
+
+  recognition = new SR();
+  recognition.lang = "en-US";
+  recognition.continuous = false; // IMPORTANT
+  recognition.interimResults = false;
+
+  recognition.onstart = () => {
+    statusEl.textContent = "🎤 Listening...";
+  };
+
+  recognition.onresult = async (e) => {
+    const transcript = e.results[0][0].transcript.trim();
+    if (!transcript) return;
+
+    log("user", "You: " + transcript);
+    statusEl.textContent = "Thinking...";
+
+    try {
+      const res = await fetch(WORKER_URL, {
+        method: "POST",
+        body: JSON.stringify({
+          transcript,
+          history
+        }),
+        headers: { "Content-Type": "application/json" }
+      });
+
+      const data = await res.json();
+      history = data.history || history;
+      speak(data.reply);
+
+    } catch (err) {
+      speak("I had a connection issue. Please repeat.");
     }
+  };
 
-    async function startInterview() {
-        document.getElementById('startBtn').style.display = 'none';
-        updateStatus("🔴 AI is thinking...", true);
-        
-        const fd = new FormData();
-        fd.append("mode", "start");
-        
-        const res = await fetch(WORKER_URL, { method: "POST", body: fd });
-        const data = await res.json();
-        
-        history = data.history;
-        addLog("AI", data.reply);
-        await speak(data.reply);
-        
-        recognition.start();
-        updateStatus("🔴 Listening (Hands-free)");
-    }
+  recognition.onerror = () => {
+    if (listening && !speaking) recognition.start();
+  };
 
-    async function handleUserSpeech(text) {
-        addLog("You", text);
-        updateStatus("Thinking...");
+  recognition.onend = () => {
+    if (listening && !speaking) recognition.start();
+  };
+}
 
-        const fd = new FormData();
-        fd.append("text", text); // Send text, not audio
-        fd.append("history", JSON.stringify(history));
+/* ================= START ================= */
+startBtn.onclick = async () => {
+  initRecognition();
+  listening = true;
+  startBtn.style.display = "none";
+  stopBtn.style.display = "block";
 
-        try {
-            const res = await fetch(WORKER_URL, { method: "POST", body: fd });
-            const data = await res.json();
-            
-            history = data.history;
-            addLog("AI", data.reply);
-            await speak(data.reply);
-        } catch (e) {
-            console.error("Worker error:", e);
-        }
-        updateStatus("🔴 Listening (Hands-free)");
-    }
+  statusEl.textContent = "Starting interview...";
 
-    function speak(text) {
-        return new Promise((resolve) => {
-            const utterance = new SpeechSynthesisUtterance(text);
-            utterance.onstart = () => { isAISpeaking = true; };
-            utterance.onend = () => { isAISpeaking = false; resolve(); };
-            window.speechSynthesis.speak(utterance);
-        });
-    }
+  const res = await fetch(WORKER_URL, {
+    method: "POST",
+    body: JSON.stringify({ mode: "start" }),
+    headers: { "Content-Type": "application/json" }
+  });
 
-    function updateStatus(msg, active = false) {
-        const el = document.getElementById('status');
-        el.innerText = msg;
-        el.className = active ? "active" : "";
-    }
+  const data = await res.json();
+  history = data.history || [];
+  speak(data.reply);
+};
 
-    function addLog(role, text) {
-        const log = document.getElementById('log');
-        log.innerHTML = `<div><strong>${role}:</strong> ${text}</div>` + log.innerHTML;
-    }
+/* ================= STOP ================= */
+stopBtn.onclick = () => {
+  listening = false;
+  speechSynthesis.cancel();
+  recognition && recognition.stop();
+  statusEl.textContent = "Interview ended";
+  stopBtn.disabled = true;
+};
 </script>
+
 </body>
 </html>
