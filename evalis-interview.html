@@ -1,160 +1,56 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Elite AI Technical Interview</title>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-    <style>
-        :root { --accent: #6366f1; --bg: #0b0f1a; }
-        body { font-family: 'Inter', system-ui, sans-serif; background: var(--bg); color: white; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; }
-        .card { width: 90%; max-width: 480px; background: #161b2c; padding: 40px; border-radius: 30px; text-align: center; border: 1px solid #2d364d; box-shadow: 0 20px 50px rgba(0,0,0,0.5); }
-        .timer { font-size: 3rem; font-weight: 800; color: var(--accent); margin: 20px 0; font-family: 'Courier New', monospace; letter-spacing: -2px; }
-        #status { font-size: 12px; color: #94a3b8; margin-bottom: 30px; text-transform: uppercase; letter-spacing: 2px; font-weight: 600; }
-        #transcript { height: 180px; overflow-y: auto; background: #0b0f1a; border-radius: 15px; padding: 20px; text-align: left; font-size: 14px; border: 1px solid #2d364d; margin-top: 20px; }
-        button { width: 100%; padding: 18px; border-radius: 15px; border: none; background: var(--accent); color: white; font-weight: bold; cursor: pointer; transition: all 0.3s; font-size: 16px; }
-        button:hover { transform: translateY(-2px); filter: brightness(1.1); }
-        button:disabled { background: #2d364d; cursor: not-allowed; transform: none; }
-        .user-line { color: #94a3b8; margin-bottom: 10px; }
-        .ai-line { color: #818cf8; margin-bottom: 20px; padding-left: 10px; border-left: 2px solid var(--accent); }
-    </style>
-</head>
-<body>
+// ... [Use the PDF parsing logic from the previous response] ...
 
-<div class="card">
-    <div id="status">Sync Resume to Begin</div>
-    <div class="timer" id="timer">15:00</div>
-    <input type="file" id="cvInput" accept=".pdf" style="margin-bottom: 25px; font-size: 12px; color: #94a3b8;">
-    <button id="startBtn" disabled>Initialize Interview</button>
-    <div id="transcript"></div>
-</div>
+async function startTurn() {
+    if(!active || busy || timeLeft <= 0) return;
 
-<script>
-    // 1. CONFIGURATION
-    const WORKER_URL = "https://evalis-ai.simpaticohrconsultancy.workers.dev";
-    let history = [], cvText = "", active = false, busy = false, timeLeft = 900;
+    try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const rec = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+        const chunks = [];
+        
+        document.getElementById('status').innerText = "INTERVIEWER IS LISTENING...";
 
-    // 2. PDF PARSER
-    document.getElementById('cvInput').onchange = async (e) => {
-        const file = e.target.files[0];
-        const reader = new FileReader();
-        reader.onload = async () => {
+        rec.ondataavailable = e => chunks.push(e.data);
+        rec.onstop = async () => {
+            if(!active) return;
+            document.getElementById('status').innerText = "INTERVIEWER IS THINKING...";
+            busy = true;
+
+            const fd = new FormData();
+            fd.append("audio", new Blob(chunks, {type: 'audio/webm'}), "voice.webm");
+            fd.append("resume", cvText); // Sends the actual parsed PDF text
+            fd.append("history", JSON.stringify(history));
+
             try {
-                const pdfjsLib = window['pdfjs-dist/build/pdf'];
-                pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-                const pdf = await pdfjsLib.getDocument({data: new Uint8Array(reader.result)}).promise;
-                let text = "";
-                for(let i=1; i<=pdf.numPages; i++){
-                    const page = await pdf.getPage(i);
-                    const content = await page.getTextContent();
-                    text += content.items.map(s => s.str).join(" ") + " ";
+                const res = await fetch(WORKER_URL, { method: "POST", body: fd });
+                const data = await res.json();
+                
+                if (data.reply) {
+                    history = data.history;
+                    updateTranscript(data.userText, data.reply);
+                    speak(data.reply); 
+                } else {
+                    busy = false; startTurn();
                 }
-                cvText = text.trim();
-                document.getElementById('status').innerText = "CV SYNCED. SYSTEM READY.";
-                document.getElementById('startBtn').disabled = false;
-            } catch (err) {
-                document.getElementById('status').innerText = "PDF Error. Try again.";
-            }
+            } catch (err) { busy = false; startTurn(); }
+            stream.getTracks().forEach(t => t.stop());
         };
-        reader.readAsArrayBuffer(file);
+
+        rec.start();
+        // Record in 8-second windows for detailed technical answers
+        setTimeout(() => { if(rec.state === "recording") rec.stop(); }, 8000); 
+    } catch (err) { alert("Mic required for technical assessment."); }
+}
+
+function speak(text) {
+    window.speechSynthesis.cancel();
+    const ut = new SpeechSynthesisUtterance(text);
+    ut.pitch = 0.9; // More professional tone
+    document.getElementById('status').innerText = "INTERVIEWER IS RESPONDING...";
+    
+    ut.onend = () => { 
+        busy = false; 
+        if(active) setTimeout(startTurn, 200); // Perfect Loop: Mic re-opens immediately
     };
-
-    // 3. VOICE LOOP (THE PERFECT ENGINE)
-    async function startTurn() {
-        if(!active || busy || timeLeft <= 0) return;
-
-        try {
-            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-            const rec = new MediaRecorder(stream);
-            const chunks = [];
-            
-            document.getElementById('status').innerText = "LISTENING...";
-
-            rec.ondataavailable = e => chunks.push(e.data);
-            rec.onstop = async () => {
-                if(!active) return;
-                document.getElementById('status').innerText = "THINKING...";
-                busy = true;
-
-                const fd = new FormData();
-                fd.append("audio", new Blob(chunks, {type: 'audio/webm'}), "voice.webm");
-                fd.append("resume", cvText);
-                fd.append("history", JSON.stringify(history));
-
-                try {
-                    const res = await fetch(WORKER_URL, { method: "POST", body: fd });
-                    const data = await res.json();
-                    
-                    if (data.reply) {
-                        history = data.history;
-                        updateTranscript(data.userText, data.reply);
-                        speak(data.reply); 
-                    } else {
-                        busy = false; startTurn();
-                    }
-                } catch (err) { busy = false; startTurn(); }
-                stream.getTracks().forEach(t => t.stop());
-            };
-
-            rec.start();
-            // Automatically analyze every 7 seconds
-            setTimeout(() => { if(rec.state === "recording") rec.stop(); }, 7000); 
-        } catch (err) { alert("Microphone required."); }
-    }
-
-    // 4. SPEECH ENGINE
-    function speak(text) {
-        window.speechSynthesis.cancel();
-        const ut = new SpeechSynthesisUtterance(text);
-        ut.rate = 1.1; // Professional speed
-        document.getElementById('status').innerText = "AI RESPONDING...";
-        
-        ut.onend = () => { 
-            busy = false; 
-            if(active) setTimeout(startTurn, 300); // Perfect Loop trigger
-        };
-        window.speechSynthesis.speak(ut);
-    }
-
-    function updateTranscript(user, ai) {
-        const box = document.getElementById('transcript');
-        if(user) box.innerHTML += `<div class="user-line"><b>You:</b> ${user}</div>`;
-        box.innerHTML += `<div class="ai-line"><b>AI:</b> ${ai}</div>`;
-        box.scrollTop = box.scrollHeight;
-    }
-
-    // 5. TIMER ENGINE
-    function startTimer() {
-        const timerInt = setInterval(() => {
-            timeLeft--;
-            let m = Math.floor(timeLeft / 60), s = timeLeft % 60;
-            document.getElementById('timer').innerText = `${m}:${s < 10 ? '0' : ''}${s}`;
-
-            if (timeLeft <= 0) {
-                clearInterval(timerInt);
-                active = false;
-                speak("The 15-minute interview has concluded. Thank you.");
-            }
-        }, 1000);
-    }
-
-    document.getElementById('startBtn').onclick = async () => {
-        active = true;
-        document.getElementById('startBtn').style.display = "none";
-        startTimer();
-        
-        // Fetch first question based on CV immediately (No generic greeting)
-        document.getElementById('status').innerText = "ANALYZING CV...";
-        const fd = new FormData();
-        fd.append("resume", cvText);
-        fd.append("history", "[]");
-        
-        try {
-            const res = await fetch(WORKER_URL, { method: "POST", body: fd });
-            const data = await res.json();
-            speak(data.reply);
-        } catch(e) { speak("I've reviewed your CV. Let's begin."); }
-    };
-</script>
-</body>
-</html>
+    window.speechSynthesis.speak(ut);
+}
