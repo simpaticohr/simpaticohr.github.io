@@ -6,30 +6,31 @@
     <title>Mercor Style AI Interview</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
     <style>
-        :root { --accent: #2563eb; --bg: #0f172a; }
+        :root { --accent: #3b82f6; --bg: #0f172a; }
         body { font-family: 'Inter', sans-serif; background: var(--bg); color: white; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; }
-        .card { width: 90%; max-width: 450px; background: #1e293b; padding: 30px; border-radius: 24px; text-align: center; border: 1px solid #334155; }
-        .timer { font-size: 2.5rem; font-weight: 800; color: #60a5fa; margin: 15px 0; font-family: monospace; }
-        #status { font-size: 14px; color: #94a3b8; margin-bottom: 20px; }
-        #transcript { height: 200px; overflow-y: auto; background: #0f172a; border-radius: 12px; padding: 15px; text-align: left; font-size: 14px; margin-top: 20px; border: 1px solid #334155; }
-        button { width: 100%; padding: 16px; border-radius: 12px; border: none; background: var(--accent); color: white; font-weight: bold; cursor: pointer; font-size: 16px; }
-        button:disabled { opacity: 0.3; cursor: not-allowed; }
+        .container { width: 90%; max-width: 450px; background: #1e293b; padding: 30px; border-radius: 20px; text-align: center; border: 1px solid #334155; }
+        .timer { font-size: 2.5rem; font-weight: 800; color: var(--accent); margin: 15px 0; font-family: monospace; }
+        #status { font-size: 13px; color: #94a3b8; margin-bottom: 20px; text-transform: uppercase; letter-spacing: 1px; }
+        #log { height: 200px; overflow-y: auto; background: #0f172a; border-radius: 10px; padding: 15px; text-align: left; font-size: 14px; margin-top: 15px; border: 1px solid #334155; }
+        button { width: 100%; padding: 15px; border-radius: 10px; border: none; background: var(--accent); color: white; font-weight: bold; cursor: pointer; }
+        button:disabled { background: #334155; cursor: not-allowed; }
+        .user-txt { color: #94a3b8; margin-bottom: 5px; }
+        .ai-txt { color: #60a5fa; margin-bottom: 15px; border-left: 2px solid var(--accent); padding-left: 10px; }
     </style>
 </head>
 <body>
 
-<div class="card">
-    <div id="status">Upload Resume to Start</div>
+<div class="container">
+    <div id="status">Upload PDF to Initialize</div>
     <div class="timer" id="timer">15:00</div>
-    <input type="file" id="cvInput" accept=".pdf" style="margin-bottom: 20px;">
-    <button id="startBtn" disabled>Begin Interview</button>
-    <div id="transcript"></div>
+    <input type="file" id="cvInput" accept=".pdf" style="margin-bottom: 20px; font-size: 12px;">
+    <button id="startBtn" disabled>Enter Interview Room</button>
+    <div id="log"></div>
 </div>
 
 <script>
     const WORKER_URL = "https://evalis-ai.simpaticohrconsultancy.workers.dev";
-    let history = [], cvText = "", active = false, busy = false, timeLeft = 900; 
-    let timerInterval;
+    let history = [], cvText = "", active = false, busy = false, timeLeft = 900;
 
     // 1. PDF Parser
     document.getElementById('cvInput').onchange = async (e) => {
@@ -46,13 +47,13 @@
                 text += content.items.map(s => s.str).join(" ") + " ";
             }
             cvText = text.trim();
-            document.getElementById('status').innerText = "Resume Parsed Successfully";
+            document.getElementById('status').innerText = "CV Synced - Ready";
             document.getElementById('startBtn').disabled = false;
         };
         reader.readAsArrayBuffer(file);
     };
 
-    // 2. Continuous Voice Loop
+    // 2. Continuous Voice Loop (Mercor/Micro 1 Style)
     async function startTurn() {
         if(!active || busy || timeLeft <= 0) return;
 
@@ -66,11 +67,10 @@
             rec.ondataavailable = e => chunks.push(e.data);
             rec.onstop = async () => {
                 if(!active) return;
-                document.getElementById('status').innerText = "Processing Answer...";
+                document.getElementById('status').innerText = "AI Analyzing...";
                 busy = true;
 
                 const fd = new FormData();
-                // Send as a binary file to avoid "Type mismatch"
                 fd.append("audio", new Blob(chunks, {type: 'audio/webm'}), "voice.webm");
                 fd.append("resume", cvText);
                 fd.append("history", JSON.stringify(history));
@@ -80,56 +80,53 @@
                     const data = await res.json();
                     
                     if (data.error) {
-                        console.error("Worker Error:", data.error);
                         busy = false; 
-                        startTurn();
+                        startTurn(); // Auto-retry on glitch
                     } else {
                         history = data.history;
-                        updateTranscript(data.userText, data.reply);
+                        updateLog(data.userText, data.reply);
                         speak(data.reply);
                     }
-                } catch (err) { 
-                    busy = false; 
-                    startTurn(); 
-                }
+                } catch (err) { busy = false; startTurn(); }
                 stream.getTracks().forEach(t => t.stop());
             };
 
             rec.start();
-            // Automatically process after 6 seconds of recording
+            // Record in 6-second bursts for natural conversation flow
             setTimeout(() => { if(rec.state === "recording") rec.stop(); }, 6000); 
-        } catch (err) { alert("Microphone access required."); }
+        } catch (err) { alert("Mic required."); }
     }
 
     function speak(text) {
         window.speechSynthesis.cancel();
         const ut = new SpeechSynthesisUtterance(text);
-        document.getElementById('status').innerText = "AI is responding...";
-        
+        document.getElementById('status').innerText = "AI Speaking...";
         ut.onend = () => { 
             busy = false; 
-            if(active) setTimeout(startTurn, 300); // Continuous loop trigger
+            if(active) setTimeout(startTurn, 300); // Immediate re-listen
         };
         window.speechSynthesis.speak(ut);
     }
 
-    function updateTranscript(user, ai) {
-        const box = document.getElementById('transcript');
-        if(user) box.innerHTML += `<div style="color: #94a3b8;"><b>You:</b> ${user}</div>`;
-        box.innerHTML += `<div style="color: #60a5fa; margin-bottom: 10px;"><b>AI:</b> ${ai}</div>`;
-        box.scrollTop = box.scrollHeight;
+    function updateLog(user, ai) {
+        const log = document.getElementById('log');
+        if(user) log.innerHTML += `<div class="user-txt"><b>You:</b> ${user}</div>`;
+        log.innerHTML += `<div class="ai-txt"><b>AI:</b> ${ai}</div>`;
+        log.scrollTop = log.scrollHeight;
     }
 
-    function startTimer() {
-        timerInterval = setInterval(() => {
+    // 3. 15-Minute Countdown
+    function runTimer() {
+        const timerInt = setInterval(() => {
             timeLeft--;
             let m = Math.floor(timeLeft / 60), s = timeLeft % 60;
             document.getElementById('timer').innerText = `${m}:${s < 10 ? '0' : ''}${s}`;
+
             if (timeLeft <= 0) {
-                clearInterval(timerInterval);
+                clearInterval(timerInt);
                 active = false;
-                speak("The 15-minute interview window has now closed. Thank you.");
-                setTimeout(() => location.reload(), 8000);
+                speak("The 15-minute interview has concluded. Thank you.");
+                setTimeout(() => location.reload(), 7000);
             }
         }, 1000);
     }
@@ -137,8 +134,8 @@
     document.getElementById('startBtn').onclick = () => {
         active = true;
         document.getElementById('startBtn').style.display = "none";
-        startTimer();
-        speak("I have reviewed your resume. Let's begin. Can you please introduce yourself?");
+        runTimer();
+        speak("I have reviewed your resume. Let's begin. Can you introduce yourself?");
     };
 </script>
 </body>
