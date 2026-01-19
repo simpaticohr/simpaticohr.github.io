@@ -2,130 +2,72 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
-<title>Spoken English Practice</title>
+<title>English Coach | Career Lab</title>
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <style>
-  body {
-    margin: 0;
-    height: 100vh;
-    background: radial-gradient(circle at top, #0b1d3a, #020617);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-family: system-ui, -apple-system, sans-serif;
-    color: #fff;
-  }
-  .card {
-    width: 90%;
-    max-width: 320px;
-    background: rgba(255,255,255,0.08);
-    backdrop-filter: blur(12px);
-    border: 1px solid rgba(255,255,255,0.1);
-    border-radius: 20px;
-    padding: 24px;
-    text-align: center;
-    box-shadow: 0 10px 30px rgba(0,0,0,0.5);
-  }
-  button {
-    width: 100%;
-    padding: 12px;
-    border: none;
-    border-radius: 10px;
-    margin-top: 10px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: opacity 0.2s;
-  }
-  button:disabled { opacity: 0.5; cursor: not-allowed; }
-  .start { background: #2563eb; color: #fff; }
-  .stop { background: #374151; color: #ccc; }
-  
-  pre {
-    text-align: left;
-    white-space: pre-wrap;
-    font-size: 13px;
-    background: rgba(0,0,0,0.2);
-    padding: 12px;
-    border-radius: 8px;
-    margin-top: 15px;
-    max-height: 120px;
-    overflow-y: auto;
-    border: 1px solid rgba(255,255,255,0.05);
-  }
-  .score { font-size: 32px; font-weight: bold; margin-top: 10px; color: #60a5fa; }
-  small { color: #94a3b8; display: block; margin-bottom: 10px; }
+  body { margin: 0; height: 100vh; background: radial-gradient(circle at top, #0b1d3a, #020617); display: flex; align-items: center; justify-content: center; font-family: system-ui, sans-serif; color: #fff; }
+  .card { width: 90%; max-width: 350px; background: rgba(255,255,255,0.08); backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,0.1); border-radius: 24px; padding: 30px; text-align: center; }
+  button { width: 100%; padding: 14px; border: none; border-radius: 12px; margin-top: 10px; font-weight: 700; cursor: pointer; transition: 0.2s; }
+  .start { background: #6366f1; color: #fff; }
+  .stop { background: #ef4444; color: #fff; }
+  pre { text-align: left; white-space: pre-wrap; font-size: 13px; background: rgba(0,0,0,0.3); padding: 15px; border-radius: 10px; margin-top: 15px; border: 1px solid rgba(255,255,255,0.1); }
+  .score { font-size: 42px; font-weight: 800; color: #818cf8; margin: 15px 0; }
+  #status { color: #94a3b8; font-size: 14px; margin-bottom: 15px; display: block; }
 </style>
 </head>
 <body>
 <div class="card">
   <h3>English Practice</h3>
-  <small id="status">Tap start and speak</small>
-  <button class="start" id="start">🎤 Start Speaking</button>
-  <button class="stop" id="stop" disabled>Stop</button>
+  <span id="status">Ready to record</span>
+  <button class="start" id="start">🎤 Start (6s Max)</button>
+  <button class="stop" id="stop" style="display:none">Stop Now</button>
   <div id="results" style="display:none;">
+    <div class="score" id="score"></div>
     <pre id="said"></pre>
     <pre id="feedback"></pre>
-    <div class="score" id="score"></div>
+    <button onclick="location.reload()" style="background:#334155; color:white">Try Again</button>
   </div>
 </div>
 
 <script>
-const API = "https://evalis-ai.simpaticohrconsultancy.workers.dev";
-let recorder, chunks = [], stopTimer;
+const API = "https://spoken-english-coach.simpaticohrconsultancy.workers.dev"; // 🟢 Update to your new URL
+let recorder, chunks = [], timer;
 
 const startBtn = document.getElementById("start");
 const stopBtn = document.getElementById("stop");
 const status = document.getElementById("status");
-const said = document.getElementById("said");
-const feedback = document.getElementById("feedback");
-const scoreBox = document.getElementById("score");
-const results = document.getElementById("results");
 
 startBtn.onclick = async () => {
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    chunks = [];
-    results.style.display = "none";
-    status.textContent = "Listening (max 6s)...";
-    
-    recorder = new MediaRecorder(stream);
-    recorder.ondataavailable = e => chunks.push(e.data);
-    recorder.onstop = () => {
-      stream.getTracks().forEach(t => t.stop());
-      sendAudio();
-    };
-
-    recorder.start();
-    startBtn.disabled = true;
-    stopBtn.disabled = false;
-
-    stopTimer = setTimeout(() => { if(recorder.state === "recording") recorder.stop(); }, 6000);
-  } catch (e) {
-    status.textContent = "Mic Error: " + e.message;
-  }
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  recorder = new MediaRecorder(stream);
+  chunks = [];
+  recorder.ondataavailable = e => chunks.push(e.data);
+  recorder.onstop = () => { stream.getTracks().forEach(t => t.stop()); sendAudio(); };
+  
+  recorder.start();
+  startBtn.style.display = "none";
+  stopBtn.style.display = "block";
+  status.textContent = "Recording...";
+  timer = setTimeout(() => { if(recorder.state === "recording") recorder.stop(); }, 6000);
 };
 
-stopBtn.onclick = () => { clearTimeout(stopTimer); recorder.stop(); };
+stopBtn.onclick = () => { clearTimeout(timer); recorder.stop(); };
 
 async function sendAudio() {
   status.textContent = "Analyzing speech...";
-  stopBtn.disabled = true;
+  stopBtn.style.display = "none";
   const blob = new Blob(chunks, { type: "audio/webm" });
   const form = new FormData();
   form.append("audio", blob);
 
-  try {
-    const res = await fetch(API, { method: "POST", body: form });
-    const data = await res.json();
-    results.style.display = "block";
-    said.textContent = "You: " + data.transcript;
-    feedback.textContent = data.feedback;
-    scoreBox.textContent = data.score + "/10";
-    status.textContent = "Done!";
-  } catch (e) {
-    status.textContent = "Server Error";
-  }
-  startBtn.disabled = false;
+  const res = await fetch(API, { method: "POST", body: form });
+  const data = await res.json();
+  
+  document.getElementById("results").style.display = "block";
+  document.getElementById("said").textContent = "You: " + data.transcript;
+  document.getElementById("feedback").textContent = data.feedback;
+  document.getElementById("score").textContent = data.score + "/10";
+  status.textContent = "Analysis Complete";
 }
 </script>
 </body>
