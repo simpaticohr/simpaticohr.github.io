@@ -1,168 +1,153 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Evalis AI – Elite Interviewer</title>
-
-<style>
-:root { --bg:#0f172a; --card:#1e293b; --accent:#4f46e5; --muted:#94a3b8; }
-body {
-  margin:0; background:var(--bg); color:white;
-  font-family:Inter,system-ui,sans-serif;
-  display:flex; justify-content:center; align-items:center; min-height:100vh;
-}
-.container {
-  width:92%; max-width:480px;
-  background:var(--card); padding:28px; border-radius:22px;
-  border:1px solid #334155; box-shadow:0 20px 40px rgba(0,0,0,.45);
-}
-#status { font-size:11px; letter-spacing:2px; color:var(--muted);
-  margin-bottom:10px; text-transform:uppercase; text-align:center; }
-.timer { font-size:3.2rem; font-weight:800; color:var(--accent);
-  text-align:center; font-family:monospace; margin:12px 0; }
-button {
-  width:100%; padding:16px; border:none; border-radius:12px;
-  background:var(--accent); color:white; font-weight:700; cursor:pointer;
-}
-button:disabled { opacity:.5; cursor:not-allowed; }
-#transcript {
-  margin-top:18px; height:200px; overflow-y:auto;
-  background:#020617; padding:14px; border-radius:12px;
-  border:1px solid #334155; font-size:13px;
-}
-.ai { color:#a5b4fc; margin-bottom:10px; }
-.user { color:#94a3b8; font-style:italic; margin-bottom:8px; }
-</style>
+    <meta charset="UTF-8">
+    <title>Evalis AI - Elite Interviewer</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <style>
+        body { background:#0f172a; color:white; font-family:sans-serif; display:flex; justify-content:center; align-items:center; min-height:100vh; margin:0; }
+        .card { background:#1e293b; padding:30px; border-radius:20px; width:90%; max-width:500px; border:1px solid #334155; text-align:center; position:relative; }
+        #status { font-size:12px; color:#4f46e5; font-weight:bold; text-transform:uppercase; margin-bottom:10px; }
+        #transcript { background:#020617; padding:15px; border-radius:10px; height:250px; overflow-y:auto; text-align:left; font-size:13px; margin:20px 0; border:1px solid #1e293b; }
+        .controls { display:flex; gap:10px; }
+        button { flex:1; padding:15px; border-radius:10px; cursor:pointer; font-weight:bold; border:none; transition:0.3s; }
+        .btn-primary { background:#4f46e5; color:white; }
+        .btn-stop { background:#ef4444; color:white; display:none; }
+        input[type="file"] { margin-bottom:20px; width:100%; color:#94a3b8; }
+        .ai-msg { color:#a5b4fc; margin-bottom:10px; border-left:2px solid #4f46e5; padding-left:10px; }
+        .user-msg { color:#94a3b8; margin-bottom:10px; font-style:italic; text-align:right; }
+        #score-screen { display:none; position:absolute; inset:0; background:#1e293b; z-index:10; padding:30px; border-radius:20px; overflow-y:auto; }
+    </style>
 </head>
-
 <body>
-<div class="container">
-  <div id="status">UPLOAD RESUME TO START</div>
-  <div class="timer" id="timer">15:00</div>
+    <div class="card">
+        <div id="score-screen">
+            <h2>Interview Assessment</h2>
+            <div id="score-content" style="text-align:left; line-height:1.6;">Generating score...</div>
+            <button onclick="location.reload()" class="btn-primary" style="margin-top:20px;">Restart</button>
+        </div>
 
-  <input type="file" id="cvInput" accept=".pdf" style="margin-bottom:14px;font-size:12px">
-  <button id="startBtn" disabled>Start Technical Interview</button>
-
-  <div id="transcript"></div>
-</div>
+        <div id="status">Ready to Begin</div>
+        <input type="file" id="cvInput" accept=".pdf">
+        <div id="transcript"></div>
+        
+        <div class="controls">
+            <button id="startBtn" class="btn-primary" disabled>Start Interview</button>
+            <button id="stopBtn" class="btn-stop">Finish & Score</button>
+        </div>
+    </div>
 
 <script>
-/* ================= CONFIG ================= */
-const WORKER_URL = "https://evalis-ai.simpaticohrconsultancy.workers.dev";
+const WORKER_URL = "https://your-worker.workers.dev"; // UPDATE THIS
+let cvText = "", history = [], isInterviewing = false, isBusy = false;
 
-let cvFile = null;
-let history = [];
-let active = false;
-let busy = false;
-let timeLeft = 900;
-
-/* ================= FILE HANDLING ================= */
-cvInput.onchange = e => {
-  cvFile = e.target.files[0];
-  if (!cvFile) return;
-  status.innerText = "RESUME READY";
-  startBtn.disabled = false;
+// 1. PDF Extract
+pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+cvInput.onchange = async e => {
+    const file = e.target.files[0];
+    const reader = new FileReader();
+    reader.onload = async function() {
+        const pdf = await pdfjsLib.getDocument(new Uint8Array(this.result)).promise;
+        let t = "";
+        for(let i=1; i<=pdf.numPages; i++) {
+            const page = await pdf.getPage(i);
+            const content = await page.getTextContent();
+            t += content.items.map(s => s.str).join(" ") + " ";
+        }
+        cvText = t.trim();
+        startBtn.disabled = false;
+        document.getElementById("status").innerText = "Resume Loaded";
+    };
+    reader.readAsArrayBuffer(file);
 };
 
-/* ================= SPEAK ================= */
+// 2. AI Voice & Continuous Loop logic
 function speak(text) {
-  if (!text) return;
-  transcript.innerHTML += `<div class="ai">AI: ${text}</div>`;
-  transcript.scrollTop = transcript.scrollHeight;
-
-  speechSynthesis.cancel();
-  const u = new SpeechSynthesisUtterance(text);
-  u.onend = () => {
-    busy = false;
-    if (active) setTimeout(startListening, 400);
-  };
-  speechSynthesis.speak(u);
+    const ts = document.getElementById("transcript");
+    ts.innerHTML += `<div class="ai-msg"><b>AI:</b> ${text}</div>`;
+    ts.scrollTop = ts.scrollHeight;
+    
+    const u = new SpeechSynthesisUtterance(text);
+    // Continuous loop: Listen immediately after AI stops talking
+    u.onend = () => { 
+        isBusy = false; 
+        if(isInterviewing) listen(); 
+    };
+    speechSynthesis.speak(u);
 }
 
-/* ================= LISTEN ================= */
-async function startListening() {
-  if (!active || busy || timeLeft <= 0) return;
-  busy = true;
-  status.innerText = "LISTENING...";
+async function listen() {
+    if(!isInterviewing || isBusy) return;
+    isBusy = true;
+    document.getElementById("status").innerText = "Listening...";
 
-  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-  const recorder = new MediaRecorder(stream);
-  const chunks = [];
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const rec = new MediaRecorder(stream);
+    const chunks = [];
+    rec.ondataavailable = e => chunks.push(e.data);
+    
+    rec.onstop = async () => {
+        stream.getTracks().forEach(t => t.stop());
+        document.getElementById("status").innerText = "Analyzing...";
+        
+        const fd = new FormData();
+        fd.append("mode", "interview");
+        fd.append("audio", new Blob(chunks, { type: "audio/webm" }));
+        fd.append("cvText", cvText);
+        fd.append("history", JSON.stringify(history));
 
-  recorder.ondataavailable = e => chunks.push(e.data);
+        try {
+            const res = await fetch(WORKER_URL, { method: "POST", body: fd });
+            const data = await res.json();
+            if(data.transcript) {
+                document.getElementById("transcript").innerHTML += `<div class="user-msg">${data.transcript}</div>`;
+            }
+            history = data.history || history;
+            speak(data.reply);
+        } catch (e) {
+            isBusy = false;
+            speak("Sorry, I missed that. Could you say it again?");
+        }
+    };
 
-  recorder.onstop = async () => {
-    stream.getTracks().forEach(t => t.stop());
-    const audio = new Blob(chunks, { type: "audio/webm" });
+    rec.start();
+    // Auto-stop recording after 6 seconds of silence/speaking
+    setTimeout(() => { if(rec.state === "recording") rec.stop(); }, 6500);
+}
 
-    if (audio.size < 3000) {
-      busy = false;
-      status.innerText = "PLEASE SPEAK CLEARLY";
-      setTimeout(startListening, 1000);
-      return;
-    }
-
-    status.innerText = "ANALYZING ANSWER...";
-
+// 3. Score Generation Logic
+async function generateScore() {
+    isInterviewing = false;
+    speechSynthesis.cancel();
+    document.getElementById("score-screen").style.display = "block";
+    
     const fd = new FormData();
-    fd.append("mode", "interview");
-    fd.append("audio", audio);
+    fd.append("mode", "score");
+    fd.append("cvText", cvText);
     fd.append("history", JSON.stringify(history));
 
-    try {
-      const res = await fetch(WORKER_URL, { method: "POST", body: fd });
-      const data = await res.json();
-
-      if (data.transcript) {
-        transcript.innerHTML += `<div class="user">You: ${data.transcript}</div>`;
-      }
-
-      history = data.history || history;
-      speak(data.reply);
-
-    } catch {
-      busy = false;
-      speak("Connection issue. Please repeat your answer.");
-    }
-  };
-
-  recorder.start();
-  setTimeout(() => recorder.stop(), 7000);
-}
-
-/* ================= START ================= */
-startBtn.onclick = async () => {
-  if (!cvFile) return;
-
-  active = true;
-  busy = true;
-  startBtn.style.display = "none";
-  status.innerText = "ANALYZING RESUME...";
-
-  const fd = new FormData();
-  fd.append("mode", "start");
-  fd.append("cv", cvFile);
-
-  try {
     const res = await fetch(WORKER_URL, { method: "POST", body: fd });
     const data = await res.json();
-    history = data.history || [];
+    document.getElementById("score-content").innerText = data.reply;
+}
+
+// 4. Control Listeners
+startBtn.onclick = async () => {
+    isInterviewing = true;
+    startBtn.style.display = "none";
+    stopBtn.style.display = "block";
+    cvInput.style.display = "none";
+    
+    const fd = new FormData();
+    fd.append("mode", "start");
+    fd.append("cvText", cvText);
+    const res = await fetch(WORKER_URL, { method: "POST", body: fd });
+    const data = await res.json();
+    history = data.history;
     speak(data.reply);
-  } catch {
-    busy = false;
-    speak("Describe the most complex system you have designed.");
-  }
 };
 
-/* ================= TIMER ================= */
-setInterval(() => {
-  if (!active || timeLeft <= 0) return;
-  timeLeft--;
-  const m = Math.floor(timeLeft / 60);
-  const s = timeLeft % 60;
-  timer.innerText = `${m}:${s < 10 ? "0" : ""}${s}`;
-}, 1000);
+stopBtn.onclick = generateScore;
 </script>
 </body>
 </html>
