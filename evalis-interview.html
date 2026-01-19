@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <meta charset="UTF-8" />
+  <meta charset="UTF-8">
   <title>Evalis AI Interview</title>
   <style>
     body {
@@ -33,7 +33,7 @@
       margin-top:15px;
       background:#020617;
       padding:12px;
-      height:200px;
+      height:220px;
       overflow:auto;
       border-radius:10px;
       font-size:13px;
@@ -44,18 +44,15 @@
 
 <div class="card">
   <h3>Evalis AI Interview</h3>
-  <button id="start">Start Speaking</button>
+  <button id="record">🎤 Speak (5 sec)</button>
   <div id="log"></div>
 </div>
 
 <script>
 const WORKER_URL = "https://evalis-ai.simpaticohrconsultancy.workers.dev";
 
-let audioCtx;
-let processor;
-let input;
-let stream;
-let pcmData = [];
+let audioCtx, source, processor, stream;
+let pcm = [];
 
 const log = t => {
   const d = document.createElement("div");
@@ -63,49 +60,44 @@ const log = t => {
   document.getElementById("log").appendChild(d);
 };
 
-document.getElementById("start").onclick = async () => {
-  pcmData = [];
-
+document.getElementById("record").onclick = async () => {
+  pcm = [];
   audioCtx = new AudioContext({ sampleRate: 16000 });
   stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-  input = audioCtx.createMediaStreamSource(stream);
+  source = audioCtx.createMediaStreamSource(stream);
 
   processor = audioCtx.createScriptProcessor(4096, 1, 1);
-  input.connect(processor);
+  source.connect(processor);
   processor.connect(audioCtx.destination);
 
   processor.onaudioprocess = e => {
-    const channel = e.inputBuffer.getChannelData(0);
-    pcmData.push(...channel);
+    const input = e.inputBuffer.getChannelData(0);
+    pcm.push(...input);
   };
 
-  log("🎤 Listening (5 seconds)...");
-
+  log("🎙️ Listening…");
   setTimeout(stopAndSend, 5000);
 };
 
 async function stopAndSend() {
   processor.disconnect();
-  input.disconnect();
+  source.disconnect();
   stream.getTracks().forEach(t => t.stop());
 
-  // Convert float PCM → int16
-  const pcm16 = pcmData.map(x =>
-    Math.max(-1, Math.min(1, x)) * 32767
+  // Float32 → Int16 PCM
+  const pcm16 = pcm.map(v =>
+    Math.max(-1, Math.min(1, v)) * 32767
   );
 
-  log("📤 Sending audio to Whisper...");
+  log("📤 Sending to Whisper…");
 
   const fd = new FormData();
   fd.append("mode", "interview");
   fd.append("audio", new Blob([new Int16Array(pcm16)]));
 
-  const res = await fetch(WORKER_URL, {
-    method: "POST",
-    body: fd
-  });
-
+  const res = await fetch(WORKER_URL, { method: "POST", body: fd });
   const data = await res.json();
+
   log("AI: " + data.reply);
 }
 </script>
