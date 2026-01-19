@@ -1,24 +1,24 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Evalis AI - Elite Interviewer</title>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-    <style>
-        :root { --bg:#0f172a; --card:#1e293b; --accent:#4f46e5; --muted:#94a3b8; }
-        body { margin:0; background:var(--bg); color:white; font-family:Inter,sans-serif; display:flex; justify-content:center; align-items:center; min-height:100vh; }
-        .container { width:92%; max-width:480px; background:var(--card); padding:28px; border-radius:22px; border:1px solid #334155; box-shadow:0 20px 40px rgba(0,0,0,.45); }
-        #status { font-size:11px; letter-spacing:2px; color:var(--muted); margin-bottom:10px; text-transform:uppercase; text-align:center; }
-        .timer { font-size:3.5rem; font-weight:800; color:var(--accent); text-align:center; font-family:monospace; margin:12px 0; }
-        #volume-bar { width: 100%; height: 6px; background: #020617; border-radius: 3px; margin-bottom: 20px; overflow: hidden; }
-        #volume-fill { height: 100%; width: 0%; background: var(--accent); transition: width 0.1s; }
-        button { width:100%; padding:16px; border:none; border-radius:12px; background:var(--accent); color:white; font-weight:700; cursor:pointer; }
-        button:disabled { opacity:.5; cursor:not-allowed; }
-        #transcript { margin-top:20px; height:180px; overflow-y:auto; background:#020617; padding:14px; border-radius:12px; border:1px solid #334155; font-size:13px; }
-        .ai { color:#a5b4fc; margin-bottom:10px; }
-        .user { color:#94a3b8; font-style:italic; margin-bottom:8px; }
-    </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Evalis AI - Elite Interviewer</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<style>
+:root { --bg:#0f172a; --card:#1e293b; --accent:#4f46e5; --muted:#94a3b8; }
+body { margin:0; background:var(--bg); color:white; font-family:Inter,sans-serif; display:flex; justify-content:center; align-items:center; min-height:100vh; }
+.container { width:92%; max-width:480px; background:var(--card); padding:28px; border-radius:22px; border:1px solid #334155; box-shadow:0 20px 40px rgba(0,0,0,.45); }
+#status { font-size:11px; letter-spacing:2px; color:var(--muted); margin-bottom:10px; text-transform:uppercase; text-align:center; }
+.timer { font-size:3.5rem; font-weight:800; color:var(--accent); text-align:center; font-family:monospace; margin:12px 0; }
+#volume-bar { width: 100%; height: 6px; background: #020617; border-radius: 3px; margin-bottom: 20px; overflow: hidden; }
+#volume-fill { height: 100%; width: 0%; background: var(--accent); transition: width 0.1s; }
+button { width:100%; padding:16px; border:none; border-radius:12px; background:var(--accent); color:white; font-weight:700; cursor:pointer; }
+button:disabled { opacity:.5; cursor:not-allowed; }
+#transcript { margin-top:20px; height:180px; overflow-y:auto; background:#020617; padding:14px; border-radius:12px; border:1px solid #334155; font-size:13px; }
+.ai { color:#a5b4fc; margin-bottom:10px; }
+.user { color:#94a3b8; font-style:italic; margin-bottom:8px; }
+</style>
 </head>
 <body>
 
@@ -27,7 +27,7 @@
     <div class="timer" id="timer">15:00</div>
     <div id="volume-bar"><div id="volume-fill"></div></div>
     <input type="file" id="cvInput" accept=".pdf" style="margin-bottom:15px; font-size:12px;">
-    <button id="startBtn" disabled>Initialize Interview</button>
+    <button id="startBtn" disabled>Start Technical Interview</button>
     <div id="transcript"></div>
 </div>
 
@@ -58,13 +58,14 @@ document.getElementById("cvInput").onchange = async e => {
 /* ================= 2. SPEECH ENGINE ================= */
 function speak(text) {
     if(!text) return;
-    document.getElementById("transcript").innerHTML += `<div class="ai">AI: ${text}</div>`;
-    document.getElementById("transcript").scrollTop = document.getElementById("transcript").scrollHeight;
+    const ts = document.getElementById("transcript");
+    ts.innerHTML += `<div class="ai">AI: ${text}</div>`;
+    ts.scrollTop = ts.scrollHeight;
     
     const u = new SpeechSynthesisUtterance(text);
     u.onend = () => { 
         busy = false; 
-        if(active) setTimeout(startTurn, 400); // Only open mic AFTER speech ends
+        if(active) setTimeout(startTurn, 400); // Wait for speech to finish
     };
     speechSynthesis.cancel();
     speechSynthesis.speak(u);
@@ -88,7 +89,7 @@ async function startTurn() {
         const chunks = [];
         rec.ondataavailable = e => chunks.push(e.data);
 
-        // Volume meter logic
+        // UI Volume feedback
         const updateVolume = () => {
             if(!busy) return;
             analyzer.getByteFrequencyData(dataArray);
@@ -103,39 +104,51 @@ async function startTurn() {
             audioCtx.close();
             const audioBlob = new Blob(chunks, { type: "audio/webm" });
 
-            if (audioBlob.size < 6000) { // Reject silence
+            // Silence Guard: Prevents empty audio triggers
+            if (audioBlob.size < 6500) { 
                 busy = false;
-                speak("I didn't catch that. Could you repeat?");
+                document.getElementById("status").innerText = "Speak Louder...";
+                setTimeout(startTurn, 1000);
                 return;
             }
 
-            document.getElementById("status").innerText = "Thinking...";
+            document.getElementById("status").innerText = "Analyzing Answer...";
             const fd = new FormData();
             fd.append("mode", "interview");
             fd.append("audio", audioBlob);
             fd.append("cvText", cvText);
             fd.append("history", JSON.stringify(history));
 
-            const res = await fetch(WORKER_URL, { method: "POST", body: fd });
-            const data = await res.json();
-            
-            history = data.history || history;
-            if(data.transcript) {
-                document.getElementById("transcript").innerHTML += `<div class="user">You: ${data.transcript}</div>`;
+            try {
+                const res = await fetch(WORKER_URL, { method: "POST", body: fd });
+                const data = await res.json();
+                
+                // Safety check for backend response keys
+                if(data.reply) {
+                    history = data.history || history;
+                    if(data.transcript) {
+                        document.getElementById("transcript").innerHTML += `<div class="user">You: ${data.transcript}</div>`;
+                    }
+                    speak(data.reply);
+                } else {
+                    throw new Error("Invalid response");
+                }
+            } catch (err) {
+                busy = false;
+                speak("I had a connection issue. Could you repeat that technical detail?");
             }
-            speak(data.reply);
         };
 
         rec.start();
-        setTimeout(() => { if(rec.state === "recording") rec.stop(); }, 7000);
+        setTimeout(() => { if(rec.state === "recording") rec.stop(); }, 7500);
     } catch (err) { busy = false; }
 }
 
-/* ================= 4. FIXED START LOGIC ================= */
+/* ================= 4. START LOGIC ================= */
 document.getElementById("startBtn").onclick = async () => {
-    active = true; busy = true; // Block immediate listening
+    active = true; busy = true;
     document.getElementById("startBtn").style.display = "none";
-    document.getElementById("status").innerText = "Analyzing CV...";
+    document.getElementById("status").innerText = "Analyzing CV Depth...";
     
     const fd = new FormData();
     fd.append("mode", "start");
@@ -144,11 +157,16 @@ document.getElementById("startBtn").onclick = async () => {
     try {
         const res = await fetch(WORKER_URL, { method: "POST", body: fd });
         const data = await res.json();
-        history = data.history;
-        speak(data.reply); // First question based on CV
+        
+        if (data.reply) {
+            history = data.history || [];
+            speak(data.reply); // First question grounded in CV
+        } else {
+            throw new Error();
+        }
     } catch {
         busy = false;
-        speak("Ready. Please introduce yourself and your technical background.");
+        speak("System ready. Tell me about the most complex architecture you've built.");
     }
 };
 
