@@ -1,56 +1,95 @@
-// ... [Use the PDF parsing logic from the previous response] ...
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Elite AI Interviewer</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <style>
+        body { background: #0f172a; color: white; font-family: sans-serif; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; }
+        .box { width: 400px; background: #1e293b; padding: 30px; border-radius: 20px; text-align: center; border: 1px solid #334155; }
+        .timer { font-size: 2.5rem; margin: 20px 0; color: #60a5fa; font-family: monospace; }
+        button { width: 100%; padding: 15px; border-radius: 10px; border: none; background: #2563eb; color: white; font-weight: bold; cursor: pointer; }
+        #log { height: 150px; overflow-y: auto; background: #0f172a; margin-top: 20px; padding: 10px; font-size: 13px; text-align: left; }
+    </style>
+</head>
+<body>
+    <div class="box">
+        <div id="status">Upload CV to Start</div>
+        <div class="timer" id="timer">15:00</div>
+        <input type="file" id="cvInput" accept=".pdf">
+        <button id="startBtn" disabled style="margin-top:20px;">Initialize Deep-Dive</button>
+        <div id="log"></div>
+    </div>
 
-async function startTurn() {
-    if(!active || busy || timeLeft <= 0) return;
+<script>
+    const WORKER_URL = "https://evalis-ai.simpaticohrconsultancy.workers.dev";
+    let history = [], cvText = "", active = false, busy = false, timeLeft = 900;
 
-    try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        const rec = new MediaRecorder(stream, { mimeType: 'audio/webm' });
-        const chunks = [];
-        
-        document.getElementById('status').innerText = "INTERVIEWER IS LISTENING...";
+    // PDF Parser
+    document.getElementById('cvInput').onchange = async (e) => {
+        const file = e.target.files[0];
+        const reader = new FileReader();
+        reader.onload = async () => {
+            const pdfjsLib = window['pdfjs-dist/build/pdf'];
+            pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+            const pdf = await pdfjsLib.getDocument({data: new Uint8Array(reader.result)}).promise;
+            let text = "";
+            for(let i=1; i<=pdf.numPages; i++){
+                const page = await pdf.getPage(i);
+                const content = await page.getTextContent();
+                text += content.items.map(s => s.str).join(" ") + " ";
+            }
+            cvText = text.trim();
+            document.getElementById('status').innerText = "CV Ready";
+            document.getElementById('startBtn').disabled = false;
+        };
+        reader.readAsArrayBuffer(file);
+    };
 
-        rec.ondataavailable = e => chunks.push(e.data);
-        rec.onstop = async () => {
-            if(!active) return;
-            document.getElementById('status').innerText = "INTERVIEWER IS THINKING...";
-            busy = true;
-
-            const fd = new FormData();
-            fd.append("audio", new Blob(chunks, {type: 'audio/webm'}), "voice.webm");
-            fd.append("resume", cvText); // Sends the actual parsed PDF text
-            fd.append("history", JSON.stringify(history));
-
-            try {
+    async function startTurn() {
+        if(!active || busy) return;
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            const rec = new MediaRecorder(stream);
+            const chunks = [];
+            document.getElementById('status').innerText = "LISTENING...";
+            rec.ondataavailable = e => chunks.push(e.data);
+            rec.onstop = async () => {
+                busy = true;
+                document.getElementById('status').innerText = "ANALYZING...";
+                const fd = new FormData();
+                fd.append("audio", new Blob(chunks), "v.webm");
+                fd.append("resume", cvText);
+                fd.append("history", JSON.stringify(history));
                 const res = await fetch(WORKER_URL, { method: "POST", body: fd });
                 const data = await res.json();
-                
-                if (data.reply) {
-                    history = data.history;
-                    updateTranscript(data.userText, data.reply);
-                    speak(data.reply); 
-                } else {
-                    busy = false; startTurn();
-                }
-            } catch (err) { busy = false; startTurn(); }
-            stream.getTracks().forEach(t => t.stop());
-        };
+                history = data.history;
+                speak(data.reply);
+                stream.getTracks().forEach(t => t.stop());
+            };
+            rec.start();
+            setTimeout(() => { if(rec.state === "recording") rec.stop(); }, 7000); 
+        } catch (err) { alert("Mic required."); }
+    }
 
-        rec.start();
-        // Record in 8-second windows for detailed technical answers
-        setTimeout(() => { if(rec.state === "recording") rec.stop(); }, 8000); 
-    } catch (err) { alert("Mic required for technical assessment."); }
-}
+    function speak(text) {
+        const ut = new SpeechSynthesisUtterance(text);
+        document.getElementById('status').innerText = "INTERVIEWER SPEAKING...";
+        ut.onend = () => { busy = false; if(active) setTimeout(startTurn, 300); };
+        window.speechSynthesis.speak(ut);
+    }
 
-function speak(text) {
-    window.speechSynthesis.cancel();
-    const ut = new SpeechSynthesisUtterance(text);
-    ut.pitch = 0.9; // More professional tone
-    document.getElementById('status').innerText = "INTERVIEWER IS RESPONDING...";
-    
-    ut.onend = () => { 
-        busy = false; 
-        if(active) setTimeout(startTurn, 200); // Perfect Loop: Mic re-opens immediately
+    document.getElementById('startBtn').onclick = async () => {
+        active = true;
+        document.getElementById('startBtn').style.display = "none";
+        // Start first CV-based question immediately
+        const fd = new FormData();
+        fd.append("resume", cvText);
+        fd.append("history", "[]");
+        const res = await fetch(WORKER_URL, { method: "POST", body: fd });
+        const data = await res.json();
+        speak(data.reply);
     };
-    window.speechSynthesis.speak(ut);
-}
+</script>
+</body>
+</html>
