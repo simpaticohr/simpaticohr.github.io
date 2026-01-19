@@ -1,182 +1,143 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Elite AI Interviewer</title>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-<style>
-:root { --bg:#0f172a; --card:#1e293b; --accent:#4f46e5; --muted:#94a3b8; }
-body { margin:0; background:var(--bg); color:white; font-family:Inter,system-ui,sans-serif; display:flex; justify-content:center; align-items:center; min-height:100vh; }
-.container { width:92%; max-width:480px; background:var(--card); padding:28px; border-radius:22px; border:1px solid #334155; box-shadow:0 20px 40px rgba(0,0,0,.45); }
-#status { font-size:12px; letter-spacing:2px; color:var(--muted); margin-bottom:10px; text-transform:uppercase; text-align:center; }
-.timer { font-size:3rem; font-weight:800; color:var(--accent); text-align:center; font-family:monospace; margin:12px 0; }
-input[type=file] { width:100%; font-size:12px; color:var(--muted); margin-bottom:15px; }
-button { width:100%; padding:16px; border:none; border-radius:12px; background:var(--accent); color:white; font-weight:700; cursor:pointer; transition: 0.2s; }
-button:hover { background: #4338ca; }
-button:disabled { opacity:.5; cursor:not-allowed; }
-#transcript { margin-top:20px; height:200px; overflow-y:auto; background:#020617; padding:14px; border-radius:12px; border:1px solid #334155; font-size:14px; }
-.ai { color:#a5b4fc; margin-bottom:10px; font-weight: 500; }
-.user { color:#94a3b8; font-style:italic; margin-bottom:8px; border-left: 2px solid #334155; padding-left: 8px; }
-</style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Elite AI Interviewer</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <style>
+        :root { --accent: #4f46e5; --bg: #0f172a; --card: #1e293b; }
+        body { font-family: 'Inter', sans-serif; background: var(--bg); color: white; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; }
+        .container { width: 90%; max-width: 500px; background: var(--card); padding: 40px; border-radius: 24px; text-align: center; border: 1px solid #334155; }
+        .timer { font-size: 3.5rem; font-weight: 800; color: var(--accent); margin: 20px 0; font-family: monospace; }
+        #status { font-size: 14px; color: #94a3b8; margin-bottom: 20px; text-transform: uppercase; }
+        button { width: 100%; padding: 18px; border-radius: 12px; border: none; background: var(--accent); color: white; font-weight: bold; cursor: pointer; }
+        /* Visual feedback for audio */
+        #meter { width: 100%; height: 10px; background: #0b0f1a; border-radius: 5px; margin-bottom: 20px; overflow: hidden; }
+        #fill { height: 100%; width: 0%; background: var(--accent); transition: width 0.1s; }
+        #transcript { height: 150px; overflow-y: auto; background: #0b0f1a; margin-top: 20px; padding: 15px; border-radius: 12px; font-size: 14px; text-align: left; }
+    </style>
 </head>
 <body>
 
 <div class="container">
-  <div id="status">Upload resume to begin</div>
-  <div class="timer" id="timer">15:00</div>
-  <input type="file" id="cvInput" accept=".pdf">
-  <button id="startBtn" disabled>Start Technical Interview</button>
-  <div id="transcript"></div>
+    <div id="status">Upload Resume to Initialize</div>
+    <div class="timer" id="timer">15:00</div>
+    <div id="meter"><div id="fill"></div></div>
+    <input type="file" id="cvInput" accept=".pdf" style="margin-bottom: 20px;">
+    <button id="startBtn" disabled>Start Technical Interview</button>
+    <div id="transcript"></div>
 </div>
 
 <script>
-/* ================= CONFIG & STATE ================= */
-const WORKER_URL = "https://evalis-ai.simpaticohrconsultancy.workers.dev";
-let cvText = "", history = [], active = false, busy = false, timeLeft = 900;
+    const WORKER_URL = "https://evalis-ai.simpaticohrconsultancy.workers.dev";
+    let history = [], cvText = "", active = false, busy = false, timeLeft = 900;
 
-/* ================= PDF PARSER ================= */
-pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
-
-document.getElementById("cvInput").onchange = async e => {
-  const file = e.target.files[0];
-  if(!file) return;
-  document.getElementById("status").innerText = "Reading PDF...";
-  const buffer = await file.arrayBuffer();
-  const pdf = await pdfjsLib.getDocument(buffer).promise;
-  let text = "";
-  for(let i=1; i<=pdf.numPages; i++){
-    const page = await pdf.getPage(i);
-    const c = await page.getTextContent();
-    text += c.items.map(x=>x.str).join(" ") + " ";
-  }
-  cvText = text.trim();
-  document.getElementById("status").innerText = "Resume Synced";
-  document.getElementById("startBtn").disabled = false;
-};
-
-/* ================= UI HELPERS ================= */
-function addAI(t) {
-  const ts = document.getElementById("transcript");
-  ts.innerHTML += `<div class="ai">AI: ${t}</div>`;
-  ts.scrollTop = ts.scrollHeight;
-}
-function addUser(t) {
-  const ts = document.getElementById("transcript");
-  ts.innerHTML += `<div class="user">You: ${t}</div>`;
-  ts.scrollTop = ts.scrollHeight;
-}
-
-/* ================= SPEAK ENGINE ================= */
-function speak(text) {
-  if(!text) return;
-  addAI(text);
-  document.getElementById("status").innerText = "Interviewer speaking";
-
-  const u = new SpeechSynthesisUtterance(text);
-  u.rate = 1.0;
-  u.pitch = 0.95;
-
-  u.onend = () => {
-    busy = false;
-    if(active) setTimeout(startTurn, 600); // Recursive call
-  };
-
-  speechSynthesis.cancel();
-  speechSynthesis.speak(u);
-}
-
-/* ================= IMPROVED LISTEN LOOP ================= */
-async function startTurn() {
-  if(!active || busy || timeLeft <= 0) return;
-  busy = true;
-  document.getElementById("status").innerText = "Listening...";
-
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    const rec = new MediaRecorder(stream, { mimeType: 'audio/webm' });
-    const chunks = [];
-
-    rec.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
-
-    rec.onstop = async () => {
-      stream.getTracks().forEach(t => t.stop());
-      const audioBlob = new Blob(chunks, { type: "audio/webm" });
-
-      // Guard: Ensure blob isn't empty/tiny
-      if (audioBlob.size < 5000) {
-        busy = false;
-        speak("I'm sorry, I couldn't hear that. Could you repeat your last point?");
-        return;
-      }
-
-      document.getElementById("status").innerText = "Analyzing Depth...";
-      const fd = new FormData();
-      fd.append("mode", "interview");
-      fd.append("audio", audioBlob, "interview_audio.webm");
-      fd.append("cvText", cvText);
-      fd.append("history", JSON.stringify(history));
-
-      try {
-        const res = await fetch(WORKER_URL, { method: "POST", body: fd });
-        const data = await res.json();
-
-        if (data.reply) {
-          history = data.history || history;
-          if (data.transcript) addUser(data.transcript);
-          speak(data.reply); // Loop continues onEnd
-        } else {
-          throw new Error();
-        }
-      } catch {
-        busy = false;
-        speak("Connection issue. Could you say that again?");
-      }
+    // 1. PDF Parser
+    document.getElementById('cvInput').onchange = async (e) => {
+        const file = e.target.files[0];
+        const reader = new FileReader();
+        reader.onload = async () => {
+            const pdfjsLib = window['pdfjs-dist/build/pdf'];
+            pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+            const pdf = await pdfjsLib.getDocument({data: new Uint8Array(reader.result)}).promise;
+            let text = "";
+            for(let i=1; i<=pdf.numPages; i++){
+                const page = await pdf.getPage(i);
+                const content = await page.getTextContent();
+                text += content.items.map(s => s.str).join(" ") + " ";
+            }
+            cvText = text.trim();
+            document.getElementById('status').innerText = "CV SYNCED - READY";
+            document.getElementById('startBtn').disabled = false;
+        };
+        reader.readAsArrayBuffer(file);
     };
 
-    rec.start();
-    // 8-second window for technical answers
-    setTimeout(() => { if (rec.state === "recording") rec.stop(); }, 8000);
-  } catch (err) {
-    alert("Microphone required.");
-    busy = false;
-  }
-}
+    // 2. Audio Capture with Visual Feedback
+    async function startTurn() {
+        if(!active || busy || timeLeft <= 0) return;
+        busy = true;
 
-/* ================= TIMER ================= */
-setInterval(() => {
-  if(!active) return;
-  timeLeft--;
-  const m = Math.floor(timeLeft / 60);
-  const s = timeLeft % 60;
-  document.getElementById("timer").innerText = `${m}:${s < 10 ? "0" : ""}${s}`;
-  if(timeLeft <= 0) {
-    active = false;
-    speak("The session has concluded. Thank you.");
-  }
-}, 1000);
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            
+            // Audio Meter Logic
+            const audioContext = new AudioContext();
+            const source = audioContext.createMediaStreamSource(stream);
+            const analyzer = audioContext.createAnalyser();
+            source.connect(analyzer);
+            const dataArray = new Uint8Array(analyzer.frequencyBinCount);
+            
+            const updateMeter = () => {
+                if(!busy) return;
+                analyzer.getByteFrequencyData(dataArray);
+                const volume = Math.max(...dataArray);
+                document.getElementById('fill').style.width = volume + "%";
+                requestAnimationFrame(updateMeter);
+            };
+            updateMeter();
 
-/* ================= INITIALIZATION ================= */
-document.getElementById("startBtn").onclick = async () => {
-  active = true;
-  busy = true;
-  document.getElementById("startBtn").style.display = "none";
-  document.getElementById("status").innerText = "Starting...";
+            const rec = new MediaRecorder(stream);
+            const chunks = [];
+            document.getElementById('status').innerText = "Interviewer Listening...";
 
-  const fd = new FormData();
-  fd.append("mode", "start");
-  fd.append("cvText", cvText);
+            rec.ondataavailable = e => chunks.push(e.data);
+            rec.onstop = async () => {
+                const audioBlob = new Blob(chunks, {type: 'audio/webm'});
+                if(audioBlob.size < 5000) { // Safety check
+                    busy = false;
+                    speak("I'm sorry, I didn't catch that. Could you repeat?");
+                    return;
+                }
 
-  try {
-    const res = await fetch(WORKER_URL, { method: "POST", body: fd });
-    const data = await res.json();
-    history = data.history;
-    speak(data.reply);
-  } catch {
-    speak("System ready. Let's begin the technical assessment.");
-  }
-};
+                const fd = new FormData();
+                fd.append("mode", "interview");
+                fd.append("audio", audioBlob, "v.webm");
+                fd.append("cvText", cvText);
+                fd.append("history", JSON.stringify(history));
+
+                const res = await fetch(WORKER_URL, { method: "POST", body: fd });
+                const data = await res.json();
+                
+                history = data.history || history;
+                document.getElementById('transcript').innerHTML += `<div>You: ${data.transcript}</div>`;
+                speak(data.reply);
+                stream.getTracks().forEach(t => t.stop());
+                audioContext.close();
+            };
+
+            rec.start();
+            setTimeout(() => { if(rec.state === "recording") rec.stop(); }, 8000); 
+        } catch (err) { alert("Mic required."); }
+    }
+
+    // 3. Recursive Speech Loop
+    function speak(text) {
+        window.speechSynthesis.cancel();
+        const ut = new SpeechSynthesisUtterance(text);
+        document.getElementById('transcript').innerHTML += `<div style="color: #818cf8">AI: ${text}</div>`;
+        ut.onend = () => { 
+            busy = false; 
+            if(active) setTimeout(startTurn, 300); 
+        };
+        window.speechSynthesis.speak(ut);
+    }
+
+    document.getElementById('startBtn').onclick = async () => {
+        active = true;
+        document.getElementById('startBtn').style.display = "none";
+        // Start 15m timer
+        setInterval(() => { if(timeLeft > 0) timeLeft--; }, 1000);
+        
+        const fd = new FormData();
+        fd.append("mode", "start");
+        fd.append("cvText", cvText);
+        const res = await fetch(WORKER_URL, { method: "POST", body: fd });
+        const data = await res.json();
+        history = data.history;
+        speak(data.reply);
+    };
 </script>
-
 </body>
 </html>
