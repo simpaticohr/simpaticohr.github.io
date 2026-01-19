@@ -1,75 +1,132 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>English Coach</title>
-    <style>
-        body { background: #020617; color: white; font-family: sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; }
-        .card { background: #1e293b; padding: 30px; border-radius: 20px; width: 300px; text-align: center; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
-        .btn { background: #2563eb; color: white; border: none; padding: 15px; border-radius: 10px; width: 100%; cursor: pointer; font-weight: bold; }
-        .btn:disabled { background: #475569; }
-        pre { background: #0f172a; padding: 10px; border-radius: 8px; font-size: 12px; text-align: left; white-space: pre-wrap; margin-top: 10px; }
-    </style>
+<meta charset="UTF-8" />
+<title>Spoken English Practice</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  body {
+    margin: 0;
+    height: 100vh;
+    background: radial-gradient(circle at top, #0b1d3a, #020617);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: system-ui, -apple-system, sans-serif;
+    color: #fff;
+  }
+  .card {
+    width: 90%;
+    max-width: 320px;
+    background: rgba(255,255,255,0.08);
+    backdrop-filter: blur(12px);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 20px;
+    padding: 24px;
+    text-align: center;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+  }
+  button {
+    width: 100%;
+    padding: 12px;
+    border: none;
+    border-radius: 10px;
+    margin-top: 10px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: opacity 0.2s;
+  }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  .start { background: #2563eb; color: #fff; }
+  .stop { background: #374151; color: #ccc; }
+  
+  pre {
+    text-align: left;
+    white-space: pre-wrap;
+    font-size: 13px;
+    background: rgba(0,0,0,0.2);
+    padding: 12px;
+    border-radius: 8px;
+    margin-top: 15px;
+    max-height: 120px;
+    overflow-y: auto;
+    border: 1px solid rgba(255,255,255,0.05);
+  }
+  .score { font-size: 32px; font-weight: bold; margin-top: 10px; color: #60a5fa; }
+  small { color: #94a3b8; display: block; margin-bottom: 10px; }
+</style>
 </head>
 <body>
-    <div class="card">
-        <h3>English Practice</h3>
-        <p id="status">Press start and speak</p>
-        <button id="recordBtn" class="btn">🎤 Start Speaking</button>
-        
-        <div id="results" style="display:none">
-            <h1 id="score" style="color:#60a5fa"></h1>
-            <pre id="said"></pre>
-            <pre id="feedback"></pre>
-            <button onclick="location.reload()" class="btn" style="background:#334155; margin-top:10px">Try Again</button>
-        </div>
-    </div>
+<div class="card">
+  <h3>English Practice</h3>
+  <small id="status">Tap start and speak</small>
+  <button class="start" id="start">🎤 Start Speaking</button>
+  <button class="stop" id="stop" disabled>Stop</button>
+  <div id="results" style="display:none;">
+    <pre id="said"></pre>
+    <pre id="feedback"></pre>
+    <div class="score" id="score"></div>
+  </div>
+</div>
 
 <script>
-    const API = "https://YOUR-NEW-WORKER.workers.dev"; // 🟢 Replace with your new Worker URL
-    let recorder, chunks = [];
+const API = "https://evalis-ai.simpaticohrconsultancy.workers.dev";
+let recorder, chunks = [], stopTimer;
 
-    document.getElementById('recordBtn').onclick = async function() {
-        const btn = this;
-        try {
-            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-            recorder = new MediaRecorder(stream);
-            chunks = [];
-            
-            recorder.ondataavailable = e => chunks.push(e.data);
-            recorder.onstop = () => sendAudio();
-            
-            recorder.start();
-            btn.disabled = true;
-            document.getElementById('status').innerText = "Recording (5s)...";
-            
-            setTimeout(() => recorder.stop(), 5000);
-        } catch (e) {
-            document.getElementById('status').innerText = "Mic Error!";
-        }
+const startBtn = document.getElementById("start");
+const stopBtn = document.getElementById("stop");
+const status = document.getElementById("status");
+const said = document.getElementById("said");
+const feedback = document.getElementById("feedback");
+const scoreBox = document.getElementById("score");
+const results = document.getElementById("results");
+
+startBtn.onclick = async () => {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    chunks = [];
+    results.style.display = "none";
+    status.textContent = "Listening (max 6s)...";
+    
+    recorder = new MediaRecorder(stream);
+    recorder.ondataavailable = e => chunks.push(e.data);
+    recorder.onstop = () => {
+      stream.getTracks().forEach(t => t.stop());
+      sendAudio();
     };
 
-    async function sendAudio() {
-        document.getElementById('status').innerText = "Analyzing speech...";
-        const blob = new Blob(chunks, { type: "audio/webm" });
-        const form = new FormData();
-        form.append("audio", blob);
+    recorder.start();
+    startBtn.disabled = true;
+    stopBtn.disabled = false;
 
-        try {
-            const res = await fetch(API, { method: "POST", body: form });
-            if (!res.ok) throw new Error("Server Error");
-            const data = await res.json();
-            
-            document.getElementById('recordBtn').style.display = "none";
-            document.getElementById('status').style.display = "none";
-            document.getElementById('results').style.display = "block";
-            document.getElementById('score').innerText = data.score + "/10";
-            document.getElementById('said').innerText = "You: " + data.transcript;
-            document.getElementById('feedback').innerText = data.feedback;
-        } catch (e) {
-            document.getElementById('status').innerText = "Error: Check AI Binding!";
-            document.getElementById('recordBtn').disabled = false;
-        }
-    }
+    stopTimer = setTimeout(() => { if(recorder.state === "recording") recorder.stop(); }, 6000);
+  } catch (e) {
+    status.textContent = "Mic Error: " + e.message;
+  }
+};
+
+stopBtn.onclick = () => { clearTimeout(stopTimer); recorder.stop(); };
+
+async function sendAudio() {
+  status.textContent = "Analyzing speech...";
+  stopBtn.disabled = true;
+  const blob = new Blob(chunks, { type: "audio/webm" });
+  const form = new FormData();
+  form.append("audio", blob);
+
+  try {
+    const res = await fetch(API, { method: "POST", body: form });
+    const data = await res.json();
+    results.style.display = "block";
+    said.textContent = "You: " + data.transcript;
+    feedback.textContent = data.feedback;
+    scoreBox.textContent = data.score + "/10";
+    status.textContent = "Done!";
+  } catch (e) {
+    status.textContent = "Server Error";
+  }
+  startBtn.disabled = false;
+}
 </script>
 </body>
 </html>
