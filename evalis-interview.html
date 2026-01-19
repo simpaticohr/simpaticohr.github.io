@@ -26,11 +26,9 @@
 <div class="card">
     <h2>Evalis AI Interview</h2>
     <div id="status">Upload PDF resume to begin</div>
-
     <input type="file" id="cvInput" accept=".pdf">
     <button id="startBtn" disabled>Start Interview</button>
     <button id="scoreBtn" style="display:none;">Finish Interview & Score</button>
-
     <div id="log"></div>
 </div>
 
@@ -42,18 +40,16 @@
     let history = [];
     let active = false;
 
-    const logBox = document.getElementById("log");
-    const statusEl = document.getElementById("status");
-
     function addLog(role, text) {
         const div = document.createElement("div");
         div.className = role;
         div.innerText = (role === "ai" ? "AI: " : "You: ") + text;
+        const logBox = document.getElementById("log");
         logBox.appendChild(div);
         logBox.scrollTop = logBox.scrollHeight;
     }
 
-    // --- 1. PDF Parser ---
+    // --- 1. PDF Extract ---
     document.getElementById("cvInput").onchange = async (e) => {
         const file = e.target.files[0];
         const pdf = await pdfjsLib.getDocument(await file.arrayBuffer()).promise;
@@ -64,11 +60,10 @@
             text += content.items.map(s => s.str).join(" ") + " ";
         }
         cvText = text.trim();
-        statusEl.innerText = "Resume loaded. Ready.";
+        document.getElementById("status").innerText = "Resume loaded.";
         document.getElementById("startBtn").disabled = false;
     };
 
-    // --- 2. Speak (AI Output) ---
     function speak(text) {
         if (!text) return;
         addLog("ai", text);
@@ -78,23 +73,21 @@
         speechSynthesis.speak(u);
     }
 
-    // --- 3. RAW PCM CAPTURE (THE 5006 FIX) ---
+    // --- 2. THE 5006 FIX (RAW PCM) ---
     async function capturePCM() {
         if (!active) return;
         try {
             const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-            const audioCtx = new AudioContext({ sampleRate: 16000 }); // Whisper Native Rate
+            const audioCtx = new AudioContext({ sampleRate: 16000 });
             const source = audioCtx.createMediaStreamSource(stream);
             const processor = audioCtx.createScriptProcessor(4096, 1, 1);
             let pcmBuffer = [];
 
-            statusEl.innerHTML = '<span class="pulse">🔴 Listening (Raw PCM)...</span>';
+            document.getElementById("status").innerHTML = '<span class="pulse">🔴 Listening (Raw PCM)...</span>';
 
             processor.onaudioprocess = (e) => {
                 const samples = e.inputBuffer.getChannelData(0);
-                for (let i = 0; i < samples.length; i++) {
-                    pcmBuffer.push(samples[i]); // Direct numeric capture
-                }
+                for (let i = 0; i < samples.length; i++) pcmBuffer.push(samples[i]);
             };
 
             source.connect(processor);
@@ -107,32 +100,26 @@
 
                 if (pcmBuffer.length < 1000) return capturePCM();
 
-                statusEl.innerText = "AI is thinking...";
+                document.getElementById("status").innerText = "AI is thinking...";
                 const fd = new FormData();
                 fd.append("mode", "interview");
-                fd.append("audio_raw", JSON.stringify(pcmBuffer)); // Send as numeric list
+                fd.append("audio_raw", JSON.stringify(pcmBuffer)); // Send numeric list
                 fd.append("cvText", cvText);
                 fd.append("history", JSON.stringify(history));
 
                 const res = await fetch(WORKER_URL, { method: "POST", body: fd });
                 const data = await res.json();
-
                 if (data.transcript) addLog("user", data.transcript);
                 history = data.history || history;
                 speak(data.reply);
             }, 6000);
-        } catch (err) {
-            statusEl.innerText = "Mic error: " + err.message;
-        }
+        } catch (err) { document.getElementById("status").innerText = "Mic error."; }
     }
 
-    // --- 4. Controls ---
     document.getElementById("startBtn").onclick = async () => {
         active = true;
         document.getElementById("startBtn").style.display = "none";
         document.getElementById("scoreBtn").style.display = "block";
-        statusEl.innerText = "Starting interview...";
-
         const fd = new FormData();
         fd.append("mode", "start");
         fd.append("cvText", cvText);
@@ -140,17 +127,6 @@
         const data = await res.json();
         history = data.history;
         speak(data.reply);
-    };
-
-    document.getElementById("scoreBtn").onclick = async () => {
-        active = false;
-        statusEl.innerText = "Calculating score...";
-        const fd = new FormData();
-        fd.append("mode", "score");
-        fd.append("history", JSON.stringify(history));
-        const res = await fetch(WORKER_URL, { method: "POST", body: fd });
-        const data = await res.json();
-        addLog("ai", "FINAL EVALUATION: " + data.reply);
     };
 </script>
 </body>
