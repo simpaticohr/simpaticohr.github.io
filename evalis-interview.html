@@ -3,166 +3,128 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Evalis AI – Elite Interview</title>
+    <title>Evalis AI - Elite Live</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
     <style>
-        :root { --primary: #6366f1; --bg: #020617; --card: rgba(255,255,255,0.05); }
-        body { margin: 0; background: var(--bg); color: white; font-family: 'Inter', system-ui, sans-serif; display: flex; align-items: center; justify-content: center; min-height: 100vh; overflow: hidden; }
-        
-        .container { width: 90%; max-width: 440px; text-align: center; z-index: 10; }
-        
-        /* Mercor-like Waveform */
-        .wave-container { height: 120px; display: flex; align-items: center; justify-content: center; margin: 20px 0; }
-        canvas { width: 100%; height: 80px; filter: drop-shadow(0 0 8px var(--primary)); }
-
-        .card { background: var(--card); backdrop-filter: blur(20px); border: 1px solid rgba(255,255,255,0.1); border-radius: 28px; padding: 30px; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.5); }
-        
-        #status { font-size: 13px; color: #94a3b8; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 20px; }
-        .status-active { color: #f87171 !important; animation: pulse 2s infinite; }
-
-        input[type="file"] { display: none; }
-        .btn { background: var(--primary); color: white; border: none; padding: 16px 32px; border-radius: 14px; font-weight: 700; cursor: pointer; width: 100%; transition: transform 0.2s; }
-        .btn:hover { transform: scale(1.02); }
-        .btn:disabled { opacity: 0.3; }
-
-        #log { margin-top: 20px; height: 100px; overflow-y: auto; font-size: 14px; color: #cbd5e1; text-align: left; mask-image: linear-gradient(to bottom, transparent, black 20%); }
-        
-        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        :root { --primary: #6366f1; --bg: #020617; }
+        body { margin: 0; background: var(--bg); color: white; font-family: sans-serif; display: flex; align-items: center; justify-content: center; min-height: 100vh; }
+        .card { width: 90%; max-width: 420px; background: rgba(255,255,255,0.05); backdrop-filter: blur(15px); border-radius: 24px; padding: 30px; text-align: center; border: 1px solid rgba(255,255,255,0.1); }
+        .wave-box { height: 100px; margin: 20px 0; display: flex; align-items: center; justify-content: center; }
+        canvas { width: 100%; height: 60px; }
+        .btn { background: var(--primary); color: white; border: none; padding: 15px; border-radius: 12px; width: 100%; font-weight: bold; cursor: pointer; font-size: 16px; }
+        #status { font-size: 12px; color: #94a3b8; margin-bottom: 15px; text-transform: uppercase; }
+        #log { margin-top: 20px; height: 120px; overflow-y: auto; text-align: left; font-size: 13px; border-top: 1px solid #334155; padding-top: 10px; }
     </style>
 </head>
 <body>
 
-<div class="container">
-    <div class="card">
-        <div id="status">Upload CV to Initialize</div>
-        
-        <div class="wave-container">
-            <canvas id="waveCanvas"></canvas>
-        </div>
-
-        <label for="cvInput" id="uploadLabel" class="btn">📁 Choose PDF Resume</label>
-        <input type="file" id="cvInput" accept=".pdf">
-        
-        <button id="startBtn" class="btn" style="display:none">Start Interview</button>
-        <button id="endBtn" class="btn" style="display:none; background:#ef4444; margin-top:10px;">End Session</button>
-
-        <div id="log"></div>
-    </div>
+<div class="card">
+    <div id="status">Upload Resume to Start</div>
+    <div class="wave-box"><canvas id="canvas"></canvas></div>
+    
+    <input type="file" id="cvInput" accept=".pdf" style="margin-bottom:10px">
+    <button id="startBtn" class="btn" disabled>Start Interview</button>
+    <button id="endBtn" class="btn" style="display:none; background:#ef4444">End Session</button>
+    
+    <div id="log"></div>
 </div>
 
 <script>
-/* ================= CONFIG ================= */
-const API = "https://evalis-ai.simpaticohrconsultancy.workers.dev"; // Your Worker URL
+const API = "https://evalis-ai.simpaticohrconsultancy.workers.dev";
 const pdfjsLib = window['pdfjs-dist/build/pdf'];
 pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
 
-let cvText = "", history = [], interviewActive = false, isAISpeaking = false;
-let audioCtx, analyser, dataArray, recognition;
+let cvText = "", history = [], interviewActive = false, isAISpeaking = false, recognition;
+let audioCtx, analyser, dataArray, canvasCtx;
 
-const statusEl = document.getElementById("status");
-const logBox = document.getElementById("log");
-const canvas = document.getElementById("waveCanvas");
-const ctx = canvas.getContext("2d");
-
-/* ================= WAVEFORM VISUALIZER ================= */
-function initVisualizer(stream) {
-    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    analyser = audioCtx.createAnalyser();
-    const source = audioCtx.createMediaStreamSource(stream);
-    source.connect(analyser);
-    analyser.fftSize = 256;
-    dataArray = new Uint8Array(analyser.frequencyBinCount);
-    drawWave();
-}
-
-function drawWave() {
-    requestAnimationFrame(drawWave);
-    analyser.getByteFrequencyData(dataArray);
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    
-    const barWidth = 3;
-    let x = 0;
-    for (let i = 0; i < analyser.frequencyBinCount; i++) {
-        const barHeight = dataArray[i] / 2;
-        ctx.fillStyle = `rgba(99, 102, 241, ${barHeight/100})`;
-        ctx.fillRect(x, canvas.height/2 - barHeight/2, barWidth, barHeight);
-        x += barWidth + 2;
-    }
-}
-
-/* ================= PDF PARSING ================= */
+/* 1. PDF & INITIALIZATION */
 document.getElementById("cvInput").onchange = async e => {
-    statusEl.textContent = "Reading PDF...";
-    const file = e.target.files[0];
-    const pdf = await pdfjsLib.getDocument(await file.arrayBuffer()).promise;
+    const pdf = await pdfjsLib.getDocument(await e.target.files[0].arrayBuffer()).promise;
     let text = "";
     for (let i = 1; i <= pdf.numPages; i++) {
         const page = await pdf.getPage(i);
-        const content = await page.getTextContent();
-        text += content.items.map(s => s.str).join(" ") + " ";
+        text += (await page.getTextContent()).items.map(s => s.str).join(" ") + " ";
     }
-    cvText = text.trim();
-    statusEl.textContent = "Resume Loaded";
-    document.getElementById("uploadLabel").style.display = "none";
-    document.getElementById("startBtn").style.display = "block";
+    cvText = text;
+    document.getElementById("startBtn").disabled = false;
+    document.getElementById("status").textContent = "Resume Loaded";
 };
 
-/* ================= LIVE AI INTERACTION ================= */
+/* 2. MERCOR WAVEFORM */
+function startWave(stream) {
+    audioCtx = new AudioContext();
+    analyser = audioCtx.createAnalyser();
+    audioCtx.createMediaStreamSource(stream).connect(analyser);
+    dataArray = new Uint8Array(analyser.frequencyBinCount);
+    canvasCtx = document.getElementById("canvas").getContext("2d");
+    draw();
+}
+
+function draw() {
+    requestAnimationFrame(draw);
+    analyser.getByteFrequencyData(dataArray);
+    canvasCtx.clearRect(0, 0, 400, 60);
+    canvasCtx.fillStyle = "#6366f1";
+    for (let i = 0; i < 100; i++) {
+        let h = dataArray[i] / 2;
+        canvasCtx.fillRect(i * 4, 30 - h/2, 2, h);
+    }
+}
+
+/* 3. SPEECH ENGINE (Text-to-Speech) */
 function speak(text) {
-    speechSynthesis.cancel();
+    window.speechSynthesis.cancel();
     const u = new SpeechSynthesisUtterance(text);
-    u.onstart = () => { isAISpeaking = true; };
+    u.onstart = () => { 
+        isAISpeaking = true; 
+        if(recognition) recognition.stop(); // 🛑 Stop mic so it doesn't hear itself
+    };
     u.onend = () => { 
         isAISpeaking = false; 
-        if (interviewActive) try { recognition.start(); } catch(e){}
+        if(interviewActive) recognition.start(); // 🟢 Listen again
     };
-    speechSynthesis.speak(u);
-}
-
-async function handleTurn(transcript) {
-    if(!transcript) return;
+    window.speechSynthesis.speak(u);
     const div = document.createElement("div");
-    div.innerHTML = `<i>You: ${transcript}</i>`;
-    logBox.prepend(div);
-
-    const fd = new FormData();
-    fd.append("mode", "interview");
-    fd.append("cvText", cvText);
-    fd.append("history", JSON.stringify(history));
-    fd.append("text", transcript);
-
-    const res = await fetch(API, { method: "POST", body: fd });
-    const data = await res.json();
-    history = data.history;
-    speak(data.reply);
+    div.innerHTML = `<b>AI:</b> ${text}`;
+    document.getElementById("log").prepend(div);
 }
 
+/* 4. LIVE LISTENING (Speech-to-Text) */
 function initRecognition() {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     recognition = new SR();
     recognition.continuous = true;
-    recognition.interimResults = false;
-
-    recognition.onresult = e => {
+    recognition.onresult = async e => {
         const transcript = e.results[e.results.length - 1][0].transcript.trim();
-        // BARGE-IN: Stop AI immediately if user starts talking
-        if (isAISpeaking) {
-            speechSynthesis.cancel();
-            isAISpeaking = false;
-        }
-        handleTurn(transcript);
-    };
+        
+        // 🔴 BARGE-IN: If you speak, AI stops talking immediately
+        if (isAISpeaking) { window.speechSynthesis.cancel(); isAISpeaking = false; }
+        
+        document.getElementById("status").textContent = "AI Thinking...";
+        const fd = new FormData();
+        fd.append("mode", "interview");
+        fd.append("history", JSON.stringify(history));
+        fd.append("text", transcript);
+        fd.append("cvText", cvText);
 
-    recognition.onstart = () => { statusEl.textContent = "Listening..."; statusEl.classList.add("status-active"); };
-    recognition.onend = () => { if(interviewActive) recognition.start(); };
+        const res = await fetch(API, { method: "POST", body: fd });
+        const data = await res.json();
+        history = data.history;
+        speak(data.reply);
+    };
+    recognition.onstart = () => { document.getElementById("status").textContent = "🔴 Listening..."; };
 }
 
+/* 5. START BUTTON */
 document.getElementById("startBtn").onclick = async () => {
+    // 🟢 CRITICAL: Unlock audio for mobile/Chrome
+    window.speechSynthesis.speak(new SpeechSynthesisUtterance("")); 
+    
     interviewActive = true;
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    initVisualizer(stream);
+    startWave(stream);
     initRecognition();
-    
+
     document.getElementById("startBtn").style.display = "none";
     document.getElementById("endBtn").style.display = "block";
 
@@ -174,9 +136,6 @@ document.getElementById("startBtn").onclick = async () => {
     history = data.history;
     speak(data.reply);
 };
-
-document.getElementById("endBtn").onclick = () => location.reload();
-
 </script>
 </body>
 </html>
