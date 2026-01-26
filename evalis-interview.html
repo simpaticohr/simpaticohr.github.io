@@ -12,11 +12,19 @@
         .wave-box { height: 80px; margin: 15px 0; }
         canvas { width: 100%; height: 60px; filter: drop-shadow(0 0 5px var(--primary)); }
         #timer { font-size: 24px; font-weight: 700; color: var(--primary); margin-bottom: 5px; font-variant-numeric: tabular-nums; }
-        #status { font-size: 12px; color: #94a3b8; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 20px; }
+        #status { font-size: 12px; color: #94a3b8; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 20px; font-weight: 600; }
+        #status.listening { color: #4ade80; animation: pulse 2s infinite; }
+        #status.thinking { color: #fbbf24; }
+        #status.speaking { color: #a78bfa; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
         .btn { background: var(--primary); color: white; border: none; padding: 16px; border-radius: 14px; width: 100%; font-weight: bold; cursor: pointer; font-size: 16px; transition: 0.3s; }
-        .btn:disabled { opacity: 0.3; }
+        .btn:disabled { opacity: 0.3; cursor: not-allowed; }
         #log { margin-top: 20px; max-height: 200px; overflow-y: auto; text-align: left; font-size: 14px; border-top: 1px solid #334155; padding-top: 15px; }
         .report-box { background: rgba(99, 102, 241, 0.1); padding: 20px; border-radius: 15px; text-align: left; line-height: 1.6; border: 1px solid var(--primary); }
+        .user-msg { color: #86efac; margin: 8px 0; }
+        .ai-msg { color: #a5b4fc; margin: 8px 0; }
+        .error-msg { color: #fca5a5; margin: 8px 0; font-size: 12px; }
+        #debugInfo { font-size: 10px; color: #64748b; margin-top: 10px; }
     </style>
 </head>
 <body>
@@ -31,6 +39,7 @@
     <button id="endBtn" class="btn" style="display:none; background:#ef4444">End Interview</button>
     
     <div id="log"></div>
+    <div id="debugInfo"></div>
 </div>
 
 <script>
@@ -40,38 +49,70 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs
 
 let cvText = "", history = [], interviewActive = false, isAISpeaking = false, recognition;
 let audioCtx, analyser, dataArray, canvasCtx, timerInterval, timeLeft = 15 * 60;
+let isProcessing = false;
+let recognitionRestartTimeout;
+
+function log(msg, type = 'info') {
+    console.log(msg);
+    const d = document.createElement("div");
+    d.className = type === 'error' ? 'error-msg' : 'ai-msg';
+    d.innerHTML = `<small>${new Date().toLocaleTimeString()}: ${msg}</small>`;
+    document.getElementById("log").prepend(d);
+}
+
+function updateDebug(msg) {
+    document.getElementById("debugInfo").textContent = msg;
+}
 
 /* 1. PDF LOADING */
 document.getElementById("cvInput").onchange = async e => {
-    const pdf = await pdfjsLib.getDocument(await e.target.files[0].arrayBuffer()).promise;
-    let text = "";
-    for (let i = 1; i <= pdf.numPages; i++) {
-        const page = await pdf.getPage(i);
-        text += (await page.getTextContent()).items.map(s => s.str).join(" ") + " ";
+    try {
+        const file = e.target.files[0];
+        if (!file) return;
+        
+        log("Loading PDF...");
+        const pdf = await pdfjsLib.getDocument(await file.arrayBuffer()).promise;
+        let text = "";
+        for (let i = 1; i <= pdf.numPages; i++) {
+            const page = await pdf.getPage(i);
+            text += (await page.getTextContent()).items.map(s => s.str).join(" ") + " ";
+        }
+        cvText = text.trim();
+        document.getElementById("startBtn").disabled = false;
+        document.getElementById("status").textContent = "Resume Ready";
+        log("Resume loaded successfully!");
+    } catch (err) {
+        log("Error loading PDF: " + err.message, 'error');
     }
-    cvText = text;
-    document.getElementById("startBtn").disabled = false;
-    document.getElementById("status").textContent = "Resume Ready";
 };
 
 /* 2. WAVEFORM & TIMER */
 function initWave(stream) {
-    audioCtx = new AudioContext();
-    analyser = audioCtx.createAnalyser();
-    audioCtx.createMediaStreamSource(stream).connect(analyser);
-    dataArray = new Uint8Array(analyser.frequencyBinCount);
-    canvasCtx = document.getElementById("canvas").getContext("2d");
-    const draw = () => {
-        requestAnimationFrame(draw);
-        analyser.getByteFrequencyData(dataArray);
-        canvasCtx.clearRect(0, 0, 400, 60);
-        canvasCtx.fillStyle = "#6366f1";
-        for (let i = 0; i < 80; i++) {
-            let h = dataArray[i] / 2.5;
-            canvasCtx.fillRect(i * 5, 30 - h/2, 3, h);
-        }
-    };
-    draw();
+    try {
+        audioCtx = new AudioContext();
+        analyser = audioCtx.createAnalyser();
+        audioCtx.createMediaStreamSource(stream).connect(analyser);
+        dataArray = new Uint8Array(analyser.frequencyBinCount);
+        const canvas = document.getElementById("canvas");
+        canvas.width = 400;
+        canvas.height = 60;
+        canvasCtx = canvas.getContext("2d");
+        
+        const draw = () => {
+            if (!interviewActive) return;
+            requestAnimationFrame(draw);
+            analyser.getByteFrequencyData(dataArray);
+            canvasCtx.clearRect(0, 0, 400, 60);
+            canvasCtx.fillStyle = "#6366f1";
+            for (let i = 0; i < 80; i++) {
+                let h = dataArray[i] / 2.5;
+                canvasCtx.fillRect(i * 5, 30 - h/2, 3, h);
+            }
+        };
+        draw();
+    } catch (err) {
+        log("Error initializing waveform: " + err.message, 'error');
+    }
 }
 
 function startTimer() {
@@ -85,80 +126,279 @@ function startTimer() {
 
 /* 3. SPEECH & INTERACTION */
 function speak(text) {
-    window.speechSynthesis.cancel();
-    const u = new SpeechSynthesisUtterance(text);
-    u.onstart = () => { isAISpeaking = true; if(recognition) recognition.stop(); };
-    u.onend = () => { isAISpeaking = false; if(interviewActive) recognition.start(); };
-    window.speechSynthesis.speak(u);
-    const d = document.createElement("div"); d.innerHTML = `<p style="color:#a5b4fc"><b>AI:</b> ${text}</p>`;
-    document.getElementById("log").prepend(d);
+    return new Promise((resolve) => {
+        window.speechSynthesis.cancel();
+        const u = new SpeechSynthesisUtterance(text);
+        
+        // Better voice settings
+        u.rate = 0.9;
+        u.pitch = 1;
+        u.volume = 1;
+        
+        u.onstart = () => { 
+            isAISpeaking = true; 
+            if(recognition) {
+                try {
+                    recognition.stop();
+                } catch(e) {}
+            }
+            updateDebug("AI Speaking...");
+            const statusEl = document.getElementById("status");
+            statusEl.textContent = "🗣️ AI Speaking...";
+            statusEl.className = "speaking";
+        };
+        
+        u.onend = () => { 
+            isAISpeaking = false;
+            updateDebug("Listening for your response...");
+            
+            // Wait a bit before restarting recognition
+            setTimeout(() => {
+                if(interviewActive && !isProcessing) {
+                    startListening();
+                }
+                resolve();
+            }, 500);
+        };
+        
+        u.onerror = (err) => {
+            log("Speech error: " + err.error, 'error');
+            isAISpeaking = false;
+            resolve();
+        };
+        
+        window.speechSynthesis.speak(u);
+        
+        const d = document.createElement("div");
+        d.className = 'ai-msg';
+        d.innerHTML = `<b>AI:</b> ${text}`;
+        document.getElementById("log").prepend(d);
+    });
+}
+
+function startListening() {
+    if (!recognition || !interviewActive || isAISpeaking || isProcessing) return;
+    
+    try {
+        recognition.start();
+        updateDebug("Listening...");
+        const statusEl = document.getElementById("status");
+        statusEl.textContent = "🎤 Listening...";
+        statusEl.className = "listening";
+    } catch (err) {
+        if (err.name !== 'InvalidStateError') {
+            log("Recognition start error: " + err.message, 'error');
+        }
+    }
 }
 
 function initRecognition() {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    
+    if (!SR) {
+        log("Speech recognition not supported in this browser", 'error');
+        alert("Speech recognition is not supported in this browser. Please use Chrome or Safari.");
+        return false;
+    }
+    
     recognition = new SR();
-    recognition.continuous = true;
-    recognition.onresult = async e => {
-        const transcript = e.results[e.results.length - 1][0].transcript.trim();
-        if (isAISpeaking) { window.speechSynthesis.cancel(); isAISpeaking = false; }
-        
-        document.getElementById("status").textContent = "Thinking...";
-        const fd = new FormData();
-        fd.append("mode", "interview");
-        fd.append("history", JSON.stringify(history));
-        fd.append("text", transcript);
-        fd.append("cvText", cvText);
-
-        const res = await fetch(API, { method: "POST", body: fd });
-        const data = await res.json();
-        history = data.history;
-        speak(data.reply);
+    recognition.continuous = false; // Changed to false for better mobile support
+    recognition.interimResults = false;
+    recognition.lang = 'en-US';
+    
+    recognition.onstart = () => {
+        updateDebug("Listening started");
+        const statusEl = document.getElementById("status");
+        statusEl.textContent = "🎤 Listening...";
+        statusEl.className = "listening";
     };
+    
+    recognition.onend = () => {
+        updateDebug("Listening ended");
+        // Auto-restart if interview is still active and not processing
+        if (interviewActive && !isProcessing && !isAISpeaking) {
+            recognitionRestartTimeout = setTimeout(() => {
+                startListening();
+            }, 1000);
+        }
+    };
+    
+    recognition.onerror = (e) => {
+        log("Recognition error: " + e.error, 'error');
+        
+        if (e.error === 'no-speech') {
+            // User didn't speak, restart listening
+            if (interviewActive && !isProcessing && !isAISpeaking) {
+                setTimeout(() => startListening(), 1000);
+            }
+        } else if (e.error === 'aborted') {
+            // Normal, happens when we stop it
+        } else {
+            log("Please try speaking again", 'error');
+            setTimeout(() => {
+                if (interviewActive && !isProcessing) startListening();
+            }, 2000);
+        }
+    };
+    
+    recognition.onresult = async (e) => {
+        const transcript = e.results[e.results.length - 1][0].transcript.trim();
+        
+        if (!transcript || transcript.length < 2) {
+            log("No speech detected, please try again", 'error');
+            return;
+        }
+        
+        // Prevent duplicate processing
+        if (isProcessing) return;
+        isProcessing = true;
+        
+        // Stop any ongoing speech
+        if (isAISpeaking) { 
+            window.speechSynthesis.cancel(); 
+            isAISpeaking = false; 
+        }
+        
+        // Display user message
+        const userDiv = document.createElement("div");
+        userDiv.className = 'user-msg';
+        userDiv.innerHTML = `<b>You:</b> ${transcript}`;
+        document.getElementById("log").prepend(userDiv);
+        
+        const statusEl = document.getElementById("status");
+        statusEl.textContent = "💭 Thinking...";
+        statusEl.className = "thinking";
+        updateDebug("Processing your response...");
+        
+        try {
+            const fd = new FormData();
+            fd.append("mode", "interview");
+            fd.append("history", JSON.stringify(history));
+            fd.append("text", transcript);
+            fd.append("cvText", cvText);
+
+            const res = await fetch(API, { method: "POST", body: fd });
+            
+            if (!res.ok) {
+                throw new Error(`API error: ${res.status}`);
+            }
+            
+            const data = await res.json();
+            
+            if (!data || !data.reply) {
+                throw new Error("Invalid response from API");
+            }
+            
+            history = data.history || history;
+            
+            // Speak the response
+            await speak(data.reply);
+            
+        } catch (err) {
+            log("Error: " + err.message, 'error');
+            await speak("I apologize, I encountered an error. Could you please repeat that?");
+        } finally {
+            isProcessing = false;
+            const statusEl = document.getElementById("status");
+            statusEl.textContent = "Interview Active";
+            statusEl.className = "";
+        }
+    };
+    
+    return true;
 }
 
 /* 4. FINISH & SCORE REPORT */
 async function finishInterview() {
     interviewActive = false;
     clearInterval(timerInterval);
-    if(recognition) recognition.stop();
+    clearTimeout(recognitionRestartTimeout);
+    
+    if(recognition) {
+        try {
+            recognition.stop();
+        } catch(e) {}
+    }
+    
     window.speechSynthesis.cancel();
     document.getElementById("status").textContent = "Generating Score Report...";
+    log("Interview ended. Generating report...");
     
-    const fd = new FormData();
-    fd.append("mode", "score");
-    fd.append("history", JSON.stringify(history));
+    try {
+        const fd = new FormData();
+        fd.append("mode", "score");
+        fd.append("history", JSON.stringify(history));
 
-    const res = await fetch(API, { method: "POST", body: fd });
-    const data = await res.json();
-    
-    document.body.innerHTML = `
-        <div class="card" style="max-width:600px">
-            <h2 style="color:var(--primary)">Final Score Report</h2>
-            <div class="report-box" style="white-space:pre-wrap">${data.reply}</div>
-            <button onclick="location.reload()" class="btn" style="margin-top:20px">New Session</button>
-        </div>`;
+        const res = await fetch(API, { method: "POST", body: fd });
+        
+        if (!res.ok) {
+            throw new Error(`API error: ${res.status}`);
+        }
+        
+        const data = await res.json();
+        
+        document.body.innerHTML = `
+            <div class="card" style="max-width:600px">
+                <h2 style="color:var(--primary)">Final Score Report</h2>
+                <div class="report-box" style="white-space:pre-wrap">${data.reply || "Report generation failed"}</div>
+                <button onclick="location.reload()" class="btn" style="margin-top:20px">New Session</button>
+            </div>`;
+    } catch (err) {
+        log("Error generating report: " + err.message, 'error');
+        alert("Failed to generate report. Please check the console for details.");
+    }
 }
 
 /* 5. START SESSION */
 document.getElementById("startBtn").onclick = async () => {
-    window.speechSynthesis.speak(new SpeechSynthesisUtterance("")); // Unlock Audio
-    interviewActive = true;
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    initWave(stream);
-    initRecognition();
-    startTimer();
+    try {
+        // Request microphone permission first
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        
+        // Initialize speech recognition
+        if (!initRecognition()) {
+            alert("Speech recognition is not available. Please use Chrome or Safari.");
+            return;
+        }
+        
+        // Unlock audio on mobile
+        window.speechSynthesis.speak(new SpeechSynthesisUtterance(""));
+        
+        interviewActive = true;
+        initWave(stream);
+        startTimer();
 
-    document.getElementById("cvInput").style.display = "none";
-    document.getElementById("startBtn").style.display = "none";
-    document.getElementById("endBtn").style.display = "block";
+        document.getElementById("cvInput").style.display = "none";
+        document.getElementById("startBtn").style.display = "none";
+        document.getElementById("endBtn").style.display = "block";
+        document.getElementById("status").textContent = "Starting...";
 
-    const fd = new FormData();
-    fd.append("mode", "start");
-    fd.append("cvText", cvText);
-    const res = await fetch(API, { method: "POST", body: fd });
-    const data = await res.json();
-    history = data.history;
-    speak(data.reply);
+        const fd = new FormData();
+        fd.append("mode", "start");
+        fd.append("cvText", cvText);
+        
+        const res = await fetch(API, { method: "POST", body: fd });
+        
+        if (!res.ok) {
+            throw new Error(`API error: ${res.status}`);
+        }
+        
+        const data = await res.json();
+        
+        if (!data || !data.reply) {
+            throw new Error("Invalid response from API");
+        }
+        
+        history = data.history || [];
+        
+        // Speak first question and start listening after
+        await speak(data.reply);
+        
+    } catch (err) {
+        log("Error starting interview: " + err.message, 'error');
+        alert("Failed to start interview: " + err.message);
+        interviewActive = false;
+    }
 };
 
 document.getElementById("endBtn").onclick = finishInterview;
