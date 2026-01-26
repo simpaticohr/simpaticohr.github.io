@@ -1,469 +1,409 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { Mic, MicOff, Upload, Play, Square, Volume2, VolumeX, Clock, MessageSquare } from 'lucide-react';
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Evalis AI - Elite Live Interview</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <style>
+        :root { --primary: #6366f1; --bg: #020617; }
+        body { margin: 0; background: var(--bg); color: white; font-family: system-ui, sans-serif; display: flex; align-items: center; justify-content: center; min-height: 100vh; overflow-x: hidden; }
+        .card { width: 90%; max-width: 440px; background: rgba(255,255,255,0.05); backdrop-filter: blur(15px); border-radius: 24px; padding: 30px; text-align: center; border: 1px solid rgba(255,255,255,0.1); box-shadow: 0 25px 50px rgba(0,0,0,0.5); }
+        .wave-box { height: 80px; margin: 15px 0; position: relative; }
+        canvas { width: 100%; height: 60px; filter: drop-shadow(0 0 5px var(--primary)); }
+        .listening-indicator { position: absolute; top: 0; right: 0; width: 12px; height: 12px; background: #10b981; border-radius: 50%; opacity: 0; transition: opacity 0.3s; }
+        .listening-indicator.active { opacity: 1; animation: pulse 1.5s infinite; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+        #timer { font-size: 24px; font-weight: 700; color: var(--primary); margin-bottom: 5px; font-variant-numeric: tabular-nums; }
+        #status { font-size: 12px; color: #94a3b8; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 20px; }
+        .btn { background: var(--primary); color: white; border: none; padding: 16px; border-radius: 14px; width: 100%; font-weight: bold; cursor: pointer; font-size: 16px; transition: 0.3s; }
+        .btn:disabled { opacity: 0.3; cursor: not-allowed; }
+        .btn:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 10px 20px rgba(99,102,241,0.3); }
+        #log { margin-top: 20px; max-height: 200px; overflow-y: auto; text-align: left; font-size: 14px; border-top: 1px solid #334155; padding-top: 15px; }
+        .log-entry { margin-bottom: 10px; padding: 8px; border-radius: 8px; background: rgba(255,255,255,0.03); }
+        .user-msg { color: #67e8f9; }
+        .ai-msg { color: #a5b4fc; }
+        .report-box { background: rgba(99, 102, 241, 0.1); padding: 20px; border-radius: 15px; text-align: left; line-height: 1.6; border: 1px solid var(--primary); }
+        .error-msg { color: #ef4444; font-size: 12px; margin-top: 10px; }
+    </style>
+</head>
+<body>
 
-export default function EvalisInterview() {
-  const [cvText, setCvText] = useState('');
-  const [messages, setMessages] = useState([]);
-  const [isActive, setIsActive] = useState(false);
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [isMuted, setIsMuted] = useState(false);
-  const [timeLeft, setTimeLeft] = useState(900); // 15 minutes
-  const [stats, setStats] = useState({ questions: 0, responses: 0 });
-  const [status, setStatus] = useState('Upload resume to begin');
-  const [showReport, setShowReport] = useState(false);
-  const [reportData, setReportData] = useState(null);
-  
-  const recognitionRef = useRef(null);
-  const lastTranscriptRef = useRef('');
-  const conversationRef = useRef([]);
-  const audioContextRef = useRef(null);
-  const analyserRef = useRef(null);
-  const canvasRef = useRef(null);
-
-  // Timer
-  useEffect(() => {
-    if (!isActive) return;
+<div class="card">
+    <div id="timer">15:00</div>
+    <div id="status">Upload Resume to Start</div>
+    <div class="wave-box">
+        <canvas id="canvas"></canvas>
+        <div class="listening-indicator" id="listeningIndicator"></div>
+    </div>
     
-    const timer = setInterval(() => {
-      setTimeLeft(prev => {
-        if (prev <= 1) {
-          handleEndInterview();
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
+    <input type="file" id="cvInput" accept=".pdf" style="margin-bottom:15px; font-size: 12px;">
+    <button id="startBtn" class="btn" disabled>Start Interview</button>
+    <button id="endBtn" class="btn" style="display:none; background:#ef4444">End Interview</button>
     
-    return () => clearInterval(timer);
-  }, [isActive]);
+    <div id="log"></div>
+    <div id="errorMsg" class="error-msg"></div>
+</div>
 
-  // Waveform visualization
-  useEffect(() => {
-    if (!isActive || !canvasRef.current) return;
+<script>
+const API = "https://evalis-ai.simpaticohrconsultancy.workers.dev";
+const pdfjsLib = window['pdfjs-dist/build/pdf'];
+pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
 
-    const drawWave = () => {
-      if (!analyserRef.current || !canvasRef.current) return;
-      
-      const canvas = canvasRef.current;
-      const ctx = canvas.getContext('2d');
-      const dataArray = new Uint8Array(analyserRef.current.frequencyBinCount);
-      
-      analyserRef.current.getByteFrequencyData(dataArray);
-      
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      
-      const barWidth = canvas.width / 80;
-      let x = 0;
-      
-      for (let i = 0; i < 80; i++) {
-        const barHeight = (dataArray[i] / 255) * canvas.height * 0.7;
-        
-        const gradient = ctx.createLinearGradient(0, canvas.height, 0, canvas.height - barHeight);
-        gradient.addColorStop(0, '#6366f1');
-        gradient.addColorStop(1, '#8b5cf6');
-        
-        ctx.fillStyle = gradient;
-        ctx.fillRect(x, canvas.height - barHeight, barWidth - 2, barHeight);
-        
-        x += barWidth;
-      }
-      
-      if (isActive) {
-        requestAnimationFrame(drawWave);
-      }
-    };
-    
-    drawWave();
-  }, [isActive]);
+let cvText = "", history = [], interviewActive = false, isAISpeaking = false, recognition;
+let audioCtx, analyser, dataArray, canvasCtx, timerInterval, timeLeft = 15 * 60;
+let silenceTimeout, userSpeechBuffer = "", lastTranscriptTime = 0;
+let isProcessing = false, reconnectAttempts = 0;
 
-  const handleFileUpload = async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-
-    setStatus('Loading PDF...');
-    
+/* 1. IMPROVED PDF LOADING */
+document.getElementById("cvInput").onchange = async e => {
     try {
-      const pdfjsLib = window['pdfjs-dist/build/pdf'];
-      const arrayBuffer = await file.arrayBuffer();
-      const pdf = await pdfjsLib.getDocument(arrayBuffer).promise;
-      
-      let text = '';
-      for (let i = 1; i <= pdf.numPages; i++) {
-        const page = await pdf.getPage(i);
-        const content = await page.getTextContent();
-        text += content.items.map(item => item.str).join(' ') + ' ';
-      }
-      
-      setCvText(text.trim());
-      setStatus('Resume loaded - Ready to start');
-      addMessage('Resume loaded successfully. Click "Start Interview" when ready.', 'system');
+        showError("");
+        const file = e.target.files[0];
+        if (!file) return;
+        
+        document.getElementById("status").textContent = "Loading Resume...";
+        const pdf = await pdfjsLib.getDocument(await file.arrayBuffer()).promise;
+        let text = "";
+        
+        for (let i = 1; i <= pdf.numPages; i++) {
+            const page = await pdf.getPage(i);
+            const content = await page.getTextContent();
+            text += content.items.map(s => s.str).join(" ") + " ";
+        }
+        
+        cvText = text.trim();
+        
+        if (cvText.length < 50) {
+            showError("Resume seems too short. Please upload a complete resume.");
+            return;
+        }
+        
+        document.getElementById("startBtn").disabled = false;
+        document.getElementById("status").textContent = "Resume Ready ✓";
     } catch (err) {
-      setStatus('Error loading PDF');
-      addMessage('Failed to load PDF: ' + err.message, 'system');
+        showError("Failed to load PDF. Please try again.");
+        console.error(err);
     }
-  };
+};
 
-  const addMessage = (content, type) => {
-    setMessages(prev => [...prev, {
-      content,
-      type,
-      time: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
-    }]);
+/* 2. ENHANCED WAVEFORM & TIMER */
+function initWave(stream) {
+    audioCtx = new AudioContext();
+    analyser = audioCtx.createAnalyser();
+    analyser.fftSize = 256;
+    analyser.smoothingTimeConstant = 0.8;
+    audioCtx.createMediaStreamSource(stream).connect(analyser);
+    dataArray = new Uint8Array(analyser.frequencyBinCount);
     
-    if (type === 'ai') setStats(prev => ({ ...prev, questions: prev.questions + 1 }));
-    if (type === 'user') setStats(prev => ({ ...prev, responses: prev.responses + 1 }));
-  };
+    const canvas = document.getElementById("canvas");
+    canvas.width = 400;
+    canvas.height = 60;
+    canvasCtx = canvas.getContext("2d");
+    
+    const draw = () => {
+        if (!interviewActive) return;
+        requestAnimationFrame(draw);
+        analyser.getByteFrequencyData(dataArray);
+        canvasCtx.clearRect(0, 0, 400, 60);
+        canvasCtx.fillStyle = "#6366f1";
+        
+        for (let i = 0; i < 80; i++) {
+            let h = dataArray[i] / 2.5;
+            canvasCtx.fillRect(i * 5, 30 - h/2, 3, Math.max(h, 2));
+        }
+    };
+    draw();
+}
 
-  const speak = (text) => {
+function startTimer() {
+    timerInterval = setInterval(() => {
+        timeLeft--;
+        let min = Math.floor(timeLeft / 60), sec = timeLeft % 60;
+        document.getElementById("timer").textContent = `${min}:${sec < 10 ? '0' : ''}${sec}`;
+        if (timeLeft <= 0) finishInterview();
+    }, 1000);
+}
+
+/* 3. OPTIMIZED SPEECH RECOGNITION */
+function speak(text) {
     return new Promise((resolve) => {
-      if (isMuted) {
-        addMessage(text, 'ai');
-        resolve();
-        return;
-      }
-
-      window.speechSynthesis.cancel();
-      
-      const utterance = new SpeechSynthesisUtterance(text);
-      utterance.rate = 0.95;
-      utterance.pitch = 1.0;
-      
-      utterance.onstart = () => setStatus('AI Speaking...');
-      utterance.onend = () => {
-        setStatus('Listening...');
-        resolve();
-      };
-      utterance.onerror = resolve;
-      
-      window.speechSynthesis.speak(utterance);
-      addMessage(text, 'ai');
+        window.speechSynthesis.cancel();
+        const u = new SpeechSynthesisUtterance(text);
+        u.rate = 0.95;
+        u.pitch = 1.0;
+        
+        u.onstart = () => { 
+            isAISpeaking = true; 
+            if(recognition) recognition.stop();
+            updateListeningIndicator(false);
+            document.getElementById("status").textContent = "AI Speaking...";
+        };
+        
+        u.onend = () => { 
+            isAISpeaking = false;
+            if(interviewActive) {
+                setTimeout(() => {
+                    if (!isProcessing && interviewActive) {
+                        recognition.start();
+                        updateListeningIndicator(true);
+                        document.getElementById("status").textContent = "Listening...";
+                    }
+                }, 500);
+            }
+            resolve();
+        };
+        
+        u.onerror = () => {
+            isAISpeaking = false;
+            resolve();
+        };
+        
+        window.speechSynthesis.speak(u);
+        addLogEntry("AI", text);
     });
-  };
+}
 
-  const initRecognition = () => {
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    
-    if (!SpeechRecognition) {
-      alert('Speech recognition not supported. Please use Chrome or Safari.');
-      return false;
+function initRecognition() {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) {
+        showError("Speech recognition not supported in this browser.");
+        return;
     }
-
-    const recognition = new SpeechRecognition();
+    
+    recognition = new SR();
     recognition.continuous = true;
     recognition.interimResults = true;
+    recognition.maxAlternatives = 1;
     recognition.lang = 'en-US';
-
-    recognition.onstart = () => setStatus('Listening...');
+    
+    recognition.onstart = () => {
+        updateListeningIndicator(true);
+        document.getElementById("status").textContent = "Listening...";
+        reconnectAttempts = 0;
+    };
+    
+    recognition.onresult = async e => {
+        const current = e.results[e.results.length - 1];
+        const transcript = current[0].transcript.trim();
+        
+        if (current.isFinal && transcript.length > 0) {
+            clearTimeout(silenceTimeout);
+            
+            if (isAISpeaking || isProcessing) return;
+            
+            userSpeechBuffer = transcript;
+            lastTranscriptTime = Date.now();
+            
+            // Wait for natural pause before processing
+            silenceTimeout = setTimeout(async () => {
+                if (userSpeechBuffer && !isProcessing && !isAISpeaking) {
+                    await processUserInput(userSpeechBuffer);
+                    userSpeechBuffer = "";
+                }
+            }, 1200);
+        }
+    };
+    
+    recognition.onerror = e => {
+        console.error("Recognition error:", e.error);
+        if (e.error === 'no-speech') {
+            // Ignore no-speech errors
+            return;
+        }
+        
+        if (e.error === 'aborted' && !interviewActive) {
+            return;
+        }
+        
+        if (interviewActive && !isAISpeaking && reconnectAttempts < 3) {
+            setTimeout(() => {
+                if (interviewActive && !isAISpeaking) {
+                    recognition.start();
+                    reconnectAttempts++;
+                }
+            }, 1000);
+        }
+    };
     
     recognition.onend = () => {
-      if (isActive && !isProcessing) {
-        setTimeout(() => {
-          try { recognition.start(); } catch(e) {}
-        }, 100);
-      }
-    };
-
-    recognition.onresult = (event) => {
-      const result = event.results[event.results.length - 1];
-      if (!result.isFinal) return;
-
-      const transcript = result[0].transcript.trim();
-      if (transcript.length < 3 || transcript === lastTranscriptRef.current) return;
-
-      lastTranscriptRef.current = transcript;
-      handleUserInput(transcript);
-    };
-
-    recognitionRef.current = recognition;
-    return true;
-  };
-
-  const handleUserInput = async (transcript) => {
-    if (isProcessing) return;
-    
-    setIsProcessing(true);
-    addMessage(transcript, 'user');
-    setStatus('Thinking...');
-
-    try {
-      const messages = [
-        {
-          role: "user",
-          content: `You are a professional technical interviewer. The candidate's resume summary: ${cvText.substring(0, 1500)}...
-
-Interview them about their technical experience. Be conversational and adaptive. Keep responses under 3 sentences.
-
-${conversationRef.current.length === 0 ? 'Greet them warmly and ask your first question about their background.' : 'Continue based on their latest response.'}`
-        },
-        ...conversationRef.current,
-        { role: "user", content: transcript }
-      ];
-
-      const response = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "anthropic-version": "2023-06-01"
-        },
-        body: JSON.stringify({
-          model: "claude-sonnet-4-20250514",
-          max_tokens: 1000,
-          messages
-        })
-      });
-
-      const data = await response.json();
-      const aiResponse = data.content[0].text;
-
-      conversationRef.current.push(
-        { role: "user", content: transcript },
-        { role: "assistant", content: aiResponse }
-      );
-
-      await speak(aiResponse);
-    } catch (err) {
-      console.error(err);
-      await speak("I apologize, I had a connection issue. Could you repeat that?");
-    } finally {
-      setIsProcessing(false);
-    }
-  };
-
-  const handleStartInterview = async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true
+        updateListeningIndicator(false);
+        if (interviewActive && !isAISpeaking && !isProcessing) {
+            setTimeout(() => {
+                if (interviewActive && !isAISpeaking) {
+                    recognition.start();
+                }
+            }, 300);
         }
-      });
-
-      // Initialize audio visualization
-      const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-      const analyser = audioContext.createAnalyser();
-      analyser.fftSize = 256;
-      const source = audioContext.createMediaStreamSource(stream);
-      source.connect(analyser);
-      
-      audioContextRef.current = audioContext;
-      analyserRef.current = analyser;
-
-      // Initialize speech recognition
-      if (!initRecognition()) return;
-      
-      recognitionRef.current.start();
-      setIsActive(true);
-      setStatus('Starting interview...');
-
-      const greeting = "Hello! I'm excited to interview you today. I've reviewed your resume. Let's start - can you tell me about your current role and what you're most proud of in your recent work?";
-      
-      conversationRef.current.push({
-        role: "assistant",
-        content: greeting
-      });
-
-      await speak(greeting);
-    } catch (err) {
-      alert('Microphone access required: ' + err.message);
-    }
-  };
-
-  const handleEndInterview = async () => {
-    setIsActive(false);
-    setStatus('Generating report...');
-    
-    if (recognitionRef.current) {
-      recognitionRef.current.stop();
-    }
-    
-    window.speechSynthesis.cancel();
-
-    try {
-      const response = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "anthropic-version": "2023-06-01"
-        },
-        body: JSON.stringify({
-          model: "claude-sonnet-4-20250514",
-          max_tokens: 2000,
-          messages: [
-            {
-              role: "user",
-              content: `Generate a professional interview evaluation report based on this conversation:
-
-${conversationRef.current.map(m => `${m.role}: ${m.content}`).join('\n\n')}
-
-Provide:
-1. Overall Score (0-100)
-2. Technical Knowledge Assessment
-3. Communication Skills
-4. Key Strengths (3-4 points)
-5. Areas for Improvement (2-3 points)
-6. Final Recommendation
-
-Format as structured text.`
-            }
-          ]
-        })
-      });
-
-      const data = await response.json();
-      setReportData(data.content[0].text);
-      setShowReport(true);
-    } catch (err) {
-      alert('Failed to generate report: ' + err.message);
-    }
-  };
-
-  const formatTime = (seconds) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
-  };
-
-  if (showReport) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-900 to-slate-800 flex items-center justify-center p-6">
-        <div className="max-w-3xl w-full bg-slate-800/80 backdrop-blur-xl rounded-3xl p-12 border border-slate-700 shadow-2xl">
-          <h1 className="text-4xl font-bold text-indigo-400 text-center mb-8">Interview Report</h1>
-          
-          <div className="bg-slate-900/50 rounded-2xl p-8 mb-8 border border-indigo-500/30">
-            <pre className="whitespace-pre-wrap text-slate-300 leading-relaxed">{reportData}</pre>
-          </div>
-
-          <button
-            onClick={() => window.location.reload()}
-            className="w-full bg-gradient-to-r from-indigo-600 to-purple-600 text-white py-4 px-6 rounded-xl font-semibold hover:from-indigo-500 hover:to-purple-500 transition-all transform hover:scale-105 shadow-lg"
-          >
-            Start New Interview
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 to-slate-800 p-6">
-      <div className="max-w-7xl mx-auto grid lg:grid-cols-3 gap-6">
-        {/* Main Panel */}
-        <div className="lg:col-span-2 bg-slate-800/80 backdrop-blur-xl rounded-3xl p-8 border border-slate-700 shadow-2xl">
-          <div className="mb-8">
-            <h1 className="text-3xl font-bold bg-gradient-to-r from-indigo-400 to-purple-400 bg-clip-text text-transparent">
-              Evalis AI
-            </h1>
-            <p className="text-slate-400 mt-1">Professional Technical Interview Platform</p>
-          </div>
-
-          {!isActive ? (
-            <div>
-              <label className="block border-2 border-dashed border-indigo-500/30 rounded-2xl p-12 text-center cursor-pointer hover:border-indigo-500 hover:bg-indigo-500/5 transition-all">
-                <input
-                  type="file"
-                  accept=".pdf"
-                  onChange={handleFileUpload}
-                  className="hidden"
-                />
-                <Upload className="w-16 h-16 mx-auto mb-4 text-indigo-400" />
-                <p className="text-lg font-semibold text-slate-200 mb-2">Upload Your Resume</p>
-                <p className="text-sm text-slate-400">Click to select PDF file</p>
-              </label>
-
-              <button
-                onClick={handleStartInterview}
-                disabled={!cvText}
-                className="w-full mt-6 bg-gradient-to-r from-indigo-600 to-purple-600 text-white py-4 px-6 rounded-xl font-semibold disabled:opacity-40 disabled:cursor-not-allowed hover:from-indigo-500 hover:to-purple-500 transition-all transform hover:scale-105 shadow-lg flex items-center justify-center gap-2"
-              >
-                <Play className="w-5 h-5" />
-                Start Interview
-              </button>
-            </div>
-          ) : (
-            <div>
-              <div className="bg-indigo-500/10 rounded-2xl p-6 mb-6 border border-indigo-500/30">
-                <canvas ref={canvasRef} width={800} height={100} className="w-full h-24" />
-              </div>
-
-              <div className="max-h-96 overflow-y-auto space-y-3 mb-6">
-                {messages.map((msg, i) => (
-                  <div
-                    key={i}
-                    className={`p-4 rounded-xl ${
-                      msg.type === 'ai'
-                        ? 'bg-indigo-500/10 border-l-4 border-indigo-500'
-                        : msg.type === 'user'
-                        ? 'bg-green-500/10 border-l-4 border-green-500'
-                        : 'bg-yellow-500/10 border-l-4 border-yellow-500'
-                    }`}
-                  >
-                    <div className="flex items-center gap-2 mb-2 text-sm text-slate-400">
-                      <MessageSquare className="w-4 h-4" />
-                      <span className="font-semibold">
-                        {msg.type === 'ai' ? 'AI Interviewer' : msg.type === 'user' ? 'You' : 'System'}
-                      </span>
-                      <span className="ml-auto">{msg.time}</span>
-                    </div>
-                    <p className="text-slate-200">{msg.content}</p>
-                  </div>
-                ))}
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <button
-                  onClick={() => setIsMuted(!isMuted)}
-                  className="bg-slate-700 hover:bg-slate-600 text-white py-3 px-4 rounded-xl font-semibold transition-all flex items-center justify-center gap-2"
-                >
-                  {isMuted ? <VolumeX className="w-5 h-5" /> : <Volume2 className="w-5 h-5" />}
-                  {isMuted ? 'Unmute' : 'Mute'} AI
-                </button>
-                <button
-                  onClick={handleEndInterview}
-                  className="bg-red-600 hover:bg-red-500 text-white py-3 px-4 rounded-xl font-semibold transition-all flex items-center justify-center gap-2"
-                >
-                  <Square className="w-5 h-5" />
-                  End Interview
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* Sidebar */}
-        <div className="bg-slate-800/80 backdrop-blur-xl rounded-3xl p-8 border border-slate-700 shadow-2xl lg:sticky lg:top-6">
-          <div className="text-center mb-8">
-            <div className={`text-5xl font-bold mb-2 ${timeLeft < 60 ? 'text-red-400' : timeLeft < 300 ? 'text-yellow-400' : 'text-indigo-400'}`}>
-              {formatTime(timeLeft)}
-            </div>
-            <div className="flex items-center justify-center gap-2 text-sm text-slate-400">
-              <div className={`w-2 h-2 rounded-full ${isActive ? 'bg-green-400 animate-pulse' : 'bg-slate-600'}`} />
-              {status}
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-4 mb-6">
-            <div className="bg-slate-900/50 p-4 rounded-xl text-center">
-              <div className="text-3xl font-bold text-indigo-400">{stats.questions}</div>
-              <div className="text-xs text-slate-400 mt-1">Questions</div>
-            </div>
-            <div className="bg-slate-900/50 p-4 rounded-xl text-center">
-              <div className="text-3xl font-bold text-green-400">{stats.responses}</div>
-              <div className="text-xs text-slate-400 mt-1">Responses</div>
-            </div>
-          </div>
-
-          <div className="pt-6 border-t border-slate-700">
-            <div className="text-xs text-slate-400 mb-2 text-center">Interview Progress</div>
-            <div className="h-2 bg-slate-700 rounded-full overflow-hidden">
-              <div
-                className="h-full bg-gradient-to-r from-indigo-600 to-purple-600 transition-all duration-500"
-                style={{ width: `${Math.min((stats.responses / 10) * 100, 100)}%` }}
-              />
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
+    };
 }
+
+async function processUserInput(transcript) {
+    if (isProcessing || !transcript) return;
+    
+    isProcessing = true;
+    recognition.stop();
+    updateListeningIndicator(false);
+    document.getElementById("status").textContent = "Thinking...";
+    
+    addLogEntry("You", transcript);
+    
+    try {
+        const fd = new FormData();
+        fd.append("mode", "interview");
+        fd.append("history", JSON.stringify(history));
+        fd.append("text", transcript);
+        fd.append("cvText", cvText);
+
+        const res = await fetch(API, { 
+            method: "POST", 
+            body: fd,
+            signal: AbortSignal.timeout(30000)
+        });
+        
+        if (!res.ok) throw new Error(`Server error: ${res.status}`);
+        
+        const data = await res.json();
+        history = data.history || history;
+        
+        if (data.reply) {
+            await speak(data.reply);
+        }
+    } catch (err) {
+        console.error("API Error:", err);
+        showError("Connection issue. Please try again.");
+        if (interviewActive) {
+            setTimeout(() => {
+                recognition.start();
+                isProcessing = false;
+            }, 2000);
+        }
+    } finally {
+        isProcessing = false;
+    }
+}
+
+/* 4. IMPROVED SCORING */
+async function finishInterview() {
+    interviewActive = false;
+    clearInterval(timerInterval);
+    clearTimeout(silenceTimeout);
+    if(recognition) recognition.stop();
+    window.speechSynthesis.cancel();
+    updateListeningIndicator(false);
+    
+    document.getElementById("status").textContent = "Generating Score Report...";
+    
+    try {
+        const fd = new FormData();
+        fd.append("mode", "score");
+        fd.append("history", JSON.stringify(history));
+        fd.append("cvText", cvText);
+        fd.append("duration", String(15 * 60 - timeLeft));
+
+        const res = await fetch(API, { 
+            method: "POST", 
+            body: fd,
+            signal: AbortSignal.timeout(45000)
+        });
+        
+        if (!res.ok) throw new Error(`Server error: ${res.status}`);
+        
+        const data = await res.json();
+        
+        document.body.innerHTML = `
+            <div class="card" style="max-width:700px">
+                <h2 style="color:var(--primary); margin-bottom: 20px;">Final Score Report</h2>
+                <div class="report-box" style="white-space:pre-wrap; font-size: 14px;">${data.reply || "Report generation failed."}</div>
+                <button onclick="location.reload()" class="btn" style="margin-top:20px">New Interview Session</button>
+            </div>`;
+    } catch (err) {
+        console.error("Scoring error:", err);
+        showError("Failed to generate report. Please try again.");
+    }
+}
+
+/* 5. START SESSION */
+document.getElementById("startBtn").onclick = async () => {
+    try {
+        showError("");
+        
+        // Test audio permissions
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        
+        // Unlock audio context
+        window.speechSynthesis.speak(new SpeechSynthesisUtterance(""));
+        
+        interviewActive = true;
+        initWave(stream);
+        initRecognition();
+        startTimer();
+
+        document.getElementById("cvInput").style.display = "none";
+        document.getElementById("startBtn").style.display = "none";
+        document.getElementById("endBtn").style.display = "block";
+        document.getElementById("status").textContent = "Initializing...";
+
+        const fd = new FormData();
+        fd.append("mode", "start");
+        fd.append("cvText", cvText);
+        
+        const res = await fetch(API, { 
+            method: "POST", 
+            body: fd,
+            signal: AbortSignal.timeout(15000)
+        });
+        
+        if (!res.ok) throw new Error(`Server error: ${res.status}`);
+        
+        const data = await res.json();
+        history = data.history || [];
+        
+        if (data.reply) {
+            await speak(data.reply);
+        }
+    } catch (err) {
+        console.error("Start error:", err);
+        showError("Failed to start interview. Please check your microphone and try again.");
+        interviewActive = false;
+        clearInterval(timerInterval);
+    }
+};
+
+document.getElementById("endBtn").onclick = () => {
+    if (confirm("Are you sure you want to end the interview?")) {
+        finishInterview();
+    }
+};
+
+/* UTILITY FUNCTIONS */
+function updateListeningIndicator(active) {
+    const indicator = document.getElementById("listeningIndicator");
+    if (active) {
+        indicator.classList.add("active");
+    } else {
+        indicator.classList.remove("active");
+    }
+}
+
+function addLogEntry(speaker, text) {
+    const entry = document.createElement("div");
+    entry.className = `log-entry ${speaker === "AI" ? "ai-msg" : "user-msg"}`;
+    entry.innerHTML = `<b>${speaker}:</b> ${text}`;
+    document.getElementById("log").prepend(entry);
+}
+
+function showError(msg) {
+    document.getElementById("errorMsg").textContent = msg;
+}
+
+// Prevent page unload during interview
+window.addEventListener('beforeunload', (e) => {
+    if (interviewActive) {
+        e.preventDefault();
+        e.returnValue = '';
+    }
+});
+</script>
+</body>
+</html>
