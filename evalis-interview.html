@@ -116,8 +116,8 @@ const pdfjsLib=window['pdfjs-dist/build/pdf'];
 pdfjsLib.GlobalWorkerOptions.workerSrc=
 "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
 
-let cvText="",history=[],interviewActive=false;
-let isAISpeaking=false,isProcessing=false;
+let cvText="",history=[];
+let interviewActive=false,isAISpeaking=false,isProcessing=false;
 let timeLeft=15*60,timerInt;
 
 const logBox=document.getElementById("log");
@@ -156,6 +156,7 @@ function speak(text){
     u.rate=.95;
     u.onend=()=>{isAISpeaking=false;res()};
     addMsg("ai",text);
+    speechSynthesis.cancel();
     speechSynthesis.speak(u);
   });
 }
@@ -191,15 +192,15 @@ async function processUser(text){
   status.textContent="Listening…";
 }
 
-/* START */
+/* ✅ START — FIXED ORDER */
 startBtn.onclick=async()=>{
-  interviewActive=true;
-  startTimer();
-  cvInput.style.display="none";
-  startBtn.style.display="none";
-  endBtn.style.display="block";
-  voskBox.style.display="block";
+  if(!cvText){
+    alert("Upload resume first");
+    return;
+  }
+
   status.textContent="Starting interview...";
+  startBtn.disabled=true;
 
   try{
     const fd=new FormData();
@@ -208,12 +209,25 @@ startBtn.onclick=async()=>{
     const r=await fetch(API,{method:"POST",body:fd});
     const d=await r.json();
     history=d.history||[];
-    await speak(d.reply||"Welcome. Tell me about yourself.");
+
+    await speak(d.reply || "Welcome. Tell me about yourself.");
+
+    /* 🔥 INTERVIEW REALLY STARTS HERE */
+    interviewActive=true;
+    startTimer();
+
+    cvInput.style.display="none";
+    startBtn.style.display="none";
+    endBtn.style.display="block";
+    voskBox.style.display="block";
+    status.textContent="Listening…";
+
   }catch{
     await speak("Welcome. Tell me about yourself.");
+    interviewActive=true;
+    startTimer();
+    status.textContent="Listening…";
   }
-
-  status.textContent="Listening…";
 };
 
 /* END */
