@@ -3,29 +3,42 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Evalis AI - Elite Live Interview</title>
+<title>Evalis AI – Elite Live Interview</title>
+
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 
 <style>
+:root{--primary:#6366f1;--bg:#020617}
+body{
+margin:0;background:var(--bg);color:#fff;
+font-family:system-ui,sans-serif;
+display:flex;align-items:center;justify-content:center;
+min-height:100vh
+}
 .back-btn{
 position:fixed;top:18px;left:18px;
-background:rgba(255,255,255,0.08);
-color:#fff;border:1px solid rgba(255,255,255,0.15);
+background:rgba(255,255,255,.08);
+color:#fff;border:1px solid rgba(255,255,255,.15);
 backdrop-filter:blur(10px);
 padding:10px 16px;border-radius:12px;
-font-weight:600;font-size:14px;cursor:pointer;z-index:999}
-.back-btn:hover{background:rgba(255,255,255,0.15)}
-:root{--primary:#6366f1;--bg:#020617}
-body{margin:0;background:var(--bg);color:white;font-family:system-ui,sans-serif;
-display:flex;align-items:center;justify-content:center;min-height:100vh}
-.card{width:90%;max-width:440px;background:rgba(255,255,255,0.05);
-backdrop-filter:blur(15px);border-radius:24px;padding:30px;
-border:1px solid rgba(255,255,255,0.1);box-shadow:0 25px 50px rgba(0,0,0,.5)}
-#wave{height:60px;margin:10px 0}
-#timer{font-size:24px;font-weight:700;color:var(--primary)}
+font-weight:600;font-size:14px;cursor:pointer;z-index:999
+}
+.back-btn:hover{background:rgba(255,255,255,.15)}
+.card{
+width:90%;max-width:440px;
+background:rgba(255,255,255,.05);
+backdrop-filter:blur(15px);
+border-radius:24px;padding:30px;
+border:1px solid rgba(255,255,255,.1);
+box-shadow:0 25px 50px rgba(0,0,0,.5)
+}
+#timer{font-size:26px;font-weight:700;color:var(--primary)}
 #status{font-size:12px;color:#94a3b8;margin-bottom:20px}
-.btn{background:var(--primary);color:white;border:none;padding:16px;
-border-radius:14px;width:100%;font-weight:bold;font-size:16px;cursor:pointer}
+.btn{
+background:var(--primary);color:#fff;
+border:none;padding:16px;border-radius:14px;
+width:100%;font-weight:bold;font-size:16px;cursor:pointer
+}
 .btn:disabled{opacity:.3}
 #log{margin-top:20px;max-height:200px;overflow-y:auto;font-size:14px}
 .log-entry{margin-bottom:8px}
@@ -57,37 +70,39 @@ const pdfjsLib=window['pdfjs-dist/build/pdf'];
 pdfjsLib.GlobalWorkerOptions.workerSrc=
 "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
 
-let cvText="",history=[],interviewActive=false,isAISpeaking=false;
-let timerInterval,timeLeft=15*60,isProcessing=false;
+let cvText="",history=[];
+let interviewActive=false,isAISpeaking=false,isProcessing=false;
+let timerInterval,timeLeft=15*60;
 
-/* PDF LOAD */
+/* -------- PDF LOAD -------- */
 cvInput.onchange=async e=>{
 try{
-const file=e.target.files[0];if(!file)return;
+const file=e.target.files[0]; if(!file) return;
 status.textContent="Loading Resume...";
 const pdf=await pdfjsLib.getDocument(await file.arrayBuffer()).promise;
 let text="";
 for(let i=1;i<=pdf.numPages;i++){
 const page=await pdf.getPage(i);
 const c=await page.getTextContent();
-text+=c.items.map(s=>s.str).join(" ")+" "}
+text+=c.items.map(s=>s.str).join(" ")+" ";
+}
 cvText=text.trim()||"[Resume uploaded]";
 startBtn.disabled=false;
 status.textContent="Resume Ready ✓";
 }catch{showError("PDF load failed")}
 };
 
-/* TIMER */
+/* -------- TIMER -------- */
 function startTimer(){
 timerInterval=setInterval(()=>{
 timeLeft--;
 timer.textContent=
 `${Math.floor(timeLeft/60)}:${String(timeLeft%60).padStart(2,"0")}`;
-if(timeLeft<=0)finishInterview();
+if(timeLeft<=0) finishInterview();
 },1000);
 }
 
-/* AI SPEAK */
+/* -------- AI SPEAK -------- */
 function speak(text){
 return new Promise(res=>{
 speechSynthesis.cancel();
@@ -99,13 +114,14 @@ addLog("AI",text);
 });
 }
 
-/* RECEIVE FROM VOSK */
+/* -------- RECEIVE FROM VOSK -------- */
 window.receiveVoskText=text=>{
-if(!interviewActive||isProcessing||!text)return;
+if(!interviewActive || isProcessing || isAISpeaking) return;
+if(!text || text.length<2) return;
 processUserInput(text);
 };
 
-/* USER INPUT */
+/* -------- USER INPUT -------- */
 async function processUserInput(text){
 isProcessing=true;
 status.textContent="Thinking...";
@@ -119,35 +135,37 @@ fd.append("cvText",cvText);
 const r=await fetch(API,{method:"POST",body:fd});
 const d=await r.json();
 history=d.history||history;
-if(d.reply)await speak(d.reply);
+if(d.reply) await speak(d.reply);
 }catch{showError("Connection error")}
 isProcessing=false;
 }
 
-/* START */
+/* -------- START -------- */
 startBtn.onclick=async()=>{
+if(interviewActive) return;
 interviewActive=true;
 startTimer();
 cvInput.style.display="none";
 startBtn.style.display="none";
 endBtn.style.display="block";
-status.textContent="Listening...";
+status.textContent="Initializing...";
 const fd=new FormData();
 fd.append("mode","start");
 fd.append("cvText",cvText);
 const r=await fetch(API,{method:"POST",body:fd});
 const d=await r.json();
 history=d.history||[];
-if(d.reply)await speak(d.reply);
+if(d.reply) await speak(d.reply);
 };
 
-/* END */
+/* -------- END -------- */
 endBtn.onclick=()=>confirm("End interview?")&&finishInterview();
 
-/* SCORE */
+/* -------- SCORE -------- */
 async function finishInterview(){
 interviewActive=false;
 clearInterval(timerInterval);
+speechSynthesis.cancel();
 status.textContent="Generating Report...";
 const fd=new FormData();
 fd.append("mode","score");
@@ -156,11 +174,14 @@ fd.append("cvText",cvText);
 const r=await fetch(API,{method:"POST",body:fd});
 const d=await r.json();
 document.body.innerHTML=
-`<div class="card"><h2>Final Report</h2><pre>${d.reply}</pre>
-<button onclick="location.reload()" class="btn">New Interview</button></div>`;
+`<div class="card">
+<h2>Final Report</h2>
+<pre>${d.reply||"No report generated"}</pre>
+<button onclick="location.reload()" class="btn">New Interview</button>
+</div>`;
 }
 
-/* UTILS */
+/* -------- UTILS -------- */
 function addLog(w,t){
 const d=document.createElement("div");
 d.className="log-entry "+(w==="AI"?"ai-msg":"user-msg");
@@ -169,8 +190,11 @@ log.prepend(d);
 }
 function showError(t){errorMsg.textContent=t}
 
-/* BACK */
-backBtn.onclick=()=>location.href="career-lab.html";
+/* -------- BACK -------- */
+backBtn.onclick=()=>{
+speechSynthesis.cancel();
+location.href="career-lab.html";
+};
 history.pushState(null,"",location.href);
 window.onpopstate=()=>backBtn.click();
 </script>
