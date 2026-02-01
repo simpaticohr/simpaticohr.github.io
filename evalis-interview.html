@@ -4,9 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Evalis AI – Live Interview</title>
-const cvInput = document.getElementById("cvInput");
-const startBtn = document.getElementById("startBtn");
-const status = document.getElementById("status");
+
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 
 <style>
@@ -26,7 +24,7 @@ body{
   min-height:100vh
 }
 .back-btn{
-  position:fixed;top:18px;left:18px;
+  position:fixed;top:16px;left:16px;
   background:rgba(255,255,255,.08);
   border:1px solid var(--border);
   padding:10px 16px;border-radius:12px;
@@ -49,7 +47,7 @@ p{margin:0;color:#94a3b8;font-size:14px}
   font-size:42px;font-weight:800;
   color:var(--primary);text-align:center;margin:16px 0
 }
-#status{text-align:center;font-size:14px;color:#94a3b8;margin-bottom:20px}
+#status{text-align:center;font-size:14px;color:#94a3b8;margin-bottom:16px}
 input[type=file]{
   width:100%;padding:14px;border-radius:12px;
   background:transparent;color:#fff;
@@ -113,19 +111,34 @@ button:disabled{opacity:.4}
 </div>
 
 <script>
-const API="https://evalis-ai.simpaticohrconsultancy.workers.dev";
-const pdfjsLib=window['pdfjs-dist/build/pdf'];
-pdfjsLib.GlobalWorkerOptions.workerSrc=
-"https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+/* ================== CONFIG ================== */
+const API = "https://evalis-ai.simpaticohrconsultancy.workers.dev";
 
-let cvText="",history=[];
-let interviewActive=false,isAISpeaking=false,isProcessing=false;
-let timeLeft=15*60,timerInt;
+/* ================== ELEMENTS ================== */
+const cvInput = document.getElementById("cvInput");
+const startBtn = document.getElementById("startBtn");
+const endBtn = document.getElementById("endBtn");
+const status = document.getElementById("status");
+const timer = document.getElementById("timer");
+const logBox = document.getElementById("log");
+const voskBox = document.getElementById("voskBox");
+const backBtn = document.getElementById("backBtn");
 
-const logBox=document.getElementById("log");
+/* ================== STATE ================== */
+let cvText = "";
+let history = [];
+let interviewActive = false;
+let isAISpeaking = false;
+let isProcessing = false;
+let timeLeft = 15 * 60;
+let timerInt = null;
 
-/* PDF */
-  cvInput.addEventListener("change", async (e) => {
+/* ================== PDF ================== */
+const pdfjsLib = window['pdfjs-dist/build/pdf'];
+pdfjsLib.GlobalWorkerOptions.workerSrc =
+  "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+
+cvInput.addEventListener("change", async (e) => {
   try {
     const file = e.target.files[0];
     if (!file) return;
@@ -147,133 +160,133 @@ const logBox=document.getElementById("log");
     startBtn.disabled = false;
     status.textContent = "Resume ready ✓ Click Start Interview";
 
-    console.log("CV loaded, start enabled");
-
   } catch (err) {
-    status.textContent = "Failed to read resume";
     console.error(err);
+    status.textContent = "Resume load failed";
   }
 });
 
-/* TTS */
+/* ================== TIMER ================== */
+function startTimer(){
+  timerInt = setInterval(()=>{
+    timeLeft--;
+    timer.textContent =
+      `${Math.floor(timeLeft/60)}:${String(timeLeft%60).padStart(2,"0")}`;
+    if(timeLeft<=0) finishInterview();
+  },1000);
+}
+
+/* ================== TTS ================== */
 function speak(text){
   return new Promise(res=>{
-    isAISpeaking=true;
-    const u=new SpeechSynthesisUtterance(text);
-    u.rate=.95;
-    u.onend=()=>{isAISpeaking=false;res()};
-    addMsg("ai",text);
-    speechSynthesis.cancel();
+    isAISpeaking = true;
+    const u = new SpeechSynthesisUtterance(text);
+    u.rate = .95;
+    u.onend = () => { isAISpeaking = false; res(); };
+    addMsg("ai", text);
     speechSynthesis.speak(u);
   });
 }
 
-/* ANDROID → WEBVIEW */
-window.receiveVoskText=text=>{
-  if(!interviewActive||isProcessing||isAISpeaking) return;
-  if(!text||text.length<2) return;
+/* ================== VOSK BRIDGE ================== */
+window.receiveVoskText = (text) => {
+  if(!interviewActive || isProcessing || isAISpeaking) return;
+  if(!text || text.length < 2) return;
   processUser(text);
 };
 
-/* USER */
+/* ================== USER INPUT ================== */
 async function processUser(text){
-  isProcessing=true;
-  status.textContent="Thinking...";
-  addMsg("user",text);
+  isProcessing = true;
+  status.textContent = "Thinking...";
+  addMsg("user", text);
 
   try{
-    const fd=new FormData();
+    const fd = new FormData();
     fd.append("mode","interview");
     fd.append("history",JSON.stringify(history));
     fd.append("text",text);
     fd.append("cvText",cvText);
-    const r=await fetch(API,{method:"POST",body:fd});
-    const d=await r.json();
-    history=d.history||history;
+
+    const r = await fetch(API,{method:"POST",body:fd});
+    const d = await r.json();
+    history = d.history || history;
+
     if(d.reply) await speak(d.reply);
+    else await speak("Can you explain that further?");
   }catch{
     await speak("Can you explain that further?");
   }
 
-  isProcessing=false;
-  status.textContent="Listening…";
+  isProcessing = false;
+  status.textContent = "Listening…";
 }
 
-/* ✅ START — FIXED ORDER */
-startBtn.onclick=async()=>{
-  if(!cvText){
-    alert("Upload resume first");
-    return;
-  }
+/* ================== START ================== */
+startBtn.onclick = async () => {
+  interviewActive = true;
+  startBtn.style.display = "none";
+  endBtn.style.display = "block";
+  cvInput.style.display = "none";
+  voskBox.style.display = "block";
 
-  status.textContent="Starting interview...";
-  startBtn.disabled=true;
+  status.textContent = "Starting interview...";
+  startTimer();
 
   try{
-    const fd=new FormData();
+    const fd = new FormData();
     fd.append("mode","start");
     fd.append("cvText",cvText);
-    const r=await fetch(API,{method:"POST",body:fd});
-    const d=await r.json();
-    history=d.history||[];
-
+    const r = await fetch(API,{method:"POST",body:fd});
+    const d = await r.json();
+    history = d.history || [];
     await speak(d.reply || "Welcome. Tell me about yourself.");
-
-    /* 🔥 INTERVIEW REALLY STARTS HERE */
-    interviewActive=true;
-    startTimer();
-
-    cvInput.style.display="none";
-    startBtn.style.display="none";
-    endBtn.style.display="block";
-    voskBox.style.display="block";
-    status.textContent="Listening…";
-
   }catch{
     await speak("Welcome. Tell me about yourself.");
-    interviewActive=true;
-    startTimer();
-    status.textContent="Listening…";
   }
+
+  status.textContent = "Listening…";
 };
 
-/* END */
-endBtn.onclick=()=>confirm("End interview?")&&finishInterview();
+/* ================== END ================== */
+endBtn.onclick = () => confirm("End interview?") && finishInterview();
 
 async function finishInterview(){
-  interviewActive=false;
+  interviewActive = false;
   clearInterval(timerInt);
   speechSynthesis.cancel();
-  status.textContent="Generating report...";
 
-  const fd=new FormData();
+  status.textContent = "Generating report...";
+
+  const fd = new FormData();
   fd.append("mode","score");
   fd.append("history",JSON.stringify(history));
   fd.append("cvText",cvText);
-  const r=await fetch(API,{method:"POST",body:fd});
-  const d=await r.json();
 
-  document.body.innerHTML=`
+  const r = await fetch(API,{method:"POST",body:fd});
+  const d = await r.json();
+
+  document.body.innerHTML = `
     <div class="card" style="max-width:800px">
       <h1>Interview Complete</h1>
-      <pre style="white-space:pre-wrap">${d.reply||"Report coming soon"}</pre>
+      <pre style="white-space:pre-wrap">${d.reply || "Report coming soon"}</pre>
       <button class="btn-primary" onclick="location.reload()">New Interview</button>
     </div>`;
 }
 
-/* UI */
+/* ================== UI ================== */
 function addMsg(role,text){
-  const d=document.createElement("div");
-  d.className="msg "+role;
-  d.innerHTML=`<b>${role==="ai"?"AI":"You"}:</b> ${text}`;
+  const d = document.createElement("div");
+  d.className = "msg " + role;
+  d.innerHTML = `<b>${role==="ai"?"AI":"You"}:</b> ${text}`;
   logBox.appendChild(d);
-  logBox.scrollTop=logBox.scrollHeight;
+  logBox.scrollTop = logBox.scrollHeight;
 }
 
-/* NAV */
-backBtn.onclick=()=>location.href="career-lab.html";
+/* ================== NAV ================== */
+backBtn.onclick = () => location.href = "career-lab.html";
 history.pushState(null,"",location.href);
-window.onpopstate=()=>backBtn.click();
+window.onpopstate = () => backBtn.click();
 </script>
 
 </body>
