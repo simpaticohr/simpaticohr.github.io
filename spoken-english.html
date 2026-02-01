@@ -4,24 +4,101 @@
 <meta charset="UTF-8" />
 <title>Spoken English Practice</title>
 <meta name="viewport" content="width=device-width, initial-scale=1" />
+
 <style>
-  body { margin: 0; height: 100vh; background: radial-gradient(circle at top, #0b1d3a, #020617); display: flex; align-items: center; justify-content: center; font-family: system-ui, -apple-system, sans-serif; color: #fff; }
-  .card { width: 90%; max-width: 320px; background: rgba(255,255,255,0.08); backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,0.1); border-radius: 20px; padding: 24px; text-align: center; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
-  button { width: 100%; padding: 12px; border: none; border-radius: 10px; margin-top: 10px; font-weight: 600; cursor: pointer; transition: opacity 0.2s; }
-  button:disabled { opacity: 0.5; cursor: not-allowed; }
-  .start { background: #2563eb; color: #fff; }
-  .stop { background: #374151; color: #ccc; }
-  pre { text-align: left; white-space: pre-wrap; font-size: 13px; background: rgba(0,0,0,0.2); padding: 12px; border-radius: 8px; margin-top: 15px; max-height: 120px; overflow-y: auto; border: 1px solid rgba(255,255,255,0.05); }
-  .score { font-size: 32px; font-weight: bold; margin-top: 10px; color: #60a5fa; }
-  small { color: #94a3b8; display: block; margin-bottom: 10px; }
+body {
+  margin: 0;
+  height: 100vh;
+  background: radial-gradient(circle at top, #0b1d3a, #020617);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: system-ui, -apple-system, sans-serif;
+  color: #fff;
+}
+
+.card {
+  width: 90%;
+  max-width: 320px;
+  background: rgba(255,255,255,0.08);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 20px;
+  padding: 24px;
+  text-align: center;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+}
+
+button {
+  width: 100%;
+  padding: 12px;
+  border: none;
+  border-radius: 10px;
+  margin-top: 10px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.start { background: #2563eb; color: #fff; }
+.stop  { background: #374151; color: #ccc; }
+
+pre {
+  text-align: left;
+  white-space: pre-wrap;
+  font-size: 13px;
+  background: rgba(0,0,0,0.25);
+  padding: 12px;
+  border-radius: 8px;
+  margin-top: 10px;
+  max-height: 120px;
+  overflow-y: auto;
+}
+
+.score {
+  font-size: 32px;
+  font-weight: bold;
+  margin-top: 10px;
+  color: #60a5fa;
+}
+
+small {
+  color: #94a3b8;
+  display: block;
+  margin-bottom: 10px;
+}
+
+/* BACK BUTTON */
+.back-btn {
+  position: fixed;
+  top: 16px;
+  left: 16px;
+  background: rgba(255,255,255,0.1);
+  color: white;
+  border: 1px solid rgba(255,255,255,0.2);
+  padding: 8px 14px;
+  border-radius: 10px;
+  cursor: pointer;
+  font-weight: 600;
+}
 </style>
 </head>
+
 <body>
+
+<button id="backBtn" class="back-btn">← Back</button>
+
 <div class="card">
   <h3>English Practice</h3>
   <small id="status">Tap start and speak</small>
+
   <button class="start" id="start">🎤 Start Speaking</button>
   <button class="stop" id="stop" disabled>Stop</button>
+
   <div id="results" style="display:none;">
     <pre id="said"></pre>
     <pre id="feedback"></pre>
@@ -31,27 +108,34 @@
 
 <script>
 const API = "https://spoken-english.simpaticohrconsultancy.workers.dev";
-let recorder, chunks = [], stopTimer;
+
+let recorder = null;
+let streamRef = null;
+let chunks = [];
+let stopTimer = null;
 
 const startBtn = document.getElementById("start");
-const stopBtn = document.getElementById("stop");
-const status = document.getElementById("status");
-const said = document.getElementById("said");
+const stopBtn  = document.getElementById("stop");
+const status   = document.getElementById("status");
+const said     = document.getElementById("said");
 const feedback = document.getElementById("feedback");
 const scoreBox = document.getElementById("score");
-const results = document.getElementById("results");
+const results  = document.getElementById("results");
 
+/* START RECORDING */
 startBtn.onclick = async () => {
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    streamRef = await navigator.mediaDevices.getUserMedia({ audio: true });
+    recorder = new MediaRecorder(streamRef);
     chunks = [];
+
     results.style.display = "none";
-    status.textContent = "Listening (max 6s)...";
-    
-    recorder = new MediaRecorder(stream);
+    status.textContent = "Listening (max 6 seconds)...";
+
     recorder.ondataavailable = e => chunks.push(e.data);
+
     recorder.onstop = () => {
-      stream.getTracks().forEach(t => t.stop());
+      streamRef.getTracks().forEach(t => t.stop());
       sendAudio();
     };
 
@@ -59,17 +143,27 @@ startBtn.onclick = async () => {
     startBtn.disabled = true;
     stopBtn.disabled = false;
 
-    stopTimer = setTimeout(() => { if(recorder.state === "recording") recorder.stop(); }, 6000);
+    stopTimer = setTimeout(() => {
+      if (recorder && recorder.state === "recording") recorder.stop();
+    }, 6000);
+
   } catch (e) {
-    status.textContent = "Mic Error: " + e.message;
+    status.textContent = "Microphone permission denied";
   }
 };
 
-stopBtn.onclick = () => { clearTimeout(stopTimer); recorder.stop(); };
+/* STOP RECORDING */
+stopBtn.onclick = () => {
+  if (!recorder) return;
+  clearTimeout(stopTimer);
+  if (recorder.state === "recording") recorder.stop();
+};
 
+/* SEND AUDIO */
 async function sendAudio() {
   status.textContent = "Analyzing speech...";
   stopBtn.disabled = true;
+
   const blob = new Blob(chunks, { type: "audio/webm" });
   const form = new FormData();
   form.append("audio", blob);
@@ -77,31 +171,34 @@ async function sendAudio() {
   try {
     const res = await fetch(API, { method: "POST", body: form });
     const data = await res.json();
+
     results.style.display = "block";
-    said.textContent = "You: " + data.transcript;
-    feedback.textContent = data.feedback;
-    scoreBox.textContent = data.score + "/10";
+    said.textContent = "You: " + (data.transcript || "");
+    feedback.textContent = data.feedback || "";
+    scoreBox.textContent = (data.score || 0) + "/10";
     status.textContent = "Done!";
+
   } catch (e) {
-    status.textContent = "Server Error";
+    status.textContent = "Server error";
   }
+
   startBtn.disabled = false;
 }
-  document.getElementById("backBtn").onclick = () => {
-    try {
-        recognition?.stop();
-        window.speechSynthesis.cancel();
-        audioCtx?.close();
-    } catch (e) {}
 
-    window.location.href = "career-lab.html";
+/* BACK BUTTON */
+document.getElementById("backBtn").onclick = () => {
+  try {
+    if (recorder && recorder.state === "recording") recorder.stop();
+    if (streamRef) streamRef.getTracks().forEach(t => t.stop());
+  } catch {}
+
+  window.location.href = "career-lab.html";
 };
 
+/* ANDROID BACK SUPPORT */
 history.pushState(null, "", location.href);
-window.onpopstate = () => {
-    document.getElementById("backBtn").click();
-};
+window.onpopstate = () => document.getElementById("backBtn").click();
 </script>
+
 </body>
-  <button id="backBtn" class="back-btn">← Back</button>
 </html>
