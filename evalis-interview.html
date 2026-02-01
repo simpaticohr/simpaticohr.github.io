@@ -60,6 +60,7 @@ button{
 }
 .btn-primary{background:var(--primary);color:#fff}
 .btn-danger{background:var(--bad);color:#fff}
+.btn-secondary{background:rgba(255,255,255,.1);color:#fff;margin-top:8px}
 button:disabled{opacity:.4}
 .log{max-height:460px;overflow-y:auto}
 .msg{
@@ -75,13 +76,17 @@ button:disabled{opacity:.4}
 .ok{color:var(--ok)}
 .bad{color:var(--bad)}
 .warn{color:var(--warn)}
-.pulse{
-  animation:pulse 2s infinite;
+.manual-input{
+  margin-top:12px;
+  display:flex;gap:8px;
 }
-@keyframes pulse{
-  0%{opacity:1}
-  50%{opacity:.5}
-  100%{opacity:1}
+.manual-input input{
+  flex:1;
+  padding:12px;
+  border-radius:10px;
+  border:1px solid var(--border);
+  background:rgba(255,255,255,.05);
+  color:#fff;
 }
 </style>
 </head>
@@ -106,12 +111,9 @@ button:disabled{opacity:.4}
   <button id="endBtn" class="btn-danger" style="display:none">End Interview</button>
 
   <div class="vosk" id="voskBox" style="display:none">
-    <div>Vosk Engine: <span id="voskStatus" class="warn">Connecting...</span></div>
-    <div>Microphone: <span id="micStatus" class="warn">Waiting...</span></div>
-    <div>Mode: <span class="ok">Continuous + Interrupt</span></div>
-    <div style="margin-top:8px;font-size:11px;color:#64748b">
-      Say "stop" or tap button to interrupt AI
-    </div>
+    <div>Vosk Engine: <span id="voskStatus" class="ok">Active</span></div>
+    <div>Microphone: <span id="micStatus" class="warn">Initializing...</span></div>
+    <div>Mode: <span id="modeStatus">Continuous</span></div>
   </div>
 </div>
 
@@ -120,6 +122,12 @@ button:disabled{opacity:.4}
   <h2>Conversation</h2>
   <p>Live transcript</p>
   <div class="log" id="log"></div>
+  
+  <!-- Manual input fallback -->
+  <div class="manual-input" id="manualInput" style="display:none">
+    <input type="text" id="textInput" placeholder="Type your answer and press Enter...">
+    <button id="sendBtn" class="btn-secondary" style="width:auto;padding:12px 20px">Send</button>
+  </div>
 </div>
 
 </div>
@@ -137,8 +145,11 @@ const timer = document.getElementById("timer");
 const logBox = document.getElementById("log");
 const voskBox = document.getElementById("voskBox");
 const backBtn = document.getElementById("backBtn");
-const voskStatus = document.getElementById("voskStatus");
+const manualInput = document.getElementById("manualInput");
+const textInput = document.getElementById("textInput");
+const sendBtn = document.getElementById("sendBtn");
 const micStatus = document.getElementById("micStatus");
+const modeStatus = document.getElementById("modeStatus");
 
 /* ================== STATE ================== */
 let cvText = "";
@@ -148,8 +159,8 @@ let isAISpeaking = false;
 let isProcessing = false;
 let timeLeft = 15 * 60;
 let timerInt = null;
-let currentUtterance = null;
-let silenceTimeout = null;
+let recognition = null;
+let useManualInput = false;
 
 /* ================== PDF ================== */
 const pdfjsLib = window['pdfjs-dist/build/pdf'];
@@ -180,7 +191,7 @@ cvInput.addEventListener("change", async (e) => {
 
   } catch (err) {
     console.error(err);
-    status.textContent = "Resume load failed";
+    status.textContent = "Resume load failed. Try again.";
   }
 });
 
@@ -194,150 +205,109 @@ function startTimer(){
   },1000);
 }
 
-/* ================== TTS with INTERRUPTION ================== */
+/* ================== TTS ================== */
 function speak(text){
   return new Promise(res=>{
-    // Cancel any current speech
-    speechSynthesis.cancel();
-    
     isAISpeaking = true;
-    status.textContent = "AI is speaking... (Say 'stop' to interrupt)";
-    status.className = "pulse";
-    
+    status.textContent = "AI is speaking...";
     const u = new SpeechSynthesisUtterance(text);
-    currentUtterance = u;
     u.rate = .95;
-    u.pitch = 1;
-    
     u.onend = () => { 
-      isAISpeaking = false;
-      currentUtterance = null;
-      status.className = "";
-      if(interviewActive) {
-        status.textContent = "Listening...";
-        // Notify Android to resume/start listening
-        if(window.Android && window.Android.resumeListening){
-          window.Android.resumeListening();
-        }
-      }
+      isAISpeaking = false; 
+      if(interviewActive) status.textContent = useManualInput ? "Type your response..." : "Listening... Speak now";
       res(); 
     };
-    
-    u.onerror = (e) => {
-      console.error("TTS Error:", e);
-      isAISpeaking = false;
-      currentUtterance = null;
-      status.className = "";
-      if(interviewActive) {
-        status.textContent = "Listening...";
-        if(window.Android && window.Android.resumeListening){
-          window.Android.resumeListening();
-        }
-      }
-      res();
-    };
-    
     addMsg("ai", text);
     speechSynthesis.speak(u);
   });
 }
 
-/* Force stop TTS for interruption */
-function stopSpeaking(){
-  if(isAISpeaking){
-    speechSynthesis.cancel();
-    isAISpeaking = false;
-    currentUtterance = null;
-    status.className = "";
-    status.textContent = "Interrupted. Listening...";
-    addMsg("system", "[Interrupted by user]");
-    
-    // Notify Android that interruption happened
-    if(window.Android && window.Android.onInterrupted){
-      window.Android.onInterrupted();
-    }
-    return true;
+/* ================== SPEECH RECOGNITION ================== */
+function initSpeechRecognition() {
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  
+  if (!SpeechRecognition) {
+    console.warn("Speech recognition not supported, falling back to manual input");
+    enableManualInput();
+    return false;
   }
-  return false;
+
+  recognition = new SpeechRecognition();
+  recognition.continuous = true;
+  recognition.interimResults = false;
+  recognition.lang = 'en-US';
+
+  recognition.onstart = () => {
+    micStatus.textContent = "Connected";
+    micStatus.className = "ok";
+    status.textContent = "Listening... Speak now";
+  };
+
+  recognition.onresult = (event) => {
+    const last = event.results.length - 1;
+    const text = event.results[last][0].transcript;
+    
+    if (event.results[last].isFinal && !isProcessing && !isAISpeaking) {
+      processUser(text);
+    }
+  };
+
+  recognition.onerror = (event) => {
+    console.error("Speech recognition error:", event.error);
+    if (event.error === 'not-allowed') {
+      status.textContent = "Microphone blocked. Switching to text input...";
+      enableManualInput();
+    } else {
+      // Restart on other errors
+      if (interviewActive && !useManualInput) {
+        setTimeout(() => {
+          try { recognition.start(); } catch(e) {}
+        }, 1000);
+      }
+    }
+  };
+
+  recognition.onend = () => {
+    // Restart if interview still active and not using manual input
+    if (interviewActive && !useManualInput) {
+      try { recognition.start(); } catch(e) {}
+    }
+  };
+
+  return true;
 }
 
-/* ================== VOSK BRIDGE (Called from Android) ================== */
-
-/**
- * Called by Android Vosk when speech is recognized
- * This is the main entry point from native Vosk
- */
-window.receiveVoskText = (text) => {
-  console.log("Vosk received:", text);
-  
-  if(!interviewActive) return;
-  
-  // Interrupt if user speaks while AI is talking
-  if(isAISpeaking){
-    const wasInterrupted = stopSpeaking();
-    // Small delay to let interruption settle, then process
-    setTimeout(() => {
-      processUser(text, true);
-    }, wasInterrupted ? 300 : 0);
-    return;
-  }
-  
-  if(isProcessing) return;
-  if(!text || text.length < 2) return;
-  
-  processUser(text, false);
-};
-
-/**
- * Called by Android when Vosk is ready
- */
-window.onVoskReady = () => {
-  console.log("Vosk ready");
-  voskStatus.textContent = "Active";
-  voskStatus.className = "ok";
-  micStatus.textContent = "Listening";
-  micStatus.className = "ok pulse";
-};
-
-/**
- * Called by Android when Vosk error occurs
- */
-window.onVoskError = (error) => {
-  console.error("Vosk error:", error);
-  voskStatus.textContent = "Error: " + error;
-  voskStatus.className = "bad";
-  micStatus.textContent = "Disconnected";
+function enableManualInput() {
+  useManualInput = true;
+  manualInput.style.display = "flex";
+  micStatus.textContent = "Disabled";
   micStatus.className = "bad";
-  status.textContent = "Speech recognition error. Please restart.";
-};
+  modeStatus.textContent = "Text Input";
+  status.textContent = "Type your response...";
+}
 
-/**
- * Called by Android when microphone state changes
- */
-window.onMicStateChange = (state) => {
-  // state: 'listening', 'processing', 'error'
-  if(state === 'listening'){
-    micStatus.textContent = "Listening";
-    micStatus.className = "ok pulse";
-  } else if(state === 'processing'){
-    micStatus.textContent = "Hearing...";
-    micStatus.className = "warn";
-  }
-};
+/* ================== MANUAL INPUT ================== */
+textInput.addEventListener("keypress", (e) => {
+  if (e.key === "Enter") sendManualInput();
+});
+
+sendBtn.addEventListener("click", sendManualInput);
+
+function sendManualInput() {
+  const text = textInput.value.trim();
+  if (!text || isProcessing || isAISpeaking) return;
+  
+  processUser(text);
+  textInput.value = "";
+}
 
 /* ================== USER INPUT ================== */
-async function processUser(text, wasInterrupted){
+async function processUser(text){
+  if (!text || text.length < 2) return;
+  
   isProcessing = true;
   status.textContent = "Thinking...";
-  micStatus.textContent = "Processing";
-  micStatus.className = "warn";
-  
-  // Pause Vosk listening while processing (Android should pause)
-  if(window.Android && window.Android.pauseListening){
-    window.Android.pauseListening();
-  }
-  
-  addMsg("user", text + (wasInterrupted ? " [interrupted]" : ""));
+  addMsg("user", text);
 
   try{
     const fd = new FormData();
@@ -345,7 +315,6 @@ async function processUser(text, wasInterrupted){
     fd.append("history",JSON.stringify(history));
     fd.append("text",text);
     fd.append("cvText",cvText);
-    fd.append("interrupted", wasInterrupted ? "true" : "false");
 
     const r = await fetch(API,{method:"POST",body:fd});
     const d = await r.json();
@@ -355,42 +324,32 @@ async function processUser(text, wasInterrupted){
     else await speak("Can you explain that further?");
   }catch(err){
     console.error(err);
-    await speak("I didn't catch that. Could you repeat?");
+    await speak("I'm having trouble connecting. Please try again.");
   }
 
   isProcessing = false;
-  if(!isAISpeaking && interviewActive){
-    status.textContent = "Listening...";
-    micStatus.textContent = "Listening";
-    micStatus.className = "ok pulse";
-  }
 }
 
 /* ================== START ================== */
 startBtn.onclick = async () => {
-  if(!cvText){
-    status.textContent = "Please upload resume first";
-    return;
-  }
-  
   interviewActive = true;
   startBtn.style.display = "none";
   endBtn.style.display = "block";
   cvInput.style.display = "none";
   voskBox.style.display = "block";
 
-  status.textContent = "Initializing Vosk...";
-  
-  // Notify Android to start Vosk
-  if(window.Android && window.Android.startInterview){
-    window.Android.startInterview();
-  } else {
-    console.warn("Android interface not found - running in browser mode");
-    voskStatus.textContent = "Browser Mode";
-    micStatus.textContent = "Not available";
-  }
-
+  status.textContent = "Starting interview...";
   startTimer();
+
+  // Initialize speech recognition
+  const speechSupported = initSpeechRecognition();
+  if (speechSupported) {
+    try {
+      recognition.start();
+    } catch(e) {
+      enableManualInput();
+    }
+  }
 
   try{
     const fd = new FormData();
@@ -399,40 +358,26 @@ startBtn.onclick = async () => {
     const r = await fetch(API,{method:"POST",body:fd});
     const d = await r.json();
     history = d.history || [];
-    
-    // Small delay to ensure Vosk is ready
-    setTimeout(async () => {
-      await speak(d.reply || "Welcome. Tell me about yourself.");
-    }, 500);
-    
+    await speak(d.reply || "Welcome. Tell me about yourself.");
   }catch(err){
     console.error(err);
-    setTimeout(async () => {
-      await speak("Welcome. Tell me about yourself.");
-    }, 500);
+    await speak("Welcome. Tell me about yourself.");
   }
 };
 
 /* ================== END ================== */
-endBtn.onclick = () => {
-  if(confirm("End interview?")){
-    finishInterview();
-  }
-};
+endBtn.onclick = () => confirm("End interview?") && finishInterview();
 
 async function finishInterview(){
   interviewActive = false;
   clearInterval(timerInt);
   speechSynthesis.cancel();
   
-  // Notify Android to stop Vosk
-  if(window.Android && window.Android.endInterview){
-    window.Android.endInterview();
+  if (recognition) {
+    try { recognition.stop(); } catch(e) {}
   }
 
   status.textContent = "Generating report...";
-  voskStatus.textContent = "Stopped";
-  micStatus.textContent = "Disconnected";
 
   try {
     const fd = new FormData();
@@ -463,37 +408,19 @@ async function finishInterview(){
 function addMsg(role,text){
   const d = document.createElement("div");
   d.className = "msg " + role;
-  d.innerHTML = `<b>${role==="ai"?"AI":role==="user"?"You":"System"}:</b> ${text}`;
+  d.innerHTML = `<b>${role==="ai"?"AI":"You"}:</b> ${text}`;
   logBox.appendChild(d);
   logBox.scrollTop = logBox.scrollHeight;
 }
 
 /* ================== NAV ================== */
 backBtn.onclick = () => {
-  if(interviewActive && !confirm("End interview and go back?")) return;
+  if (interviewActive && !confirm("End interview and go back?")) return;
   finishInterview();
+  location.href = "career-lab.html";
 };
-
-// Prevent accidental back button during interview
 history.pushState(null,"",location.href);
-window.onpopstate = () => {
-  if(interviewActive){
-    history.pushState(null,"",location.href);
-    if(confirm("End interview?")){
-      finishInterview();
-    }
-  } else {
-    location.href = "career-lab.html";
-  }
-};
-
-/* ================== KEYBOARD INTERRUPT (for testing) ================== */
-document.addEventListener('keydown', (e) => {
-  if(e.code === 'Space' && interviewActive && isAISpeaking){
-    e.preventDefault();
-    stopSpeaking();
-  }
-});
+window.onpopstate = () => backBtn.click();
 </script>
 
 </body>
