@@ -81,7 +81,6 @@ button:disabled{opacity:.4}
 
 <div class="container">
 
-<!-- LEFT -->
 <div class="card">
   <h1>Evalis AI Interview</h1>
   <p>Vosk powered live interview</p>
@@ -101,7 +100,6 @@ button:disabled{opacity:.4}
   </div>
 </div>
 
-<!-- RIGHT -->
 <div class="card">
   <h2>Conversation</h2>
   <p>Live transcript</p>
@@ -127,6 +125,14 @@ let timerInt = null;
 const pdfjsLib = window['pdfjs-dist/build/pdf'];
 pdfjsLib.GlobalWorkerOptions.workerSrc =
   "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+
+const cvInput = document.getElementById('cvInput');
+const startBtn = document.getElementById('startBtn');
+const endBtn = document.getElementById('endBtn');
+const status = document.getElementById('status');
+const timer = document.getElementById('timer');
+const voskBox = document.getElementById('voskBox');
+const backBtn = document.getElementById('backBtn');
 
 cvInput.onchange = async e => {
   const file = e.target.files[0];
@@ -159,15 +165,64 @@ function startTimer() {
   }, 1000);
 }
 
-/* ================= SPEECH ================= */
+/* ================= ROBUST SPEECH (FIXED) ================= */
 function speak(text) {
   return new Promise(res => {
     isAISpeaking = true;
+    status.textContent = "AI Speaking..."; // UI Feedback
+    addMsg("ai", text);
+
+    // 1. Check support
+    if (!window.speechSynthesis) {
+      console.warn("No TTS support");
+      setTimeout(() => {
+        isAISpeaking = false;
+        status.textContent = "Listening...";
+        res();
+      }, 1500);
+      return;
+    }
+
     const u = new SpeechSynthesisUtterance(text);
     u.rate = 0.95;
-    u.onend = () => { isAISpeaking = false; res(); };
-    addMsg("ai", text);
-    speechSynthesis.speak(u);
+
+    // 2. Safety Timeout (Crucial for Android)
+    // If onend doesn't fire in (length * 100ms + 2s), we force reset
+    const safetyDuration = (text.length * 100) + 2000;
+    const safetyTimer = setTimeout(() => {
+      if (isAISpeaking) {
+        console.warn("TTS timed out - Force resetting");
+        speechSynthesis.cancel();
+        isAISpeaking = false;
+        status.textContent = "Listening...";
+        res();
+      }
+    }, safetyDuration);
+
+    u.onend = () => {
+      clearTimeout(safetyTimer);
+      isAISpeaking = false;
+      status.textContent = "Listening...";
+      res();
+    };
+
+    u.onerror = (e) => {
+      console.error("TTS Error", e);
+      clearTimeout(safetyTimer);
+      isAISpeaking = false;
+      status.textContent = "Listening...";
+      res();
+    };
+
+    try {
+      speechSynthesis.speak(u);
+    } catch (e) {
+      console.error("TTS Crash", e);
+      clearTimeout(safetyTimer);
+      isAISpeaking = false;
+      status.textContent = "Listening...";
+      res();
+    }
   });
 }
 
@@ -184,10 +239,22 @@ async function callAPI(mode, extra = {}) {
   return await res.json();
 }
 
-/* ================= ANDROID → WEB ================= */
+/* ================= ANDROID → WEB (DEBUGGED) ================= */
 window.receiveVoskText = text => {
-  if (!interviewActive || isProcessing || isAISpeaking) return;
+  // Debug Log to see what Android is sending
+  console.log("Android Input:", text);
+
+  // If AI is talking, ignore input
+  if (isAISpeaking) {
+    console.log("Ignored: AI is speaking");
+    return;
+  }
+  if (!interviewActive || isProcessing) {
+    console.log("Ignored: Not active or processing");
+    return;
+  }
   if (!text || text.length < 2) return;
+  
   processUser(text);
 };
 
@@ -210,7 +277,7 @@ async function processUser(text) {
   }
 
   isProcessing = false;
-  status.textContent = "Listening…";
+  // Status set by speak() completion
 }
 
 /* ================= START ================= */
@@ -227,6 +294,9 @@ startBtn.onclick = async () => {
 
   status.textContent = "Starting interview...";
 
+  // Attempt to "prime" the audio engine
+  if(window.speechSynthesis) speechSynthesis.cancel();
+
   try {
     const data = await callAPI("start", { cvText });
     history = data.history || [];
@@ -234,8 +304,6 @@ startBtn.onclick = async () => {
   } catch {
     await speak("Tell me about yourself.");
   }
-
-  status.textContent = "Listening…";
 };
 
 /* ================= END ================= */
@@ -244,21 +312,26 @@ endBtn.onclick = () => confirm("End interview?") && finishInterview();
 async function finishInterview() {
   interviewActive = false;
   clearInterval(timerInt);
-  speechSynthesis.cancel();
+  if(window.speechSynthesis) speechSynthesis.cancel();
 
   status.textContent = "Generating report...";
 
-  const data = await callAPI("score", {
-    history,
-    cvText
-  });
+  try {
+    const data = await callAPI("score", {
+      history,
+      cvText
+    });
 
-  document.body.innerHTML = `
-    <div class="card" style="max-width:800px">
-      <h1>Interview Complete</h1>
-      <pre style="white-space:pre-wrap">${data.reply || "Report unavailable"}</pre>
-      <button class="btn-primary" onclick="location.reload()">New Interview</button>
-    </div>`;
+    document.body.innerHTML = `
+      <div class="card" style="max-width:800px; margin: 20px auto;">
+        <h1>Interview Complete</h1>
+        <pre style="white-space:pre-wrap; font-family: inherit;">${data.reply || "Report unavailable"}</pre>
+        <br>
+        <button class="btn-primary" onclick="location.reload()">New Interview</button>
+      </div>`;
+  } catch (e) {
+      status.textContent = "Error generating report.";
+  }
 }
 
 /* ================= UI ================= */
