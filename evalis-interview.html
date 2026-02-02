@@ -81,6 +81,7 @@ button:disabled{opacity:.4}
 
 <div class="container">
 
+<!-- LEFT -->
 <div class="card">
   <h1>Evalis AI Interview</h1>
   <p>Vosk powered live interview</p>
@@ -100,6 +101,7 @@ button:disabled{opacity:.4}
   </div>
 </div>
 
+<!-- RIGHT -->
 <div class="card">
   <h2>Conversation</h2>
   <p>Live transcript</p>
@@ -116,134 +118,52 @@ const API = "https://evalis-ai.simpaticohrconsultancy.workers.dev";
 let cvText = "";
 let history = [];
 let interviewActive = false;
-let isAISpeaking = false;
 let isProcessing = false;
 let timeLeft = 15 * 60;
-let timerInt = null;
-let voices = []; // Store voices here
+let timerInt;
 
 /* ================= PDF ================= */
 const pdfjsLib = window['pdfjs-dist/build/pdf'];
 pdfjsLib.GlobalWorkerOptions.workerSrc =
   "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
 
-const cvInput = document.getElementById('cvInput');
-const startBtn = document.getElementById('startBtn');
-const endBtn = document.getElementById('endBtn');
-const status = document.getElementById('status');
-const timer = document.getElementById('timer');
-const voskBox = document.getElementById('voskBox');
-const backBtn = document.getElementById('backBtn');
+const cvInput = document.getElementById("cvInput");
+const startBtn = document.getElementById("startBtn");
+const endBtn = document.getElementById("endBtn");
+const status = document.getElementById("status");
+const timer = document.getElementById("timer");
+const voskBox = document.getElementById("voskBox");
+const logBox = document.getElementById("log");
 
+/* ================= CV ================= */
 cvInput.onchange = async e => {
-  const file = e.target.files[0];
-  if (!file) return;
+  const f = e.target.files[0];
+  if (!f) return;
 
   status.textContent = "Reading resume...";
   startBtn.disabled = true;
 
-  const pdf = await pdfjsLib.getDocument(await file.arrayBuffer()).promise;
-  let text = "";
-
+  const pdf = await pdfjsLib.getDocument(await f.arrayBuffer()).promise;
+  let t = "";
   for (let i = 1; i <= pdf.numPages; i++) {
-    const page = await pdf.getPage(i);
-    const content = await page.getTextContent();
-    text += content.items.map(i => i.str).join(" ") + " ";
+    const p = await pdf.getPage(i);
+    const c = await p.getTextContent();
+    t += c.items.map(x => x.str).join(" ") + " ";
   }
 
-  cvText = text.trim() || "[Resume uploaded]";
+  cvText = t.trim() || "[Resume uploaded]";
   startBtn.disabled = false;
   status.textContent = "Resume ready ✓";
 };
 
 /* ================= TIMER ================= */
-function startTimer() {
-  timerInt = setInterval(() => {
+function startTimer(){
+  timerInt = setInterval(()=>{
     timeLeft--;
     timer.textContent =
       `${Math.floor(timeLeft/60)}:${String(timeLeft%60).padStart(2,"0")}`;
-    if (timeLeft <= 0) finishInterview();
-  }, 1000);
-}
-
-/* ================= VOICE LOADER (NEW) ================= */
-// Android needs to be forced to load voices
-function loadVoices() {
-  voices = window.speechSynthesis.getVoices();
-  console.log("Voices loaded:", voices.length);
-}
-// Try loading immediately and on change
-if ('speechSynthesis' in window) {
-    loadVoices();
-    window.speechSynthesis.onvoiceschanged = loadVoices;
-}
-
-/* ================= SPEECH (WITH VOICE SELECTION) ================= */
-function speak(text) {
-  return new Promise(res => {
-    isAISpeaking = true;
-    
-    // Check if voices are loaded, if not try one last time
-    if (voices.length === 0) loadVoices();
-    
-    // Visual feedback
-    status.textContent = "AI Speaking..."; 
-    addMsg("ai", text);
-
-    if (!window.speechSynthesis) {
-      console.warn("No TTS support");
-      setTimeout(() => endSpeak(res), 2000);
-      return;
-    }
-
-    const u = new SpeechSynthesisUtterance(text);
-    u.rate = 1.0;
-    u.volume = 1.0; // Force max volume
-
-    // --- CRITICAL: VOICE SELECTION ---
-    // Try to find an English voice. Android often defaults to silent if not picked.
-    const englishVoice = voices.find(v => v.lang.includes('en-US') || v.lang.includes('en_US')) 
-                      || voices.find(v => v.lang.includes('en'))
-                      || voices[0];
-    
-    if (englishVoice) {
-        u.voice = englishVoice;
-        console.log("Selected voice:", englishVoice.name);
-    } else {
-        console.warn("No specific voice found, using default");
-        // Status warning if phone has no voices
-        if(voices.length === 0) status.textContent = "⚠️ No TTS Voices Found on Phone";
-    }
-    // ----------------------------------
-
-    // Safety Timeout
-    const safetyDuration = (text.length * 80) + 3000;
-    const safetyTimer = setTimeout(() => {
-      if (isAISpeaking) {
-        console.warn("TTS timed out. Resetting.");
-        speechSynthesis.cancel();
-        endSpeak(res);
-      }
-    }, safetyDuration);
-
-    u.onend = () => { clearTimeout(safetyTimer); endSpeak(res); };
-    u.onerror = (e) => { console.error("TTS Error", e); clearTimeout(safetyTimer); endSpeak(res); };
-
-    try {
-      speechSynthesis.cancel(); // Clear any stuck audio first
-      speechSynthesis.speak(u);
-    } catch (e) {
-      console.error("TTS Crash", e);
-      clearTimeout(safetyTimer);
-      endSpeak(res);
-    }
-  });
-}
-
-function endSpeak(resCallback) {
-    isAISpeaking = false;
-    status.textContent = "Listening...";
-    resCallback();
+    if(timeLeft<=0) finishInterview();
+  },1000);
 }
 
 /* ================= API ================= */
@@ -254,115 +174,93 @@ async function callAPI(mode, extra = {}) {
   if (extra.cvText) fd.append("cvText", extra.cvText);
   if (extra.history) fd.append("history", JSON.stringify(extra.history));
 
-  const res = await fetch(API, { method: "POST", body: fd });
-  if (!res.ok) throw new Error("API failed");
-  return await res.json();
+  const r = await fetch(API, { method: "POST", body: fd });
+  if (!r.ok) throw new Error("API failed");
+  return await r.json();
 }
 
-/* ================= ANDROID BRIDGE ================= */
+/* ================= ANDROID → WEB ================= */
 window.receiveVoskText = text => {
-  // Debug log
-  console.log("Vosk Input:", text);
-
-  if (isAISpeaking || !interviewActive || isProcessing) return;
+  if (!interviewActive || isProcessing) return;
   if (!text || text.length < 2) return;
-  
   processUser(text);
 };
 
 /* ================= USER ================= */
-async function processUser(text) {
+async function processUser(text){
   isProcessing = true;
   status.textContent = "Thinking...";
   addMsg("user", text);
 
-  try {
-    const data = await callAPI("interview", {
-      text,
-      cvText,
-      history
-    });
-    history = data.history || history;
-    await speak(data.reply);
-  } catch {
-    await speak("Can you explain that further?");
+  try{
+    const d = await callAPI("interview",{ text, cvText, history });
+    history = d.history || history;
+    addMsg("ai", d.reply);
+    Android.speak(d.reply);   // 🔥 ANDROID TTS
+  }catch{
+    const fallback = "Can you explain that further?";
+    addMsg("ai", fallback);
+    Android.speak(fallback);
   }
 
   isProcessing = false;
+  status.textContent = "Listening...";
 }
 
 /* ================= START ================= */
-startBtn.onclick = async () => {
-  if (!cvText) return;
-
+startBtn.onclick = async ()=>{
   interviewActive = true;
   startTimer();
+  cvInput.style.display="none";
+  startBtn.style.display="none";
+  endBtn.style.display="block";
+  voskBox.style.display="block";
+  status.textContent="Starting interview...";
 
-  cvInput.style.display = "none";
-  startBtn.style.display = "none";
-  endBtn.style.display = "block";
-  voskBox.style.display = "block";
-
-  status.textContent = "Starting interview...";
-
-  // Attempt to "prime" the audio engine
-  if(window.speechSynthesis) {
-      loadVoices();
-      speechSynthesis.cancel();
+  try{
+    const d = await callAPI("start",{cvText});
+    history = d.history || [];
+    addMsg("ai", d.reply);
+    Android.speak(d.reply);
+  }catch{
+    const fallback="Tell me about yourself.";
+    addMsg("ai", fallback);
+    Android.speak(fallback);
   }
 
-  try {
-    const data = await callAPI("start", { cvText });
-    history = data.history || [];
-    await speak(data.reply || "Tell me about yourself.");
-  } catch {
-    await speak("Tell me about yourself.");
-  }
+  status.textContent="Listening...";
 };
 
 /* ================= END ================= */
-endBtn.onclick = () => confirm("End interview?") && finishInterview();
+endBtn.onclick=()=>confirm("End interview?")&&finishInterview();
 
-async function finishInterview() {
-  interviewActive = false;
+async function finishInterview(){
+  interviewActive=false;
   clearInterval(timerInt);
-  if(window.speechSynthesis) speechSynthesis.cancel();
+  status.textContent="Generating report...";
 
-  status.textContent = "Generating report...";
-
-  try {
-    const data = await callAPI("score", {
-      history,
-      cvText
-    });
-
-    document.body.innerHTML = `
-      <div class="card" style="max-width:800px; margin: 20px auto;">
-        <h1>Interview Complete</h1>
-        <pre style="white-space:pre-wrap; font-family: inherit;">${data.reply || "Report unavailable"}</pre>
-        <br>
-        <button class="btn-primary" onclick="location.reload()">New Interview</button>
-      </div>`;
-  } catch (e) {
-      status.textContent = "Error generating report.";
-  }
+  const d = await callAPI("score",{history,cvText});
+  document.body.innerHTML=`
+    <div class="card" style="max-width:800px;margin:20px auto">
+      <h1>Interview Complete</h1>
+      <pre style="white-space:pre-wrap">${d.reply}</pre>
+      <button class="btn-primary" onclick="location.reload()">New Interview</button>
+    </div>`;
 }
 
 /* ================= UI ================= */
-const logBox = document.getElementById("log");
-
-function addMsg(role, text) {
-  const d = document.createElement("div");
-  d.className = "msg " + role;
-  d.innerHTML = `<b>${role === "ai" ? "AI" : "You"}:</b> ${text}`;
+function addMsg(role,text){
+  const d=document.createElement("div");
+  d.className="msg "+role;
+  d.innerHTML=`<b>${role==="ai"?"AI":"You"}:</b> ${text}`;
   logBox.appendChild(d);
-  logBox.scrollTop = logBox.scrollHeight;
+  logBox.scrollTop=logBox.scrollHeight;
 }
 
 /* ================= NAV ================= */
-backBtn.onclick = () => location.href = "career-lab.html";
-history.pushState(null, "", location.href);
-window.onpopstate = () => backBtn.click();
+backBtn.onclick=()=>location.href="career-lab.html";
+history.pushState(null,"",location.href);
+window.onpopstate=()=>backBtn.click();
 </script>
 
 </body>
