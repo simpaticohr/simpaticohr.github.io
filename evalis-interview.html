@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Evalis AI – Live Interview</title>
+<title>Evalis AI – Live Interview (Hybrid)</title>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 
@@ -15,16 +15,17 @@
   --border:rgba(255,255,255,.1);
   --ok:#10b981;
   --bad:#ef4444;
+  --warn:#f59e0b;
 }
 *{box-sizing:border-box}
 body{
   margin:0;background:var(--bg);color:#fff;
   font-family:system-ui,sans-serif;
   display:flex;justify-content:center;align-items:center;
-  min-height:100vh
+  min-height:100vh;padding:20px;
 }
 .back-btn{
-  position:fixed;top:18px;left:18px;
+  position:fixed;top:16px;left:16px;
   background:rgba(255,255,255,.08);
   border:1px solid var(--border);
   padding:10px 16px;border-radius:12px;
@@ -47,7 +48,7 @@ p{margin:0;color:#94a3b8;font-size:14px}
   font-size:42px;font-weight:800;
   color:var(--primary);text-align:center;margin:16px 0
 }
-#status{text-align:center;font-size:14px;color:#94a3b8;margin-bottom:20px}
+#status{text-align:center;font-size:14px;color:#94a3b8;margin-bottom:16px}
 input[type=file]{
   width:100%;padding:14px;border-radius:12px;
   background:transparent;color:#fff;
@@ -59,19 +60,51 @@ button{
 }
 .btn-primary{background:var(--primary);color:#fff}
 .btn-danger{background:var(--bad);color:#fff}
-button:disabled{opacity:.4}
+.btn-secondary{background:rgba(255,255,255,.1);color:#fff;margin-top:8px}
+button:disabled{opacity:.4;cursor:not-allowed}
 .log{max-height:460px;overflow-y:auto}
 .msg{
   margin-bottom:14px;padding:12px 16px;border-radius:12px
 }
 .msg.user{background:rgba(103,232,249,.1);border-left:3px solid #67e8f9}
 .msg.ai{background:rgba(165,180,252,.1);border-left:3px solid #a5b4fc}
+.msg.error{background:rgba(239,68,68,.1);border-left:3px solid #ef4444}
+.msg.debug{background:rgba(245,158,11,.1);border-left:3px solid #f59e0b;font-size:12px}
 .vosk{
   margin-top:16px;padding:12px 16px;
   border-radius:12px;border:1px solid var(--border);
   background:rgba(255,255,255,.03);font-size:13px
 }
 .ok{color:var(--ok)}
+.bad{color:var(--bad)}
+.warn{color:var(--warn)}
+.manual-input{
+  margin-top:12px;
+  display:flex;gap:8px;
+}
+.manual-input input{
+  flex:1;
+  padding:12px;
+  border-radius:10px;
+  border:1px solid var(--border);
+  background:rgba(255,255,255,.05);
+  color:#fff;
+}
+.debug-panel{
+  margin-top:16px;
+  padding:12px;
+  border-radius:12px;
+  background:rgba(245,158,11,.1);
+  border:1px solid var(--warn);
+  font-size:12px;
+  max-height:200px;
+  overflow-y:auto;
+}
+.debug-panel h3{
+  margin:0 0 8px;
+  font-size:13px;
+  color:var(--warn);
+}
 </style>
 </head>
 
@@ -81,6 +114,7 @@ button:disabled{opacity:.4}
 
 <div class="container">
 
+<!-- LEFT -->
 <div class="card">
   <h1>Evalis AI Interview</h1>
   <p>Vosk powered live interview</p>
@@ -94,25 +128,58 @@ button:disabled{opacity:.4}
   <button id="endBtn" class="btn-danger" style="display:none">End Interview</button>
 
   <div class="vosk" id="voskBox" style="display:none">
-    <div>Vosk Engine: <span class="ok">Active</span></div>
-    <div>Microphone: <span class="ok">Connected</span></div>
-    <div>Mode: Continuous</div>
+    <div>Vosk Engine: <span id="voskStatus" class="ok">Active</span></div>
+    <div>Microphone: <span id="micStatus" class="warn">Initializing...</span></div>
+    <div>Mode: <span id="modeStatus">Continuous</span></div>
+    <div>Platform: <span id="platformStatus" class="warn">Detecting...</span></div>
+  </div>
+
+  <div class="debug-panel" id="debugPanel" style="display:none">
+    <h3>🐛 Debug Log</h3>
+    <div id="debugLog"></div>
   </div>
 </div>
 
+<!-- RIGHT -->
 <div class="card">
   <h2>Conversation</h2>
   <p>Live transcript</p>
   <div class="log" id="log"></div>
+  
+  <!-- Manual input fallback -->
+  <div class="manual-input" id="manualInput" style="display:none">
+    <input type="text" id="textInput" placeholder="Type your answer and press Enter...">
+    <button id="sendBtn" class="btn-secondary" style="width:auto;padding:12px 20px">Send</button>
+  </div>
 </div>
 
 </div>
 
 <script>
-/* ================= CONFIG ================= */
+/* ================== CONFIG ================== */
 const API = "https://evalis-ai.simpaticohrconsultancy.workers.dev";
+const DEBUG_MODE = true;
+const API_TIMEOUT = 15000;
 
-/* ================= STATE ================= */
+/* ================== ELEMENTS ================== */
+const cvInput = document.getElementById("cvInput");
+const startBtn = document.getElementById("startBtn");
+const endBtn = document.getElementById("endBtn");
+const status = document.getElementById("status");
+const timer = document.getElementById("timer");
+const logBox = document.getElementById("log");
+const voskBox = document.getElementById("voskBox");
+const backBtn = document.getElementById("backBtn");
+const manualInput = document.getElementById("manualInput");
+const textInput = document.getElementById("textInput");
+const sendBtn = document.getElementById("sendBtn");
+const micStatus = document.getElementById("micStatus");
+const modeStatus = document.getElementById("modeStatus");
+const platformStatus = document.getElementById("platformStatus");
+const debugPanel = document.getElementById("debugPanel");
+const debugLog = document.getElementById("debugLog");
+
+/* ================== STATE ================== */
 let cvText = "";
 let history = [];
 let interviewActive = false;
@@ -120,185 +187,442 @@ let isAISpeaking = false;
 let isProcessing = false;
 let timeLeft = 15 * 60;
 let timerInt = null;
-let voices = [];
+let recognition = null;
+let useManualInput = false;
 
-/* ================= UI ELEMENTS ================= */
-const cvInput = document.getElementById('cvInput');
-const startBtn = document.getElementById('startBtn');
-const endBtn = document.getElementById('endBtn');
-const statusText = document.getElementById('status');
-const timerDisplay = document.getElementById('timer');
-const voskBox = document.getElementById('voskBox');
-const logBox = document.getElementById('log');
-const backBtn = document.getElementById('backBtn');
+// Detect platform
+const isAndroid = typeof AndroidTTS !== 'undefined';
+const hasVosk = isAndroid; // Assume Vosk is available on Android
 
-/* ================= PDF HANDLING ================= */
-const pdfjsLib = window['pdfjs-dist/build/pdf'];
-pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+/* ================== DEBUG LOGGING ================== */
+function debugMsg(msg, type = "info") {
+  if (!DEBUG_MODE) return;
+  
+  debugPanel.style.display = "block";
+  const timestamp = new Date().toLocaleTimeString();
+  const color = type === "error" ? "#ef4444" : type === "success" ? "#10b981" : "#94a3b8";
+  
+  const entry = document.createElement("div");
+  entry.style.color = color;
+  entry.style.marginBottom = "4px";
+  entry.textContent = `[${timestamp}] ${msg}`;
+  debugLog.appendChild(entry);
+  debugLog.scrollTop = debugLog.scrollHeight;
+  
+  console.log(`[Evalis] ${msg}`);
+}
 
-cvInput.onchange = async e => {
-  const file = e.target.files[0];
-  if (!file) return;
+/* ================== ANDROID BRIDGE - VOSK RECEIVER ================== */
+// This function is called by Android when Vosk detects speech
+window.receiveVoskText = function(text) {
+  debugMsg(`Vosk heard: ${text}`, "success");
+  
+  if (interviewActive && !isProcessing && !isAISpeaking) {
+    processUser(text);
+  } else {
+    debugMsg(`Ignored (processing=${isProcessing}, speaking=${isAISpeaking})`);
+  }
+};
 
-  statusText.textContent = "Reading resume...";
-  startBtn.disabled = true;
+/* ================== API HELPER ================== */
+async function apiCall(data) {
+  debugMsg(`API: ${data.mode}`);
+  
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => {
+    debugMsg("API timeout", "error");
+    controller.abort();
+  }, API_TIMEOUT);
 
   try {
+    const response = await fetch(API, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+      signal: controller.signal
+    });
+    
+    clearTimeout(timeoutId);
+    
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    
+    debugMsg("API OK", "success");
+    return await response.json();
+    
+  } catch (err) {
+    clearTimeout(timeoutId);
+    throw err;
+  }
+}
+
+/* ================== PDF ================== */
+const pdfjsLib = window['pdfjs-dist/build/pdf'];
+pdfjsLib.GlobalWorkerOptions.workerSrc =
+  "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+
+cvInput.addEventListener("change", async (e) => {
+  try {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    debugMsg(`Loading: ${file.name}`);
+    status.textContent = "Loading resume...";
+
     const pdf = await pdfjsLib.getDocument(await file.arrayBuffer()).promise;
     let text = "";
+    
     for (let i = 1; i <= pdf.numPages; i++) {
       const page = await pdf.getPage(i);
       const content = await page.getTextContent();
-      text += content.items.map(it => it.str).join(" ") + " ";
+      text += content.items.map(x => x.str).join(" ") + " ";
     }
+
     cvText = text.trim() || "[Resume uploaded]";
     startBtn.disabled = false;
-    statusText.textContent = "Resume ready ✓";
+    status.textContent = "Resume ready ✓ Click Start Interview";
+    debugMsg(`Resume: ${cvText.length} chars`, "success");
+
   } catch (err) {
-    statusText.textContent = "Error reading PDF";
+    debugMsg(`PDF error: ${err.message}`, "error");
+    status.textContent = "Resume load failed. Try again.";
+    addMsg("error", `Failed to load resume: ${err.message}`);
   }
-};
+});
 
-/* ================= VOICE INITIALIZATION ================= */
-function initVoices() {
-  voices = window.speechSynthesis.getVoices();
-}
-if ('speechSynthesis' in window) {
-  initVoices();
-  window.speechSynthesis.onvoiceschanged = initVoices;
+/* ================== TIMER ================== */
+function startTimer(){
+  debugMsg("Timer started");
+  timerInt = setInterval(()=>{
+    timeLeft--;
+    timer.textContent = `${Math.floor(timeLeft/60)}:${String(timeLeft%60).padStart(2,"0")}`;
+    if(timeLeft<=0) {
+      debugMsg("Time's up!");
+      finishInterview();
+    }
+  },1000);
 }
 
-/* ================= ROBUST MOBILE SPEECH ================= */
-function speak(text) {
-  return new Promise(res => {
+/* ================== TTS - HYBRID ================== */
+function speak(text){
+  return new Promise(res=>{
+    debugMsg(`Speaking: ${text.substring(0, 50)}...`);
     isAISpeaking = true;
-    statusText.textContent = "AI Speaking...";
+    status.textContent = "AI is speaking...";
     addMsg("ai", text);
-
-    if (!window.speechSynthesis) {
-      finishSpeaking(res);
+    
+    // Android TTS
+    if (isAndroid && typeof AndroidTTS !== 'undefined') {
+      debugMsg("Using Android TTS", "success");
+      try {
+        AndroidTTS.speak(text);
+        // Estimate speaking time (rough calculation)
+        const estimatedTime = text.length * 50; // ~50ms per character
+        setTimeout(() => {
+          isAISpeaking = false;
+          if(interviewActive) status.textContent = useManualInput ? "Type your response..." : "Listening... Speak now";
+          res();
+        }, estimatedTime);
+      } catch (err) {
+        debugMsg(`Android TTS error: ${err.message}`, "error");
+        isAISpeaking = false;
+        res();
+      }
       return;
     }
-
-    window.speechSynthesis.cancel(); 
-    const u = new SpeechSynthesisUtterance(text);
     
-    // Find an English voice specifically for Android
-    let v = voices.find(v => v.lang.startsWith('en') && v.localService) || voices.find(v => v.lang.startsWith('en'));
-    if (v) u.voice = v;
-    u.lang = 'en-US';
-    u.rate = 1.0;
-    u.pitch = 1.0;
-
-    // Safety timeout: Unlock state if TTS hangs
-    const safetyTimer = setTimeout(() => {
-      window.speechSynthesis.cancel();
-      finishSpeaking(res);
-    }, (text.length * 100) + 3000);
-
-    u.onend = () => { clearTimeout(safetyTimer); finishSpeaking(res); };
-    u.onerror = () => { clearTimeout(safetyTimer); finishSpeaking(res); };
-
-    window.speechSynthesis.speak(u);
+    // Web TTS fallback
+    if (!window.speechSynthesis) {
+      debugMsg("No TTS available", "error");
+      isAISpeaking = false;
+      if(interviewActive) status.textContent = useManualInput ? "Type your response..." : "Listening... Speak now";
+      res();
+      return;
+    }
+    
+    debugMsg("Using Web TTS");
+    const u = new SpeechSynthesisUtterance(text);
+    u.rate = .95;
+    u.onend = () => { 
+      debugMsg("TTS finished");
+      isAISpeaking = false; 
+      if(interviewActive) status.textContent = useManualInput ? "Type your response..." : "Listening... Speak now";
+      res(); 
+    };
+    u.onerror = (err) => {
+      debugMsg(`Web TTS error: ${err.error}`, "error");
+      isAISpeaking = false;
+      if(interviewActive) status.textContent = useManualInput ? "Type your response..." : "Listening... Speak now";
+      res();
+    };
+    
+    speechSynthesis.speak(u);
   });
 }
 
-function finishSpeaking(res) {
-  isAISpeaking = false;
-  statusText.textContent = "Listening...";
-  res();
+/* ================== SPEECH RECOGNITION - HYBRID ================== */
+function initSpeechRecognition() {
+  debugMsg("Init speech recognition");
+  
+  // Android Vosk (native)
+  if (hasVosk) {
+    debugMsg("Using Vosk (Android native)", "success");
+    micStatus.textContent = "Connected";
+    micStatus.className = "ok";
+    modeStatus.textContent = "Vosk (Continuous)";
+    platformStatus.textContent = "Android Native";
+    platformStatus.className = "ok";
+    status.textContent = "Listening... Speak now";
+    // Vosk is always listening, no need to start
+    return true;
+  }
+  
+  // Web Speech Recognition fallback
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  
+  if (!SR) {
+    debugMsg("No speech support", "error");
+    platformStatus.textContent = "Web (No speech)";
+    platformStatus.className = "bad";
+    enableManualInput();
+    return false;
+  }
+
+  debugMsg("Using Web Speech Recognition");
+  platformStatus.textContent = "Web Browser";
+  platformStatus.className = "warn";
+  
+  recognition = new SR();
+  recognition.continuous = true;
+  recognition.interimResults = false;
+  recognition.lang = 'en-US';
+
+  recognition.onstart = () => {
+    debugMsg("Mic ON", "success");
+    micStatus.textContent = "Connected";
+    micStatus.className = "ok";
+    status.textContent = "Listening... Speak now";
+  };
+
+  recognition.onresult = (e) => {
+    const text = e.results[e.results.length-1][0].transcript;
+    debugMsg(`Web heard: ${text}`);
+    if (!isProcessing && !isAISpeaking) processUser(text);
+  };
+
+  recognition.onerror = (e) => {
+    debugMsg(`Speech error: ${e.error}`, "error");
+    if (e.error === 'not-allowed') {
+      enableManualInput();
+    } else if (interviewActive && !useManualInput) {
+      setTimeout(() => { try{recognition.start()}catch(err){} }, 1000);
+    }
+  };
+
+  recognition.onend = () => {
+    if (interviewActive && !useManualInput) {
+      try{ recognition.start(); }catch(err){}
+    }
+  };
+
+  return true;
 }
 
-/* ================= LOGIC & API ================= */
-async function callAPI(mode, extra = {}) {
-  const fd = new FormData();
-  fd.append("mode", mode);
-  if (extra.text) fd.append("text", extra.text);
-  if (extra.cvText) fd.append("cvText", extra.cvText);
-  if (extra.history) fd.append("history", JSON.stringify(extra.history));
-
-  const res = await fetch(API, { method: "POST", body: fd });
-  return await res.json();
+function enableManualInput() {
+  debugMsg("→ Text input mode");
+  useManualInput = true;
+  manualInput.style.display = "flex";
+  micStatus.textContent = "Disabled";
+  micStatus.className = "bad";
+  modeStatus.textContent = "Text Input";
+  status.textContent = "Type your response...";
 }
 
-window.receiveVoskText = text => {
-  if (isAISpeaking || !interviewActive || isProcessing) return;
-  if (!text || text.length < 2) return;
+/* ================== MANUAL INPUT ================== */
+textInput.addEventListener("keypress", (e) => {
+  if (e.key === "Enter") sendManualInput();
+});
+sendBtn.addEventListener("click", sendManualInput);
+
+function sendManualInput() {
+  const text = textInput.value.trim();
+  if (!text || isProcessing || isAISpeaking) return;
   processUser(text);
-};
+  textInput.value = "";
+}
 
-async function processUser(text) {
+/* ================== USER INPUT ================== */
+async function processUser(text){
+  if (!text || text.length < 2) return;
+  
+  debugMsg(`Processing: ${text}`);
   isProcessing = true;
-  statusText.textContent = "Thinking...";
+  status.textContent = "Thinking...";
   addMsg("user", text);
 
-  try {
-    const data = await callAPI("interview", { text, cvText, history });
+  try{
+    const data = await apiCall({
+      mode: "interview",
+      history: history,
+      text: text,
+      cvText: cvText
+    });
+    
     history = data.history || history;
-    await speak(data.reply);
-  } catch {
-    await speak("Could you tell me more about that?");
+    const reply = data.reply || "Can you explain that further?";
+    debugMsg(`AI: ${reply.substring(0, 50)}...`);
+    await speak(reply);
+    
+  }catch(err){
+    debugMsg(`Error: ${err.message}`, "error");
+    addMsg("error", `Connection error: ${err.message}`);
+    await speak("I'm having trouble connecting. Please try again.");
   }
+
   isProcessing = false;
 }
 
-/* ================= CONTROLS ================= */
+/* ================== START ================== */
 startBtn.onclick = async () => {
-  // Prime audio engine on user tap
-  window.speechSynthesis.speak(new SpeechSynthesisUtterance(""));
-  
+  debugMsg("=== STARTING INTERVIEW ===");
   interviewActive = true;
-  cvInput.style.display = "none";
   startBtn.style.display = "none";
   endBtn.style.display = "block";
+  cvInput.style.display = "none";
   voskBox.style.display = "block";
 
-  timerInt = setInterval(() => {
-    timeLeft--;
-    timerDisplay.textContent = `${Math.floor(timeLeft/60)}:${String(timeLeft%60).padStart(2,"0")}`;
-    if (timeLeft <= 0) finishInterview();
-  }, 1000);
+  status.textContent = "Starting interview...";
+  startTimer();
 
-  statusText.textContent = "Starting...";
-  try {
-    const data = await callAPI("start", { cvText });
+  // Initialize speech recognition (Vosk or Web)
+  const speechSupported = initSpeechRecognition();
+  
+  // Start Web Speech Recognition if needed
+  if (!hasVosk && speechSupported && recognition) {
+    try {
+      debugMsg("Starting Web Speech");
+      recognition.start();
+    } catch(e) {
+      debugMsg(`Failed to start: ${e.message}`, "error");
+      enableManualInput();
+    }
+  }
+
+  // Get initial question from API
+  try{
+    debugMsg("Getting initial question...");
+    const data = await apiCall({
+      mode: "start",
+      cvText: cvText
+    });
+    
+    debugMsg("Received initial question", "success");
     history = data.history || [];
-    await speak(data.reply || "Tell me about yourself.");
-  } catch {
-    await speak("Tell me about yourself.");
+    await speak(data.reply || "Welcome. Tell me about yourself.");
+    
+  }catch(err){
+    debugMsg(`Start error: ${err.message}`, "error");
+    addMsg("error", "Cannot connect to AI. Starting offline mode.");
+    await speak("Welcome to the interview practice. Tell me about yourself.");
+    
+    if (!useManualInput && !hasVosk && !recognition) {
+      enableManualInput();
+    }
   }
 };
 
-endBtn.onclick = () => confirm("End interview?") && finishInterview();
+/* ================== END ================== */
+endBtn.onclick = () => {
+  if (confirm("End interview and see report?")) {
+    finishInterview();
+  }
+};
 
-async function finishInterview() {
+async function finishInterview(){
+  debugMsg("=== ENDING INTERVIEW ===");
   interviewActive = false;
   clearInterval(timerInt);
-  window.speechSynthesis.cancel();
-  statusText.textContent = "Finalizing...";
+  
+  // Stop speech synthesis
+  if (isAndroid && typeof AndroidTTS !== 'undefined') {
+    try { AndroidTTS.stop(); } catch(e) {}
+  } else {
+    speechSynthesis.cancel();
+  }
+  
+  // Stop Web Speech Recognition
+  if (recognition) {
+    try { recognition.stop(); } catch(e) {}
+  }
+
+  status.textContent = "Generating report...";
 
   try {
-    const data = await callAPI("score", { history, cvText });
+    debugMsg("Requesting report...");
+    const data = await apiCall({
+      mode: "score",
+      history: history,
+      cvText: cvText
+    });
+    
+    debugMsg("Report received", "success");
+
     document.body.innerHTML = `
-      <div class="card" style="max-width:800px; margin:20px auto;">
-        <h1>Interview Complete</h1>
-        <pre style="white-space:pre-wrap; font-family:inherit; color:#94a3b8;">${data.reply || "No report available."}</pre>
+      <div class="card" style="max-width:800px;margin:20px auto">
+        <h1>Interview Complete ✓</h1>
+        <pre style="white-space:pre-wrap;line-height:1.6">${data.reply || "Report coming soon"}</pre>
         <button class="btn-primary" onclick="location.reload()">New Interview</button>
       </div>`;
-  } catch {
-    location.reload();
+      
+  } catch(err) {
+    debugMsg(`Report error: ${err.message}`, "error");
+    
+    const conversationSummary = history.length > 0 
+      ? history.map((h, i) => `${i + 1}. ${h.role}: ${h.content.substring(0, 100)}...`).join('\n')
+      : "No conversation recorded.";
+    
+    document.body.innerHTML = `
+      <div class="card" style="max-width:800px;margin:20px auto">
+        <h1>Interview Complete</h1>
+        <p style="color:#94a3b8;margin-bottom:20px">Unable to generate AI report (server unavailable):</p>
+        <div style="background:rgba(255,255,255,.05);padding:20px;border-radius:12px;margin:20px 0">
+          <h3>Conversation Summary</h3>
+          <pre style="white-space:pre-wrap;font-size:13px;color:#94a3b8">${conversationSummary}</pre>
+        </div>
+        <button class="btn-primary" onclick="location.reload()">New Interview</button>
+      </div>`;
   }
 }
 
-function addMsg(role, text) {
+/* ================== UI ================== */
+function addMsg(role, text){
   const d = document.createElement("div");
   d.className = "msg " + role;
-  d.innerHTML = `<b>${role === "ai" ? "AI" : "You"}:</b> ${text}`;
+  const label = role === "ai" ? "AI" : role === "user" ? "You" : role === "error" ? "⚠️ Error" : "ℹ️ Info";
+  d.innerHTML = `<b>${label}:</b> ${text}`;
   logBox.appendChild(d);
   logBox.scrollTop = logBox.scrollHeight;
 }
 
-backBtn.onclick = () => location.href = "career-lab.html";
+/* ================== NAV ================== */
+backBtn.onclick = () => {
+  if (interviewActive && !confirm("End interview and go back?")) return;
+  if (interviewActive) finishInterview();
+  location.reload();
+};
+
+history.pushState(null,"",location.href);
+window.onpopstate = () => backBtn.click();
+
+// Initialize
+debugMsg("=== Evalis AI Interview (Hybrid) ===", "success");
+debugMsg(`Platform: ${isAndroid ? "Android" : "Web"}`);
+debugMsg(`Vosk: ${hasVosk ? "Available" : "Not available"}`);
+debugMsg(`AndroidTTS: ${typeof AndroidTTS !== 'undefined' ? "Available" : "Not available"}`);
+debugMsg(`Web Speech: ${!!(window.SpeechRecognition || window.webkitSpeechRecognition)}`);
+debugMsg(`Web TTS: ${!!window.speechSynthesis}`);
 </script>
+
 </body>
 </html>
