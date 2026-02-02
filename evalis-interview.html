@@ -2,263 +2,166 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Evalis AI - Live Evaluation</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Evalis AI - Elite Live Interview</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
     <style>
-        :root { --primary: #6366f1; --bg: #0f172a; --card: #1e293b; --text: #f8fafc; }
-        body { margin: 0; background: var(--bg); color: var(--text); font-family: 'Segoe UI', system-ui, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; overflow: hidden; }
-        
-        /* Main Interface */
-        .card { width: 90%; max-width: 400px; background: var(--card); border-radius: 24px; padding: 25px; box-shadow: 0 20px 50px rgba(0,0,0,0.5); text-align: center; border: 1px solid rgba(255,255,255,0.05); position: relative; z-index: 2; }
-        
-        /* Timer & Status */
-        #timer { font-size: 32px; font-weight: 800; color: var(--primary); font-variant-numeric: tabular-nums; letter-spacing: -1px; margin: 10px 0; }
-        #status { font-size: 13px; text-transform: uppercase; letter-spacing: 2px; color: #94a3b8; font-weight: 600; margin-bottom: 20px; min-height: 20px;}
-        
-        /* Audio Visualizer */
-        .vis-container { height: 80px; width: 100%; display: flex; align-items: center; justify-content: center; margin-bottom: 20px; background: rgba(0,0,0,0.2); border-radius: 12px; }
-        canvas { width: 100%; height: 100%; border-radius: 12px; }
-
-        /* Controls */
-        .btn { background: var(--primary); color: white; border: none; padding: 18px; border-radius: 16px; width: 100%; font-weight: bold; font-size: 16px; margin-top: 10px; cursor: pointer; transition: transform 0.1s; display: block; }
-        .btn:active { transform: scale(0.98); }
-        .btn.danger { background: #ef4444; }
-        input[type="file"] { margin-bottom: 15px; color: #cbd5e1; font-size: 12px; width: 100%; }
-        
-        /* Chat Log (Auto-scroll) */
-        #log { height: 150px; overflow-y: auto; text-align: left; font-size: 14px; border-top: 1px solid #334155; padding-top: 10px; margin-top: 10px; scroll-behavior: smooth; }
-        .msg { margin-bottom: 8px; line-height: 1.4; }
-        .msg.ai { color: #a5b4fc; }
-        .msg.user { color: #cbd5e1; text-align: right; opacity: 0.7; }
-
-        /* Final Report */
-        .report-modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: var(--bg); z-index: 10; overflow-y: auto; padding: 20px; box-sizing: border-box; }
-        .score-circle { width: 100px; height: 100px; border-radius: 50%; border: 8px solid var(--primary); display: flex; align-items: center; justify-content: center; font-size: 32px; font-weight: bold; margin: 0 auto 20px; }
+        :root { --primary: #6366f1; --bg: #020617; }
+        body { margin: 0; background: var(--bg); color: white; font-family: system-ui, sans-serif; display: flex; align-items: center; justify-content: center; min-height: 100vh; overflow-x: hidden; }
+        .card { width: 90%; max-width: 440px; background: rgba(255,255,255,0.05); backdrop-filter: blur(15px); border-radius: 24px; padding: 30px; text-align: center; border: 1px solid rgba(255,255,255,0.1); box-shadow: 0 25px 50px rgba(0,0,0,0.5); }
+        .wave-box { height: 80px; margin: 15px 0; }
+        canvas { width: 100%; height: 60px; filter: drop-shadow(0 0 5px var(--primary)); }
+        #timer { font-size: 24px; font-weight: 700; color: var(--primary); margin-bottom: 5px; font-variant-numeric: tabular-nums; }
+        #status { font-size: 12px; color: #94a3b8; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 20px; }
+        .btn { background: var(--primary); color: white; border: none; padding: 16px; border-radius: 14px; width: 100%; font-weight: bold; cursor: pointer; font-size: 16px; transition: 0.3s; }
+        .btn:disabled { opacity: 0.3; }
+        #log { margin-top: 20px; max-height: 200px; overflow-y: auto; text-align: left; font-size: 14px; border-top: 1px solid #334155; padding-top: 15px; }
+        .report-box { background: rgba(99, 102, 241, 0.1); padding: 20px; border-radius: 15px; text-align: left; line-height: 1.6; border: 1px solid var(--primary); }
     </style>
 </head>
 <body>
 
-<div class="card" id="mainCard">
-    <div id="status">Ready</div>
+<div class="card">
     <div id="timer">15:00</div>
+    <div id="status">Upload Resume to Start</div>
+    <div class="wave-box"><canvas id="canvas"></canvas></div>
     
-    <div class="vis-container">
-        <canvas id="canvas"></canvas>
-    </div>
-
-    <div id="controls">
-        <input type="file" id="cvInput" accept=".pdf">
-        <button id="startBtn" class="btn" disabled>Start Interview</button>
-    </div>
-
-    <button id="endBtn" class="btn danger" style="display:none">End Session</button>
+    <input type="file" id="cvInput" accept=".pdf" style="margin-bottom:15px; font-size: 12px;">
+    <button id="startBtn" class="btn" disabled>Start Interview</button>
+    <button id="endBtn" class="btn" style="display:none; background:#ef4444">End Interview</button>
     
     <div id="log"></div>
 </div>
 
-<div id="report" class="report-modal">
-    <h2 style="text-align:center">Performance Report</h2>
-    <div class="score-circle" id="finalScore">--</div>
-    <div id="reportText" style="white-space: pre-wrap; line-height: 1.6; color: #cbd5e1;"></div>
-    <button class="btn" onclick="location.reload()" style="margin-top:30px">New Interview</button>
-</div>
-
 <script>
-// CONFIGURATION
-const WORKER_URL = "https://evalis-ai.simpaticohrconsultancy.workers.dev"; // Your Cloudflare Worker URL
+const API = "https://evalis-ai.simpaticohrconsultancy.workers.dev";
 const pdfjsLib = window['pdfjs-dist/build/pdf'];
 pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
 
-// STATE
-let cvText = "";
-let history = [];
-let interviewActive = false;
-let isAISpeaking = false;
-let recognition;
-let timeLeft = 900; // 15 minutes
-let timerInt;
+let cvText = "", history = [], interviewActive = false, isAISpeaking = false, recognition;
+let audioCtx, analyser, dataArray, canvasCtx, timerInterval, timeLeft = 15 * 60;
 
-// 1. PDF HANDLING
-document.getElementById("cvInput").addEventListener("change", async (e) => {
-    if(e.target.files[0]) {
-        document.getElementById("status").innerText = "Parsing PDF...";
-        try {
-            const data = await e.target.files[0].arrayBuffer();
-            const pdf = await pdfjsLib.getDocument(data).promise;
-            let fullText = "";
-            for (let i = 1; i <= pdf.numPages; i++) {
-                const page = await pdf.getPage(i);
-                const txt = await page.getTextContent();
-                fullText += txt.items.map(s => s.str).join(" ") + " ";
-            }
-            cvText = fullText;
-            document.getElementById("startBtn").disabled = false;
-            document.getElementById("startBtn").innerText = "Start Interview";
-            document.getElementById("status").innerText = "Resume Loaded";
-        } catch (err) {
-            alert("Error reading PDF");
-        }
+/* 1. PDF LOADING */
+document.getElementById("cvInput").onchange = async e => {
+    const pdf = await pdfjsLib.getDocument(await e.target.files[0].arrayBuffer()).promise;
+    let text = "";
+    for (let i = 1; i <= pdf.numPages; i++) {
+        const page = await pdf.getPage(i);
+        text += (await page.getTextContent()).items.map(s => s.str).join(" ") + " ";
     }
-});
-
-// 2. AUDIO SYSTEM (Web Audio API for Visualizer)
-let audioCtx, analyser, dataArray, canvasCtx;
-async function initAudio() {
-    try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-        analyser = audioCtx.createAnalyser();
-        const source = audioCtx.createMediaStreamSource(stream);
-        source.connect(analyser);
-        analyser.fftSize = 256;
-        dataArray = new Uint8Array(analyser.frequencyBinCount);
-        canvasCtx = document.getElementById("canvas").getContext("2d");
-        drawVisualizer();
-    } catch(e) {
-        console.error("Mic Error", e);
-    }
-}
-
-function drawVisualizer() {
-    if(!interviewActive) return;
-    requestAnimationFrame(drawVisualizer);
-    analyser.getByteFrequencyData(dataArray);
-    canvasCtx.fillStyle = '#1e293b';
-    canvasCtx.fillRect(0, 0, 300, 150);
-    const barWidth = (document.getElementById("canvas").width / dataArray.length) * 2.5;
-    let x = 0;
-    for(let i = 0; i < dataArray.length; i++) {
-        let barHeight = dataArray[i] / 2;
-        canvasCtx.fillStyle = isAISpeaking ? '#a5b4fc' : '#6366f1'; // Purple if AI, Blue if User
-        canvasCtx.fillRect(x, 80 - barHeight/2, barWidth, barHeight);
-        x += barWidth + 1;
-    }
-}
-
-// 3. SPEECH RECOGNITION (STT)
-function initSpeech() {
-    const Speech = window.SpeechRecognition || window.webkitSpeechRecognition;
-    recognition = new Speech();
-    recognition.continuous = false; // False is better for mobile to force restart on silence
-    recognition.interimResults = false;
-    recognition.lang = 'en-US';
-
-    recognition.onstart = () => { document.getElementById("status").innerText = "Listening..."; };
-    
-    recognition.onresult = async (event) => {
-        const transcript = event.results[0][0].transcript;
-        addLog(transcript, "user");
-        await sendToAI(transcript);
-    };
-
-    recognition.onend = () => {
-        // Auto-restart if interview is active and AI isn't talking
-        if (interviewActive && !isAISpeaking) {
-            try { recognition.start(); } catch(e){}
-        }
-    };
-}
-
-// 4. TEXT TO SPEECH (TTS)
-function speak(text) {
-    isAISpeaking = true;
-    if(recognition) recognition.stop(); // Stop listening so AI doesn't hear itself
-    document.getElementById("status").innerText = "Interviewer Speaking...";
-    
-    const utter = new SpeechSynthesisUtterance(text);
-    utter.rate = 1.1;
-    utter.pitch = 1.0;
-    
-    utter.onend = () => {
-        isAISpeaking = false;
-        if(interviewActive) {
-            try { recognition.start(); } catch(e){}
-        }
-    };
-    
-    window.speechSynthesis.speak(utter);
-    addLog(text, "ai");
-}
-
-// 5. API COMMUNICATION
-async function sendToAI(userText, mode="interview") {
-    document.getElementById("status").innerText = "Thinking...";
-    
-    const formData = new FormData();
-    formData.append("mode", mode);
-    formData.append("cvText", cvText);
-    formData.append("history", JSON.stringify(history));
-    formData.append("text", userText || "");
-
-    try {
-        const res = await fetch(WORKER_URL, { method: "POST", body: formData });
-        const data = await res.json();
-        
-        if (mode === "score") {
-            showReport(data.reply);
-        } else {
-            history = data.history;
-            speak(data.reply);
-        }
-    } catch (e) {
-        document.getElementById("status").innerText = "Connection Error";
-    }
-}
-
-function addLog(text, role) {
-    const div = document.createElement("div");
-    div.className = `msg ${role}`;
-    div.innerText = (role === "ai" ? "AI: " : "You: ") + text;
-    const log = document.getElementById("log");
-    log.appendChild(div);
-    log.scrollTop = log.scrollHeight;
-}
-
-// 6. CONTROL LOGIC
-document.getElementById("startBtn").onclick = async () => {
-    // Need user gesture for audio
-    await initAudio();
-    initSpeech();
-    
-    document.getElementById("controls").style.display = "none";
-    document.getElementById("endBtn").style.display = "block";
-    
-    interviewActive = true;
-    startTimer();
-    
-    // Trigger "Start" mode on backend
-    sendToAI("", "start");
+    cvText = text;
+    document.getElementById("startBtn").disabled = false;
+    document.getElementById("status").textContent = "Resume Ready";
 };
 
-document.getElementById("endBtn").onclick = () => {
-    interviewActive = false;
-    clearInterval(timerInt);
-    window.speechSynthesis.cancel();
-    recognition.stop();
-    sendToAI("", "score");
-};
+/* 2. WAVEFORM & TIMER */
+function initWave(stream) {
+    audioCtx = new AudioContext();
+    analyser = audioCtx.createAnalyser();
+    audioCtx.createMediaStreamSource(stream).connect(analyser);
+    dataArray = new Uint8Array(analyser.frequencyBinCount);
+    canvasCtx = document.getElementById("canvas").getContext("2d");
+    const draw = () => {
+        requestAnimationFrame(draw);
+        analyser.getByteFrequencyData(dataArray);
+        canvasCtx.clearRect(0, 0, 400, 60);
+        canvasCtx.fillStyle = "#6366f1";
+        for (let i = 0; i < 80; i++) {
+            let h = dataArray[i] / 2.5;
+            canvasCtx.fillRect(i * 5, 30 - h/2, 3, h);
+        }
+    };
+    draw();
+}
 
 function startTimer() {
-    timerInt = setInterval(() => {
+    timerInterval = setInterval(() => {
         timeLeft--;
-        const m = Math.floor(timeLeft / 60);
-        const s = timeLeft % 60;
-        document.getElementById("timer").innerText = `${m}:${s < 10 ? '0' : ''}${s}`;
-        if(timeLeft <= 0) document.getElementById("endBtn").click();
+        let min = Math.floor(timeLeft / 60), sec = timeLeft % 60;
+        document.getElementById("timer").textContent = `${min}:${sec < 10 ? '0' : ''}${sec}`;
+        if (timeLeft <= 0) finishInterview();
     }, 1000);
 }
 
-function showReport(markdownReport) {
-    document.getElementById("mainCard").style.display = "none";
-    document.getElementById("report").style.display = "block";
-    
-    // Simple regex to find a score (e.g., "Score: 85/100")
-    const scoreMatch = markdownReport.match(/(\d+)\/100/);
-    if(scoreMatch) document.getElementById("finalScore").innerText = scoreMatch[1];
-    
-    document.getElementById("reportText").innerText = markdownReport;
+/* 3. SPEECH & INTERACTION */
+function speak(text) {
+    window.speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(text);
+    u.onstart = () => { isAISpeaking = true; if(recognition) recognition.stop(); };
+    u.onend = () => { isAISpeaking = false; if(interviewActive) recognition.start(); };
+    window.speechSynthesis.speak(u);
+    const d = document.createElement("div"); d.innerHTML = `<p style="color:#a5b4fc"><b>AI:</b> ${text}</p>`;
+    document.getElementById("log").prepend(d);
 }
+
+function initRecognition() {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    recognition = new SR();
+    recognition.continuous = true;
+    recognition.onresult = async e => {
+        const transcript = e.results[e.results.length - 1][0].transcript.trim();
+        if (isAISpeaking) { window.speechSynthesis.cancel(); isAISpeaking = false; }
+        
+        document.getElementById("status").textContent = "Thinking...";
+        const fd = new FormData();
+        fd.append("mode", "interview");
+        fd.append("history", JSON.stringify(history));
+        fd.append("text", transcript);
+        fd.append("cvText", cvText);
+
+        const res = await fetch(API, { method: "POST", body: fd });
+        const data = await res.json();
+        history = data.history;
+        speak(data.reply);
+    };
+}
+
+/* 4. FINISH & SCORE REPORT */
+async function finishInterview() {
+    interviewActive = false;
+    clearInterval(timerInterval);
+    if(recognition) recognition.stop();
+    window.speechSynthesis.cancel();
+    document.getElementById("status").textContent = "Generating Score Report...";
+    
+    const fd = new FormData();
+    fd.append("mode", "score");
+    fd.append("history", JSON.stringify(history));
+
+    const res = await fetch(API, { method: "POST", body: fd });
+    const data = await res.json();
+    
+    document.body.innerHTML = `
+        <div class="card" style="max-width:600px">
+            <h2 style="color:var(--primary)">Final Score Report</h2>
+            <div class="report-box" style="white-space:pre-wrap">${data.reply}</div>
+            <button onclick="location.reload()" class="btn" style="margin-top:20px">New Session</button>
+        </div>`;
+}
+
+/* 5. START SESSION */
+document.getElementById("startBtn").onclick = async () => {
+    window.speechSynthesis.speak(new SpeechSynthesisUtterance("")); // Unlock Audio
+    interviewActive = true;
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    initWave(stream);
+    initRecognition();
+    startTimer();
+
+    document.getElementById("cvInput").style.display = "none";
+    document.getElementById("startBtn").style.display = "none";
+    document.getElementById("endBtn").style.display = "block";
+
+    const fd = new FormData();
+    fd.append("mode", "start");
+    fd.append("cvText", cvText);
+    const res = await fetch(API, { method: "POST", body: fd });
+    const data = await res.json();
+    history = data.history;
+    speak(data.reply);
+};
+
+document.getElementById("endBtn").onclick = finishInterview;
 </script>
 </body>
 </html>
