@@ -15,7 +15,6 @@
   --border:rgba(255,255,255,.1);
   --ok:#10b981;
   --bad:#ef4444;
-  --warn:#f59e0b;
 }
 *{box-sizing:border-box}
 body{
@@ -25,7 +24,7 @@ body{
   min-height:100vh
 }
 .back-btn{
-  position:fixed;top:16px;left:16px;
+  position:fixed;top:18px;left:18px;
   background:rgba(255,255,255,.08);
   border:1px solid var(--border);
   padding:10px 16px;border-radius:12px;
@@ -48,7 +47,7 @@ p{margin:0;color:#94a3b8;font-size:14px}
   font-size:42px;font-weight:800;
   color:var(--primary);text-align:center;margin:16px 0
 }
-#status{text-align:center;font-size:14px;color:#94a3b8;margin-bottom:16px}
+#status{text-align:center;font-size:14px;color:#94a3b8;margin-bottom:20px}
 input[type=file]{
   width:100%;padding:14px;border-radius:12px;
   background:transparent;color:#fff;
@@ -60,7 +59,6 @@ button{
 }
 .btn-primary{background:var(--primary);color:#fff}
 .btn-danger{background:var(--bad);color:#fff}
-.btn-secondary{background:rgba(255,255,255,.1);color:#fff;margin-top:8px}
 button:disabled{opacity:.4}
 .log{max-height:460px;overflow-y:auto}
 .msg{
@@ -74,20 +72,6 @@ button:disabled{opacity:.4}
   background:rgba(255,255,255,.03);font-size:13px
 }
 .ok{color:var(--ok)}
-.bad{color:var(--bad)}
-.warn{color:var(--warn)}
-.manual-input{
-  margin-top:12px;
-  display:flex;gap:8px;
-}
-.manual-input input{
-  flex:1;
-  padding:12px;
-  border-radius:10px;
-  border:1px solid var(--border);
-  background:rgba(255,255,255,.05);
-  color:#fff;
-}
 </style>
 </head>
 
@@ -111,9 +95,9 @@ button:disabled{opacity:.4}
   <button id="endBtn" class="btn-danger" style="display:none">End Interview</button>
 
   <div class="vosk" id="voskBox" style="display:none">
-    <div>Vosk Engine: <span id="voskStatus" class="ok">Active</span></div>
-    <div>Microphone: <span id="micStatus" class="warn">Initializing...</span></div>
-    <div>Mode: <span id="modeStatus">Continuous</span></div>
+    <div>Vosk Engine: <span class="ok">Active</span></div>
+    <div>Microphone: <span class="ok">Connected</span></div>
+    <div>Mode: Continuous</div>
   </div>
 </div>
 
@@ -122,36 +106,15 @@ button:disabled{opacity:.4}
   <h2>Conversation</h2>
   <p>Live transcript</p>
   <div class="log" id="log"></div>
-  
-  <!-- Manual input fallback -->
-  <div class="manual-input" id="manualInput" style="display:none">
-    <input type="text" id="textInput" placeholder="Type your answer and press Enter...">
-    <button id="sendBtn" class="btn-secondary" style="width:auto;padding:12px 20px">Send</button>
-  </div>
 </div>
 
 </div>
 
 <script>
-/* ================== CONFIG ================== */
+/* ================= CONFIG ================= */
 const API = "https://evalis-ai.simpaticohrconsultancy.workers.dev";
 
-/* ================== ELEMENTS ================== */
-const cvInput = document.getElementById("cvInput");
-const startBtn = document.getElementById("startBtn");
-const endBtn = document.getElementById("endBtn");
-const status = document.getElementById("status");
-const timer = document.getElementById("timer");
-const logBox = document.getElementById("log");
-const voskBox = document.getElementById("voskBox");
-const backBtn = document.getElementById("backBtn");
-const manualInput = document.getElementById("manualInput");
-const textInput = document.getElementById("textInput");
-const sendBtn = document.getElementById("sendBtn");
-const micStatus = document.getElementById("micStatus");
-const modeStatus = document.getElementById("modeStatus");
-
-/* ================== STATE ================== */
+/* ================= STATE ================= */
 let cvText = "";
 let history = [];
 let interviewActive = false;
@@ -159,267 +122,159 @@ let isAISpeaking = false;
 let isProcessing = false;
 let timeLeft = 15 * 60;
 let timerInt = null;
-let recognition = null;
-let useManualInput = false;
 
-/* ================== PDF ================== */
+/* ================= PDF ================= */
 const pdfjsLib = window['pdfjs-dist/build/pdf'];
 pdfjsLib.GlobalWorkerOptions.workerSrc =
   "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
 
-cvInput.addEventListener("change", async (e) => {
-  try {
-    const file = e.target.files[0];
-    if (!file) return;
+cvInput.onchange = async e => {
+  const file = e.target.files[0];
+  if (!file) return;
 
-    status.textContent = "Loading resume...";
+  status.textContent = "Reading resume...";
+  startBtn.disabled = true;
 
-    const pdf = await pdfjsLib.getDocument(
-      await file.arrayBuffer()
-    ).promise;
+  const pdf = await pdfjsLib.getDocument(await file.arrayBuffer()).promise;
+  let text = "";
 
-    let text = "";
-    for (let i = 1; i <= pdf.numPages; i++) {
-      const page = await pdf.getPage(i);
-      const content = await page.getTextContent();
-      text += content.items.map(x => x.str).join(" ") + " ";
-    }
-
-    cvText = text.trim() || "[Resume uploaded]";
-    startBtn.disabled = false;
-    status.textContent = "Resume ready ✓ Click Start Interview";
-
-  } catch (err) {
-    console.error(err);
-    status.textContent = "Resume load failed. Try again.";
+  for (let i = 1; i <= pdf.numPages; i++) {
+    const page = await pdf.getPage(i);
+    const content = await page.getTextContent();
+    text += content.items.map(i => i.str).join(" ") + " ";
   }
-});
 
-/* ================== TIMER ================== */
-function startTimer(){
-  timerInt = setInterval(()=>{
+  cvText = text.trim() || "[Resume uploaded]";
+  startBtn.disabled = false;
+  status.textContent = "Resume ready ✓";
+};
+
+/* ================= TIMER ================= */
+function startTimer() {
+  timerInt = setInterval(() => {
     timeLeft--;
     timer.textContent =
       `${Math.floor(timeLeft/60)}:${String(timeLeft%60).padStart(2,"0")}`;
-    if(timeLeft<=0) finishInterview();
-  },1000);
+    if (timeLeft <= 0) finishInterview();
+  }, 1000);
 }
 
-/* ================== TTS ================== */
-function speak(text){
-  return new Promise(res=>{
+/* ================= SPEECH ================= */
+function speak(text) {
+  return new Promise(res => {
     isAISpeaking = true;
-    status.textContent = "AI is speaking...";
     const u = new SpeechSynthesisUtterance(text);
-    u.rate = .95;
-    u.onend = () => { 
-      isAISpeaking = false; 
-      if(interviewActive) status.textContent = useManualInput ? "Type your response..." : "Listening... Speak now";
-      res(); 
-    };
+    u.rate = 0.95;
+    u.onend = () => { isAISpeaking = false; res(); };
     addMsg("ai", text);
     speechSynthesis.speak(u);
   });
 }
 
-/* ================== SPEECH RECOGNITION ================== */
-function initSpeechRecognition() {
-  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-  
-  if (!SpeechRecognition) {
-    console.warn("Speech recognition not supported, falling back to manual input");
-    enableManualInput();
-    return false;
-  }
+/* ================= API ================= */
+async function callAPI(mode, extra = {}) {
+  const fd = new FormData();
+  fd.append("mode", mode);
+  if (extra.text) fd.append("text", extra.text);
+  if (extra.cvText) fd.append("cvText", extra.cvText);
+  if (extra.history) fd.append("history", JSON.stringify(extra.history));
 
-  recognition = new SpeechRecognition();
-  recognition.continuous = true;
-  recognition.interimResults = false;
-  recognition.lang = 'en-US';
-
-  recognition.onstart = () => {
-    micStatus.textContent = "Connected";
-    micStatus.className = "ok";
-    status.textContent = "Listening... Speak now";
-  };
-
-  recognition.onresult = (event) => {
-    const last = event.results.length - 1;
-    const text = event.results[last][0].transcript;
-    
-    if (event.results[last].isFinal && !isProcessing && !isAISpeaking) {
-      processUser(text);
-    }
-  };
-
-  recognition.onerror = (event) => {
-    console.error("Speech recognition error:", event.error);
-    if (event.error === 'not-allowed') {
-      status.textContent = "Microphone blocked. Switching to text input...";
-      enableManualInput();
-    } else {
-      // Restart on other errors
-      if (interviewActive && !useManualInput) {
-        setTimeout(() => {
-          try { recognition.start(); } catch(e) {}
-        }, 1000);
-      }
-    }
-  };
-
-  recognition.onend = () => {
-    // Restart if interview still active and not using manual input
-    if (interviewActive && !useManualInput) {
-      try { recognition.start(); } catch(e) {}
-    }
-  };
-
-  return true;
+  const res = await fetch(API, { method: "POST", body: fd });
+  if (!res.ok) throw new Error("API failed");
+  return await res.json();
 }
 
-function enableManualInput() {
-  useManualInput = true;
-  manualInput.style.display = "flex";
-  micStatus.textContent = "Disabled";
-  micStatus.className = "bad";
-  modeStatus.textContent = "Text Input";
-  status.textContent = "Type your response...";
-}
-
-/* ================== MANUAL INPUT ================== */
-textInput.addEventListener("keypress", (e) => {
-  if (e.key === "Enter") sendManualInput();
-});
-
-sendBtn.addEventListener("click", sendManualInput);
-
-function sendManualInput() {
-  const text = textInput.value.trim();
-  if (!text || isProcessing || isAISpeaking) return;
-  
-  processUser(text);
-  textInput.value = "";
-}
-
-/* ================== USER INPUT ================== */
-async function processUser(text){
+/* ================= ANDROID → WEB ================= */
+window.receiveVoskText = text => {
+  if (!interviewActive || isProcessing || isAISpeaking) return;
   if (!text || text.length < 2) return;
-  
+  processUser(text);
+};
+
+/* ================= USER ================= */
+async function processUser(text) {
   isProcessing = true;
   status.textContent = "Thinking...";
   addMsg("user", text);
 
-  try{
-    const fd = new FormData();
-    fd.append("mode","interview");
-    fd.append("history",JSON.stringify(history));
-    fd.append("text",text);
-    fd.append("cvText",cvText);
-
-    const r = await fetch(API,{method:"POST",body:fd});
-    const d = await r.json();
-    history = d.history || history;
-
-    if(d.reply) await speak(d.reply);
-    else await speak("Can you explain that further?");
-  }catch(err){
-    console.error(err);
-    await speak("I'm having trouble connecting. Please try again.");
+  try {
+    const data = await callAPI("interview", {
+      text,
+      cvText,
+      history
+    });
+    history = data.history || history;
+    await speak(data.reply);
+  } catch {
+    await speak("Can you explain that further?");
   }
 
   isProcessing = false;
+  status.textContent = "Listening…";
 }
 
-/* ================== START ================== */
+/* ================= START ================= */
 startBtn.onclick = async () => {
+  if (!cvText) return;
+
   interviewActive = true;
+  startTimer();
+
+  cvInput.style.display = "none";
   startBtn.style.display = "none";
   endBtn.style.display = "block";
-  cvInput.style.display = "none";
   voskBox.style.display = "block";
 
   status.textContent = "Starting interview...";
-  startTimer();
 
-  // Initialize speech recognition
-  const speechSupported = initSpeechRecognition();
-  if (speechSupported) {
-    try {
-      recognition.start();
-    } catch(e) {
-      enableManualInput();
-    }
+  try {
+    const data = await callAPI("start", { cvText });
+    history = data.history || [];
+    await speak(data.reply || "Tell me about yourself.");
+  } catch {
+    await speak("Tell me about yourself.");
   }
 
-  try{
-    const fd = new FormData();
-    fd.append("mode","start");
-    fd.append("cvText",cvText);
-    const r = await fetch(API,{method:"POST",body:fd});
-    const d = await r.json();
-    history = d.history || [];
-    await speak(d.reply || "Welcome. Tell me about yourself.");
-  }catch(err){
-    console.error(err);
-    await speak("Welcome. Tell me about yourself.");
-  }
+  status.textContent = "Listening…";
 };
 
-/* ================== END ================== */
+/* ================= END ================= */
 endBtn.onclick = () => confirm("End interview?") && finishInterview();
 
-async function finishInterview(){
+async function finishInterview() {
   interviewActive = false;
   clearInterval(timerInt);
   speechSynthesis.cancel();
-  
-  if (recognition) {
-    try { recognition.stop(); } catch(e) {}
-  }
 
   status.textContent = "Generating report...";
 
-  try {
-    const fd = new FormData();
-    fd.append("mode","score");
-    fd.append("history",JSON.stringify(history));
-    fd.append("cvText",cvText);
+  const data = await callAPI("score", {
+    history,
+    cvText
+  });
 
-    const r = await fetch(API,{method:"POST",body:fd});
-    const d = await r.json();
-
-    document.body.innerHTML = `
-      <div class="card" style="max-width:800px;margin:20px auto">
-        <h1>Interview Complete</h1>
-        <pre style="white-space:pre-wrap">${d.reply || "Report coming soon"}</pre>
-        <button class="btn-primary" onclick="location.reload()">New Interview</button>
-      </div>`;
-  } catch(err) {
-    document.body.innerHTML = `
-      <div class="card" style="max-width:800px;margin:20px auto">
-        <h1>Interview Complete</h1>
-        <p>Thank you for completing the interview.</p>
-        <button class="btn-primary" onclick="location.reload()">New Interview</button>
-      </div>`;
-  }
+  document.body.innerHTML = `
+    <div class="card" style="max-width:800px">
+      <h1>Interview Complete</h1>
+      <pre style="white-space:pre-wrap">${data.reply || "Report unavailable"}</pre>
+      <button class="btn-primary" onclick="location.reload()">New Interview</button>
+    </div>`;
 }
 
-/* ================== UI ================== */
-function addMsg(role,text){
+/* ================= UI ================= */
+const logBox = document.getElementById("log");
+
+function addMsg(role, text) {
   const d = document.createElement("div");
   d.className = "msg " + role;
-  d.innerHTML = `<b>${role==="ai"?"AI":"You"}:</b> ${text}`;
+  d.innerHTML = `<b>${role === "ai" ? "AI" : "You"}:</b> ${text}`;
   logBox.appendChild(d);
   logBox.scrollTop = logBox.scrollHeight;
 }
 
-/* ================== NAV ================== */
-backBtn.onclick = () => {
-  if (interviewActive && !confirm("End interview and go back?")) return;
-  finishInterview();
-  location.href = "career-lab.html";
-};
-history.pushState(null,"",location.href);
+/* ================= NAV ================= */
+backBtn.onclick = () => location.href = "career-lab.html";
+history.pushState(null, "", location.href);
 window.onpopstate = () => backBtn.click();
 </script>
 
