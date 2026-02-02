@@ -81,7 +81,6 @@ button:disabled{opacity:.4}
 
 <div class="container">
 
-<!-- LEFT -->
 <div class="card">
   <h1>Evalis AI Interview</h1>
   <p>Vosk powered live interview</p>
@@ -101,7 +100,6 @@ button:disabled{opacity:.4}
   </div>
 </div>
 
-<!-- RIGHT -->
 <div class="card">
   <h2>Conversation</h2>
   <p>Live transcript</p>
@@ -118,55 +116,100 @@ const API = "https://evalis-ai.simpaticohrconsultancy.workers.dev";
 let cvText = "";
 let history = [];
 let interviewActive = false;
+let isAISpeaking = false;
 let isProcessing = false;
 let timeLeft = 15 * 60;
-let timerInt;
+let timerInt = null;
+let voices = [];
 
-/* ================= PDF ================= */
+/* ================= UI ELEMENTS ================= */
+const cvInput = document.getElementById('cvInput');
+const startBtn = document.getElementById('startBtn');
+const endBtn = document.getElementById('endBtn');
+const statusText = document.getElementById('status');
+const timerDisplay = document.getElementById('timer');
+const voskBox = document.getElementById('voskBox');
+const logBox = document.getElementById('log');
+const backBtn = document.getElementById('backBtn');
+
+/* ================= PDF HANDLING ================= */
 const pdfjsLib = window['pdfjs-dist/build/pdf'];
-pdfjsLib.GlobalWorkerOptions.workerSrc =
-  "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
 
-const cvInput = document.getElementById("cvInput");
-const startBtn = document.getElementById("startBtn");
-const endBtn = document.getElementById("endBtn");
-const status = document.getElementById("status");
-const timer = document.getElementById("timer");
-const voskBox = document.getElementById("voskBox");
-const logBox = document.getElementById("log");
-
-/* ================= CV ================= */
 cvInput.onchange = async e => {
-  const f = e.target.files[0];
-  if (!f) return;
+  const file = e.target.files[0];
+  if (!file) return;
 
-  status.textContent = "Reading resume...";
+  statusText.textContent = "Reading resume...";
   startBtn.disabled = true;
 
-  const pdf = await pdfjsLib.getDocument(await f.arrayBuffer()).promise;
-  let t = "";
-  for (let i = 1; i <= pdf.numPages; i++) {
-    const p = await pdf.getPage(i);
-    const c = await p.getTextContent();
-    t += c.items.map(x => x.str).join(" ") + " ";
+  try {
+    const pdf = await pdfjsLib.getDocument(await file.arrayBuffer()).promise;
+    let text = "";
+    for (let i = 1; i <= pdf.numPages; i++) {
+      const page = await pdf.getPage(i);
+      const content = await page.getTextContent();
+      text += content.items.map(it => it.str).join(" ") + " ";
+    }
+    cvText = text.trim() || "[Resume uploaded]";
+    startBtn.disabled = false;
+    statusText.textContent = "Resume ready ✓";
+  } catch (err) {
+    statusText.textContent = "Error reading PDF";
   }
-
-  cvText = t.trim() || "[Resume uploaded]";
-  startBtn.disabled = false;
-  status.textContent = "Resume ready ✓";
 };
 
-/* ================= TIMER ================= */
-function startTimer(){
-  timerInt = setInterval(()=>{
-    timeLeft--;
-    timer.textContent =
-      `${Math.floor(timeLeft/60)}:${String(timeLeft%60).padStart(2,"0")}`;
-    if(timeLeft<=0) finishInterview();
-  },1000);
+/* ================= VOICE INITIALIZATION ================= */
+function initVoices() {
+  voices = window.speechSynthesis.getVoices();
+}
+if ('speechSynthesis' in window) {
+  initVoices();
+  window.speechSynthesis.onvoiceschanged = initVoices;
 }
 
-/* ================= API ================= */
+/* ================= ROBUST MOBILE SPEECH ================= */
+function speak(text) {
+  return new Promise(res => {
+    isAISpeaking = true;
+    statusText.textContent = "AI Speaking...";
+    addMsg("ai", text);
+
+    if (!window.speechSynthesis) {
+      finishSpeaking(res);
+      return;
+    }
+
+    window.speechSynthesis.cancel(); 
+    const u = new SpeechSynthesisUtterance(text);
+    
+    // Find an English voice specifically for Android
+    let v = voices.find(v => v.lang.startsWith('en') && v.localService) || voices.find(v => v.lang.startsWith('en'));
+    if (v) u.voice = v;
+    u.lang = 'en-US';
+    u.rate = 1.0;
+    u.pitch = 1.0;
+
+    // Safety timeout: Unlock state if TTS hangs
+    const safetyTimer = setTimeout(() => {
+      window.speechSynthesis.cancel();
+      finishSpeaking(res);
+    }, (text.length * 100) + 3000);
+
+    u.onend = () => { clearTimeout(safetyTimer); finishSpeaking(res); };
+    u.onerror = () => { clearTimeout(safetyTimer); finishSpeaking(res); };
+
+    window.speechSynthesis.speak(u);
+  });
+}
+
+function finishSpeaking(res) {
+  isAISpeaking = false;
+  statusText.textContent = "Listening...";
+  res();
+}
+
+/* ================= LOGIC & API ================= */
 async function callAPI(mode, extra = {}) {
   const fd = new FormData();
   fd.append("mode", mode);
@@ -174,94 +217,88 @@ async function callAPI(mode, extra = {}) {
   if (extra.cvText) fd.append("cvText", extra.cvText);
   if (extra.history) fd.append("history", JSON.stringify(extra.history));
 
-  const r = await fetch(API, { method: "POST", body: fd });
-  if (!r.ok) throw new Error("API failed");
-  return await r.json();
+  const res = await fetch(API, { method: "POST", body: fd });
+  return await res.json();
 }
 
-/* ================= ANDROID → WEB ================= */
 window.receiveVoskText = text => {
-  if (!interviewActive || isProcessing) return;
+  if (isAISpeaking || !interviewActive || isProcessing) return;
   if (!text || text.length < 2) return;
   processUser(text);
 };
 
-/* ================= USER ================= */
-async function processUser(text){
+async function processUser(text) {
   isProcessing = true;
-  status.textContent = "Thinking...";
+  statusText.textContent = "Thinking...";
   addMsg("user", text);
 
-  try{
-    const d = await callAPI("interview",{ text, cvText, history });
-    history = d.history || history;
-    addMsg("ai", d.reply);
-    Android.speak(d.reply);   // 🔥 ANDROID TTS
-  }catch{
-    const fallback = "Can you explain that further?";
-    addMsg("ai", fallback);
-    Android.speak(fallback);
+  try {
+    const data = await callAPI("interview", { text, cvText, history });
+    history = data.history || history;
+    await speak(data.reply);
+  } catch {
+    await speak("Could you tell me more about that?");
   }
-
   isProcessing = false;
-  status.textContent = "Listening...";
 }
 
-/* ================= START ================= */
-startBtn.onclick = async ()=>{
+/* ================= CONTROLS ================= */
+startBtn.onclick = async () => {
+  // Prime audio engine on user tap
+  window.speechSynthesis.speak(new SpeechSynthesisUtterance(""));
+  
   interviewActive = true;
-  startTimer();
-  cvInput.style.display="none";
-  startBtn.style.display="none";
-  endBtn.style.display="block";
-  voskBox.style.display="block";
-  status.textContent="Starting interview...";
+  cvInput.style.display = "none";
+  startBtn.style.display = "none";
+  endBtn.style.display = "block";
+  voskBox.style.display = "block";
 
-  try{
-    const d = await callAPI("start",{cvText});
-    history = d.history || [];
-    addMsg("ai", d.reply);
-    Android.speak(d.reply);
-  }catch{
-    const fallback="Tell me about yourself.";
-    addMsg("ai", fallback);
-    Android.speak(fallback);
+  timerInt = setInterval(() => {
+    timeLeft--;
+    timerDisplay.textContent = `${Math.floor(timeLeft/60)}:${String(timeLeft%60).padStart(2,"0")}`;
+    if (timeLeft <= 0) finishInterview();
+  }, 1000);
+
+  statusText.textContent = "Starting...";
+  try {
+    const data = await callAPI("start", { cvText });
+    history = data.history || [];
+    await speak(data.reply || "Tell me about yourself.");
+  } catch {
+    await speak("Tell me about yourself.");
   }
-
-  status.textContent="Listening...";
 };
 
-/* ================= END ================= */
-endBtn.onclick=()=>confirm("End interview?")&&finishInterview();
+endBtn.onclick = () => confirm("End interview?") && finishInterview();
 
-async function finishInterview(){
-  interviewActive=false;
+async function finishInterview() {
+  interviewActive = false;
   clearInterval(timerInt);
-  status.textContent="Generating report...";
+  window.speechSynthesis.cancel();
+  statusText.textContent = "Finalizing...";
 
-  const d = await callAPI("score",{history,cvText});
-  document.body.innerHTML=`
-    <div class="card" style="max-width:800px;margin:20px auto">
-      <h1>Interview Complete</h1>
-      <pre style="white-space:pre-wrap">${d.reply}</pre>
-      <button class="btn-primary" onclick="location.reload()">New Interview</button>
-    </div>`;
+  try {
+    const data = await callAPI("score", { history, cvText });
+    document.body.innerHTML = `
+      <div class="card" style="max-width:800px; margin:20px auto;">
+        <h1>Interview Complete</h1>
+        <pre style="white-space:pre-wrap; font-family:inherit; color:#94a3b8;">${data.reply || "No report available."}</pre>
+        <button class="btn-primary" onclick="location.reload()">New Interview</button>
+      </div>`;
+  } catch {
+    location.reload();
+  }
 }
 
-/* ================= UI ================= */
-function addMsg(role,text){
-  const d=document.createElement("div");
-  d.className="msg "+role;
-  d.innerHTML=`<b>${role==="ai"?"AI":"You"}:</b> ${text}`;
+function addMsg(role, text) {
+  const d = document.createElement("div");
+  d.className = "msg " + role;
+  d.innerHTML = `<b>${role === "ai" ? "AI" : "You"}:</b> ${text}`;
   logBox.appendChild(d);
-  logBox.scrollTop=logBox.scrollHeight;
+  logBox.scrollTop = logBox.scrollHeight;
 }
 
-/* ================= NAV ================= */
-backBtn.onclick=()=>location.href="career-lab.html";
-history.pushState(null,"",location.href);
-window.onpopstate=()=>backBtn.click();
+backBtn.onclick = () => location.href = "career-lab.html";
 </script>
-
 </body>
 </html>
