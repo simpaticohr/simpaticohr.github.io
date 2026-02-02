@@ -120,6 +120,7 @@ let isAISpeaking = false;
 let isProcessing = false;
 let timeLeft = 15 * 60;
 let timerInt = null;
+let voices = []; // Store voices here
 
 /* ================= PDF ================= */
 const pdfjsLib = window['pdfjs-dist/build/pdf'];
@@ -165,65 +166,84 @@ function startTimer() {
   }, 1000);
 }
 
-/* ================= ROBUST SPEECH (FIXED) ================= */
+/* ================= VOICE LOADER (NEW) ================= */
+// Android needs to be forced to load voices
+function loadVoices() {
+  voices = window.speechSynthesis.getVoices();
+  console.log("Voices loaded:", voices.length);
+}
+// Try loading immediately and on change
+if ('speechSynthesis' in window) {
+    loadVoices();
+    window.speechSynthesis.onvoiceschanged = loadVoices;
+}
+
+/* ================= SPEECH (WITH VOICE SELECTION) ================= */
 function speak(text) {
   return new Promise(res => {
     isAISpeaking = true;
-    status.textContent = "AI Speaking..."; // UI Feedback
+    
+    // Check if voices are loaded, if not try one last time
+    if (voices.length === 0) loadVoices();
+    
+    // Visual feedback
+    status.textContent = "AI Speaking..."; 
     addMsg("ai", text);
 
-    // 1. Check support
     if (!window.speechSynthesis) {
       console.warn("No TTS support");
-      setTimeout(() => {
-        isAISpeaking = false;
-        status.textContent = "Listening...";
-        res();
-      }, 1500);
+      setTimeout(() => endSpeak(res), 2000);
       return;
     }
 
     const u = new SpeechSynthesisUtterance(text);
-    u.rate = 0.95;
+    u.rate = 1.0;
+    u.volume = 1.0; // Force max volume
 
-    // 2. Safety Timeout (Crucial for Android)
-    // If onend doesn't fire in (length * 100ms + 2s), we force reset
-    const safetyDuration = (text.length * 100) + 2000;
+    // --- CRITICAL: VOICE SELECTION ---
+    // Try to find an English voice. Android often defaults to silent if not picked.
+    const englishVoice = voices.find(v => v.lang.includes('en-US') || v.lang.includes('en_US')) 
+                      || voices.find(v => v.lang.includes('en'))
+                      || voices[0];
+    
+    if (englishVoice) {
+        u.voice = englishVoice;
+        console.log("Selected voice:", englishVoice.name);
+    } else {
+        console.warn("No specific voice found, using default");
+        // Status warning if phone has no voices
+        if(voices.length === 0) status.textContent = "⚠️ No TTS Voices Found on Phone";
+    }
+    // ----------------------------------
+
+    // Safety Timeout
+    const safetyDuration = (text.length * 80) + 3000;
     const safetyTimer = setTimeout(() => {
       if (isAISpeaking) {
-        console.warn("TTS timed out - Force resetting");
+        console.warn("TTS timed out. Resetting.");
         speechSynthesis.cancel();
-        isAISpeaking = false;
-        status.textContent = "Listening...";
-        res();
+        endSpeak(res);
       }
     }, safetyDuration);
 
-    u.onend = () => {
-      clearTimeout(safetyTimer);
-      isAISpeaking = false;
-      status.textContent = "Listening...";
-      res();
-    };
-
-    u.onerror = (e) => {
-      console.error("TTS Error", e);
-      clearTimeout(safetyTimer);
-      isAISpeaking = false;
-      status.textContent = "Listening...";
-      res();
-    };
+    u.onend = () => { clearTimeout(safetyTimer); endSpeak(res); };
+    u.onerror = (e) => { console.error("TTS Error", e); clearTimeout(safetyTimer); endSpeak(res); };
 
     try {
+      speechSynthesis.cancel(); // Clear any stuck audio first
       speechSynthesis.speak(u);
     } catch (e) {
       console.error("TTS Crash", e);
       clearTimeout(safetyTimer);
-      isAISpeaking = false;
-      status.textContent = "Listening...";
-      res();
+      endSpeak(res);
     }
   });
+}
+
+function endSpeak(resCallback) {
+    isAISpeaking = false;
+    status.textContent = "Listening...";
+    resCallback();
 }
 
 /* ================= API ================= */
@@ -239,20 +259,12 @@ async function callAPI(mode, extra = {}) {
   return await res.json();
 }
 
-/* ================= ANDROID → WEB (DEBUGGED) ================= */
+/* ================= ANDROID BRIDGE ================= */
 window.receiveVoskText = text => {
-  // Debug Log to see what Android is sending
-  console.log("Android Input:", text);
+  // Debug log
+  console.log("Vosk Input:", text);
 
-  // If AI is talking, ignore input
-  if (isAISpeaking) {
-    console.log("Ignored: AI is speaking");
-    return;
-  }
-  if (!interviewActive || isProcessing) {
-    console.log("Ignored: Not active or processing");
-    return;
-  }
+  if (isAISpeaking || !interviewActive || isProcessing) return;
   if (!text || text.length < 2) return;
   
   processUser(text);
@@ -277,7 +289,6 @@ async function processUser(text) {
   }
 
   isProcessing = false;
-  // Status set by speak() completion
 }
 
 /* ================= START ================= */
@@ -295,7 +306,10 @@ startBtn.onclick = async () => {
   status.textContent = "Starting interview...";
 
   // Attempt to "prime" the audio engine
-  if(window.speechSynthesis) speechSynthesis.cancel();
+  if(window.speechSynthesis) {
+      loadVoices();
+      speechSynthesis.cancel();
+  }
 
   try {
     const data = await callAPI("start", { cvText });
