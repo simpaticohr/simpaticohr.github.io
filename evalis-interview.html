@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Evalis AI – Live Interview (Hybrid)</title>
+<title>Evalis AI – Live Interview</title>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 
@@ -189,10 +189,11 @@ let timeLeft = 15 * 60;
 let timerInt = null;
 let recognition = null;
 let useManualInput = false;
+let offlineMode = false;
 
-// Detect platform
-const isAndroid = typeof AndroidTTS !== 'undefined';
-const hasVosk = isAndroid; // Assume Vosk is available on Android
+// Detect platform - check for Android bridges
+const hasAndroidTTS = typeof AndroidTTS !== 'undefined' && AndroidTTS !== null;
+const isAndroidWebView = /Android/i.test(navigator.userAgent) || hasAndroidTTS;
 
 /* ================== DEBUG LOGGING ================== */
 function debugMsg(msg, type = "info") {
@@ -213,14 +214,23 @@ function debugMsg(msg, type = "info") {
 }
 
 /* ================== ANDROID BRIDGE - VOSK RECEIVER ================== */
-// This function is called by Android when Vosk detects speech
+// Called by Android when Vosk detects speech
 window.receiveVoskText = function(text) {
-  debugMsg(`Vosk heard: ${text}`, "success");
+  debugMsg(`Vosk: ${text}`, "success");
   
   if (interviewActive && !isProcessing && !isAISpeaking) {
     processUser(text);
   } else {
-    debugMsg(`Ignored (processing=${isProcessing}, speaking=${isAISpeaking})`);
+    debugMsg(`Ignored (busy=${isProcessing || isAISpeaking})`);
+  }
+};
+
+// Called by Android when TTS finishes speaking
+window.onTTSComplete = function() {
+  debugMsg("Android TTS complete", "success");
+  isAISpeaking = false;
+  if(interviewActive) {
+    status.textContent = useManualInput ? "Type your response..." : "Listening... Speak now";
   }
 };
 
@@ -230,7 +240,7 @@ async function apiCall(data) {
   
   const controller = new AbortController();
   const timeoutId = setTimeout(() => {
-    debugMsg("API timeout", "error");
+    debugMsg("Timeout", "error");
     controller.abort();
   }, API_TIMEOUT);
 
@@ -245,7 +255,8 @@ async function apiCall(data) {
     clearTimeout(timeoutId);
     
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
+      const errorText = await response.text().catch(() => "Unknown error");
+      throw new Error(`HTTP ${response.status}: ${errorText}`);
     }
     
     debugMsg("API OK", "success");
@@ -255,6 +266,28 @@ async function apiCall(data) {
     clearTimeout(timeoutId);
     throw err;
   }
+}
+
+/* ================== OFFLINE AI RESPONSES ================== */
+const offlineResponses = [
+  "That's interesting. Can you tell me more about your experience with that?",
+  "I see. What challenges did you face in that situation?",
+  "How did you approach solving that problem?",
+  "What did you learn from that experience?",
+  "Can you give me a specific example?",
+  "How would you handle a similar situation in the future?",
+  "What skills did you use to accomplish that?",
+  "Tell me about a time when you had to work with a team.",
+  "What are your greatest strengths?",
+  "Where do you see yourself in five years?"
+];
+
+let offlineQuestionIndex = 0;
+
+function getOfflineResponse() {
+  const response = offlineResponses[offlineQuestionIndex % offlineResponses.length];
+  offlineQuestionIndex++;
+  return response;
 }
 
 /* ================== PDF ================== */
@@ -287,7 +320,6 @@ cvInput.addEventListener("change", async (e) => {
   } catch (err) {
     debugMsg(`PDF error: ${err.message}`, "error");
     status.textContent = "Resume load failed. Try again.";
-    addMsg("error", `Failed to load resume: ${err.message}`);
   }
 });
 
@@ -312,31 +344,34 @@ function speak(text){
     status.textContent = "AI is speaking...";
     addMsg("ai", text);
     
-    // Android TTS
-    if (isAndroid && typeof AndroidTTS !== 'undefined') {
+    // Try Android TTS first
+    if (hasAndroidTTS) {
       debugMsg("Using Android TTS", "success");
       try {
         AndroidTTS.speak(text);
-        // Estimate speaking time (rough calculation)
-        const estimatedTime = text.length * 50; // ~50ms per character
+        // Android will call window.onTTSComplete() when done
+        // But add a backup timeout in case callback fails
         setTimeout(() => {
-          isAISpeaking = false;
-          if(interviewActive) status.textContent = useManualInput ? "Type your response..." : "Listening... Speak now";
+          if (isAISpeaking) {
+            debugMsg("TTS timeout fallback");
+            isAISpeaking = false;
+            if(interviewActive) status.textContent = useManualInput ? "Type..." : "Listening...";
+          }
           res();
-        }, estimatedTime);
+        }, text.length * 60 + 2000); // Estimate + buffer
+        return;
       } catch (err) {
         debugMsg(`Android TTS error: ${err.message}`, "error");
-        isAISpeaking = false;
-        res();
+        addMsg("error", "Android TTS failed, trying web TTS...");
       }
-      return;
     }
     
     // Web TTS fallback
     if (!window.speechSynthesis) {
       debugMsg("No TTS available", "error");
+      addMsg("error", "No TTS available");
       isAISpeaking = false;
-      if(interviewActive) status.textContent = useManualInput ? "Type your response..." : "Listening... Speak now";
+      if(interviewActive) status.textContent = useManualInput ? "Type..." : "Listening...";
       res();
       return;
     }
@@ -345,19 +380,25 @@ function speak(text){
     const u = new SpeechSynthesisUtterance(text);
     u.rate = .95;
     u.onend = () => { 
-      debugMsg("TTS finished");
+      debugMsg("Web TTS finished");
       isAISpeaking = false; 
-      if(interviewActive) status.textContent = useManualInput ? "Type your response..." : "Listening... Speak now";
+      if(interviewActive) status.textContent = useManualInput ? "Type..." : "Listening...";
       res(); 
     };
     u.onerror = (err) => {
       debugMsg(`Web TTS error: ${err.error}`, "error");
       isAISpeaking = false;
-      if(interviewActive) status.textContent = useManualInput ? "Type your response..." : "Listening... Speak now";
+      if(interviewActive) status.textContent = useManualInput ? "Type..." : "Listening...";
       res();
     };
     
-    speechSynthesis.speak(u);
+    try {
+      speechSynthesis.speak(u);
+    } catch (err) {
+      debugMsg(`TTS failed: ${err.message}`, "error");
+      isAISpeaking = false;
+      res();
+    }
   });
 }
 
@@ -365,16 +406,15 @@ function speak(text){
 function initSpeechRecognition() {
   debugMsg("Init speech recognition");
   
-  // Android Vosk (native)
-  if (hasVosk) {
-    debugMsg("Using Vosk (Android native)", "success");
+  // Android Vosk (via window.receiveVoskText callback)
+  if (isAndroidWebView) {
+    debugMsg("Using Vosk (Android)", "success");
     micStatus.textContent = "Connected";
     micStatus.className = "ok";
     modeStatus.textContent = "Vosk (Continuous)";
-    platformStatus.textContent = "Android Native";
+    platformStatus.textContent = hasAndroidTTS ? "Android Native" : "Android WebView";
     platformStatus.className = "ok";
     status.textContent = "Listening... Speak now";
-    // Vosk is always listening, no need to start
     return true;
   }
   
@@ -389,7 +429,7 @@ function initSpeechRecognition() {
     return false;
   }
 
-  debugMsg("Using Web Speech Recognition");
+  debugMsg("Using Web Speech");
   platformStatus.textContent = "Web Browser";
   platformStatus.className = "warn";
   
@@ -402,17 +442,17 @@ function initSpeechRecognition() {
     debugMsg("Mic ON", "success");
     micStatus.textContent = "Connected";
     micStatus.className = "ok";
-    status.textContent = "Listening... Speak now";
+    status.textContent = "Listening...";
   };
 
   recognition.onresult = (e) => {
     const text = e.results[e.results.length-1][0].transcript;
-    debugMsg(`Web heard: ${text}`);
+    debugMsg(`Heard: ${text}`);
     if (!isProcessing && !isAISpeaking) processUser(text);
   };
 
   recognition.onerror = (e) => {
-    debugMsg(`Speech error: ${e.error}`, "error");
+    debugMsg(`Error: ${e.error}`, "error");
     if (e.error === 'not-allowed') {
       enableManualInput();
     } else if (interviewActive && !useManualInput) {
@@ -436,7 +476,7 @@ function enableManualInput() {
   micStatus.textContent = "Disabled";
   micStatus.className = "bad";
   modeStatus.textContent = "Text Input";
-  status.textContent = "Type your response...";
+  status.textContent = "Type...";
 }
 
 /* ================== MANUAL INPUT ================== */
@@ -461,72 +501,83 @@ async function processUser(text){
   status.textContent = "Thinking...";
   addMsg("user", text);
 
-  try{
-    const data = await apiCall({
-      mode: "interview",
-      history: history,
-      text: text,
-      cvText: cvText
-    });
-    
-    history = data.history || history;
-    const reply = data.reply || "Can you explain that further?";
-    debugMsg(`AI: ${reply.substring(0, 50)}...`);
-    await speak(reply);
-    
-  }catch(err){
-    debugMsg(`Error: ${err.message}`, "error");
-    addMsg("error", `Connection error: ${err.message}`);
-    await speak("I'm having trouble connecting. Please try again.");
-  }
+  // Add to history
+  history.push({ role: "user", content: text });
 
+  // Try API if not in offline mode
+  if (!offlineMode) {
+    try{
+      const data = await apiCall({
+        mode: "interview",
+        history: history,
+        text: text,
+        cvText: cvText
+      });
+      
+      history = data.history || history;
+      const reply = data.reply || getOfflineResponse();
+      debugMsg(`AI: ${reply.substring(0, 50)}...`);
+      await speak(reply);
+      isProcessing = false;
+      return;
+      
+    }catch(err){
+      debugMsg(`API Error: ${err.message}`, "error");
+      addMsg("error", `Connection error: HTTP 500`);
+      
+      // Switch to offline mode
+      if (!offlineMode) {
+        offlineMode = true;
+        debugMsg("Switching to offline mode", "warn");
+        addMsg("error", "Switching to offline practice mode");
+      }
+    }
+  }
+  
+  // Offline fallback
+  const reply = getOfflineResponse();
+  history.push({ role: "assistant", content: reply });
+  await speak(reply);
   isProcessing = false;
 }
 
 /* ================== START ================== */
 startBtn.onclick = async () => {
-  debugMsg("=== STARTING INTERVIEW ===");
+  debugMsg("=== START ===");
   interviewActive = true;
   startBtn.style.display = "none";
   endBtn.style.display = "block";
   cvInput.style.display = "none";
   voskBox.style.display = "block";
-
-  status.textContent = "Starting interview...";
+  status.textContent = "Starting...";
   startTimer();
 
-  // Initialize speech recognition (Vosk or Web)
-  const speechSupported = initSpeechRecognition();
-  
-  // Start Web Speech Recognition if needed
-  if (!hasVosk && speechSupported && recognition) {
-    try {
-      debugMsg("Starting Web Speech");
-      recognition.start();
-    } catch(e) {
-      debugMsg(`Failed to start: ${e.message}`, "error");
-      enableManualInput();
-    }
+  const hasSpeech = initSpeechRecognition();
+  if (!isAndroidWebView && hasSpeech && recognition) {
+    try{ recognition.start(); }catch(e){ enableManualInput(); }
   }
 
-  // Get initial question from API
+  // Try API
   try{
-    debugMsg("Getting initial question...");
+    debugMsg("Getting question...");
     const data = await apiCall({
       mode: "start",
       cvText: cvText
     });
     
-    debugMsg("Received initial question", "success");
     history = data.history || [];
-    await speak(data.reply || "Welcome. Tell me about yourself.");
+    const reply = data.reply || "Welcome! Tell me about yourself.";
+    await speak(reply);
     
   }catch(err){
     debugMsg(`Start error: ${err.message}`, "error");
+    offlineMode = true;
     addMsg("error", "Cannot connect to AI. Starting offline mode.");
-    await speak("Welcome to the interview practice. Tell me about yourself.");
+    const reply = "Welcome to the interview practice. Tell me about yourself.";
+    history.push({ role: "assistant", content: reply });
+    await speak(reply);
     
-    if (!useManualInput && !hasVosk && !recognition) {
+    if (!useManualInput && !isAndroidWebView && !recognition) {
       enableManualInput();
     }
   }
@@ -534,72 +585,76 @@ startBtn.onclick = async () => {
 
 /* ================== END ================== */
 endBtn.onclick = () => {
-  if (confirm("End interview and see report?")) {
-    finishInterview();
-  }
+  if (confirm("End interview?")) finishInterview();
 };
 
 async function finishInterview(){
-  debugMsg("=== ENDING INTERVIEW ===");
+  debugMsg("=== END ===");
   interviewActive = false;
   clearInterval(timerInt);
   
-  // Stop speech synthesis
-  if (isAndroid && typeof AndroidTTS !== 'undefined') {
+  // Stop TTS
+  if (hasAndroidTTS) {
     try { AndroidTTS.stop(); } catch(e) {}
   } else {
     speechSynthesis.cancel();
   }
   
-  // Stop Web Speech Recognition
+  // Stop speech recognition
   if (recognition) {
     try { recognition.stop(); } catch(e) {}
   }
 
   status.textContent = "Generating report...";
 
-  try {
-    debugMsg("Requesting report...");
-    const data = await apiCall({
-      mode: "score",
-      history: history,
-      cvText: cvText
-    });
-    
-    debugMsg("Report received", "success");
-
-    document.body.innerHTML = `
-      <div class="card" style="max-width:800px;margin:20px auto">
-        <h1>Interview Complete ✓</h1>
-        <pre style="white-space:pre-wrap;line-height:1.6">${data.reply || "Report coming soon"}</pre>
-        <button class="btn-primary" onclick="location.reload()">New Interview</button>
-      </div>`;
+  // Try to get report from API
+  if (!offlineMode) {
+    try {
+      debugMsg("Requesting report...");
+      const data = await apiCall({
+        mode: "score",
+        history: history,
+        cvText: cvText
+      });
       
-  } catch(err) {
-    debugMsg(`Report error: ${err.message}`, "error");
-    
-    const conversationSummary = history.length > 0 
-      ? history.map((h, i) => `${i + 1}. ${h.role}: ${h.content.substring(0, 100)}...`).join('\n')
-      : "No conversation recorded.";
-    
-    document.body.innerHTML = `
-      <div class="card" style="max-width:800px;margin:20px auto">
-        <h1>Interview Complete</h1>
-        <p style="color:#94a3b8;margin-bottom:20px">Unable to generate AI report (server unavailable):</p>
-        <div style="background:rgba(255,255,255,.05);padding:20px;border-radius:12px;margin:20px 0">
-          <h3>Conversation Summary</h3>
-          <pre style="white-space:pre-wrap;font-size:13px;color:#94a3b8">${conversationSummary}</pre>
-        </div>
-        <button class="btn-primary" onclick="location.reload()">New Interview</button>
-      </div>`;
+      debugMsg("Report OK", "success");
+
+      document.body.innerHTML = `
+        <div class="card" style="max-width:800px;margin:20px auto">
+          <h1>Interview Complete ✓</h1>
+          <pre style="white-space:pre-wrap;line-height:1.6">${data.reply || "Report coming soon"}</pre>
+          <button class="btn-primary" onclick="location.reload()">New Interview</button>
+        </div>`;
+      return;
+        
+    } catch(err) {
+      debugMsg(`Report error: ${err.message}`, "error");
+    }
   }
+  
+  // Offline report
+  const summary = history.map((h, i) => 
+    `${i + 1}. ${h.role === 'user' ? 'You' : 'AI'}: ${h.content}`
+  ).join('\n\n');
+  
+  document.body.innerHTML = `
+    <div class="card" style="max-width:800px;margin:20px auto">
+      <h1>Interview Complete</h1>
+      <p style="color:#94a3b8;margin-bottom:20px">Offline practice session summary:</p>
+      <div style="background:rgba(255,255,255,.05);padding:20px;border-radius:12px;margin:20px 0">
+        <h3>Conversation (${history.length} exchanges)</h3>
+        <pre style="white-space:pre-wrap;font-size:13px;color:#94a3b8;line-height:1.6">${summary || "No conversation recorded."}</pre>
+      </div>
+      <p style="font-size:13px;color:#94a3b8">Good practice! Connect to internet for AI-powered feedback.</p>
+      <button class="btn-primary" onclick="location.reload()">New Interview</button>
+    </div>`;
 }
 
 /* ================== UI ================== */
 function addMsg(role, text){
   const d = document.createElement("div");
   d.className = "msg " + role;
-  const label = role === "ai" ? "AI" : role === "user" ? "You" : role === "error" ? "⚠️ Error" : "ℹ️ Info";
+  const label = {ai:"AI", user:"You", error:"⚠️", debug:"ℹ️"}[role] || role;
   d.innerHTML = `<b>${label}:</b> ${text}`;
   logBox.appendChild(d);
   logBox.scrollTop = logBox.scrollHeight;
@@ -607,21 +662,18 @@ function addMsg(role, text){
 
 /* ================== NAV ================== */
 backBtn.onclick = () => {
-  if (interviewActive && !confirm("End interview and go back?")) return;
+  if (interviewActive && !confirm("End and go back?")) return;
   if (interviewActive) finishInterview();
   location.reload();
 };
 
-history.pushState(null,"",location.href);
-window.onpopstate = () => backBtn.click();
-
-// Initialize
-debugMsg("=== Evalis AI Interview (Hybrid) ===", "success");
-debugMsg(`Platform: ${isAndroid ? "Android" : "Web"}`);
-debugMsg(`Vosk: ${hasVosk ? "Available" : "Not available"}`);
-debugMsg(`AndroidTTS: ${typeof AndroidTTS !== 'undefined' ? "Available" : "Not available"}`);
-debugMsg(`Web Speech: ${!!(window.SpeechRecognition || window.webkitSpeechRecognition)}`);
-debugMsg(`Web TTS: ${!!window.speechSynthesis}`);
+// Init
+debugMsg("=== Init ===", "success");
+debugMsg(`User Agent: ${navigator.userAgent}`);
+debugMsg(`AndroidTTS: ${hasAndroidTTS ? "✓ Available" : "✗ Not found"}`);
+debugMsg(`Platform: ${isAndroidWebView ? "Android" : "Web"}`);
+debugMsg(`Web Speech: ${!!(window.SpeechRecognition || window.webkitSpeechRecognition) ? "✓" : "✗"}`);
+debugMsg(`Web TTS: ${!!window.speechSynthesis ? "✓" : "✗"}`);
 </script>
 
 </body>
