@@ -8,33 +8,77 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 
 <style>
-:root{--primary:#6366f1;--bg:#020617}
+:root{
+  --primary:#6366f1;
+  --bg:#020617;
+  --card:rgba(255,255,255,.05);
+  --border:rgba(255,255,255,.1);
+}
+*{box-sizing:border-box}
 body{
-  margin:0;background:var(--bg);color:#fff;
+  margin:0;
+  background:var(--bg);
+  color:#fff;
   font-family:system-ui,sans-serif;
-  display:flex;justify-content:center;align-items:center;
+  display:flex;
+  justify-content:center;
+  align-items:center;
   min-height:100vh
 }
 .card{
-  width:90%;max-width:460px;
-  background:rgba(255,255,255,.05);
-  border-radius:24px;padding:28px;
-  border:1px solid rgba(255,255,255,.1);
+  width:92%;
+  max-width:420px;
+  background:var(--card);
+  border:1px solid var(--border);
+  border-radius:22px;
+  padding:24px;
   box-shadow:0 25px 50px rgba(0,0,0,.5);
   text-align:center
 }
-#timer{font-size:26px;color:var(--primary);font-weight:700}
-#status{font-size:12px;color:#94a3b8;margin:10px 0 20px}
+#timer{
+  font-size:36px;
+  font-weight:800;
+  color:var(--primary);
+  margin:10px 0
+}
+#status{
+  font-size:12px;
+  color:#94a3b8;
+  margin-bottom:16px
+}
+input[type=file]{
+  width:100%;
+  padding:12px;
+  border-radius:12px;
+  border:2px dashed var(--border);
+  background:transparent;
+  color:#fff
+}
 button{
-  width:100%;padding:16px;border-radius:14px;
-  border:none;font-weight:700;font-size:16px;
+  width:100%;
+  padding:14px;
+  margin-top:12px;
+  border-radius:14px;
+  border:none;
+  font-size:16px;
+  font-weight:700;
   cursor:pointer
 }
 .start{background:var(--primary);color:#fff}
 .end{background:#ef4444;color:#fff}
 button:disabled{opacity:.4}
-#log{margin-top:20px;text-align:left;max-height:220px;overflow:auto}
-.msg{margin-bottom:12px;padding:10px 14px;border-radius:12px}
+#log{
+  margin-top:18px;
+  max-height:220px;
+  overflow-y:auto;
+  text-align:left;
+  font-size:14px
+}
+.msg{
+  margin-bottom:10px;
+  padding:10px 14px;
+  border-radius:10px
+}
 .ai{background:rgba(165,180,252,.1)}
 .user{background:rgba(103,232,249,.1)}
 </style>
@@ -44,9 +88,9 @@ button:disabled{opacity:.4}
 
 <div class="card">
   <div id="timer">15:00</div>
-  <div id="status">Upload resume to start</div>
+  <div id="status">Upload resume to begin</div>
 
-  <input type="file" id="cvInput" accept=".pdf"><br><br>
+  <input type="file" id="cvInput" accept=".pdf">
   <button id="startBtn" class="start" disabled>Start Interview</button>
   <button id="endBtn" class="end" style="display:none">End Interview</button>
 
@@ -55,163 +99,216 @@ button:disabled{opacity:.4}
 
 <script>
 /* ================= CONFIG ================= */
-const API="https://evalis-ai.simpaticohrconsultancy.workers.dev";
+const API = "https://evalis-ai.simpaticohrconsultancy.workers.dev";
+const pdfjsLib = window['pdfjs-dist/build/pdf'];
+pdfjsLib.GlobalWorkerOptions.workerSrc =
+  "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
 
 /* ================= STATE ================= */
-let cvText="",history=[];
-let interviewActive=false,isAISpeaking=false,isProcessing=false;
-let recognition=null;
-let timer=15*60,timerInt;
+let cvText = "";
+let history = [];
+let interviewActive = false;
+let isAISpeaking = false;
+let recognition = null;
+let audioCtx = null;
+let audioUnlocked = false;
+let timeLeft = 15 * 60;
+let timerInt = null;
 
 /* ================= PDF ================= */
-const pdfjsLib=window['pdfjs-dist/build/pdf'];
-pdfjsLib.GlobalWorkerOptions.workerSrc=
-"https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+cvInput.onchange = async e => {
+  const f = e.target.files[0];
+  if (!f) return;
 
-cvInput.onchange=async e=>{
-  const pdf=await pdfjsLib.getDocument(await e.target.files[0].arrayBuffer()).promise;
-  let t="";
-  for(let i=1;i<=pdf.numPages;i++){
-    const p=await pdf.getPage(i);
-    const c=await p.getTextContent();
-    t+=c.items.map(x=>x.str).join(" ")+" ";
+  status.textContent = "Reading resume...";
+  const pdf = await pdfjsLib.getDocument(await f.arrayBuffer()).promise;
+  let t = "";
+
+  for (let i = 1; i <= pdf.numPages; i++) {
+    const p = await pdf.getPage(i);
+    const c = await p.getTextContent();
+    t += c.items.map(x => x.str).join(" ") + " ";
   }
-  cvText=t.trim()||"[Resume]";
-  startBtn.disabled=false;
-  status.textContent="Resume ready ✓";
+
+  cvText = t.trim() || "[Resume uploaded]";
+  startBtn.disabled = false;
+  status.textContent = "Resume ready ✓";
 };
 
-/* ================= TIMER ================= */
-function startTimer(){
-  timerInt=setInterval(()=>{
-    timer--;
-    timerEl.textContent=`${Math.floor(timer/60)}:${String(timer%60).padStart(2,"0")}`;
-    if(timer<=0) finish();
-  },1000);
+/* ================= AUDIO UNLOCK (CRITICAL) ================= */
+async function unlockAudio() {
+  if (audioUnlocked) return;
+
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  if (audioCtx.state === "suspended") {
+    await audioCtx.resume();
+  }
+
+  const buffer = audioCtx.createBuffer(1, 1, 22050);
+  const src = audioCtx.createBufferSource();
+  src.buffer = buffer;
+  src.connect(audioCtx.destination);
+  src.start(0);
+
+  speechSynthesis.cancel();
+  speechSynthesis.speak(new SpeechSynthesisUtterance(""));
+
+  audioUnlocked = true;
 }
 
-/* ================= TTS ================= */
-function speak(text){
-  return new Promise(res=>{
-    isAISpeaking=true;
-    status.textContent="AI speaking…";
-    add("ai",text);
+/* ================= TIMER ================= */
+function startTimer() {
+  timerInt = setInterval(() => {
+    timeLeft--;
+    timer.textContent =
+      `${Math.floor(timeLeft/60)}:${String(timeLeft%60).padStart(2,"0")}`;
+    if (timeLeft <= 0) finishInterview();
+  }, 1000);
+}
 
-    const u=new SpeechSynthesisUtterance(text);
-    u.rate=0.95;
+/* ================= SPEECH ================= */
+function speak(text) {
+  return new Promise(res => {
+    speechSynthesis.cancel();
 
-    u.onend=()=>{
-      isAISpeaking=false;
-      status.textContent="Listening…";
-      if(interviewActive) restartRecognition();
+    const u = new SpeechSynthesisUtterance(text);
+    u.lang = "en-US";
+    u.rate = 0.95;
+    u.volume = 1;
+
+    u.onstart = () => {
+      isAISpeaking = true;
+      if (recognition) recognition.stop();
+    };
+
+    u.onend = () => {
+      isAISpeaking = false;
+      if (interviewActive && recognition) {
+        setTimeout(() => recognition.start(), 300);
+      }
       res();
     };
 
-    speechSynthesis.cancel();
+    addMsg("ai", text);
     speechSynthesis.speak(u);
   });
 }
 
 /* ================= SPEECH RECOGNITION ================= */
-function initRecognition(){
-  const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
-  recognition=new SR();
-  recognition.lang="en-US";
-  recognition.continuous=true;
-  recognition.interimResults=false;
+function initRecognition() {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) {
+    status.textContent = "Speech not supported on this device";
+    return;
+  }
 
-  recognition.onresult=e=>{
-    const text=e.results[e.results.length-1][0].transcript.trim();
-    if(!text||isAISpeaking||isProcessing) return;
+  recognition = new SR();
+  recognition.continuous = true;
+  recognition.interimResults = false;
+
+  recognition.onresult = e => {
+    if (isAISpeaking || !interviewActive) return;
+    const text = e.results[e.results.length - 1][0].transcript.trim();
+    if (text.length < 2) return;
     processUser(text);
   };
 
-  recognition.onerror=()=>restartRecognition();
-  recognition.onend=()=>restartRecognition();
-}
-
-function restartRecognition(){
-  if(!interviewActive||isAISpeaking) return;
-  try{ recognition.start(); }catch{}
+  recognition.onend = () => {
+    if (interviewActive && !isAISpeaking) {
+      setTimeout(() => recognition.start(), 300);
+    }
+  };
 }
 
 /* ================= USER ================= */
-async function processUser(text){
-  isProcessing=true;
-  status.textContent="Thinking…";
-  add("user",text);
+async function processUser(text) {
+  addMsg("user", text);
+  status.textContent = "Thinking...";
 
-  try{
-    const fd=new FormData();
-    fd.append("mode","interview");
-    fd.append("text",text);
-    fd.append("cvText",cvText);
-    fd.append("history",JSON.stringify(history));
-    const r=await fetch(API,{method:"POST",body:fd});
-    const d=await r.json();
-    history=d.history||history;
-    await speak(d.reply||"Please continue.");
-  }catch{
+  try {
+    const fd = new FormData();
+    fd.append("mode", "interview");
+    fd.append("text", text);
+    fd.append("history", JSON.stringify(history));
+    fd.append("cvText", cvText);
+
+    const r = await fetch(API, { method: "POST", body: fd });
+    const d = await r.json();
+
+    history = d.history || history;
+    await speak(d.reply || "Please continue.");
+  } catch {
     await speak("Could you explain that further?");
   }
-  isProcessing=false;
+
+  status.textContent = "Listening...";
 }
 
 /* ================= START ================= */
-startBtn.onclick=async()=>{
-  speechSynthesis.speak(new SpeechSynthesisUtterance("")); // unlock
-  interviewActive=true;
+startBtn.onclick = async () => {
+  await unlockAudio();
+
+  interviewActive = true;
   startTimer();
+
+  cvInput.style.display = "none";
+  startBtn.style.display = "none";
+  endBtn.style.display = "block";
+
   initRecognition();
-  restartRecognition();
+  status.textContent = "Starting interview...";
 
-  startBtn.style.display="none";
-  cvInput.style.display="none";
-  endBtn.style.display="block";
+  try {
+    const fd = new FormData();
+    fd.append("mode", "start");
+    fd.append("cvText", cvText);
 
-  const fd=new FormData();
-  fd.append("mode","start");
-  fd.append("cvText",cvText);
-  const r=await fetch(API,{method:"POST",body:fd});
-  const d=await r.json();
-  history=d.history||[];
-  await speak(d.reply||"Tell me about yourself.");
+    const r = await fetch(API, { method: "POST", body: fd });
+    const d = await r.json();
+
+    history = d.history || [];
+    await speak(d.reply || "Tell me about yourself.");
+  } catch {
+    await speak("Tell me about yourself.");
+  }
 };
 
 /* ================= END ================= */
-endBtn.onclick=finish;
+endBtn.onclick = finishInterview;
 
-async function finish(){
-  interviewActive=false;
+async function finishInterview() {
+  interviewActive = false;
   clearInterval(timerInt);
-  if(recognition) recognition.stop();
+  if (recognition) recognition.stop();
   speechSynthesis.cancel();
-  status.textContent="Generating report…";
 
-  const fd=new FormData();
-  fd.append("mode","score");
-  fd.append("history",JSON.stringify(history));
-  fd.append("cvText",cvText);
-  const r=await fetch(API,{method:"POST",body:fd});
-  const d=await r.json();
+  status.textContent = "Generating report...";
 
-  document.body.innerHTML=`
+  const fd = new FormData();
+  fd.append("mode", "score");
+  fd.append("history", JSON.stringify(history));
+  fd.append("cvText", cvText);
+
+  const r = await fetch(API, { method: "POST", body: fd });
+  const d = await r.json();
+
+  document.body.innerHTML = `
     <div class="card">
       <h2>Interview Complete</h2>
-      <pre style="white-space:pre-wrap">${d.reply}</pre>
+      <pre style="white-space:pre-wrap">${d.reply || "Report unavailable"}</pre>
       <button class="start" onclick="location.reload()">New Interview</button>
     </div>`;
 }
 
 /* ================= UI ================= */
-const timerEl=document.getElementById("timer");
-function add(role,text){
-  const d=document.createElement("div");
-  d.className="msg "+role;
-  d.innerHTML=`<b>${role==="ai"?"AI":"You"}:</b> ${text}`;
+function addMsg(role, text) {
+  const d = document.createElement("div");
+  d.className = "msg " + role;
+  d.innerHTML = `<b>${role === "ai" ? "AI" : "You"}:</b> ${text}`;
   log.appendChild(d);
-  log.scrollTop=log.scrollHeight;
+  log.scrollTop = log.scrollHeight;
 }
 </script>
+
 </body>
 </html>
