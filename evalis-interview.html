@@ -169,12 +169,18 @@ function startTimer() {
 /* ================= SPEECH ================= */
 function speak(text) {
   return new Promise(res => {
+    // Android Fix: Ensure voices are ready
+    const voices = speechSynthesis.getVoices();
     speechSynthesis.cancel();
 
     const u = new SpeechSynthesisUtterance(text);
     u.lang = "en-US";
-    u.rate = 0.95;
-    u.volume = 1;
+    u.rate = 1; 
+
+    // Android Fix: Explicitly grab an English voice if available
+    if(voices.length > 0) {
+      u.voice = voices.find(v => v.lang.includes('en')) || voices[0];
+    }
 
     u.onstart = () => {
       isAISpeaking = true;
@@ -183,9 +189,18 @@ function speak(text) {
 
     u.onend = () => {
       isAISpeaking = false;
-      if (interviewActive && recognition) {
-        setTimeout(() => recognition.start(), 300);
+      // Android Fix: Delay restarting mic to prevent self-hearing
+      if (interviewActive) {
+        setTimeout(() => {
+           if(!isAISpeaking && recognition) recognition.start();
+        }, 300);
       }
+      res();
+    };
+
+    u.onerror = (e) => {
+      console.log("TTS Error:", e);
+      isAISpeaking = false; // Reset flag on error so mic can work
       res();
     };
 
@@ -193,6 +208,7 @@ function speak(text) {
     speechSynthesis.speak(u);
   });
 }
+
 
 /* ================= SPEECH RECOGNITION ================= */
 function initRecognition() {
@@ -220,29 +236,42 @@ function initRecognition() {
   };
 }
 
-/* ================= USER ================= */
-async function processUser(text) {
-  addMsg("user", text);
-  status.textContent = "Thinking...";
+/* ================= START ================= */
+startBtn.onclick = async () => {
+  await unlockAudio();
+
+  interviewActive = true;
+  startTimer();
+
+  cvInput.style.display = "none";
+  startBtn.style.display = "none";
+  endBtn.style.display = "block";
+
+  status.textContent = "Connecting...";
+
+  // ANDROID FIX: Speak immediately to keep audio "awake" while fetching
+  // This prevents the browser from sleeping the audio while waiting for the server
+  speak("Please wait while I read your resume."); 
+
+  initRecognition();
 
   try {
     const fd = new FormData();
-    fd.append("mode", "interview");
-    fd.append("text", text);
-    fd.append("history", JSON.stringify(history));
+    fd.append("mode", "start");
     fd.append("cvText", cvText);
 
     const r = await fetch(API, { method: "POST", body: fd });
     const d = await r.json();
 
-    history = d.history || history;
-    await speak(d.reply || "Please continue.");
+    history = d.history || [];
+    
+    // This will override the "Please wait" message with the real question
+    await speak(d.reply || "Tell me about yourself.");
   } catch {
-    await speak("Could you explain that further?");
+    await speak("Tell me about yourself.");
   }
+};
 
-  status.textContent = "Listening...";
-}
 
 /* ================= START ================= */
 startBtn.onclick = async () => {
