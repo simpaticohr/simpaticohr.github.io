@@ -14,9 +14,16 @@
         #timer { font-size: 24px; font-weight: 700; color: var(--primary); margin-bottom: 5px; font-variant-numeric: tabular-nums; }
         #status { font-size: 12px; color: #94a3b8; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 20px; }
         .btn { background: var(--primary); color: white; border: none; padding: 16px; border-radius: 14px; width: 100%; font-weight: bold; cursor: pointer; font-size: 16px; transition: 0.3s; }
-        .btn:disabled { opacity: 0.3; }
+        .btn:disabled { opacity: 0.3; cursor: not-allowed; }
         #log { margin-top: 20px; max-height: 200px; overflow-y: auto; text-align: left; font-size: 14px; border-top: 1px solid #334155; padding-top: 15px; }
         .report-box { background: rgba(99, 102, 241, 0.1); padding: 20px; border-radius: 15px; text-align: left; line-height: 1.6; border: 1px solid var(--primary); }
+        .error { color: #ef4444; font-size: 11px; margin-top: 8px; }
+        .success { color: #10b981; font-size: 11px; margin-top: 8px; }
+        /* Custom file upload button for better mobile experience */
+        .file-upload-wrapper { position: relative; margin-bottom: 15px; }
+        .file-upload-label { display: block; background: rgba(255,255,255,0.1); padding: 12px; border-radius: 12px; cursor: pointer; border: 2px dashed rgba(255,255,255,0.3); transition: 0.3s; }
+        .file-upload-label:active { background: rgba(255,255,255,0.15); }
+        #cvInput { position: absolute; opacity: 0; width: 100%; height: 100%; cursor: pointer; }
     </style>
 </head>
 <body>
@@ -26,7 +33,13 @@
     <div id="status">Upload Resume to Start</div>
     <div class="wave-box"><canvas id="canvas"></canvas></div>
     
-    <input type="file" id="cvInput" accept=".pdf" style="margin-bottom:15px; font-size: 12px;">
+    <div class="file-upload-wrapper">
+        <label class="file-upload-label" for="cvInput" id="uploadLabel">
+            📄 Choose PDF Resume
+        </label>
+        <input type="file" id="cvInput" accept="application/pdf,.pdf">
+    </div>
+    <div id="uploadStatus"></div>
     <button id="startBtn" class="btn" disabled>Start Interview</button>
     <button id="endBtn" class="btn" style="display:none; background:#ef4444">End Interview</button>
     
@@ -35,26 +48,115 @@
 
 <script>
 const API = "https://evalis-ai.simpaticohrconsultancy.workers.dev";
+
+// Configure PDF.js with explicit worker path for Android compatibility
 const pdfjsLib = window['pdfjs-dist/build/pdf'];
 pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
 
 let cvText = "", history = [], interviewActive = false, isAISpeaking = false, recognition;
 let audioCtx, analyser, dataArray, canvasCtx, timerInterval, timeLeft = 15 * 60;
 
-/* 1. PDF LOADING */
-document.getElementById("cvInput").onchange = async e => {
+/* 1. PDF LOADING - ANDROID COMPATIBLE */
+document.getElementById("cvInput").addEventListener("change", async function(e) {
     const file = e.target.files[0];
-    if (!file) return;
-    const pdf = await pdfjsLib.getDocument(await file.arrayBuffer()).promise;
-    let text = "";
-    for (let i = 1; i <= pdf.numPages; i++) {
-        const page = await pdf.getPage(i);
-        text += (await page.getTextContent()).items.map(s => s.str).join(" ") + " ";
+    const statusDiv = document.getElementById("uploadStatus");
+    const startBtn = document.getElementById("startBtn");
+    const uploadLabel = document.getElementById("uploadLabel");
+    
+    if (!file) {
+        statusDiv.innerHTML = '<div class="error">No file selected</div>';
+        return;
     }
-    cvText = text;
-    document.getElementById("startBtn").disabled = false;
-    document.getElementById("status").textContent = "Resume Ready";
-};
+    
+    console.log("File selected:", file.name, file.type, file.size);
+    
+    // Update UI
+    uploadLabel.textContent = `📄 ${file.name}`;
+    statusDiv.innerHTML = '<div style="color:#94a3b8; font-size:11px;">⏳ Processing PDF...</div>';
+    document.getElementById("status").textContent = "Processing Resume...";
+    startBtn.disabled = true;
+    
+    try {
+        // Read file as ArrayBuffer - more reliable on Android
+        const arrayBuffer = await new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = (e) => resolve(e.target.result);
+            reader.onerror = (e) => reject(new Error("Failed to read file"));
+            reader.readAsArrayBuffer(file);
+        });
+        
+        console.log("ArrayBuffer loaded, size:", arrayBuffer.byteLength);
+        
+        // Load PDF with timeout handling
+        const loadingTask = pdfjsLib.getDocument({
+            data: arrayBuffer,
+            useWorkerFetch: false,
+            isEvalSupported: false,
+            useSystemFonts: true
+        });
+        
+        const pdf = await Promise.race([
+            loadingTask.promise,
+            new Promise((_, reject) => 
+                setTimeout(() => reject(new Error("PDF loading timeout")), 30000)
+            )
+        ]);
+        
+        console.log("PDF loaded, pages:", pdf.numPages);
+        
+        // Extract text from all pages
+        let text = "";
+        for (let i = 1; i <= pdf.numPages; i++) {
+            try {
+                const page = await pdf.getPage(i);
+                const textContent = await page.getTextContent();
+                const pageText = textContent.items.map(item => item.str).join(" ");
+                text += pageText + " ";
+                console.log(`Page ${i} extracted, length:`, pageText.length);
+            } catch (pageError) {
+                console.error(`Error on page ${i}:`, pageError);
+            }
+        }
+        
+        // Validate extracted text
+        const cleanText = text.trim();
+        console.log("Total text extracted:", cleanText.length, "characters");
+        
+        if (cleanText.length < 50) {
+            throw new Error("PDF appears to be empty or scanned. Please upload a text-based PDF.");
+        }
+        
+        // Success!
+        cvText = cleanText;
+        startBtn.disabled = false;
+        document.getElementById("status").textContent = "Resume Ready ✓";
+        statusDiv.innerHTML = '<div class="success">✓ Resume loaded successfully!</div>';
+        uploadLabel.style.borderColor = "#10b981";
+        uploadLabel.style.background = "rgba(16, 185, 129, 0.1)";
+        
+    } catch (error) {
+        console.error("PDF processing error:", error);
+        
+        // Show user-friendly error
+        let errorMsg = "Failed to process PDF. ";
+        if (error.message.includes("timeout")) {
+            errorMsg += "File is too large or complex.";
+        } else if (error.message.includes("password")) {
+            errorMsg += "Password-protected PDFs are not supported.";
+        } else if (error.message.includes("scanned")) {
+            errorMsg += error.message;
+        } else {
+            errorMsg += "Please try a different PDF file.";
+        }
+        
+        statusDiv.innerHTML = `<div class="error">✗ ${errorMsg}</div>`;
+        document.getElementById("status").textContent = "Upload Failed";
+        startBtn.disabled = true;
+        uploadLabel.textContent = "📄 Choose PDF Resume";
+        uploadLabel.style.borderColor = "rgba(255,255,255,0.3)";
+        uploadLabel.style.background = "rgba(255,255,255,0.1)";
+    }
+}, false);
 
 /* 2. WAVEFORM */
 function initWave(stream) {
@@ -81,75 +183,147 @@ function initWave(stream) {
 /* 3. SPEECH (ANDROID FIX) */
 function speak(text) {
     return new Promise((resolve) => {
-        const voices = window.speechSynthesis.getVoices();
-        window.speechSynthesis.cancel();
-        const u = new SpeechSynthesisUtterance(text);
-        u.lang = "en-US";
-        if (voices.length > 0) u.voice = voices.find(v => v.lang.includes('en')) || voices[0];
+        // Load voices for Android
+        const loadVoices = () => {
+            const voices = window.speechSynthesis.getVoices();
+            window.speechSynthesis.cancel();
+            const u = new SpeechSynthesisUtterance(text);
+            u.lang = "en-US";
+            u.rate = 0.95; // Slightly slower for Android
+            u.pitch = 1;
+            u.volume = 1;
+            
+            if (voices.length > 0) {
+                u.voice = voices.find(v => v.lang.includes('en')) || voices[0];
+            }
 
-        u.onstart = () => { isAISpeaking = true; if(recognition) recognition.stop(); };
-        u.onend = () => { 
-            isAISpeaking = false; 
-            if(interviewActive) setTimeout(() => { if(!isAISpeaking && recognition) recognition.start(); }, 500);
-            resolve();
+            u.onstart = () => { 
+                isAISpeaking = true; 
+                if(recognition) recognition.stop(); 
+            };
+            u.onend = () => { 
+                isAISpeaking = false; 
+                if(interviewActive) {
+                    setTimeout(() => { 
+                        if(!isAISpeaking && recognition) recognition.start(); 
+                    }, 500);
+                }
+                resolve();
+            };
+            u.onerror = (e) => { 
+                console.error("Speech error:", e);
+                isAISpeaking = false; 
+                resolve(); 
+            };
+
+            window.speechSynthesis.speak(u);
+            const d = document.createElement("div");
+            d.innerHTML = `<p style="color:#a5b4fc; margin:5px 0;"><b>AI:</b> ${text}</p>`;
+            document.getElementById("log").prepend(d);
         };
-        u.onerror = () => { isAISpeaking = false; resolve(); };
 
-        window.speechSynthesis.speak(u);
-        const d = document.createElement("div");
-        d.innerHTML = `<p style="color:#a5b4fc; margin:5px 0;"><b>AI:</b> ${text}</p>`;
-        document.getElementById("log").prepend(d);
+        // Android requires voices to be loaded first
+        if (window.speechSynthesis.getVoices().length === 0) {
+            window.speechSynthesis.onvoiceschanged = () => {
+                window.speechSynthesis.onvoiceschanged = null;
+                loadVoices();
+            };
+        } else {
+            loadVoices();
+        }
     });
 }
 
 function initRecognition() {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SR) return;
+    if (!SR) {
+        console.error("Speech recognition not supported");
+        return;
+    }
     recognition = new SR();
     recognition.continuous = true;
+    recognition.interimResults = false;
+    recognition.lang = "en-US";
+    
     recognition.onresult = async e => {
         const transcript = e.results[e.results.length - 1][0].transcript.trim();
         if (isAISpeaking || !transcript) return;
         
+        console.log("User said:", transcript);
         document.getElementById("status").textContent = "Thinking...";
-        const fd = new FormData();
-        fd.append("mode", "interview");
-        fd.append("history", JSON.stringify(history));
-        fd.append("text", transcript);
-        fd.append("cvText", cvText);
+        
+        try {
+            const fd = new FormData();
+            fd.append("mode", "interview");
+            fd.append("history", JSON.stringify(history));
+            fd.append("text", transcript);
+            fd.append("cvText", cvText);
 
+            const res = await fetch(API, { method: "POST", body: fd });
+            const data = await res.json();
+            history = data.history;
+            await speak(data.reply);
+            document.getElementById("status").textContent = "Listening...";
+        } catch (error) {
+            console.error("Interview error:", error);
+            document.getElementById("status").textContent = "Error - Try again";
+        }
+    };
+    
+    recognition.onerror = (e) => {
+        console.error("Recognition error:", e.error);
+        if (e.error === 'not-allowed') {
+            document.getElementById("status").textContent = "Microphone permission denied";
+        }
+    };
+    
+    recognition.onend = () => {
+        if (interviewActive && !isAISpeaking) {
+            setTimeout(() => recognition.start(), 100);
+        }
+    };
+}
+
+/* 4. START SESSION - ANDROID OPTIMIZED */
+document.getElementById("startBtn").onclick = async () => {
+    try {
+        // Initialize AudioContext first (required for Android)
+        if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        await audioCtx.resume();
+        
+        // Trigger speech synthesis (Android requirement)
+        window.speechSynthesis.speak(new SpeechSynthesisUtterance(""));
+        
+        // Request microphone permission
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        
+        interviewActive = true;
+        initWave(stream);
+        initRecognition();
+        
+        document.getElementById("cvInput").parentElement.style.display = "none";
+        document.getElementById("uploadStatus").style.display = "none";
+        document.getElementById("startBtn").style.display = "none";
+        document.getElementById("endBtn").style.display = "block";
+        
+        await speak("Please wait while I read your resume...");
+
+        const fd = new FormData();
+        fd.append("mode", "start");
+        fd.append("cvText", cvText);
         const res = await fetch(API, { method: "POST", body: fd });
         const data = await res.json();
         history = data.history;
         await speak(data.reply);
+        
         document.getElementById("status").textContent = "Listening...";
-    };
-}
-
-/* 4. START SESSION */
-document.getElementById("startBtn").onclick = async () => {
-    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    await audioCtx.resume();
-    window.speechSynthesis.speak(new SpeechSynthesisUtterance("")); // Vital for Android
-
-    interviewActive = true;
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    initWave(stream);
-    initRecognition();
-    
-    document.getElementById("cvInput").style.display = "none";
-    document.getElementById("startBtn").style.display = "none";
-    document.getElementById("endBtn").style.display = "block";
-    
-    speak("Please wait while I read your resume..."); // Holds the audio channel open
-
-    const fd = new FormData();
-    fd.append("mode", "start");
-    fd.append("cvText", cvText);
-    const res = await fetch(API, { method: "POST", body: fd });
-    const data = await res.json();
-    history = data.history;
-    speak(data.reply);
+        if (recognition) recognition.start();
+        
+    } catch (error) {
+        console.error("Start error:", error);
+        alert("Failed to start interview: " + error.message);
+        interviewActive = false;
+    }
 };
 
 document.getElementById("endBtn").onclick = async () => {
@@ -158,19 +332,32 @@ document.getElementById("endBtn").onclick = async () => {
     window.speechSynthesis.cancel();
     document.getElementById("status").textContent = "Generating Report...";
     
-    const fd = new FormData();
-    fd.append("mode", "score");
-    fd.append("history", JSON.stringify(history));
-    const res = await fetch(API, { method: "POST", body: fd });
-    const data = await res.json();
-    
-    document.body.innerHTML = `
-        <div class="card" style="max-width:600px">
-            <h2 style="color:var(--primary)">Interview Complete</h2>
-            <div class="report-box" style="white-space:pre-wrap">${data.reply}</div>
-            <button onclick="location.reload()" class="btn" style="margin-top:20px">New Interview</button>
-        </div>`;
+    try {
+        const fd = new FormData();
+        fd.append("mode", "score");
+        fd.append("history", JSON.stringify(history));
+        const res = await fetch(API, { method: "POST", body: fd });
+        const data = await res.json();
+        
+        document.body.innerHTML = `
+            <div class="card" style="max-width:600px">
+                <h2 style="color:var(--primary)">Interview Complete</h2>
+                <div class="report-box" style="white-space:pre-wrap">${data.reply}</div>
+                <button onclick="location.reload()" class="btn" style="margin-top:20px">New Interview</button>
+            </div>`;
+    } catch (error) {
+        console.error("Report error:", error);
+        document.getElementById("status").textContent = "Error generating report";
+    }
 };
+
+// Prevent page unload during interview
+window.addEventListener('beforeunload', (e) => {
+    if (interviewActive) {
+        e.preventDefault();
+        e.returnValue = '';
+    }
+});
 </script>
 </body>
 </html>
