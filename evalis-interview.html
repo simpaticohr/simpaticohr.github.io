@@ -69,20 +69,13 @@ body {
 
 <script>
 /* ================= PLATFORM CHECK ================= */
-const IS_ANDROID_APP =
-  typeof Android !== "undefined" ||
-  /Android/i.test(navigator.userAgent);
+const IS_ANDROID_APP = typeof Android !== "undefined";
 
-/* Disable all WEB mic/speech on Android to prevent echo/conflicts, 
-   BUT we will bridge speech back to Android via speakText() below */
+/* Disable WEB speech engines ONLY (keep browser intact) */
 if (IS_ANDROID_APP) {
   window.SpeechRecognition = undefined;
   window.webkitSpeechRecognition = undefined;
-  // Note: We keep window.speechSynthesis or use a bridge. 
-  // If you strictly want Android TTS, keep synthesis disabled here 
-  // and ensure 'Android.speak' is defined in your Java/Kotlin code.
-  window.speechSynthesis = undefined; 
-  navigator.mediaDevices = undefined;
+  window.speechSynthesis = undefined;
 
   document.getElementById("uploadStatus").innerHTML =
     "<div class='notice'>🎤 Voice handled by Android (Vosk)</div>";
@@ -100,19 +93,22 @@ let interviewActive = false;
 let timeLeft = 15 * 60;
 let timerInterval = null;
 
-/* ================= HELPER: TEXT TO SPEECH ================= */
+/* ================= ANDROID TTS BRIDGE ================= */
 function speakText(text) {
-  // 1. Try sending to Android Native App (if interface exists)
-  if (typeof Android !== "undefined" && Android.speak) {
+  if (IS_ANDROID_APP && Android.speak) {
+    Android.onAISpeakStart?.();
     Android.speak(text);
-  } 
-  // 2. Fallback: If Android interface is missing (e.g. desktop testing), try browser speech
-  // Note: This won't run on Android if we set window.speechSynthesis = undefined above.
-  else if (window.speechSynthesis && !IS_ANDROID_APP) {
+  } else if (window.speechSynthesis) {
     const u = new SpeechSynthesisUtterance(text);
-    window.speechSynthesis.speak(u);
+    speechSynthesis.speak(u);
   }
 }
+
+/* Called by Android AFTER TTS finishes */
+window.onAndroidTtsDone = function () {
+  if (!interviewActive) return;
+  document.getElementById("status").textContent = "Listening (Android)…";
+};
 
 /* ================= TIMER ================= */
 function startTimer() {
@@ -173,8 +169,7 @@ document.getElementById("startBtn").onclick = async () => {
 
   document.getElementById("startBtn").style.display="none";
   document.getElementById("endBtn").style.display="block";
-  document.getElementById("status").textContent =
-    IS_ANDROID_APP ? "Listening (Android)..." : "Listening...";
+  document.getElementById("status").textContent = "Thinking…";
 
   const fd = new FormData();
   fd.append("mode","start");
@@ -185,11 +180,10 @@ document.getElementById("startBtn").onclick = async () => {
   history = d.history || [];
 
   addMsg("AI", d.reply);
-  speakText(d.reply); // <--- AI Speaks the opening line
+  speakText(d.reply);
 };
 
 /* ================= ANDROID → WEB ================= */
-/* Called from Android (VoiceService / Vosk) */
 window.receiveVoskText = async function(text) {
   if (!interviewActive || !text || text.length < 2) return;
 
@@ -207,8 +201,7 @@ window.receiveVoskText = async function(text) {
   history = d.history || history;
 
   addMsg("AI", d.reply);
-  speakText(d.reply); // <--- AI Speaks the reply
-  document.getElementById("status").textContent = "Listening…";
+  speakText(d.reply);
 };
 
 /* ================= END ================= */
