@@ -29,7 +29,6 @@ body {
   text-align:center;
   border:1px solid rgba(255,255,255,0.1);
 }
-#wave { height:60px; }
 canvas { width:100%; height:60px; }
 .btn {
   background:var(--primary);
@@ -55,7 +54,6 @@ canvas { width:100%; height:60px; }
 </head>
 
 <body>
-
 <div class="card">
   <h2 id="timer">15:00</h2>
   <p id="status">Upload Resume to Start</p>
@@ -75,7 +73,7 @@ canvas { width:100%; height:60px; }
 /* ---------------- CONFIG ---------------- */
 const API = "https://evalis-ai.simpaticohrconsultancy.workers.dev";
 
-/* ---------------- PDF.JS ---------------- */
+/* ---------------- PDF ---------------- */
 pdfjsLib.GlobalWorkerOptions.workerSrc =
   "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
 
@@ -101,13 +99,10 @@ document.getElementById("cvInput").addEventListener("change", async e => {
 
   try {
     const buffer = await file.arrayBuffer();
-
-    const loadingTask = pdfjsLib.getDocument({
+    const pdf = await pdfjsLib.getDocument({
       data: buffer,
-      disableWorker: true   // 🔥 CRITICAL FOR MOBILE
-    });
-
-    const pdf = await loadingTask.promise;
+      disableWorker: true
+    }).promise;
 
     let text = "";
     for (let i = 1; i <= pdf.numPages; i++) {
@@ -117,23 +112,17 @@ document.getElementById("cvInput").addEventListener("change", async e => {
     }
 
     cvText = text.trim();
+    if (cvText.length < 30) throw new Error("Empty PDF");
 
-    if (cvText.length < 20) {
-      throw new Error("PDF has no readable text");
-    }
-
-    btn.disabled = false;               // ✅ FORCE ENABLE
-    btn.style.opacity = "1";
-    status.innerHTML = "<div class='success'>✓ Resume loaded</div>";
+    btn.disabled = false;
     document.getElementById("status").textContent = "Resume Ready ✓";
+    status.innerHTML = "<div class='success'>✓ Resume loaded</div>";
 
-    console.log("PDF OK, button enabled");
-
-  } catch (err) {
-    console.error("PDF error:", err);
+  } catch {
     status.innerHTML = "<div class='error'>PDF read failed</div>";
   }
 });
+
 /* ---------------- WAVE ---------------- */
 function initWave(stream) {
   audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -157,42 +146,35 @@ function initWave(stream) {
   draw();
 }
 
-/* ---------------- SAFE SPEAK ---------------- */
+/* ---------------- SPEAK ---------------- */
 function speak(text) {
   return new Promise(resolve => {
-
-    if (!window.speechSynthesis || typeof SpeechSynthesisUtterance === "undefined") {
-      console.warn("Speech not supported");
-      resolve();
-      return;
-    }
+    if (!speechSynthesis) return resolve();
 
     const run = () => {
-      try {
-        const u = new SpeechSynthesisUtterance(text);
-        u.lang = "en-US";
-        u.rate = 0.95;
+      const u = new SpeechSynthesisUtterance(text);
+      u.lang = "en-US";
+      u.rate = 0.95;
 
-        u.onstart = () => {
-          isAISpeaking = true;
-          if (recognition) recognition.stop();
-        };
+      u.onstart = () => {
+        isAISpeaking = true;
+        if (recognition) recognition.stop();
+      };
 
-        u.onend = () => {
-          isAISpeaking = false;
-          if (interviewActive && recognition) recognition.start();
-          resolve();
-        };
-
-        speechSynthesis.cancel();
-        speechSynthesis.speak(u);
-
-        const d = document.createElement("div");
-        d.innerHTML = `<b>AI:</b> ${text}`;
-        document.getElementById("log").prepend(d);
-      } catch {
+      u.onend = () => {
+        isAISpeaking = false;
+        if (interviewActive && recognition) {
+          setTimeout(() => recognition.start(), 600);
+        }
         resolve();
-      }
+      };
+
+      speechSynthesis.cancel();
+      speechSynthesis.speak(u);
+
+      const d = document.createElement("div");
+      d.innerHTML = `<b>AI:</b> ${text}`;
+      document.getElementById("log").prepend(d);
     };
 
     if (speechSynthesis.getVoices().length === 0) {
@@ -208,6 +190,7 @@ function initRecognition() {
 
   recognition = new SR();
   recognition.continuous = false;
+  recognition.interimResults = false;
   recognition.lang = "en-US";
 
   recognition.onresult = async e => {
@@ -231,7 +214,9 @@ function initRecognition() {
     document.getElementById("status").textContent = "Listening…";
   };
 
-  
+  recognition.onerror = () => {};
+  recognition.onend = () => {};
+}
 
 /* ---------------- START ---------------- */
 document.getElementById("startBtn").onclick = async () => {
@@ -255,13 +240,12 @@ document.getElementById("startBtn").onclick = async () => {
   history = d.history;
 
   await speak(d.reply);
-  recognition.start();
 };
 
 /* ---------------- END ---------------- */
 document.getElementById("endBtn").onclick = async () => {
   interviewActive = false;
-  recognition.stop();
+  if (recognition) recognition.stop();
   speechSynthesis.cancel();
 
   const fd = new FormData();
