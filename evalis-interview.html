@@ -54,6 +54,7 @@ canvas { width:100%; height:60px; }
 </head>
 
 <body>
+
 <div class="card">
   <h2 id="timer">15:00</h2>
   <p id="status">Upload Resume to Start</p>
@@ -70,14 +71,13 @@ canvas { width:100%; height:60px; }
 </div>
 
 <script>
-/* ---------------- CONFIG ---------------- */
+/* ================= CONFIG ================= */
 const API = "https://evalis-ai.simpaticohrconsultancy.workers.dev";
 
-/* ---------------- PDF ---------------- */
 pdfjsLib.GlobalWorkerOptions.workerSrc =
   "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
 
-/* ---------------- STATE ---------------- */
+/* ================= STATE ================= */
 let cvText = "";
 let history = [];
 let interviewActive = false;
@@ -86,7 +86,25 @@ let audioCtx = null;
 let analyser = null;
 let isAISpeaking = false;
 
-/* ---------------- PDF LOAD ---------------- */
+let timeLeft = 15 * 60;
+let timerInterval = null;
+
+/* ================= TIMER ================= */
+function startTimer() {
+  timerInterval = setInterval(() => {
+    if (!interviewActive) return;
+    timeLeft--;
+    const m = String(Math.floor(timeLeft / 60)).padStart(2,"0");
+    const s = String(timeLeft % 60).padStart(2,"0");
+    document.getElementById("timer").textContent = `${m}:${s}`;
+    if (timeLeft <= 0) {
+      clearInterval(timerInterval);
+      document.getElementById("endBtn").click();
+    }
+  }, 1000);
+}
+
+/* ================= PDF LOAD ================= */
 document.getElementById("cvInput").addEventListener("change", async e => {
   const file = e.target.files[0];
   const status = document.getElementById("uploadStatus");
@@ -112,18 +130,18 @@ document.getElementById("cvInput").addEventListener("change", async e => {
     }
 
     cvText = text.trim();
-    if (cvText.length < 30) throw new Error("Empty PDF");
+    if (cvText.length < 30) throw new Error("No readable text");
 
     btn.disabled = false;
-    document.getElementById("status").textContent = "Resume Ready ✓";
     status.innerHTML = "<div class='success'>✓ Resume loaded</div>";
+    document.getElementById("status").textContent = "Resume Ready ✓";
 
   } catch {
     status.innerHTML = "<div class='error'>PDF read failed</div>";
   }
 });
 
-/* ---------------- WAVE ---------------- */
+/* ================= WAVE ================= */
 function initWave(stream) {
   audioCtx = new (window.AudioContext || window.webkitAudioContext)();
   analyser = audioCtx.createAnalyser();
@@ -146,10 +164,10 @@ function initWave(stream) {
   draw();
 }
 
-/* ---------------- SPEAK ---------------- */
+/* ================= SPEAK ================= */
 function speak(text) {
   return new Promise(resolve => {
-    if (!speechSynthesis) return resolve();
+    if (!window.speechSynthesis) return resolve();
 
     const run = () => {
       const u = new SpeechSynthesisUtterance(text);
@@ -177,20 +195,19 @@ function speak(text) {
       document.getElementById("log").prepend(d);
     };
 
-    if (speechSynthesis.getVoices().length === 0) {
+    if (speechSynthesis.getVoices().length === 0)
       speechSynthesis.onvoiceschanged = run;
-    } else run();
+    else run();
   });
 }
 
-/* ---------------- RECOGNITION ---------------- */
+/* ================= RECOGNITION ================= */
 function initRecognition() {
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!SR) return;
 
   recognition = new SR();
   recognition.continuous = false;
-  recognition.interimResults = false;
   recognition.lang = "en-US";
 
   recognition.onresult = async e => {
@@ -214,17 +231,21 @@ function initRecognition() {
     document.getElementById("status").textContent = "Listening…";
   };
 
-  recognition.onerror = () => {};
-  recognition.onend = () => {};
+  recognition.onend = () => {
+    if (interviewActive && !isAISpeaking) {
+      setTimeout(() => recognition.start(), 600);
+    }
+  };
 }
 
-/* ---------------- START ---------------- */
+/* ================= START ================= */
 document.getElementById("startBtn").onclick = async () => {
   interviewActive = true;
 
   const stream = await navigator.mediaDevices.getUserMedia({ audio:true });
   initWave(stream);
   initRecognition();
+  startTimer();
 
   document.getElementById("startBtn").style.display="none";
   document.getElementById("endBtn").style.display="block";
@@ -240,11 +261,14 @@ document.getElementById("startBtn").onclick = async () => {
   history = d.history;
 
   await speak(d.reply);
+  document.getElementById("status").textContent = "Listening…";
+  recognition.start();
 };
 
-/* ---------------- END ---------------- */
+/* ================= END ================= */
 document.getElementById("endBtn").onclick = async () => {
   interviewActive = false;
+  clearInterval(timerInterval);
   if (recognition) recognition.stop();
   speechSynthesis.cancel();
 
