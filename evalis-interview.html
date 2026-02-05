@@ -96,31 +96,44 @@ document.getElementById("cvInput").addEventListener("change", async e => {
 
   if (!file) return;
 
-  status.innerHTML = "⏳ Reading resume…";
+  status.textContent = "⏳ Reading resume…";
   btn.disabled = true;
 
   try {
     const buffer = await file.arrayBuffer();
-    const pdf = await pdfjsLib.getDocument({ data: buffer }).promise;
+
+    const loadingTask = pdfjsLib.getDocument({
+      data: buffer,
+      disableWorker: true   // 🔥 CRITICAL FOR MOBILE
+    });
+
+    const pdf = await loadingTask.promise;
 
     let text = "";
     for (let i = 1; i <= pdf.numPages; i++) {
       const page = await pdf.getPage(i);
       const content = await page.getTextContent();
-      text += content.items.map(i => i.str).join(" ") + " ";
+      text += content.items.map(it => it.str).join(" ") + " ";
     }
 
-    if (text.trim().length < 50) throw "Empty PDF";
+    cvText = text.trim();
 
-    cvText = text;
-    btn.disabled = false;
+    if (cvText.length < 20) {
+      throw new Error("PDF has no readable text");
+    }
+
+    btn.disabled = false;               // ✅ FORCE ENABLE
+    btn.style.opacity = "1";
     status.innerHTML = "<div class='success'>✓ Resume loaded</div>";
     document.getElementById("status").textContent = "Resume Ready ✓";
-  } catch {
-    status.innerHTML = "<div class='error'>Failed to read PDF</div>";
+
+    console.log("PDF OK, button enabled");
+
+  } catch (err) {
+    console.error("PDF error:", err);
+    status.innerHTML = "<div class='error'>PDF read failed</div>";
   }
 });
-
 /* ---------------- WAVE ---------------- */
 function initWave(stream) {
   audioCtx = new (window.AudioContext || window.webkitAudioContext)();
