@@ -73,11 +73,15 @@ const IS_ANDROID_APP =
   typeof Android !== "undefined" ||
   /Android/i.test(navigator.userAgent);
 
-/* Disable all WEB mic/speech on Android */
+/* Disable all WEB mic/speech on Android to prevent echo/conflicts, 
+   BUT we will bridge speech back to Android via speakText() below */
 if (IS_ANDROID_APP) {
   window.SpeechRecognition = undefined;
   window.webkitSpeechRecognition = undefined;
-  window.speechSynthesis = undefined;
+  // Note: We keep window.speechSynthesis or use a bridge. 
+  // If you strictly want Android TTS, keep synthesis disabled here 
+  // and ensure 'Android.speak' is defined in your Java/Kotlin code.
+  window.speechSynthesis = undefined; 
   navigator.mediaDevices = undefined;
 
   document.getElementById("uploadStatus").innerHTML =
@@ -95,6 +99,20 @@ let history = [];
 let interviewActive = false;
 let timeLeft = 15 * 60;
 let timerInterval = null;
+
+/* ================= HELPER: TEXT TO SPEECH ================= */
+function speakText(text) {
+  // 1. Try sending to Android Native App (if interface exists)
+  if (typeof Android !== "undefined" && Android.speak) {
+    Android.speak(text);
+  } 
+  // 2. Fallback: If Android interface is missing (e.g. desktop testing), try browser speech
+  // Note: This won't run on Android if we set window.speechSynthesis = undefined above.
+  else if (window.speechSynthesis && !IS_ANDROID_APP) {
+    const u = new SpeechSynthesisUtterance(text);
+    window.speechSynthesis.speak(u);
+  }
+}
 
 /* ================= TIMER ================= */
 function startTimer() {
@@ -167,6 +185,7 @@ document.getElementById("startBtn").onclick = async () => {
   history = d.history || [];
 
   addMsg("AI", d.reply);
+  speakText(d.reply); // <--- AI Speaks the opening line
 };
 
 /* ================= ANDROID → WEB ================= */
@@ -188,6 +207,7 @@ window.receiveVoskText = async function(text) {
   history = d.history || history;
 
   addMsg("AI", d.reply);
+  speakText(d.reply); // <--- AI Speaks the reply
   document.getElementById("status").textContent = "Listening…";
 };
 
