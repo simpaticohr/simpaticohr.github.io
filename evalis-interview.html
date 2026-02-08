@@ -1,175 +1,127 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Evalis AI – Voice Interview</title>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 
 <style>
 body {
-  margin:0;
   background:#020617;
   color:white;
-  font-family:system-ui,sans-serif;
+  font-family:system-ui;
   padding:20px;
 }
 button {
   width:100%;
-  padding:16px;
-  font-size:16px;
-  font-weight:700;
-  border-radius:12px;
+  padding:14px;
+  margin-top:10px;
   border:none;
+  border-radius:12px;
+  font-size:16px;
   background:#6366f1;
   color:white;
-  margin-top:10px;
 }
-button:disabled { opacity:.4 }
-#status { color:#94a3b8; margin:10px 0 }
-#log div { margin:10px 0 }
-input { margin-top:10px }
+#log div { margin-top:10px }
 </style>
 </head>
 
 <body>
 
 <h2>Evalis AI – Live Interview</h2>
-<p id="status">Upload your resume to begin</p>
+<p id="status">Upload resume</p>
 
 <input type="file" id="cvInput" accept="application/pdf">
 <button id="startBtn" disabled>Start Interview</button>
+<button id="micBtn" disabled>🎤 Speak</button>
+<button id="voiceBtn" disabled>🔊 Hear AI</button>
 
 <div id="log"></div>
 
 <script>
-/* ---------------- CONFIG ---------------- */
 const API = "https://evalis-ai.simpaticohrconsultancy.workers.dev";
+let cvText="", history=[], lastAI="";
 
-/* ---------------- STATE ---------------- */
-let recognition;
-let history = [];
-let cvText = "";
-let listening = false;
-
-/* ---------------- PDF ---------------- */
+/* ---------- PDF ---------- */
 pdfjsLib.GlobalWorkerOptions.workerSrc =
-  "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+"https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
 
-document.getElementById("cvInput").onchange = async e => {
-  const file = e.target.files[0];
-  if (!file) return;
-
-  document.getElementById("status").innerText = "Reading resume…";
-
-  try {
-    const buffer = await file.arrayBuffer();
-    const pdf = await pdfjsLib.getDocument({
-      data: buffer,
-      disableWorker: true
-    }).promise;
-
-    let text = "";
-    for (let i = 1; i <= pdf.numPages; i++) {
-      const page = await pdf.getPage(i);
-      const content = await page.getTextContent();
-      text += content.items.map(it => it.str).join(" ") + " ";
-    }
-
-    cvText = text.trim();
-    if (cvText.length < 50) throw new Error();
-
-    document.getElementById("status").innerText = "Resume loaded ✓";
-    document.getElementById("startBtn").disabled = false;
-
-  } catch {
-    document.getElementById("status").innerText = "Failed to read PDF";
+cvInput.onchange = async e => {
+  const pdf = await pdfjsLib.getDocument({
+    data: await e.target.files[0].arrayBuffer(),
+    disableWorker:true
+  }).promise;
+  let t="";
+  for(let i=1;i<=pdf.numPages;i++){
+    const p=await pdf.getPage(i);
+    const c=await p.getTextContent();
+    t+=c.items.map(x=>x.str).join(" ");
   }
+  cvText=t;
+  startBtn.disabled=false;
+  status.innerText="Resume loaded ✓";
 };
 
-/* ---------------- UI ---------------- */
-function add(who, text) {
-  const d = document.createElement("div");
-  d.innerHTML = `<b>${who}:</b> ${text}`;
-  document.getElementById("log").appendChild(d);
+/* ---------- UI ---------- */
+function add(w,t){
+  const d=document.createElement("div");
+  d.innerHTML=`<b>${w}:</b> ${t}`;
+  log.appendChild(d);
 }
 
-/* ---------------- SPEAK ---------------- */
-function speak(text) {
-  return new Promise(res => {
-    const u = new SpeechSynthesisUtterance(text);
-    u.lang = "en-US";
-    u.rate = 0.95;
-    u.onend = res;
-    speechSynthesis.cancel();
-    speechSynthesis.speak(u);
-  });
+/* ---------- SPEAK ---------- */
+function speak(text){
+  speechSynthesis.cancel();
+  const u=new SpeechSynthesisUtterance(text);
+  u.lang="en-US";
+  speechSynthesis.speak(u);
 }
 
-/* ---------------- LISTEN ---------------- */
-function initRecognition() {
-  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!SR) {
-    alert("Speech Recognition not supported");
-    return;
-  }
+/* ---------- MIC ---------- */
+function listen(){
+  const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+  if(!SR){ alert("Mic not supported"); return; }
+  const r=new SR();
+  r.lang="en-US";
+  r.onresult=async e=>{
+    const text=e.results[0][0].transcript;
+    add("You",text);
 
-  recognition = new SR();
-  recognition.lang = "en-US";
-  recognition.continuous = false;
-
-  recognition.onresult = async e => {
-    const text = e.results[0][0].transcript.trim();
-    if (!text) return;
-
-    add("You", text);
-    document.getElementById("status").innerText = "Thinking…";
-
-    const fd = new FormData();
+    const fd=new FormData();
     fd.append("mode","interview");
-    fd.append("text", text);
-    fd.append("history", JSON.stringify(history));
-    fd.append("cvText", cvText);
+    fd.append("text",text);
+    fd.append("history",JSON.stringify(history));
+    fd.append("cvText",cvText);
 
-    const r = await fetch(API,{method:"POST",body:fd});
-    const d = await r.json();
-    history = d.history || history;
-
-    add("AI", d.reply);
-    await speak(d.reply);
-
-    document.getElementById("status").innerText = "Listening…";
-    recognition.start(); // auto follow-up
+    const res=await fetch(API,{method:"POST",body:fd});
+    const d=await res.json();
+    history=d.history;
+    lastAI=d.reply;
+    add("AI",lastAI);
+    voiceBtn.disabled=false;
   };
-
-  recognition.onerror = () => {
-    if (listening) recognition.start();
-  };
+  r.start();
 }
 
-/* ---------------- START ---------------- */
-document.getElementById("startBtn").onclick = async () => {
-  document.getElementById("startBtn").disabled = true;
-  listening = true;
-  initRecognition();
-
-  document.getElementById("status").innerText = "Starting interview…";
-
-  const fd = new FormData();
+/* ---------- START ---------- */
+startBtn.onclick=async()=>{
+  const fd=new FormData();
   fd.append("mode","start");
-  fd.append("cvText", cvText);
+  fd.append("cvText",cvText);
 
-  const r = await fetch(API,{method:"POST",body:fd});
-  const d = await r.json();
-  history = d.history || [];
+  const r=await fetch(API,{method:"POST",body:fd});
+  const d=await r.json();
+  history=d.history;
+  lastAI=d.reply;
 
-  add("AI", d.reply);
-  await speak(d.reply);
-
-  document.getElementById("status").innerText = "Listening…";
-  recognition.start();
+  add("AI",lastAI);
+  micBtn.disabled=false;
+  voiceBtn.disabled=false;
 };
+
+micBtn.onclick=listen;
+voiceBtn.onclick=()=>speak(lastAI);
 </script>
 
 </body>
