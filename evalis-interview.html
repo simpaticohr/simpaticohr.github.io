@@ -37,7 +37,9 @@ body {
   width:100%;
   font-size:16px;
   font-weight:700;
+  margin-top:10px;
 }
+.btn.danger { background:#ef4444 }
 .btn:disabled { opacity:.35 }
 #log {
   margin-top:20px;
@@ -62,25 +64,13 @@ body {
   <div id="uploadStatus"></div>
 
   <button id="startBtn" class="btn" disabled>Start Interview</button>
-  <button id="endBtn" class="btn" style="display:none;background:#ef4444">End Interview</button>
+  <button id="speakBtn" class="btn" style="display:none">🎤 Speak</button>
+  <button id="endBtn" class="btn danger" style="display:none">End Interview</button>
 
   <div id="log"></div>
 </div>
 
 <script>
-/* ================= PLATFORM CHECK ================= */
-const IS_ANDROID_APP = typeof Android !== "undefined";
-
-/* Disable WEB speech engines ONLY (keep browser intact) */
-if (IS_ANDROID_APP) {
-  window.SpeechRecognition = undefined;
-  window.webkitSpeechRecognition = undefined;
-  window.speechSynthesis = undefined;
-
-  document.getElementById("uploadStatus").innerHTML =
-    "<div class='notice'>🎤 Voice handled by Android (Vosk)</div>";
-}
-
 /* ================= CONFIG ================= */
 const API = "https://evalis-ai.simpaticohrconsultancy.workers.dev";
 pdfjsLib.GlobalWorkerOptions.workerSrc =
@@ -92,23 +82,7 @@ let history = [];
 let interviewActive = false;
 let timeLeft = 15 * 60;
 let timerInterval = null;
-
-/* ================= ANDROID TTS BRIDGE ================= */
-function speakText(text) {
-  if (IS_ANDROID_APP && Android.speak) {
-    Android.onAISpeakStart?.();
-    Android.speak(text);
-  } else if (window.speechSynthesis) {
-    const u = new SpeechSynthesisUtterance(text);
-    speechSynthesis.speak(u);
-  }
-}
-
-/* Called by Android AFTER TTS finishes */
-window.onAndroidTtsDone = function () {
-  if (!interviewActive) return;
-  document.getElementById("status").textContent = "Listening (Android)…";
-};
+let recognition = null;
 
 /* ================= TIMER ================= */
 function startTimer() {
@@ -120,7 +94,7 @@ function startTimer() {
     document.getElementById("timer").textContent = `${m}:${s}`;
     if (timeLeft <= 0) {
       clearInterval(timerInterval);
-      document.getElementById("endBtn").click();
+      endInterview();
     }
   }, 1000);
 }
@@ -138,10 +112,7 @@ document.getElementById("cvInput").addEventListener("change", async e => {
 
   try {
     const buffer = await file.arrayBuffer();
-    const pdf = await pdfjsLib.getDocument({
-      data: buffer,
-      disableWorker: true
-    }).promise;
+    const pdf = await pdfjsLib.getDocument({ data: buffer }).promise;
 
     let text = "";
     for (let i = 1; i <= pdf.numPages; i++) {
@@ -169,7 +140,8 @@ document.getElementById("startBtn").onclick = async () => {
 
   document.getElementById("startBtn").style.display="none";
   document.getElementById("endBtn").style.display="block";
-  document.getElementById("status").textContent = "Thinking…";
+  document.getElementById("speakBtn").style.display="block";
+  document.getElementById("status").textContent = "Listening…";
 
   const fd = new FormData();
   fd.append("mode","start");
@@ -180,12 +152,43 @@ document.getElementById("startBtn").onclick = async () => {
   history = d.history || [];
 
   addMsg("AI", d.reply);
-  speakText(d.reply);
 };
 
-/* ================= ANDROID → WEB ================= */
-window.receiveVoskText = async function(text) {
-  if (!interviewActive || !text || text.length < 2) return;
+/* ================= VOICE ================= */
+document.getElementById("speakBtn").onclick = startVoice;
+
+function startVoice() {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) {
+    alert("Voice not supported in this browser");
+    return;
+  }
+
+  recognition = new SR();
+  recognition.lang = "en-US";
+  recognition.continuous = false;
+  recognition.interimResults = false;
+
+  recognition.onstart = () => {
+    document.getElementById("status").textContent = "Listening…";
+  };
+
+  recognition.onresult = (e) => {
+    const text = e.results[0][0].transcript;
+    recognition.stop();
+    sendText(text);
+  };
+
+  recognition.onerror = () => {
+    document.getElementById("status").textContent = "Mic error";
+  };
+
+  recognition.start();
+}
+
+/* ================= SEND ================= */
+async function sendText(text) {
+  if (!interviewActive) return;
 
   addMsg("You", text);
   document.getElementById("status").textContent = "Thinking…";
@@ -198,14 +201,16 @@ window.receiveVoskText = async function(text) {
 
   const r = await fetch(API,{method:"POST",body:fd});
   const d = await r.json();
-  history = d.history || history;
 
+  history = d.history || history;
   addMsg("AI", d.reply);
-  speakText(d.reply);
-};
+  document.getElementById("status").textContent = "Listening…";
+}
 
 /* ================= END ================= */
-document.getElementById("endBtn").onclick = async () => {
+document.getElementById("endBtn").onclick = endInterview;
+
+async function endInterview() {
   interviewActive = false;
   clearInterval(timerInterval);
 
@@ -222,7 +227,7 @@ document.getElementById("endBtn").onclick = async () => {
       <pre style="white-space:pre-wrap">${d.reply}</pre>
       <button class="btn" onclick="location.reload()">New Interview</button>
     </div>`;
-};
+}
 
 /* ================= UI ================= */
 function addMsg(who, text) {
