@@ -1,127 +1,271 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Evalis AI – Voice Interview</title>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Evalis AI – Live Interview</title>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 
 <style>
+:root { --primary:#6366f1; --bg:#020617; }
 body {
-  background:#020617;
+  margin:0;
+  background:var(--bg);
   color:white;
-  font-family:system-ui;
-  padding:20px;
+  font-family:system-ui,sans-serif;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  min-height:100vh;
+}
+.card {
+  width:90%;
+  max-width:440px;
+  background:rgba(255,255,255,.05);
+  border-radius:22px;
+  padding:28px;
+  text-align:center;
+  border:1px solid rgba(255,255,255,.12);
 }
 button {
-  width:100%;
-  padding:14px;
-  margin-top:10px;
-  border:none;
-  border-radius:12px;
-  font-size:16px;
-  background:#6366f1;
+  background:var(--primary);
   color:white;
+  border:none;
+  padding:14px;
+  border-radius:14px;
+  width:100%;
+  font-size:16px;
+  font-weight:700;
+  margin-top:10px;
 }
-#log div { margin-top:10px }
+button:disabled { opacity:.35 }
+#log {
+  margin-top:20px;
+  max-height:220px;
+  overflow:auto;
+  text-align:left;
+  font-size:14px;
+}
+small { color:#94a3b8 }
 </style>
 </head>
 
 <body>
 
-<h2>Evalis AI – Live Interview</h2>
-<p id="status">Upload resume</p>
+<div class="card">
+  <h2 id="timer">15:00</h2>
+  <p id="status">Upload resume to begin</p>
 
-<input type="file" id="cvInput" accept="application/pdf">
-<button id="startBtn" disabled>Start Interview</button>
-<button id="micBtn" disabled>🎤 Speak</button>
-<button id="voiceBtn" disabled>🔊 Hear AI</button>
+  <input type="file" id="cvInput" accept="application/pdf">
+  <small id="uploadStatus"></small>
 
-<div id="log"></div>
+  <button id="startBtn" disabled>Start Interview</button>
+  <button id="endBtn" style="display:none;background:#ef4444">End Interview</button>
+
+  <div id="log"></div>
+</div>
 
 <script>
+/* ======================================================
+   ENV DETECTION
+====================================================== */
+const IS_ANDROID_APP =
+  typeof Android !== "undefined" &&
+  typeof Android.speak === "function";
+
+/* ======================================================
+   CONFIG
+====================================================== */
 const API = "https://evalis-ai.simpaticohrconsultancy.workers.dev";
-let cvText="", history=[], lastAI="";
 
-/* ---------- PDF ---------- */
 pdfjsLib.GlobalWorkerOptions.workerSrc =
-"https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+  "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
 
-cvInput.onchange = async e => {
-  const pdf = await pdfjsLib.getDocument({
-    data: await e.target.files[0].arrayBuffer(),
-    disableWorker:true
-  }).promise;
-  let t="";
-  for(let i=1;i<=pdf.numPages;i++){
-    const p=await pdf.getPage(i);
-    const c=await p.getTextContent();
-    t+=c.items.map(x=>x.str).join(" ");
-  }
-  cvText=t;
-  startBtn.disabled=false;
-  status.innerText="Resume loaded ✓";
-};
+/* ======================================================
+   STATE
+====================================================== */
+let cvText = "";
+let history = [];
+let interviewActive = false;
+let recognition = null;
+let isAISpeaking = false;
 
-/* ---------- UI ---------- */
-function add(w,t){
-  const d=document.createElement("div");
-  d.innerHTML=`<b>${w}:</b> ${t}`;
-  log.appendChild(d);
+/* ======================================================
+   UI HELPERS
+====================================================== */
+function addMsg(who, text) {
+  const div = document.createElement("div");
+  div.innerHTML = `<b>${who}:</b> ${text}`;
+  document.getElementById("log").prepend(div);
 }
 
-/* ---------- SPEAK ---------- */
-function speak(text){
+/* ======================================================
+   TEXT TO SPEECH (AI VOICE)
+====================================================== */
+function speak(text) {
+  // Android native TTS (BEST)
+  if (IS_ANDROID_APP) {
+    Android.speak(text);
+    return;
+  }
+
+  // Browser fallback
+  if (!window.speechSynthesis) return;
+
   speechSynthesis.cancel();
-  const u=new SpeechSynthesisUtterance(text);
-  u.lang="en-US";
+  const u = new SpeechSynthesisUtterance(text);
+  u.lang = "en-US";
+  u.rate = 0.95;
+
+  u.onstart = () => {
+    isAISpeaking = true;
+    if (recognition) recognition.stop();
+  };
+
+  u.onend = () => {
+    isAISpeaking = false;
+    if (recognition) recognition.start();
+  };
+
   speechSynthesis.speak(u);
 }
 
-/* ---------- MIC ---------- */
-function listen(){
-  const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
-  if(!SR){ alert("Mic not supported"); return; }
-  const r=new SR();
-  r.lang="en-US";
-  r.onresult=async e=>{
-    const text=e.results[0][0].transcript;
-    add("You",text);
+/* ======================================================
+   SPEECH RECOGNITION (BROWSER ONLY)
+====================================================== */
+function initRecognition() {
+  if (IS_ANDROID_APP) return; // Android uses Vosk
 
-    const fd=new FormData();
-    fd.append("mode","interview");
-    fd.append("text",text);
-    fd.append("history",JSON.stringify(history));
-    fd.append("cvText",cvText);
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) return;
 
-    const res=await fetch(API,{method:"POST",body:fd});
-    const d=await res.json();
-    history=d.history;
-    lastAI=d.reply;
-    add("AI",lastAI);
-    voiceBtn.disabled=false;
+  recognition = new SR();
+  recognition.lang = "en-US";
+  recognition.continuous = false;
+
+  recognition.onresult = e => {
+    if (isAISpeaking) return;
+    const text = e.results[0][0].transcript.trim();
+    if (text) sendUserText(text);
   };
-  r.start();
+
+  recognition.onend = () => {
+    if (interviewActive && !isAISpeaking)
+      recognition.start();
+  };
 }
 
-/* ---------- START ---------- */
-startBtn.onclick=async()=>{
-  const fd=new FormData();
+/* ======================================================
+   PDF LOAD
+====================================================== */
+document.getElementById("cvInput").onchange = async e => {
+  const file = e.target.files[0];
+  const status = document.getElementById("uploadStatus");
+
+  if (!file) return;
+  status.textContent = "Reading resume…";
+
+  try {
+    const buffer = await file.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument({
+      data: buffer,
+      disableWorker: true
+    }).promise;
+
+    let text = "";
+    for (let i=1;i<=pdf.numPages;i++) {
+      const page = await pdf.getPage(i);
+      const c = await page.getTextContent();
+      text += c.items.map(it=>it.str).join(" ") + " ";
+    }
+
+    if (text.length < 30) throw "Empty";
+    cvText = text;
+    document.getElementById("startBtn").disabled = false;
+    status.textContent = "Resume ready ✓";
+
+  } catch {
+    status.textContent = "PDF read failed";
+  }
+};
+
+/* ======================================================
+   START INTERVIEW
+====================================================== */
+document.getElementById("startBtn").onclick = async () => {
+  interviewActive = true;
+  document.getElementById("startBtn").style.display = "none";
+  document.getElementById("endBtn").style.display = "block";
+  document.getElementById("status").textContent = "Listening…";
+
+  initRecognition();
+
+  const fd = new FormData();
   fd.append("mode","start");
   fd.append("cvText",cvText);
 
-  const r=await fetch(API,{method:"POST",body:fd});
-  const d=await r.json();
-  history=d.history;
-  lastAI=d.reply;
+  const r = await fetch(API,{method:"POST",body:fd});
+  const d = await r.json();
 
-  add("AI",lastAI);
-  micBtn.disabled=false;
-  voiceBtn.disabled=false;
+  history = d.history || [];
+  addMsg("AI", d.reply);
+  speak(d.reply);
+
+  if (recognition) recognition.start();
 };
 
-micBtn.onclick=listen;
-voiceBtn.onclick=()=>speak(lastAI);
+/* ======================================================
+   USER SPEAKS (ANDROID → JS)
+====================================================== */
+window.receiveVoskText = text => {
+  if (!interviewActive || !text) return;
+  sendUserText(text);
+};
+
+/* ======================================================
+   SEND USER TEXT
+====================================================== */
+async function sendUserText(text) {
+  addMsg("You", text);
+  document.getElementById("status").textContent = "Thinking…";
+
+  const fd = new FormData();
+  fd.append("mode","interview");
+  fd.append("text",text);
+  fd.append("history",JSON.stringify(history));
+  fd.append("cvText",cvText);
+
+  const r = await fetch(API,{method:"POST",body:fd});
+  const d = await r.json();
+
+  history = d.history || history;
+  addMsg("AI", d.reply);
+  speak(d.reply);
+  document.getElementById("status").textContent = "Listening…";
+}
+
+/* ======================================================
+   END
+====================================================== */
+document.getElementById("endBtn").onclick = async () => {
+  interviewActive = false;
+  if (recognition) recognition.stop();
+
+  const fd = new FormData();
+  fd.append("mode","score");
+  fd.append("history",JSON.stringify(history));
+
+  const r = await fetch(API,{method:"POST",body:fd});
+  const d = await r.json();
+
+  document.body.innerHTML = `
+    <div class="card">
+      <h2>Interview Complete</h2>
+      <pre style="white-space:pre-wrap">${d.reply}</pre>
+      <button onclick="location.reload()">New Interview</button>
+    </div>`;
+};
 </script>
 
 </body>
