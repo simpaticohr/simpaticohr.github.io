@@ -13,7 +13,7 @@ body {
   margin:0;
   background:var(--bg);
   color:white;
-  font-family:system-ui,sans-serif;
+  font-family:system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   display:flex;
   align-items:center;
   justify-content:center;
@@ -27,6 +27,8 @@ body {
   padding:28px;
   text-align:center;
   border:1px solid rgba(255,255,255,.12);
+  box-shadow: 0 4px 30px rgba(0, 0, 0, 0.1);
+  backdrop-filter: blur(5px);
 }
 button {
   background:var(--primary);
@@ -38,16 +40,26 @@ button {
   font-size:16px;
   font-weight:700;
   margin-top:10px;
+  cursor: pointer;
+  transition: opacity 0.2s;
 }
-button:disabled { opacity:.35 }
+button:disabled { opacity:.35; cursor: not-allowed; }
+button:active { opacity: 0.8; }
 #log {
   margin-top:20px;
   max-height:220px;
-  overflow:auto;
+  overflow-y:auto;
   text-align:left;
   font-size:14px;
+  line-height: 1.5;
+  padding-right: 5px;
 }
-small { color:#94a3b8 }
+/* Custom Scrollbar for log */
+#log::-webkit-scrollbar { width: 6px; }
+#log::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); border-radius: 3px; }
+small { color:#94a3b8; display: block; margin-bottom: 15px; }
+.msg { margin-bottom: 8px; }
+.msg b { color: var(--primary); }
 </style>
 </head>
 
@@ -68,22 +80,13 @@ small { color:#94a3b8 }
 
 <script>
 /* ======================================================
-   ENV DETECTION
-====================================================== */
-const IS_ANDROID_APP =
-  typeof Android !== "undefined" &&
-  typeof Android.speak === "function";
-
-/* ======================================================
-   CONFIG
+   CONFIG & SETUP
 ====================================================== */
 const API = "https://evalis-ai.simpaticohrconsultancy.workers.dev";
-
-pdfjsLib.GlobalWorkerOptions.workerSrc =
-  "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
 
 /* ======================================================
-   STATE
+   STATE MANAGEMENT
 ====================================================== */
 let cvText = "";
 let history = [];
@@ -96,36 +99,50 @@ let isAISpeaking = false;
 ====================================================== */
 function addMsg(who, text) {
   const div = document.createElement("div");
-  div.innerHTML = `<b>${who}:</b> ${text}`;
+  div.className = "msg";
+  // Color code speakers
+  const color = who === "AI" ? "#a5b4fc" : "#86efac";
+  div.innerHTML = `<b style="color:${color}">${who}:</b> ${text}`;
   document.getElementById("log").prepend(div);
 }
 
 /* ======================================================
-   TEXT TO SPEECH (AI VOICE)
+   TEXT TO SPEECH (FIXED FOR ANDROID)
 ====================================================== */
 function speak(text) {
-  // Android native TTS (BEST)
-  if (IS_ANDROID_APP) {
+  // 1. Android Native Bridge (Preferred)
+  // Checks if 'Android' object exists and has the 'speak' method
+  if (typeof Android !== "undefined" && Android.speak) {
+    console.log("Speaking via Android Native Interface");
     Android.speak(text);
     return;
   }
 
-  // Browser fallback
-  if (!window.speechSynthesis) return;
+  // 2. Browser Fallback (Web Speech API)
+  if (!window.speechSynthesis) {
+    console.warn("No TTS support found");
+    return;
+  }
 
+  // Cancel any currently playing audio to avoid overlap
   speechSynthesis.cancel();
+
   const u = new SpeechSynthesisUtterance(text);
   u.lang = "en-US";
-  u.rate = 0.95;
+  u.rate = 1.0; // Normal speed
 
+  // Stop listening while AI speaks to avoid AI hearing itself
   u.onstart = () => {
     isAISpeaking = true;
     if (recognition) recognition.stop();
   };
 
+  // Resume listening after AI finishes
   u.onend = () => {
     isAISpeaking = false;
-    if (recognition) recognition.start();
+    if (interviewActive && recognition) {
+        try { recognition.start(); } catch(e) {}
+    }
   };
 
   speechSynthesis.speak(u);
@@ -133,16 +150,19 @@ function speak(text) {
 
 /* ======================================================
    SPEECH RECOGNITION (BROWSER ONLY)
+   Note: Android App usually injects text via receiveVoskText
 ====================================================== */
 function initRecognition() {
-  if (IS_ANDROID_APP) return; // Android uses Vosk
+  // If we are in the Android App (native), we skip browser recognition
+  if (typeof Android !== "undefined") return;
 
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!SR) return;
 
   recognition = new SR();
   recognition.lang = "en-US";
-  recognition.continuous = false;
+  recognition.continuous = false; // We restart manually for better control
+  recognition.interimResults = false;
 
   recognition.onresult = e => {
     if (isAISpeaking) return;
@@ -151,20 +171,25 @@ function initRecognition() {
   };
 
   recognition.onend = () => {
-    if (interviewActive && !isAISpeaking)
-      recognition.start();
+    // Auto-restart if interview is active and AI isn't speaking
+    if (interviewActive && !isAISpeaking) {
+        try { recognition.start(); } catch(e) {}
+    }
   };
 }
 
 /* ======================================================
-   PDF LOAD
+   FILE UPLOAD & PARSING
 ====================================================== */
 document.getElementById("cvInput").onchange = async e => {
   const file = e.target.files[0];
   const status = document.getElementById("uploadStatus");
+  const btn = document.getElementById("startBtn");
 
   if (!file) return;
+  
   status.textContent = "Reading resume…";
+  btn.disabled = true;
 
   try {
     const buffer = await file.arrayBuffer();
@@ -174,49 +199,76 @@ document.getElementById("cvInput").onchange = async e => {
     }).promise;
 
     let text = "";
-    for (let i=1;i<=pdf.numPages;i++) {
+    for (let i = 1; i <= pdf.numPages; i++) {
       const page = await pdf.getPage(i);
       const c = await page.getTextContent();
-      text += c.items.map(it=>it.str).join(" ") + " ";
+      text += c.items.map(it => it.str).join(" ") + " ";
     }
 
-    if (text.length < 30) throw "Empty";
+    // Basic validation
+    if (text.trim().length < 50) throw new Error("Resume too short or unreadable");
+    
     cvText = text;
-    document.getElementById("startBtn").disabled = false;
+    btn.disabled = false;
     status.textContent = "Resume ready ✓";
 
-  } catch {
-    status.textContent = "PDF read failed";
+  } catch (err) {
+    console.error(err);
+    status.textContent = "Error reading PDF. Try a different file.";
   }
 };
 
 /* ======================================================
-   START INTERVIEW
+   START INTERVIEW LOGIC
 ====================================================== */
 document.getElementById("startBtn").onclick = async () => {
+  const btn = document.getElementById("startBtn");
+  
+  // --- CRITICAL FIX: UNLOCK AUDIO ---
+  // Mobile browsers block audio unless triggered by a click.
+  // We play a silent utterance immediately to "unlock" the audio engine.
+  if (window.speechSynthesis) {
+      const dummy = new SpeechSynthesisUtterance("");
+      speechSynthesis.speak(dummy);
+  }
+  // ----------------------------------
+
   interviewActive = true;
-  document.getElementById("startBtn").style.display = "none";
+  btn.style.display = "none";
   document.getElementById("endBtn").style.display = "block";
-  document.getElementById("status").textContent = "Listening…";
+  document.getElementById("status").textContent = "Connecting to AI…";
 
   initRecognition();
 
   const fd = new FormData();
-  fd.append("mode","start");
-  fd.append("cvText",cvText);
+  fd.append("mode", "start");
+  fd.append("cvText", cvText);
 
-  const r = await fetch(API,{method:"POST",body:fd});
-  const d = await r.json();
+  try {
+      const r = await fetch(API, { method: "POST", body: fd });
+      if (!r.ok) throw new Error("Server error");
+      
+      const d = await r.json();
 
-  history = d.history || [];
-  addMsg("AI", d.reply);
-  speak(d.reply);
-
-  if (recognition) recognition.start();
+      history = d.history || [];
+      addMsg("AI", d.reply);
+      speak(d.reply);
+      
+      document.getElementById("status").textContent = "Listening…";
+      if (recognition) recognition.start();
+      
+  } catch (err) {
+      alert("Failed to start interview: " + err.message);
+      interviewActive = false;
+      btn.style.display = "block";
+      document.getElementById("endBtn").style.display = "none";
+      document.getElementById("status").textContent = "Resume ready ✓";
+  }
 };
 
 /* ======================================================
-   USER SPEAKS (ANDROID → JS)
+   ANDROID/VOSK INTERFACE
+   (Called by Android Java code)
 ====================================================== */
 window.receiveVoskText = text => {
   if (!interviewActive || !text) return;
@@ -224,47 +276,61 @@ window.receiveVoskText = text => {
 };
 
 /* ======================================================
-   SEND USER TEXT
+   SEND MESSAGE TO AI
 ====================================================== */
 async function sendUserText(text) {
   addMsg("You", text);
-  document.getElementById("status").textContent = "Thinking…";
+  document.getElementById("status").textContent = "AI is thinking…";
 
   const fd = new FormData();
-  fd.append("mode","interview");
-  fd.append("text",text);
-  fd.append("history",JSON.stringify(history));
-  fd.append("cvText",cvText);
+  fd.append("mode", "interview");
+  fd.append("text", text);
+  fd.append("history", JSON.stringify(history));
+  fd.append("cvText", cvText);
 
-  const r = await fetch(API,{method:"POST",body:fd});
-  const d = await r.json();
+  try {
+      const r = await fetch(API, { method: "POST", body: fd });
+      const d = await r.json();
 
-  history = d.history || history;
-  addMsg("AI", d.reply);
-  speak(d.reply);
-  document.getElementById("status").textContent = "Listening…";
+      history = d.history || history;
+      addMsg("AI", d.reply);
+      speak(d.reply);
+      document.getElementById("status").textContent = "Listening…";
+      
+  } catch (err) {
+      addMsg("System", "Error connecting to AI.");
+      document.getElementById("status").textContent = "Connection Error";
+  }
 }
 
 /* ======================================================
-   END
+   END INTERVIEW
 ====================================================== */
 document.getElementById("endBtn").onclick = async () => {
   interviewActive = false;
   if (recognition) recognition.stop();
+  if (window.speechSynthesis) speechSynthesis.cancel();
 
+  document.getElementById("status").textContent = "Generating feedback…";
+  
   const fd = new FormData();
-  fd.append("mode","score");
-  fd.append("history",JSON.stringify(history));
+  fd.append("mode", "score");
+  fd.append("history", JSON.stringify(history));
 
-  const r = await fetch(API,{method:"POST",body:fd});
-  const d = await r.json();
+  try {
+      const r = await fetch(API, { method: "POST", body: fd });
+      const d = await r.json();
 
-  document.body.innerHTML = `
-    <div class="card">
-      <h2>Interview Complete</h2>
-      <pre style="white-space:pre-wrap">${d.reply}</pre>
-      <button onclick="location.reload()">New Interview</button>
-    </div>`;
+      document.body.innerHTML = `
+        <div class="card">
+          <h2>Interview Complete</h2>
+          <div style="text-align:left;max-height:60vh;overflow:auto;white-space:pre-wrap;font-size:14px;background:rgba(0,0,0,0.2);padding:15px;border-radius:10px;">${d.reply}</div>
+          <button onclick="location.reload()">New Interview</button>
+        </div>`;
+  } catch (err) {
+      alert("Error generating feedback.");
+      location.reload();
+  }
 };
 </script>
 
