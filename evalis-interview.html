@@ -3,32 +3,43 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Evalis AI – Intelligent Interview</title>
+<title>Evalis AI – Elite Interview</title>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 
 <style>
-:root { --primary:#6366f1; --bg:#020617; }
+:root {
+  --primary:#6366f1;
+  --bg:#020617;
+}
 body {
   margin:0;
   background:var(--bg);
   color:white;
   font-family:system-ui,sans-serif;
   display:flex;
-  justify-content:center;
   align-items:center;
+  justify-content:center;
   min-height:100vh;
 }
 .card {
-  width:90%;
-  max-width:460px;
+  width:92%;
+  max-width:480px;
   background:rgba(255,255,255,.05);
   border-radius:22px;
   padding:28px;
   border:1px solid rgba(255,255,255,.1);
 }
-#timer { color:var(--primary); font-weight:700; }
-#status { font-size:12px; color:#94a3b8; margin-bottom:12px; }
+#timer {
+  color:var(--primary);
+  font-weight:700;
+  font-size:22px;
+}
+#status {
+  font-size:12px;
+  color:#94a3b8;
+  margin-bottom:14px;
+}
 button {
   width:100%;
   padding:14px;
@@ -37,10 +48,12 @@ button {
   background:var(--primary);
   color:white;
   font-weight:700;
+  font-size:16px;
 }
+button:disabled { opacity:.4; }
 #log {
-  margin-top:15px;
-  max-height:220px;
+  margin-top:18px;
+  max-height:240px;
   overflow-y:auto;
   font-size:14px;
 }
@@ -52,7 +65,7 @@ button {
 <body>
 <div class="card">
   <div id="timer">15:00</div>
-  <div id="status">Upload resume to start</div>
+  <div id="status">Upload resume to begin</div>
 
   <input type="file" id="cvInput" accept=".pdf" />
   <button id="startBtn" disabled>Start Interview</button>
@@ -62,132 +75,151 @@ button {
 </div>
 
 <script>
+/* ================= CONFIG ================= */
 const API = "https://evalis-ai.simpaticohrconsultancy.workers.dev";
 pdfjsLib.GlobalWorkerOptions.workerSrc =
   "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
 
-let cvText="", history=[];
-let recognition, interviewActive=false, aiSpeaking=false;
-let timeLeft=900, timer;
+/* ================= STATE ================= */
+let cvText = "";
+let history = [];
+let recognition = null;
+let interviewActive = false;
+let aiSpeaking = false;
+let timeLeft = 900;
+let timer;
 
-/* ---------------- PDF ---------------- */
+/* ================= HELPERS ================= */
+function logMsg(who, text) {
+  const d = document.createElement("div");
+  d.className = "msg";
+  d.innerHTML = `<b>${who}:</b> ${text}`;
+  log.prepend(d);
+}
+
+/* ================= PDF ================= */
 cvInput.onchange = async e => {
-  const pdf = await pdfjsLib.getDocument(await e.target.files[0].arrayBuffer()).promise;
-  let text="";
-  for(let i=1;i<=pdf.numPages;i++){
+  const pdf = await pdfjsLib.getDocument(
+    await e.target.files[0].arrayBuffer()
+  ).promise;
+
+  let text = "";
+  for (let i = 1; i <= pdf.numPages; i++) {
     const p = await pdf.getPage(i);
-    text += (await p.getTextContent()).items.map(x=>x.str).join(" ")+" ";
+    text += (await p.getTextContent()).items.map(x=>x.str).join(" ") + " ";
   }
-  cvText=text;
-  startBtn.disabled=false;
-  status.textContent="Resume ready";
+
+  cvText = text;
+  startBtn.disabled = false;
+  status.textContent = "Resume ready";
 };
 
-/* ---------------- TIMER ---------------- */
-function startTimer(){
-  timer=setInterval(()=>{
+/* ================= TIMER ================= */
+function startTimer() {
+  timer = setInterval(() => {
     timeLeft--;
-    const m=Math.floor(timeLeft/60), s=timeLeft%60;
-    timerEl.textContent=`${m}:${s<10?'0':''}${s}`;
-    if(timeLeft<=0) finishInterview();
-  },1000);
+    const m = Math.floor(timeLeft / 60);
+    const s = timeLeft % 60;
+    timerEl.textContent = `${m}:${s<10?'0':''}${s}`;
+    if (timeLeft <= 0) finishInterview();
+  }, 1000);
 }
 
-/* ---------------- LOG ---------------- */
-function log(who,text){
-  const d=document.createElement("div");
-  d.className="msg";
-  d.innerHTML=`<b>${who}:</b> ${text}`;
-  logEl.prepend(d);
-}
+/* ================= SPEECH ================= */
+function initRecognition() {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  recognition = new SR();
+  recognition.lang = "en-US";
+  recognition.continuous = false;   // 🔥 TURN-BASED (CRITICAL)
+  recognition.interimResults = false;
 
-/* ---------------- AI VOICE ---------------- */
-function speak(text){
-  aiSpeaking=true;
-  recognition?.stop();
-  const u=new SpeechSynthesisUtterance(text);
-  u.onend=()=>{
-    aiSpeaking=false;
-    if(interviewActive) recognition.start();
-  };
-  speechSynthesis.speak(u);
-  log("AI",text);
-}
+  recognition.onresult = async e => {
+    const text = e.results[0][0].transcript.trim();
+    if (!text) return;
 
-/* ---------------- SPEECH ---------------- */
-function initRecognition(){
-  const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
-  recognition=new SR();
-  recognition.lang="en-US";
-  recognition.continuous=false; // 🔥 CRITICAL
-  recognition.interimResults=false;
-
-  recognition.onresult=async e=>{
-    const text=e.results[0][0].transcript.trim();
-    if(!text) return;
     recognition.stop();
-    log("You",text);
-    status.textContent="AI thinking…";
+    logMsg("You", text);
+    status.textContent = "AI thinking…";
 
-    const fd=new FormData();
-    fd.append("mode","interview");
-    fd.append("text",text);
-    fd.append("history",JSON.stringify(history));
-    fd.append("cvText",cvText);
+    const fd = new FormData();
+    fd.append("mode", "interview");
+    fd.append("text", text);
+    fd.append("history", JSON.stringify(history));
+    fd.append("cvText", cvText);
 
-    const r=await fetch(API,{method:"POST",body:fd});
-    const d=await r.json();
-    history=d.history;
-    status.textContent="Listening…";
+    const r = await fetch(API, { method:"POST", body:fd });
+    const d = await r.json();
+
+    history = d.history;
     speak(d.reply);
   };
 }
 
-/* ---------------- START ---------------- */
-startBtn.onclick=async()=>{
-  speechSynthesis.speak(new SpeechSynthesisUtterance(""));
-  interviewActive=true;
-  startBtn.style.display="none";
-  cvInput.style.display="none";
-  endBtn.style.display="block";
-  status.textContent="Connecting…";
+/* ================= AI VOICE ================= */
+function speak(text) {
+  aiSpeaking = true;
+  recognition?.stop();
+
+  const u = new SpeechSynthesisUtterance(text);
+  u.onend = () => {
+    aiSpeaking = false;
+    if (interviewActive) recognition.start();
+  };
+
+  speechSynthesis.speak(u);
+  logMsg("AI", text);
+  status.textContent = "Listening…";
+}
+
+/* ================= START ================= */
+startBtn.onclick = async () => {
+  speechSynthesis.speak(new SpeechSynthesisUtterance("")); // unlock audio
+
+  interviewActive = true;
+  startBtn.style.display = "none";
+  cvInput.style.display = "none";
+  endBtn.style.display = "block";
+  status.textContent = "Connecting…";
 
   initRecognition();
   startTimer();
 
-  const fd=new FormData();
-  fd.append("mode","start");
-  fd.append("cvText",cvText);
-  const r=await fetch(API,{method:"POST",body:fd});
-  const d=await r.json();
-  history=d.history;
-  status.textContent="Listening…";
+  const fd = new FormData();
+  fd.append("mode", "start");
+  fd.append("cvText", cvText);
+
+  const r = await fetch(API, { method:"POST", body:fd });
+  const d = await r.json();
+
+  history = d.history;
   speak(d.reply);
 };
 
-/* ---------------- END ---------------- */
-async function finishInterview(){
-  interviewActive=false;
+/* ================= END ================= */
+async function finishInterview() {
+  interviewActive = false;
   clearInterval(timer);
   recognition?.stop();
   speechSynthesis.cancel();
 
-  const fd=new FormData();
-  fd.append("mode","score");
-  fd.append("history",JSON.stringify(history));
+  status.textContent = "Generating report…";
 
-  const r=await fetch(API,{method:"POST",body:fd});
-  const d=await r.json();
+  const fd = new FormData();
+  fd.append("mode", "score");
+  fd.append("history", JSON.stringify(history));
 
-  document.body.innerHTML=`
+  const r = await fetch(API, { method:"POST", body:fd });
+  const d = await r.json();
+
+  document.body.innerHTML = `
     <div class="card">
       <h2>Interview Report</h2>
-      <pre>${d.reply}</pre>
+      <pre style="white-space:pre-wrap">${d.reply}</pre>
       <button onclick="location.reload()">New Interview</button>
     </div>`;
 }
 
-endBtn.onclick=finishInterview;
+endBtn.onclick = finishInterview;
 </script>
 </body>
 </html>
