@@ -5,184 +5,238 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Evalis AI – Elite Interview</title>
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-
 <style>
 :root {
   --primary:#6366f1;
   --bg:#020617;
 }
+* { box-sizing:border-box; }
+
 body {
   margin:0;
+  min-height:100vh;
   background:var(--bg);
-  color:white;
-  font-family:system-ui,sans-serif;
+  color:#fff;
+  font-family:system-ui,-apple-system,Segoe UI,Roboto;
   display:flex;
   align-items:center;
   justify-content:center;
-  min-height:100vh;
 }
+
 .card {
-  width:92%;
-  max-width:480px;
-  background:rgba(255,255,255,.05);
-  border-radius:22px;
+  width:90%;
+  max-width:460px;
+  background:rgba(255,255,255,0.06);
+  backdrop-filter:blur(14px);
+  border-radius:24px;
   padding:28px;
-  border:1px solid rgba(255,255,255,.1);
+  border:1px solid rgba(255,255,255,0.12);
 }
+
 #timer {
-  color:var(--primary);
+  font-size:26px;
   font-weight:700;
-  font-size:22px;
+  color:var(--primary);
+  text-align:center;
 }
+
 #status {
   font-size:12px;
+  text-align:center;
+  letter-spacing:1px;
   color:#94a3b8;
-  margin-bottom:14px;
+  margin-bottom:16px;
 }
+
 button {
   width:100%;
-  padding:14px;
+  padding:16px;
+  margin-top:12px;
   border:none;
   border-radius:14px;
-  background:var(--primary);
-  color:white;
-  font-weight:700;
   font-size:16px;
+  font-weight:700;
+  cursor:pointer;
 }
-button:disabled { opacity:.4; }
+
+button.primary {
+  background:var(--primary);
+  color:#fff;
+}
+
+button.danger {
+  background:#ef4444;
+  color:#fff;
+}
+
+button:disabled {
+  opacity:.35;
+  cursor:not-allowed;
+}
+
 #log {
-  margin-top:18px;
-  max-height:240px;
+  margin-top:20px;
+  max-height:220px;
   overflow-y:auto;
   font-size:14px;
+  line-height:1.5;
 }
+
 .msg { margin-bottom:10px; }
 .msg b { color:var(--primary); }
+
+.hidden { display:none; }
 </style>
 </head>
 
 <body>
-<div class="card">
-  <div id="timer">15:00</div>
-  <div id="status">Upload resume to begin</div>
 
-  <input type="file" id="cvInput" accept=".pdf" />
-  <button id="startBtn" disabled>Start Interview</button>
-  <button id="endBtn" style="display:none;background:#ef4444">End Interview</button>
+<div class="card">
+
+  <div id="timer">15:00</div>
+  <div id="status">Waiting for resume</div>
+
+  <!-- ANDROID: resume injected natively -->
+  <!-- DESKTOP: user can paste text -->
+  <textarea id="resumeBox"
+    placeholder="Paste resume text here (desktop only)"
+    style="width:100%;height:90px;margin-bottom:10px;border-radius:12px;border:none;padding:10px;display:none">
+  </textarea>
+
+  <button id="startBtn" class="primary" disabled>
+    Start Interview
+  </button>
+
+  <button id="endBtn" class="danger hidden">
+    End Interview
+  </button>
 
   <div id="log"></div>
+
 </div>
 
 <script>
-/* ================= CONFIG ================= */
+/* =========================
+   CONFIG
+========================= */
 const API = "https://evalis-ai.simpaticohrconsultancy.workers.dev";
-pdfjsLib.GlobalWorkerOptions.workerSrc =
-  "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
 
-/* ================= STATE ================= */
+/* =========================
+   STATE
+========================= */
 let cvText = "";
 let history = [];
-let recognition = null;
 let interviewActive = false;
+let recognition = null;
 let aiSpeaking = false;
-let timeLeft = 900;
-let timer;
+let timer = 15 * 60;
+let timerId;
 
-/* ================= HELPERS ================= */
-function logMsg(who, text) {
-  const d = document.createElement("div");
-  d.className = "msg";
-  d.innerHTML = `<b>${who}:</b> ${text}`;
-  log.prepend(d);
-}
-
-/* ================= PDF ================= */
-cvInput.onchange = async e => {
-  const pdf = await pdfjsLib.getDocument(
-    await e.target.files[0].arrayBuffer()
-  ).promise;
-
-  let text = "";
-  for (let i = 1; i <= pdf.numPages; i++) {
-    const p = await pdf.getPage(i);
-    text += (await p.getTextContent()).items.map(x=>x.str).join(" ") + " ";
-  }
-
-  cvText = text;
-  startBtn.disabled = false;
-  status.textContent = "Resume ready";
+/* =========================
+   ANDROID BRIDGE (CRITICAL)
+========================= */
+window.setResumeText = function(text) {
+  cvText = text || "";
+  document.getElementById("status").innerText = "Resume loaded ✓";
+  document.getElementById("startBtn").disabled = false;
 };
 
-/* ================= TIMER ================= */
+/* =========================
+   DESKTOP FALLBACK
+========================= */
+const resumeBox = document.getElementById("resumeBox");
+if (!/Android/i.test(navigator.userAgent)) {
+  resumeBox.style.display = "block";
+  resumeBox.oninput = () => {
+    cvText = resumeBox.value.trim();
+    document.getElementById("startBtn").disabled = cvText.length < 30;
+  };
+}
+
+/* =========================
+   UI HELPERS
+========================= */
+function addMsg(who, text) {
+  const div = document.createElement("div");
+  div.className = "msg";
+  div.innerHTML = `<b>${who}:</b> ${text}`;
+  document.getElementById("log").prepend(div);
+}
+
+/* =========================
+   TIMER
+========================= */
 function startTimer() {
-  timer = setInterval(() => {
-    timeLeft--;
-    const m = Math.floor(timeLeft / 60);
-    const s = timeLeft % 60;
-    timerEl.textContent = `${m}:${s<10?'0':''}${s}`;
-    if (timeLeft <= 0) finishInterview();
+  timerId = setInterval(() => {
+    timer--;
+    const m = Math.floor(timer / 60);
+    const s = timer % 60;
+    document.getElementById("timer").innerText =
+      `${m}:${s < 10 ? "0" : ""}${s}`;
+    if (timer <= 0) endInterview();
   }, 1000);
 }
 
-/* ================= SPEECH ================= */
+/* =========================
+   SPEECH (DESKTOP ONLY)
+========================= */
 function initRecognition() {
+  if (typeof AndroidSpeech !== "undefined") return;
+
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) return;
+
   recognition = new SR();
   recognition.lang = "en-US";
-  recognition.continuous = false;   // 🔥 TURN-BASED (CRITICAL)
-  recognition.interimResults = false;
+  recognition.continuous = false;
 
-  recognition.onresult = async e => {
-    const text = e.results[0][0].transcript.trim();
-    if (!text) return;
+  recognition.onresult = e => {
+    if (aiSpeaking) return;
+    const text = e.results[0][0].transcript;
+    sendUser(text);
+  };
 
-    recognition.stop();
-    logMsg("You", text);
-    status.textContent = "AI thinking…";
-
-    const fd = new FormData();
-    fd.append("mode", "interview");
-    fd.append("text", text);
-    fd.append("history", JSON.stringify(history));
-    fd.append("cvText", cvText);
-
-    const r = await fetch(API, { method:"POST", body:fd });
-    const d = await r.json();
-
-    history = d.history;
-    speak(d.reply);
+  recognition.onend = () => {
+    if (interviewActive && !aiSpeaking) recognition.start();
   };
 }
 
-/* ================= AI VOICE ================= */
+/* =========================
+   AI SPEAK
+========================= */
 function speak(text) {
-  aiSpeaking = true;
-  recognition?.stop();
+  addMsg("AI", text);
+  if (!window.speechSynthesis) return;
 
+  speechSynthesis.cancel();
   const u = new SpeechSynthesisUtterance(text);
+  aiSpeaking = true;
+
   u.onend = () => {
     aiSpeaking = false;
-    if (interviewActive) recognition.start();
+    if (interviewActive && recognition) recognition.start();
   };
 
   speechSynthesis.speak(u);
-  logMsg("AI", text);
-  status.textContent = "Listening…";
 }
 
-/* ================= START ================= */
+/* =========================
+   START INTERVIEW
+========================= */
 startBtn.onclick = async () => {
-  speechSynthesis.speak(new SpeechSynthesisUtterance("")); // unlock audio
-
   interviewActive = true;
-  startBtn.style.display = "none";
-  cvInput.style.display = "none";
-  endBtn.style.display = "block";
-  status.textContent = "Connecting…";
+  startBtn.classList.add("hidden");
+  endBtn.classList.remove("hidden");
+  status.innerText = "Connecting…";
+
+  try { speechSynthesis.speak(new SpeechSynthesisUtterance("")); } catch {}
 
   initRecognition();
   startTimer();
+
+  if (typeof AndroidSpeech !== "undefined") {
+    AndroidSpeech.startListening();
+  }
 
   const fd = new FormData();
   fd.append("mode", "start");
@@ -191,18 +245,49 @@ startBtn.onclick = async () => {
   const r = await fetch(API, { method:"POST", body:fd });
   const d = await r.json();
 
-  history = d.history;
+  history = d.history || [];
+  status.innerText = "Listening…";
   speak(d.reply);
 };
 
-/* ================= END ================= */
-async function finishInterview() {
+/* =========================
+   SEND USER
+========================= */
+async function sendUser(text) {
+  addMsg("You", text);
+  status.innerText = "Thinking…";
+
+  const fd = new FormData();
+  fd.append("mode", "interview");
+  fd.append("text", text);
+  fd.append("history", JSON.stringify(history));
+  fd.append("cvText", cvText);
+
+  const r = await fetch(API, { method:"POST", body:fd });
+  const d = await r.json();
+
+  history = d.history || history;
+  status.innerText = "Listening…";
+  speak(d.reply);
+}
+
+/* =========================
+   ANDROID VOICE INPUT
+========================= */
+window.receiveVoskText = function(text) {
+  if (interviewActive && text) sendUser(text);
+};
+
+/* =========================
+   END INTERVIEW
+========================= */
+async function endInterview() {
   interviewActive = false;
-  clearInterval(timer);
-  recognition?.stop();
+  clearInterval(timerId);
+  if (recognition) recognition.stop();
   speechSynthesis.cancel();
 
-  status.textContent = "Generating report…";
+  status.innerText = "Scoring…";
 
   const fd = new FormData();
   fd.append("mode", "score");
@@ -213,13 +298,14 @@ async function finishInterview() {
 
   document.body.innerHTML = `
     <div class="card">
-      <h2>Interview Report</h2>
+      <h2 style="color:var(--primary)">Final Report</h2>
       <pre style="white-space:pre-wrap">${d.reply}</pre>
-      <button onclick="location.reload()">New Interview</button>
+      <button class="primary" onclick="location.reload()">New Interview</button>
     </div>`;
 }
 
-endBtn.onclick = finishInterview;
+endBtn.onclick = endInterview;
 </script>
+
 </body>
 </html>
