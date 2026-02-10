@@ -69,25 +69,36 @@ small { color:#94a3b8; }
 </div>
 
 <script>
-/* ======================================================
-   CONFIG
-====================================================== */
+/* ================= CONFIG ================= */
 const API = "https://evalis-ai.simpaticohrconsultancy.workers.dev";
 pdfjsLib.GlobalWorkerOptions.workerSrc =
   "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
 
-/* ======================================================
-   STATE
-====================================================== */
+/* ================= STATE ================= */
 let cvText = "";
 let history = [];
 let interviewActive = false;
-let recognition = null;
-let isAISpeaking = false;
 
-/* ======================================================
-   UI
-====================================================== */
+/* ================= TIMER ================= */
+let timeLeft = 15 * 60;
+let timerInterval = null;
+
+function startTimer() {
+  clearInterval(timerInterval);
+  timerInterval = setInterval(() => {
+    timeLeft--;
+    if (timeLeft <= 0) {
+      clearInterval(timerInterval);
+      document.getElementById("endBtn").click();
+    }
+    const m = Math.floor(timeLeft / 60);
+    const s = timeLeft % 60;
+    document.getElementById("timer").textContent =
+      `${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}`;
+  }, 1000);
+}
+
+/* ================= UI ================= */
 function addMsg(who, text) {
   const div = document.createElement("div");
   div.className = "msg";
@@ -95,79 +106,36 @@ function addMsg(who, text) {
   document.getElementById("log").prepend(div);
 }
 
-/* ======================================================
-   TEXT TO SPEECH (ANDROID + SAFE FALLBACK)
-====================================================== */
+/* ================= TTS + MIC TRIGGER ================= */
 function speak(text) {
-  console.log("SPEAK:", text);
+  console.log("AI:", text);
 
-  isAISpeaking = true;
-  if (recognition) recognition.stop();
-
-  // 1️⃣ ANDROID NATIVE TTS
   if (typeof Android !== "undefined" && Android.speak) {
     Android.speak(text);
 
-    // SAFETY RELEASE (Android TTS has no JS callbacks)
+    // ⏳ After AI speaks → open mic
     setTimeout(() => {
-      isAISpeaking = false;
-      if (interviewActive && recognition) {
-        try { recognition.start(); } catch(e) {}
+      if (typeof AndroidSpeech !== "undefined") {
+        AndroidSpeech.startListening();
       }
-    }, Math.min(4000 + text.length * 30, 8000));
+    }, Math.min(3500 + text.length * 30, 9000));
 
     return;
   }
 
-  // 2️⃣ BROWSER FALLBACK
-  if (!window.speechSynthesis) {
-    isAISpeaking = false;
-    return;
-  }
-
-  speechSynthesis.cancel();
+  // Browser fallback (desktop testing)
+  if (!window.speechSynthesis) return;
   const u = new SpeechSynthesisUtterance(text);
   u.lang = "en-US";
-
   u.onend = () => {
-    isAISpeaking = false;
-    if (interviewActive && recognition) {
-      try { recognition.start(); } catch(e) {}
+    if (typeof AndroidSpeech !== "undefined") {
+      AndroidSpeech.startListening();
     }
   };
-
   speechSynthesis.speak(u);
 }
 
-/* ======================================================
-   SPEECH RECOGNITION (BROWSER ONLY)
-====================================================== */
-function initRecognition() {
-  if (typeof Android !== "undefined") return;
-
-  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!SR) return;
-
-  recognition = new SR();
-  recognition.lang = "en-US";
-  recognition.interimResults = false;
-
-  recognition.onresult = e => {
-    if (isAISpeaking) return;
-    const text = e.results[0][0].transcript.trim();
-    if (text) sendUserText(text);
-  };
-
-  recognition.onend = () => {
-    if (interviewActive && !isAISpeaking) {
-      try { recognition.start(); } catch(e) {}
-    }
-  };
-}
-
-/* ======================================================
-   FILE UPLOAD
-====================================================== */
+/* ================= FILE UPLOAD ================= */
 document.getElementById("cvInput").onchange = async e => {
   const file = e.target.files[0];
   if (!file) return;
@@ -186,7 +154,7 @@ document.getElementById("cvInput").onchange = async e => {
       text += c.items.map(it => it.str).join(" ") + " ";
     }
 
-    if (text.length < 50) throw "Resume too short";
+    if (text.length < 50) throw "Invalid resume";
 
     cvText = text;
     document.getElementById("uploadStatus").textContent = "Resume ready ✓";
@@ -197,45 +165,35 @@ document.getElementById("cvInput").onchange = async e => {
   }
 };
 
-/* ======================================================
-   START INTERVIEW
-====================================================== */
+/* ================= START INTERVIEW ================= */
 document.getElementById("startBtn").onclick = async () => {
-
-  // 🔓 Unlock audio (mobile requirement)
-  if (window.speechSynthesis) {
-    speechSynthesis.speak(new SpeechSynthesisUtterance(""));
-  }
-
   interviewActive = true;
+  startTimer();
+
   document.getElementById("startBtn").style.display = "none";
   document.getElementById("endBtn").style.display = "block";
   document.getElementById("status").textContent = "Connecting to AI…";
-
-  initRecognition();
 
   const fd = new FormData();
   fd.append("mode", "start");
   fd.append("cvText", cvText);
 
-  try {
-    const r = await fetch(API, { method: "POST", body: fd });
-    const d = await r.json();
+  const r = await fetch(API, { method: "POST", body: fd });
+  const d = await r.json();
 
-    history = d.history || [];
-    addMsg("AI", d.reply);
-    speak(d.reply);
+  history = d.history || [];
+  addMsg("AI", d.reply);
+  speak(d.reply);
 
-    document.getElementById("status").textContent = "Listening…";
-
-  } catch {
-    alert("Failed to start interview");
-  }
+  document.getElementById("status").textContent = "Listening…";
 };
 
-/* ======================================================
-   SEND USER ANSWER
-====================================================== */
+/* ================= RECEIVE USER ANSWER ================= */
+window.receiveVoskText = text => {
+  if (!interviewActive || !text) return;
+  sendUserText(text);
+};
+
 async function sendUserText(text) {
   addMsg("You", text);
   document.getElementById("status").textContent = "AI is thinking…";
@@ -246,34 +204,19 @@ async function sendUserText(text) {
   fd.append("history", JSON.stringify(history));
   fd.append("cvText", cvText);
 
-  try {
-    const r = await fetch(API, { method: "POST", body: fd });
-    const d = await r.json();
+  const r = await fetch(API, { method: "POST", body: fd });
+  const d = await r.json();
 
-    history = d.history || history;
-    addMsg("AI", d.reply);
-    speak(d.reply);
-    document.getElementById("status").textContent = "Listening…";
-
-  } catch {
-    addMsg("System", "Connection error");
-  }
+  history = d.history || history;
+  addMsg("AI", d.reply);
+  speak(d.reply);
+  document.getElementById("status").textContent = "Listening…";
 }
 
-/* ======================================================
-   ANDROID SPEECH INPUT (Vosk / Native)
-====================================================== */
-window.receiveVoskText = text => {
-  if (interviewActive && text) sendUserText(text);
-};
-
-/* ======================================================
-   END INTERVIEW
-====================================================== */
+/* ================= END INTERVIEW ================= */
 document.getElementById("endBtn").onclick = async () => {
   interviewActive = false;
-  if (recognition) recognition.stop();
-  if (window.speechSynthesis) speechSynthesis.cancel();
+  clearInterval(timerInterval);
 
   document.getElementById("status").textContent = "Generating feedback…";
 
@@ -281,20 +224,17 @@ document.getElementById("endBtn").onclick = async () => {
   fd.append("mode", "score");
   fd.append("history", JSON.stringify(history));
 
-  try {
-    const r = await fetch(API, { method: "POST", body: fd });
-    const d = await r.json();
+  const r = await fetch(API, { method: "POST", body: fd });
+  const d = await r.json();
 
-    document.body.innerHTML = `
-      <div class="card">
-        <h2>Interview Complete</h2>
-        <pre style="white-space:pre-wrap">${d.reply}</pre>
-        <button onclick="location.reload()">New Interview</button>
-      </div>`;
-  } catch {
-    location.reload();
-  }
+  document.body.innerHTML = `
+    <div class="card">
+      <h2>Interview Complete</h2>
+      <pre style="white-space:pre-wrap">${d.reply}</pre>
+      <button onclick="location.reload()">New Interview</button>
+    </div>`;
 };
 </script>
+
 </body>
 </html>
