@@ -13,7 +13,7 @@ body {
   margin:0;
   background:var(--bg);
   color:white;
-  font-family:system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
   display:flex;
   align-items:center;
   justify-content:center;
@@ -47,8 +47,8 @@ button:disabled { opacity:.35; }
   text-align:left;
   font-size:14px;
 }
-.msg { margin-bottom: 8px; }
-.msg b { color: var(--primary); }
+.msg { margin-bottom:8px; }
+.msg b { color:var(--primary); }
 small { color:#94a3b8; }
 </style>
 </head>
@@ -98,6 +98,16 @@ function startTimer() {
   }, 1000);
 }
 
+/* ================= SAFE FETCH ================= */
+function fetchWithTimeout(url, options = {}, timeout = 15000) {
+  return Promise.race([
+    fetch(url, options),
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error("Request timeout")), timeout)
+    )
+  ]);
+}
+
 /* ================= UI ================= */
 function addMsg(who, text) {
   const div = document.createElement("div");
@@ -106,24 +116,18 @@ function addMsg(who, text) {
   document.getElementById("log").prepend(div);
 }
 
-/* ================= TTS + MIC TRIGGER ================= */
+/* ================= TTS + MIC ================= */
 function speak(text) {
-  console.log("AI:", text);
-
   if (typeof Android !== "undefined" && Android.speak) {
     Android.speak(text);
-
-    // ⏳ After AI speaks → open mic
     setTimeout(() => {
       if (typeof AndroidSpeech !== "undefined") {
         AndroidSpeech.startListening();
       }
     }, Math.min(3500 + text.length * 30, 9000));
-
     return;
   }
 
-  // Browser fallback (desktop testing)
   if (!window.speechSynthesis) return;
   const u = new SpeechSynthesisUtterance(text);
   u.lang = "en-US";
@@ -154,7 +158,7 @@ document.getElementById("cvInput").onchange = async e => {
       text += c.items.map(it => it.str).join(" ") + " ";
     }
 
-    if (text.length < 50) throw "Invalid resume";
+    if (text.length < 50) throw new Error("Invalid resume");
 
     cvText = text;
     document.getElementById("uploadStatus").textContent = "Resume ready ✓";
@@ -178,17 +182,24 @@ document.getElementById("startBtn").onclick = async () => {
   fd.append("mode", "start");
   fd.append("cvText", cvText);
 
-  const r = await fetch(API, { method: "POST", body: fd });
-  const d = await r.json();
+  try {
+    const r = await fetchWithTimeout(API, { method:"POST", body:fd });
+    if (!r.ok) throw new Error("HTTP " + r.status);
 
-  history = d.history || [];
-  addMsg("AI", d.reply);
-  speak(d.reply);
+    const d = await r.json();
+    history = d.history || [];
 
-  document.getElementById("status").textContent = "Listening…";
+    addMsg("AI", d.reply);
+    speak(d.reply);
+    document.getElementById("status").textContent = "Listening…";
+
+  } catch (err) {
+    document.getElementById("status").textContent = "AI connection failed";
+    addMsg("System", err.message);
+  }
 };
 
-/* ================= RECEIVE USER ANSWER ================= */
+/* ================= RECEIVE VOICE ================= */
 window.receiveVoskText = text => {
   if (!interviewActive || !text) return;
   sendUserText(text);
@@ -196,7 +207,7 @@ window.receiveVoskText = text => {
 
 async function sendUserText(text) {
   addMsg("You", text);
-  document.getElementById("status").textContent = "AI is thinking…";
+  document.getElementById("status").textContent = "AI thinking…";
 
   const fd = new FormData();
   fd.append("mode", "interview");
@@ -204,13 +215,21 @@ async function sendUserText(text) {
   fd.append("history", JSON.stringify(history));
   fd.append("cvText", cvText);
 
-  const r = await fetch(API, { method: "POST", body: fd });
-  const d = await r.json();
+  try {
+    const r = await fetchWithTimeout(API, { method:"POST", body:fd });
+    if (!r.ok) throw new Error("HTTP " + r.status);
 
-  history = d.history || history;
-  addMsg("AI", d.reply);
-  speak(d.reply);
-  document.getElementById("status").textContent = "Listening…";
+    const d = await r.json();
+    history = d.history || history;
+
+    addMsg("AI", d.reply);
+    speak(d.reply);
+    document.getElementById("status").textContent = "Listening…";
+
+  } catch (err) {
+    document.getElementById("status").textContent = "AI error";
+    addMsg("System", err.message);
+  }
 }
 
 /* ================= END INTERVIEW ================= */
@@ -224,15 +243,19 @@ document.getElementById("endBtn").onclick = async () => {
   fd.append("mode", "score");
   fd.append("history", JSON.stringify(history));
 
-  const r = await fetch(API, { method: "POST", body: fd });
-  const d = await r.json();
+  try {
+    const r = await fetchWithTimeout(API, { method:"POST", body:fd });
+    const d = await r.json();
 
-  document.body.innerHTML = `
-    <div class="card">
-      <h2>Interview Complete</h2>
-      <pre style="white-space:pre-wrap">${d.reply}</pre>
-      <button onclick="location.reload()">New Interview</button>
-    </div>`;
+    document.body.innerHTML = `
+      <div class="card">
+        <h2>Interview Complete</h2>
+        <pre style="white-space:pre-wrap">${d.reply}</pre>
+        <button onclick="location.reload()">New Interview</button>
+      </div>`;
+  } catch {
+    location.reload();
+  }
 };
 </script>
 
