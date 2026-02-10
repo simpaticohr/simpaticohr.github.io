@@ -1,182 +1,167 @@
-package com.example.simpaticocareerlab
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Evalis AI - Elite Live Interview</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <style>
+        :root { --primary: #6366f1; --bg: #020617; }
+        body { margin: 0; background: var(--bg); color: white; font-family: system-ui, sans-serif; display: flex; align-items: center; justify-content: center; min-height: 100vh; overflow-x: hidden; }
+        .card { width: 90%; max-width: 440px; background: rgba(255,255,255,0.05); backdrop-filter: blur(15px); border-radius: 24px; padding: 30px; text-align: center; border: 1px solid rgba(255,255,255,0.1); box-shadow: 0 25px 50px rgba(0,0,0,0.5); }
+        .wave-box { height: 80px; margin: 15px 0; }
+        canvas { width: 100%; height: 60px; filter: drop-shadow(0 0 5px var(--primary)); }
+        #timer { font-size: 24px; font-weight: 700; color: var(--primary); margin-bottom: 5px; font-variant-numeric: tabular-nums; }
+        #status { font-size: 12px; color: #94a3b8; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 20px; }
+        .btn { background: var(--primary); color: white; border: none; padding: 16px; border-radius: 14px; width: 100%; font-weight: bold; cursor: pointer; font-size: 16px; transition: 0.3s; }
+        .btn:disabled { opacity: 0.3; }
+        #log { margin-top: 20px; max-height: 200px; overflow-y: auto; text-align: left; font-size: 14px; border-top: 1px solid #334155; padding-top: 15px; }
+        .report-box { background: rgba(99, 102, 241, 0.1); padding: 20px; border-radius: 15px; text-align: left; line-height: 1.6; border: 1px solid var(--primary); }
+    </style>
+</head>
+<body>
 
-import android.Manifest
-import android.app.Activity
-import android.content.Intent
-import android.content.pm.PackageManager
-import android.net.Uri
-import android.os.Bundle
-import android.speech.RecognitionListener
-import android.speech.RecognizerIntent
-import android.speech.SpeechRecognizer
-import android.speech.tts.TextToSpeech
-import android.webkit.*
-import androidx.activity.ComponentActivity
-import androidx.activity.compose.setContent
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.ui.viewinterop.AndroidView
-import androidx.core.app.ActivityCompat
-import androidx.core.content.ContextCompat
-import org.json.JSONObject
-import java.util.Locale
+<div class="card">
+    <div id="timer">15:00</div>
+    <div id="status">Upload Resume to Start</div>
+    <div class="wave-box"><canvas id="canvas"></canvas></div>
+    
+    <input type="file" id="cvInput" accept=".pdf" style="margin-bottom:15px; font-size: 12px;">
+    <button id="startBtn" class="btn" disabled>Start Interview</button>
+    <button id="endBtn" class="btn" style="display:none; background:#ef4444">End Interview</button>
+    
+    <div id="log"></div>
+</div>
 
-class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
+<script>
+const API = "https://evalis-ai.simpaticohrconsultancy.workers.dev";
+const pdfjsLib = window['pdfjs-dist/build/pdf'];
+pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
 
-    private lateinit var webView: WebView
-    private lateinit var tts: TextToSpeech
-    private lateinit var speechRecognizer: SpeechRecognizer
-    private lateinit var speechIntent: Intent
+let cvText = "", history = [], interviewActive = false, isAISpeaking = false, recognition;
+let audioCtx, analyser, dataArray, canvasCtx, timerInterval, timeLeft = 15 * 60;
 
-    private var fileCallback: ValueCallback<Array<Uri>>? = null
-
-    /* ---------------- FILE PICKER ---------------- */
-    private val filePickerLauncher =
-        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-            val uri =
-                if (result.resultCode == Activity.RESULT_OK) result.data?.data else null
-            fileCallback?.onReceiveValue(if (uri != null) arrayOf(uri) else null)
-            fileCallback = null
-        }
-
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-
-        /* ---------------- PERMISSIONS ---------------- */
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
-            != PackageManager.PERMISSION_GRANTED
-        ) {
-            ActivityCompat.requestPermissions(
-                this,
-                arrayOf(Manifest.permission.RECORD_AUDIO),
-                1
-            )
-        }
-
-        /* ---------------- TTS ---------------- */
-        tts = TextToSpeech(this, this)
-
-        /* ---------------- SPEECH RECOGNIZER ---------------- */
-        speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this)
-
-        speechIntent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-            putExtra(
-                RecognizerIntent.EXTRA_LANGUAGE_MODEL,
-                RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
-            )
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.US)
-            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false)
-        }
-
-        speechRecognizer.setRecognitionListener(object : RecognitionListener {
-
-            override fun onResults(results: Bundle) {
-                val text =
-                    results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                        ?.firstOrNull()
-                        ?: return
-
-                webView.post {
-                    webView.evaluateJavascript(
-                        "window.receiveVoskText(${JSONObject.quote(text)})",
-                        null
-                    )
-                }
-            }
-
-            override fun onError(error: Int) {
-                restartListening()
-            }
-
-            override fun onEndOfSpeech() {
-                restartListening()
-            }
-
-            override fun onReadyForSpeech(params: Bundle?) {}
-            override fun onBeginningOfSpeech() {}
-            override fun onRmsChanged(rmsdB: Float) {}
-            override fun onBufferReceived(buffer: ByteArray?) {}
-            override fun onPartialResults(partialResults: Bundle?) {}
-            override fun onEvent(eventType: Int, params: Bundle?) {}
-        })
-
-        /* ---------------- UI ---------------- */
-        setContent {
-            AndroidView(factory = { context ->
-                webView = WebView(context).apply {
-
-                    settings.javaScriptEnabled = true
-                    settings.domStorageEnabled = true
-                    settings.allowFileAccess = true
-                    settings.allowContentAccess = true
-                    settings.mediaPlaybackRequiresUserGesture = false
-                    settings.cacheMode = WebSettings.LOAD_NO_CACHE
-
-                    clearCache(true)
-                    clearHistory()
-
-                    webViewClient = WebViewClient()
-
-                    webChromeClient = object : WebChromeClient() {
-                        override fun onShowFileChooser(
-                            webView: WebView?,
-                            filePathCallback: ValueCallback<Array<Uri>>?,
-                            fileChooserParams: FileChooserParams?
-                        ): Boolean {
-                            fileCallback = filePathCallback
-                            filePickerLauncher.launch(
-                                fileChooserParams?.createIntent()
-                            )
-                            return true
-                        }
-                    }
-
-                    /* -------- JS ↔ ANDROID BRIDGES -------- */
-                    addJavascriptInterface(AndroidTTS(), "Android")
-                    addJavascriptInterface(AndroidMic(), "AndroidSpeech")
-
-                    /* -------- LOAD FINAL HTML -------- */
-                    loadUrl("file:///android_asset/evalis-interview.html")
-                }
-
-                webView
-            })
-        }
+/* 1. PDF LOADING */
+document.getElementById("cvInput").onchange = async e => {
+    const pdf = await pdfjsLib.getDocument(await e.target.files[0].arrayBuffer()).promise;
+    let text = "";
+    for (let i = 1; i <= pdf.numPages; i++) {
+        const page = await pdf.getPage(i);
+        text += (await page.getTextContent()).items.map(s => s.str).join(" ") + " ";
     }
+    cvText = text;
+    document.getElementById("startBtn").disabled = false;
+    document.getElementById("status").textContent = "Resume Ready";
+};
 
-    /* ---------------- ANDROID TTS ---------------- */
-    inner class AndroidTTS {
-        @JavascriptInterface
-        fun speak(text: String) {
-            tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, null)
+/* 2. WAVEFORM & TIMER */
+function initWave(stream) {
+    audioCtx = new AudioContext();
+    analyser = audioCtx.createAnalyser();
+    audioCtx.createMediaStreamSource(stream).connect(analyser);
+    dataArray = new Uint8Array(analyser.frequencyBinCount);
+    canvasCtx = document.getElementById("canvas").getContext("2d");
+    const draw = () => {
+        requestAnimationFrame(draw);
+        analyser.getByteFrequencyData(dataArray);
+        canvasCtx.clearRect(0, 0, 400, 60);
+        canvasCtx.fillStyle = "#6366f1";
+        for (let i = 0; i < 80; i++) {
+            let h = dataArray[i] / 2.5;
+            canvasCtx.fillRect(i * 5, 30 - h/2, 3, h);
         }
-    }
-
-    /* ---------------- ANDROID MIC ---------------- */
-    inner class AndroidMic {
-        @JavascriptInterface
-        fun startListening() {
-            restartListening()
-        }
-    }
-
-    private fun restartListening() {
-        try {
-            speechRecognizer.cancel()
-            speechRecognizer.startListening(speechIntent)
-        } catch (_: Exception) {}
-    }
-
-    override fun onInit(status: Int) {
-        if (status == TextToSpeech.SUCCESS) {
-            tts.language = Locale.US
-            tts.setSpeechRate(1.0f)
-        }
-    }
-
-    override fun onDestroy() {
-        super.onDestroy()
-        speechRecognizer.destroy()
-        tts.stop()
-        tts.shutdown()
-    }
+    };
+    draw();
 }
+
+function startTimer() {
+    timerInterval = setInterval(() => {
+        timeLeft--;
+        let min = Math.floor(timeLeft / 60), sec = timeLeft % 60;
+        document.getElementById("timer").textContent = `${min}:${sec < 10 ? '0' : ''}${sec}`;
+        if (timeLeft <= 0) finishInterview();
+    }, 1000);
+}
+
+/* 3. SPEECH & INTERACTION */
+function speak(text) {
+    window.speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(text);
+    u.onstart = () => { isAISpeaking = true; if(recognition) recognition.stop(); };
+    u.onend = () => { isAISpeaking = false; if(interviewActive) recognition.start(); };
+    window.speechSynthesis.speak(u);
+    const d = document.createElement("div"); d.innerHTML = `<p style="color:#a5b4fc"><b>AI:</b> ${text}</p>`;
+    document.getElementById("log").prepend(d);
+}
+
+function initRecognition() {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    recognition = new SR();
+    recognition.continuous = true;
+    recognition.onresult = async e => {
+        const transcript = e.results[e.results.length - 1][0].transcript.trim();
+        if (isAISpeaking) { window.speechSynthesis.cancel(); isAISpeaking = false; }
+        
+        document.getElementById("status").textContent = "Thinking...";
+        const fd = new FormData();
+        fd.append("mode", "interview");
+        fd.append("history", JSON.stringify(history));
+        fd.append("text", transcript);
+        fd.append("cvText", cvText);
+
+        const res = await fetch(API, { method: "POST", body: fd });
+        const data = await res.json();
+        history = data.history;
+        speak(data.reply);
+    };
+}
+
+/* 4. FINISH & SCORE REPORT */
+async function finishInterview() {
+    interviewActive = false;
+    clearInterval(timerInterval);
+    if(recognition) recognition.stop();
+    window.speechSynthesis.cancel();
+    document.getElementById("status").textContent = "Generating Score Report...";
+    
+    const fd = new FormData();
+    fd.append("mode", "score");
+    fd.append("history", JSON.stringify(history));
+
+    const res = await fetch(API, { method: "POST", body: fd });
+    const data = await res.json();
+    
+    document.body.innerHTML = `
+        <div class="card" style="max-width:600px">
+            <h2 style="color:var(--primary)">Final Score Report</h2>
+            <div class="report-box" style="white-space:pre-wrap">${data.reply}</div>
+            <button onclick="location.reload()" class="btn" style="margin-top:20px">New Session</button>
+        </div>`;
+}
+
+/* 5. START SESSION */
+document.getElementById("startBtn").onclick = async () => {
+    window.speechSynthesis.speak(new SpeechSynthesisUtterance("")); // Unlock Audio
+    interviewActive = true;
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    initWave(stream);
+    initRecognition();
+    startTimer();
+
+    document.getElementById("cvInput").style.display = "none";
+    document.getElementById("startBtn").style.display = "none";
+    document.getElementById("endBtn").style.display = "block";
+
+    const fd = new FormData();
+    fd.append("mode", "start");
+    fd.append("cvText", cvText);
+    const res = await fetch(API, { method: "POST", body: fd });
+    const data = await res.json();
+    history = data.history;
+    speak(data.reply);
+};
+
+document.getElementById("endBtn").onclick = finishInterview;
+</script>
+</body>
+</html>
