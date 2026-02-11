@@ -2,615 +2,432 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Evalis AI - Elite Live Interview</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Evalis AI | Intelligent Interviewer</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
     <style>
-        :root { --primary: #6366f1; --bg: #020617; --danger: #ef4444; }
-
-        * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+        :root {
+            --bg: #05050a;
+            --surface: #0f1016;
+            --primary: #6366f1;
+            --accent: #a855f7;
+            --text: #e2e8f0;
+            --text-dim: #64748b;
+        }
 
         body {
+            margin: 0;
             background: var(--bg);
-            color: white;
-            font-family: system-ui, sans-serif;
+            color: var(--text);
+            font-family: 'Inter', sans-serif;
             display: flex;
+            flex-direction: column;
             align-items: center;
             justify-content: center;
             min-height: 100vh;
-            padding: 16px;
-        }
-
-        .card {
-            width: 100%;
-            max-width: 440px;
-            background: rgba(255,255,255,0.05);
-            backdrop-filter: blur(15px);
-            border-radius: 24px;
-            padding: 28px 24px;
-            text-align: center;
-            border: 1px solid rgba(255,255,255,0.1);
-            box-shadow: 0 25px 50px rgba(0,0,0,0.5);
-        }
-
-        #timer {
-            font-size: 40px;
-            font-weight: 700;
-            color: var(--primary);
-            margin-bottom: 4px;
-            font-variant-numeric: tabular-nums;
-        }
-        #timer.warn { color: var(--danger); }
-
-        #status {
-            font-size: 12px;
-            color: #94a3b8;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-            margin-bottom: 16px;
-            min-height: 18px;
-        }
-
-        .wave-box {
-            height: 60px;
-            margin: 12px 0;
-            background: rgba(0,0,0,0.2);
-            border-radius: 10px;
             overflow: hidden;
         }
-        canvas { width: 100%; height: 60px; display: block; }
 
-        /* Upload */
-        .upload-area {
-            border: 1.5px dashed rgba(255,255,255,0.15);
-            border-radius: 12px;
-            padding: 18px;
-            margin-bottom: 14px;
-            cursor: pointer;
+        /* --- THE ORB (Core Animation) --- */
+        .orb-container {
             position: relative;
-            transition: border-color 0.2s;
+            width: 200px;
+            height: 200px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 40px;
         }
-        .upload-area.ready { border-color: var(--primary); background: rgba(99,102,241,0.08); }
-        .upload-area input {
-            position: absolute; inset: 0; opacity: 0;
-            cursor: pointer; width: 100%; height: 100%;
-        }
-        .upload-icon { font-size: 26px; margin-bottom: 4px; }
-        .upload-label { font-size: 12px; color: #64748b; }
-        .upload-name { font-size: 12px; color: var(--primary); margin-top: 4px; }
 
-        /* Buttons */
+        .orb {
+            width: 120px;
+            height: 120px;
+            background: linear-gradient(135deg, var(--primary), var(--accent));
+            border-radius: 50%;
+            box-shadow: 0 0 60px rgba(99, 102, 241, 0.4), inset 0 0 20px rgba(255, 255, 255, 0.2);
+            position: relative;
+            z-index: 2;
+            transition: all 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+            animation: breathe 4s ease-in-out infinite;
+        }
+
+        /* State: Listening (Active) */
+        .orb.listening {
+            background: linear-gradient(135deg, #22c55e, #10b981);
+            box-shadow: 0 0 60px rgba(34, 197, 94, 0.4);
+            animation: pulse-green 2s infinite;
+        }
+
+        /* State: Thinking (Processing) */
+        .orb.thinking {
+            background: linear-gradient(135deg, #f59e0b, #d97706);
+            box-shadow: 0 0 60px rgba(245, 158, 11, 0.4);
+            animation: spin 1.5s linear infinite;
+            border-radius: 40%;
+        }
+
+        /* Rings */
+        .ring {
+            position: absolute;
+            border-radius: 50%;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            z-index: 1;
+        }
+        .ring:nth-child(1) { width: 200px; height: 200px; animation: spin 10s linear infinite; border-color: rgba(99, 102, 241, 0.1); }
+        .ring:nth-child(2) { width: 300px; height: 300px; animation: spin-rev 15s linear infinite; border-style: dashed; }
+        .ring:nth-child(3) { width: 450px; height: 450px; opacity: 0.3; }
+
+        /* --- UI ELEMENTS --- */
+        .interface {
+            width: 100%;
+            max-width: 500px;
+            text-align: center;
+            z-index: 10;
+        }
+
+        h1 { font-weight: 300; letter-spacing: -1px; margin-bottom: 5px; font-size: 1.5rem; }
+        .status-pill {
+            display: inline-block;
+            padding: 6px 16px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 50px;
+            font-size: 0.85rem;
+            color: var(--text-dim);
+            margin-bottom: 30px;
+            backdrop-filter: blur(5px);
+            transition: 0.3s;
+        }
+        
+        .timer { font-family: monospace; color: var(--text-dim); margin-top: 10px; font-size: 0.9rem; opacity: 0; transition: opacity 0.5s; }
+        .timer.active { opacity: 1; }
+
+        /* Controls */
+        .controls { display: flex; gap: 15px; justify-content: center; margin-top: 20px; }
+        
         .btn {
-            width: 100%;
-            padding: 16px;
-            border-radius: 14px;
-            border: none;
-            font-weight: bold;
-            font-size: 15px;
-            cursor: pointer;
-            transition: opacity 0.2s, transform 0.1s;
-            margin-bottom: 10px;
-        }
-        .btn:active { transform: scale(0.97); }
-        .btn:disabled { opacity: 0.3; cursor: not-allowed; }
-
-        #startBtn { background: var(--primary); color: white; }
-        #endBtn   { background: var(--danger); color: white; display: none; }
-
-        /* Push-to-talk */
-        #pttBtn {
-            width: 100%;
-            padding: 22px;
-            border-radius: 14px;
-            border: 2px solid rgba(99,102,241,0.4);
-            background: rgba(99,102,241,0.08);
-            color: var(--primary);
-            font-size: 15px;
-            font-weight: bold;
-            cursor: pointer;
-            display: none;
-            margin-bottom: 10px;
-            transition: all 0.15s;
-            user-select: none;
-            -webkit-user-select: none;
-        }
-        #pttBtn.recording {
-            background: var(--primary);
-            color: white;
-            border-color: var(--primary);
-            box-shadow: 0 0 24px rgba(99,102,241,0.5);
-        }
-
-        /* Error */
-        .error {
-            background: rgba(239,68,68,0.1);
-            border: 1px solid rgba(239,68,68,0.3);
-            color: #fca5a5;
-            border-radius: 10px;
-            padding: 12px;
-            font-size: 12px;
-            margin-bottom: 12px;
-            display: none;
-            line-height: 1.5;
-            text-align: left;
-        }
-
-        /* Log */
-        #log {
-            margin-top: 16px;
-            max-height: 220px;
-            overflow-y: auto;
-            border-top: 1px solid #1e293b;
-            padding-top: 14px;
-            text-align: left;
-        }
-        .entry { margin-bottom: 12px; font-size: 13px; line-height: 1.5; }
-        .entry.ai  { color: #a5b4fc; }
-        .entry.you { color: #94a3b8; }
-        .entry b   { font-size: 10px; letter-spacing: 1px; opacity: 0.6; display: block; margin-bottom: 2px; }
-
-        /* Text fallback */
-        #textFallback {
-            display: none;
-            gap: 8px;
-            margin-bottom: 10px;
-        }
-        #textFallback input {
-            flex: 1;
-            background: rgba(255,255,255,0.05);
-            border: 1px solid rgba(255,255,255,0.15);
-            border-radius: 10px;
-            padding: 12px;
-            color: white;
-            font-size: 13px;
-            outline: none;
-        }
-        #textFallback button {
-            background: var(--primary);
-            border: none;
-            border-radius: 10px;
-            padding: 12px 16px;
-            color: white;
-            font-size: 13px;
-            cursor: pointer;
-        }
-
-        /* Report */
-        .report-card {
-            width: 100%;
-            max-width: 600px;
-            background: rgba(255,255,255,0.05);
-            border-radius: 20px;
-            padding: 28px 24px;
-            border: 1px solid rgba(255,255,255,0.1);
-        }
-        .report-card h2 { color: var(--primary); margin-bottom: 16px; }
-        .report-box {
-            background: rgba(99,102,241,0.08);
-            border: 1px solid rgba(99,102,241,0.25);
+            background: var(--surface);
+            color: var(--text);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            padding: 12px 24px;
             border-radius: 12px;
-            padding: 20px;
-            font-size: 13px;
-            line-height: 1.8;
-            white-space: pre-wrap;
-            color: #e2e8f0;
-            text-align: left;
+            cursor: pointer;
+            font-weight: 600;
+            transition: 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .btn:hover { background: rgba(255, 255, 255, 0.1); transform: translateY(-2px); }
+        .btn-primary { background: var(--primary); border-color: var(--primary); }
+        .btn-primary:hover { background: #4f46e5; }
+        .btn-danger { background: rgba(239, 68, 68, 0.1); color: #ef4444; border-color: rgba(239, 68, 68, 0.2); }
+        .btn-danger:hover { background: rgba(239, 68, 68, 0.2); }
+
+        input[type="file"] { display: none; }
+        .file-trigger {
+            border: 2px dashed rgba(255, 255, 255, 0.2);
+            padding: 30px;
+            border-radius: 16px;
+            cursor: pointer;
+            color: var(--text-dim);
+            transition: 0.2s;
+        }
+        .file-trigger:hover { border-color: var(--primary); color: var(--text); background: rgba(99, 102, 241, 0.05); }
+
+        /* Animations */
+        @keyframes breathe { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.05); } }
+        @keyframes pulse-green { 0% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.7); } 70% { box-shadow: 0 0 0 20px rgba(34, 197, 94, 0); } 100% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0); } }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        @keyframes spin-rev { 0% { transform: rotate(360deg); } 100% { transform: rotate(0deg); } }
+
+        /* Report Modal */
+        .modal {
+            position: fixed; top:0; left:0; width:100%; height:100%;
+            background: rgba(0,0,0,0.8); backdrop-filter: blur(10px);
+            display: none; align-items: center; justify-content: center; z-index: 100;
+        }
+        .modal-content {
+            background: var(--surface); border: 1px solid rgba(255,255,255,0.1);
+            padding: 40px; border-radius: 24px; max-width: 600px; width: 90%;
+            max-height: 80vh; overflow-y: auto; text-align: left;
         }
     </style>
 </head>
 <body>
-<div class="card" id="mainCard">
-    <div id="timer">15:00</div>
-    <div id="status">Upload Resume to Start</div>
 
-    <div class="wave-box"><canvas id="canvas"></canvas></div>
-
-    <div class="error" id="errBox"></div>
-
-    <div class="upload-area" id="uploadArea">
-        <input type="file" id="cvInput" accept=".pdf">
-        <div class="upload-icon">📄</div>
-        <div class="upload-label">Tap to upload your resume (PDF)</div>
-        <div class="upload-name" id="uploadName"></div>
+    <div class="orb-container">
+        <div class="ring"></div>
+        <div class="ring"></div>
+        <div class="ring"></div>
+        <div id="orb" class="orb"></div>
     </div>
 
-    <button id="startBtn" class="btn" disabled>Start Interview</button>
-    <button id="pttBtn">🎙 Hold to Speak</button>
-    <div id="textFallback">
-        <input id="textInput" placeholder="Type your answer here...">
-        <button onclick="submitText()">Send</button>
-    </div>
-    <button id="endBtn" class="btn">End Interview</button>
+    <div class="interface">
+        <h1 id="mainTitle">Evalis AI</h1>
+        <div id="status" class="status-pill">Waiting for Resume</div>
+        
+        <div id="setupPanel">
+            <label class="file-trigger">
+                <span>📂 Upload PDF Resume</span>
+                <input type="file" id="cvInput" accept=".pdf">
+            </label>
+            <br><br>
+            <button id="startBtn" class="btn btn-primary" style="width:100%; justify-content:center; display:none;">
+                Start Interview
+            </button>
+        </div>
 
-    <div id="log"></div>
-</div>
+        <div id="activePanel" style="display:none;">
+            <div class="controls">
+                <button id="micToggle" class="btn">🎤 Mute</button>
+                <button id="endBtn" class="btn btn-danger">End Session</button>
+            </div>
+            <div id="timer" class="timer">15:00</div>
+        </div>
+    </div>
+
+    <div id="reportModal" class="modal">
+        <div class="modal-content">
+            <h2 style="color:var(--primary); margin-top:0;">Evaluation Report</h2>
+            <div id="reportText" style="line-height: 1.6; color: var(--text-dim); white-space: pre-wrap;"></div>
+            <button onclick="location.reload()" class="btn btn-primary" style="margin-top:20px; width:100%; justify-content:center;">Start New Session</button>
+        </div>
+    </div>
 
 <script>
-// ─── Config ──────────────────────────────────────────────────────────────────
-const API = "https://evalis-ai.simpaticohrconsultancy.workers.dev";
-pdfjsLib.GlobalWorkerOptions.workerSrc =
-    "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+// --- CONFIGURATION ---
+const API_URL = "https://evalis-ai.simpaticohrconsultancy.workers.dev";
+pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
 
-// ─── Detect environment ───────────────────────────────────────────────────────
-// If window.Android exists, we're in the native WebView with the TTS bridge
-const USE_ANDROID_BRIDGE = typeof window.Android !== "undefined"
-    || typeof window.androidTTSReady !== "undefined";
-
-// ─── State ────────────────────────────────────────────────────────────────────
-let cvText = "", history = [], interviewActive = false, isAISpeaking = false;
-let audioCtx, analyser, dataArray, canvasCtx;
-let timerInterval, timeLeft = 15 * 60;
-let mediaStream, mediaRecorder, audioChunks = [];
-let pttRecording = false;
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-function showError(msg) {
-    const b = document.getElementById("errBox");
-    b.textContent = msg;
-    b.style.display = "block";
-    setTimeout(() => b.style.display = "none", 7000);
-}
-
-function setStatus(msg) {
-    document.getElementById("status").textContent = msg;
-}
-
-function addLog(role, text) {
-    const el = document.createElement("div");
-    el.className = `entry ${role}`;
-    el.innerHTML = `<b>${role === "ai" ? "AI" : "YOU"}</b>${text}`;
-    document.getElementById("log").prepend(el);
-}
-
-// ─── PDF ──────────────────────────────────────────────────────────────────────
-document.getElementById("cvInput").onchange = async e => {
-    const file = e.target.files[0];
-    if (!file) return;
-    setStatus("Reading resume...");
-    try {
-        const pdf = await pdfjsLib.getDocument(await file.arrayBuffer()).promise;
-        let text = "";
-        for (let i = 1; i <= pdf.numPages; i++) {
-            const page = await pdf.getPage(i);
-            text += (await page.getTextContent()).items.map(s => s.str).join(" ") + " ";
-        }
-        cvText = text;
-        document.getElementById("startBtn").disabled = false;
-        document.getElementById("uploadName").textContent = "✓ " + file.name;
-        document.getElementById("uploadArea").classList.add("ready");
-        setStatus("Resume Ready");
-    } catch {
-        showError("Failed to read PDF. Please try another file.");
-        setStatus("Upload Resume to Start");
-    }
+// --- STATE ---
+let state = {
+    cvText: "",
+    history: [],
+    isListening: false,
+    isSpeaking: false,
+    timeLeft: 900 // 15 mins
 };
 
-// ─── Waveform ─────────────────────────────────────────────────────────────────
-function initWave(stream) {
+// --- DOM ELEMENTS ---
+const orb = document.getElementById('orb');
+const status = document.getElementById('status');
+const timerDisplay = document.getElementById('timer');
+
+// --- AUDIO VISUALIZATION ---
+let audioCtx, analyser, dataArray;
+async function initAudio() {
     try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
         audioCtx = new (window.AudioContext || window.webkitAudioContext)();
         analyser = audioCtx.createAnalyser();
-        analyser.fftSize = 256;
-        audioCtx.createMediaStreamSource(stream).connect(analyser);
+        analyser.fftSize = 64; // Low detail for snappy animations
+        const source = audioCtx.createMediaStreamSource(stream);
+        source.connect(analyser);
         dataArray = new Uint8Array(analyser.frequencyBinCount);
-        const cv = document.getElementById("canvas");
-        cv.width = cv.offsetWidth || 400;
-        cv.height = 60;
-        canvasCtx = cv.getContext("2d");
-        (function draw() {
-            if (!interviewActive) return;
-            requestAnimationFrame(draw);
-            analyser.getByteFrequencyData(dataArray);
-            canvasCtx.clearRect(0, 0, cv.width, cv.height);
-            const count = Math.floor(cv.width / 7);
-            for (let i = 0; i < count; i++) {
-                const v = dataArray[Math.floor(i * dataArray.length / count)];
-                const h = Math.max(3, (v / 255) * 50);
-                canvasCtx.fillStyle = isAISpeaking ? "#818cf8" : "#6366f1";
-                canvasCtx.beginPath();
-                canvasCtx.roundRect(i * 7, (60 - h) / 2, 4, h, 2);
-                canvasCtx.fill();
-            }
-        })();
-    } catch(e) { console.warn("Waveform:", e); }
+        animateOrb();
+        return true;
+    } catch (e) {
+        alert("Microphone access denied. Please enable permissions.");
+        return false;
+    }
 }
 
-// ─── Timer ────────────────────────────────────────────────────────────────────
-function startTimer() {
-    timerInterval = setInterval(() => {
-        timeLeft--;
-        const m = Math.floor(timeLeft / 60), s = timeLeft % 60;
-        const el = document.getElementById("timer");
-        el.textContent = `${m}:${s < 10 ? "0" : ""}${s}`;
-        if (timeLeft <= 60) el.classList.add("warn");
-        if (timeLeft <= 0) finishInterview();
+function animateOrb() {
+    requestAnimationFrame(animateOrb);
+    if (!state.isListening) {
+        if (!state.isSpeaking) orb.style.transform = `scale(1)`;
+        return;
+    }
+    
+    analyser.getByteFrequencyData(dataArray);
+    
+    // Calculate volume
+    let sum = 0;
+    for (let i = 0; i < dataArray.length; i++) sum += dataArray[i];
+    let avg = sum / dataArray.length;
+    
+    // Map volume to scale (1.0 to 1.5)
+    let scale = 1 + (avg / 255) * 0.8; 
+    orb.style.transform = `scale(${scale})`;
+}
+
+// --- SPEECH RECOGNITION (The "Ears") ---
+const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+const recognition = new Recognition();
+recognition.continuous = false; // Intentionally false to force pauses
+recognition.interimResults = false;
+recognition.lang = 'en-US';
+
+recognition.onstart = () => {
+    state.isListening = true;
+    orb.classList.add('listening');
+    orb.classList.remove('thinking');
+    status.textContent = "Listening...";
+};
+
+recognition.onend = () => {
+    state.isListening = false;
+    orb.classList.remove('listening');
+    // If we didn't trigger thinking/speaking, restart listening (loop protection)
+    if (!state.isSpeaking && state.history.length > 0) {
+        // Simple debounce
+        setTimeout(() => { if(!state.isSpeaking) recognition.start(); }, 500);
+    }
+};
+
+recognition.onresult = async (event) => {
+    const transcript = event.results[0][0].transcript;
+    if (!transcript.trim()) return;
+
+    // Transition to Thinking
+    state.isListening = false; // Stop visualizer
+    orb.classList.remove('listening');
+    orb.classList.add('thinking');
+    status.textContent = "Analysing response...";
+    
+    // Send to AI
+    await processAIInteraction(transcript);
+};
+
+// --- SPEECH SYNTHESIS (The "Voice") ---
+function speak(text) {
+    state.isSpeaking = true;
+    recognition.stop(); // Stop listening while speaking
+    orb.classList.remove('listening', 'thinking');
+    status.textContent = "AI Speaking...";
+
+    const utterance = new SpeechSynthesisUtterance(text);
+    
+    // Attempt to select a better voice
+    const voices = window.speechSynthesis.getVoices();
+    const preferred = voices.find(v => v.name.includes('Google US English') || v.name.includes('Natural'));
+    if(preferred) utterance.voice = preferred;
+    
+    utterance.rate = 1.1; // Slightly faster for natural feel
+    utterance.pitch = 1.0;
+
+    utterance.onend = () => {
+        state.isSpeaking = false;
+        orb.classList.remove('listening', 'thinking');
+        orb.classList.add('listening'); // Visual cue
+        recognition.start(); // Handshake back to user
+    };
+
+    window.speechSynthesis.speak(utterance);
+    
+    // Visual modulation during speech (simulated)
+    let speechInterval = setInterval(() => {
+        if(!state.isSpeaking) clearInterval(speechInterval);
+        else {
+            const randomScale = 1 + Math.random() * 0.2;
+            orb.style.transform = `scale(${randomScale})`;
+        }
+    }, 100);
+}
+
+// --- CORE LOGIC ---
+async function processAIInteraction(userText) {
+    const fd = new FormData();
+    fd.append("mode", "interview");
+    fd.append("history", JSON.stringify(state.history));
+    fd.append("text", userText);
+    fd.append("cvText", state.cvText);
+
+    try {
+        const res = await fetch(API_URL, { method: "POST", body: fd });
+        const data = await res.json();
+        
+        state.history = data.history;
+        speak(data.reply);
+    } catch (e) {
+        console.error(e);
+        status.textContent = "Connection Error. Retrying...";
+        setTimeout(() => recognition.start(), 2000);
+    }
+}
+
+// --- SETUP & HANDLERS ---
+document.getElementById('cvInput').onchange = async (e) => {
+    const file = e.target.files[0];
+    if(!file) return;
+    
+    status.textContent = "Reading Resume...";
+    const buffer = await file.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument(buffer).promise;
+    
+    let fullText = "";
+    for (let i = 1; i <= pdf.numPages; i++) {
+        const page = await pdf.getPage(i);
+        const textContent = await page.getTextContent();
+        fullText += textContent.items.map(s => s.str).join(" ");
+    }
+    
+    state.cvText = fullText;
+    status.textContent = "Ready to Begin";
+    status.style.borderColor = "var(--primary)";
+    status.style.color = "white";
+    document.getElementById('startBtn').style.display = "flex";
+};
+
+document.getElementById('startBtn').onclick = async () => {
+    const success = await initAudio();
+    if(!success) return;
+
+    document.getElementById('setupPanel').style.display = 'none';
+    document.getElementById('activePanel').style.display = 'block';
+    document.getElementById('timer').classList.add('active');
+    
+    // Start countdown
+    setInterval(() => {
+        if(state.timeLeft <= 0) finishSession();
+        state.timeLeft--;
+        const m = Math.floor(state.timeLeft / 60);
+        const s = state.timeLeft % 60;
+        timerDisplay.textContent = `${m}:${s < 10 ? '0'+s : s}`;
     }, 1000);
-}
 
-// ─── TTS ──────────────────────────────────────────────────────────────────────
-// Uses Android native TTS bridge when in WebView, falls back to Web Speech API
-function speak(text, onDone) {
-    addLog("ai", text);
-    isAISpeaking = true;
-    setStatus("AI Speaking...");
-
-    if (USE_ANDROID_BRIDGE && window.Android) {
-        // Use native Android TTS — poll until done
-        window.Android.speak(text);
-
-        // Poll isSpeaking() to detect when TTS finishes
-        // Android TTS starts slightly after the call, so wait 400ms first
-        setTimeout(function poll() {
-            try {
-                if (window.Android.isSpeaking()) {
-                    setTimeout(poll, 200);
-                } else {
-                    isAISpeaking = false;
-                    if (onDone) onDone();
-                }
-            } catch(e) {
-                isAISpeaking = false;
-                if (onDone) onDone();
-            }
-        }, 600);
-    } else {
-        // Web Speech API fallback (desktop Chrome / non-bridge)
-        window.speechSynthesis.cancel();
-        const chunks = splitTTS(text);
-        let i = 0;
-        function sayNext() {
-            if (i >= chunks.length) {
-                isAISpeaking = false;
-                if (onDone) onDone();
-                return;
-            }
-            const u = new SpeechSynthesisUtterance(chunks[i++]);
-            u.rate = 0.95;
-            const voices = window.speechSynthesis.getVoices();
-            const v = voices.find(v => v.lang.startsWith("en")) || voices[0];
-            if (v) u.voice = v;
-            u.onend = sayNext;
-            u.onerror = () => { isAISpeaking = false; if (onDone) onDone(); };
-            window.speechSynthesis.speak(u);
-        }
-        sayNext();
-    }
-}
-
-function splitTTS(text) {
-    const sentences = text.match(/[^.!?]+[.!?]*/g) || [text];
-    const chunks = [];
-    let cur = "";
-    for (const s of sentences) {
-        if ((cur + s).length > 180) { if (cur) chunks.push(cur.trim()); cur = s; }
-        else cur += s;
-    }
-    if (cur.trim()) chunks.push(cur.trim());
-    return chunks.length ? chunks : [text];
-}
-
-// ─── API ──────────────────────────────────────────────────────────────────────
-async function sendToAPI(transcript) {
-    addLog("you", transcript);
-    setStatus("Thinking...");
+    // Initial AI Handshake
+    orb.classList.add('thinking');
+    status.textContent = "Reviewing Profile...";
+    
+    const fd = new FormData();
+    fd.append("mode", "start");
+    fd.append("cvText", state.cvText);
+    
     try {
-        const fd = new FormData();
-        fd.append("mode", "interview");
-        fd.append("history", JSON.stringify(history));
-        fd.append("text", transcript);
-        fd.append("cvText", cvText);
-        const res = await fetch(API, { method: "POST", body: fd });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const res = await fetch(API_URL, { method: "POST", body: fd });
         const data = await res.json();
-        history = data.history;
-        speak(data.reply, () => {
-            if (interviewActive) {
-                setStatus("Hold button to speak");
-                document.getElementById("pttBtn").disabled = false;
-            }
-        });
-    } catch (err) {
-        showError("Network error — check your connection.");
-        setStatus("Error");
-        document.getElementById("pttBtn").disabled = false;
-    }
-}
-
-// ─── Push-to-Talk ─────────────────────────────────────────────────────────────
-// SpeechRecognition does NOT work in Android WebView — we record with MediaRecorder
-// then either use on-device SR (one-shot) or send to API
-
-function initPTT() {
-    const btn = document.getElementById("pttBtn");
-    btn.style.display = "block";
-    setStatus("Hold button to speak");
-
-    const startRec = async () => {
-        if (pttRecording || isAISpeaking || !mediaStream) return;
-        pttRecording = true;
-        audioChunks = [];
-        btn.classList.add("recording");
-        btn.textContent = "🔴 Recording... (release to send)";
-
-        try {
-            const mime = ["audio/webm;codecs=opus","audio/webm","audio/ogg",""]
-                .find(m => m === "" || MediaRecorder.isTypeSupported(m));
-            mediaRecorder = new MediaRecorder(mediaStream, mime ? { mimeType: mime } : {});
-            mediaRecorder.ondataavailable = e => { if (e.data.size > 0) audioChunks.push(e.data); };
-            mediaRecorder.onstop = processRecording;
-            mediaRecorder.start();
-        } catch(err) {
-            showError("Recording failed: " + err.message);
-            resetPTT();
-        }
-    };
-
-    const stopRec = () => {
-        if (!pttRecording || !mediaRecorder) return;
-        resetPTT();
-        try { mediaRecorder.stop(); } catch(e) {}
-    };
-
-    // Touch events (prevent ghost mouse events on Android)
-    btn.addEventListener("touchstart", e => { e.preventDefault(); startRec(); }, { passive: false });
-    btn.addEventListener("touchend",   e => { e.preventDefault(); stopRec();  }, { passive: false });
-    btn.addEventListener("touchcancel",e => { e.preventDefault(); stopRec();  }, { passive: false });
-    // Mouse events (desktop fallback)
-    btn.addEventListener("mousedown", startRec);
-    btn.addEventListener("mouseup",   stopRec);
-    btn.addEventListener("mouseleave",stopRec);
-}
-
-function resetPTT() {
-    pttRecording = false;
-    const btn = document.getElementById("pttBtn");
-    btn.classList.remove("recording");
-    btn.textContent = "🎙 Hold to Speak";
-    btn.disabled = true; // disabled until AI finishes responding
-    setStatus("Processing...");
-}
-
-async function processRecording() {
-    if (!audioChunks.length) {
-        document.getElementById("pttBtn").disabled = false;
-        setStatus("Hold button to speak");
-        return;
-    }
-
-    // Try on-device SpeechRecognition (works on some Android WebViews)
-    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (SR) {
-        const sr = new SR();
-        sr.continuous = false;
-        sr.interimResults = false;
-        sr.lang = "en-US";
-        let gotResult = false;
-
-        sr.onresult = e => {
-            gotResult = true;
-            const t = e.results[0][0].transcript.trim();
-            if (t) sendToAPI(t);
-            else fallbackToText();
-        };
-        sr.onerror = () => { if (!gotResult) fallbackToText(); };
-        sr.onend   = () => { if (!gotResult) fallbackToText(); };
-
-        try { sr.start(); return; } catch(e) {}
-    }
-
-    // If SR not available, show text input fallback
-    fallbackToText();
-}
-
-function fallbackToText() {
-    setStatus("Type your answer below");
-    document.getElementById("pttBtn").style.display = "none";
-    document.getElementById("textFallback").style.display = "flex";
-    document.getElementById("textInput").focus();
-}
-
-window.submitText = function() {
-    const input = document.getElementById("textInput");
-    const text = input.value.trim();
-    if (!text) return;
-    input.value = "";
-    sendToAPI(text);
-};
-
-document.getElementById("textInput").addEventListener("keydown", e => {
-    if (e.key === "Enter") window.submitText();
-});
-
-// ─── Start ────────────────────────────────────────────────────────────────────
-document.getElementById("startBtn").onclick = async () => {
-    // Unlock Web Audio on user gesture
-    try {
-        const ctx = new (window.AudioContext || window.webkitAudioContext)();
-        ctx.resume();
-    } catch(e) {}
-
-    // Request microphone
-    try {
-        mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-    } catch(err) {
-        if (err.name === "NotAllowedError" || err.name === "PermissionDeniedError") {
-            showError("Microphone denied. Go to Android Settings → Apps → [App name] → Permissions → Microphone → Allow, then restart the app.");
-        } else if (err.name === "NotFoundError") {
-            showError("No microphone found on this device.");
-        } else {
-            showError("Microphone error: " + err.message);
-        }
-        return;
-    }
-
-    interviewActive = true;
-    initWave(mediaStream);
-    startTimer();
-
-    document.getElementById("uploadArea").style.display = "none";
-    document.getElementById("startBtn").style.display = "none";
-    document.getElementById("endBtn").style.display = "block";
-
-    setStatus("Connecting...");
-
-    try {
-        const fd = new FormData();
-        fd.append("mode", "start");
-        fd.append("cvText", cvText);
-        const res = await fetch(API, { method: "POST", body: fd });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = await res.json();
-        history = data.history;
-
-        speak(data.reply, () => {
-            if (interviewActive) initPTT();
-        });
-    } catch(err) {
-        showError("Failed to connect to server. Check internet connection.");
-        setStatus("Error");
-        interviewActive = false;
+        state.history = data.history;
+        speak(data.reply);
+    } catch (e) {
+        alert("Could not connect to AI Server.");
     }
 };
 
-// ─── Finish ───────────────────────────────────────────────────────────────────
-async function finishInterview() {
-    interviewActive = false;
-    clearInterval(timerInterval);
-    if (window.Android) try { window.Android.stop(); } catch(e) {}
-    else window.speechSynthesis.cancel();
-    if (mediaStream) mediaStream.getTracks().forEach(t => t.stop());
+document.getElementById('endBtn').onclick = finishSession;
 
-    document.body.innerHTML = `
-        <div class="report-card">
-            <h2>Generating Report...</h2>
-            <p style="color:#64748b;font-size:13px">Analysing your interview performance...</p>
-        </div>`;
-
-    try {
-        const fd = new FormData();
-        fd.append("mode", "score");
-        fd.append("history", JSON.stringify(history));
-        const res = await fetch(API, { method: "POST", body: fd });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = await res.json();
-
-        document.body.innerHTML = `
-            <div class="report-card">
-                <h2>Final Score Report</h2>
-                <div class="report-box">${data.reply}</div>
-                <button onclick="location.reload()" class="btn" style="margin-top:20px;background:var(--primary);color:white">New Session</button>
-            </div>`;
-    } catch {
-        document.body.innerHTML = `
-            <div class="report-card">
-                <h2 style="color:var(--danger)">Report Failed</h2>
-                <p style="color:#64748b;font-size:13px">Could not generate report.</p>
-                <button onclick="location.reload()" class="btn" style="margin-top:20px;background:var(--primary);color:white">Try Again</button>
-            </div>`;
-    }
+async function finishSession() {
+    recognition.stop();
+    window.speechSynthesis.cancel();
+    document.getElementById('activePanel').style.display = 'none';
+    orb.classList.remove('listening');
+    orb.classList.add('thinking');
+    status.textContent = "Generating Final Score...";
+    
+    const fd = new FormData();
+    fd.append("mode", "score");
+    fd.append("history", JSON.stringify(state.history));
+    
+    const res = await fetch(API_URL, { method: "POST", body: fd });
+    const data = await res.json();
+    
+    document.getElementById('reportText').textContent = data.reply;
+    document.getElementById('reportModal').style.display = 'flex';
 }
-
-document.getElementById("endBtn").onclick = finishInterview;
 </script>
 </body>
 </html>
