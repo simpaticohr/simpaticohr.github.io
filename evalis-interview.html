@@ -1,201 +1,429 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-<title>Evalis AI | Intelligent Interview</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Evalis AI | Advanced Interview</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg: #000000;
+            --surface: #121212;
+            --primary: #ffffff;
+            --secondary: #888888;
+            --accent-glow: rgba(255, 255, 255, 0.15);
+            --orb-color: #ffffff;
+        }
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+        body {
+            margin: 0;
+            background: var(--bg);
+            color: var(--primary);
+            font-family: 'Inter', sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            overflow: hidden;
+            user-select: none;
+            -webkit-tap-highlight-color: transparent;
+        }
 
-<style>
-:root{
---bg:#05050a;--surface:#0f1016;--primary:#6366f1;--accent:#a855f7;
---text:#f8fafc;--text-dim:#64748b;--danger:#ef4444;
-}
-body{
-margin:0;background:var(--bg);color:var(--text);font-family:Inter;
-display:flex;flex-direction:column;align-items:center;justify-content:center;
-min-height:100vh;overflow:hidden;
-}
-.orb-wrapper{position:relative;width:280px;height:280px;margin-bottom:24px}
-.orb{width:130px;height:130px;border-radius:50%;background:linear-gradient(135deg,var(--primary),var(--accent));
-box-shadow:0 0 60px rgba(99,102,241,.4);transition:.3s}
-.orb.idle{opacity:.6;animation:breathe 4s infinite}
-.orb.listening{background:linear-gradient(135deg,#34d399,#10b981)}
-.orb.speaking{animation:pulse 1.2s infinite}
-.orb.thinking{background:#f59e0b;animation:spin 2s linear infinite;border-radius:40%}
-.interface{text-align:center;width:85%;max-width:420px}
-#timer{font-family:monospace;color:var(--text-dim);margin-bottom:10px}
-.transcript{min-height:40px;opacity:.6;transition:.3s}
-.transcript.fade{opacity:0}
-.btn{padding:14px;border-radius:12px;border:1px solid rgba(255,255,255,.1);
-background:rgba(255,255,255,.05);color:var(--text);cursor:pointer}
-.btn-primary{background:#fff;color:#000}
-.btn-danger{border-color:#ef4444;color:#ef4444}
-.hidden{display:none}
-@keyframes breathe{50%{transform:scale(1.05)}}
-@keyframes pulse{50%{transform:scale(1.12)}}
-@keyframes spin{100%{transform:rotate(360deg)}}
-</style>
+        /* --- THE ORB (Siri/Mercor Style) --- */
+        .orb-stage {
+            position: relative;
+            width: 300px;
+            height: 300px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 60px;
+        }
+
+        .orb-core {
+            width: 80px;
+            height: 80px;
+            background: var(--orb-color);
+            border-radius: 50%;
+            position: relative;
+            z-index: 10;
+            box-shadow: 0 0 50px var(--accent-glow);
+            transition: all 0.4s cubic-bezier(0.25, 0.8, 0.25, 1);
+        }
+
+        /* Waves */
+        .wave {
+            position: absolute;
+            top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            border-radius: 50%;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            width: 80px; height: 80px;
+            opacity: 0;
+            z-index: 1;
+        }
+
+        /* --- STATES --- */
+        
+        /* IDLE: Slow breathing */
+        .state-idle .orb-core { transform: scale(1); opacity: 0.5; }
+        .state-idle .wave { animation: ripple 4s infinite; }
+
+        /* LISTENING: Active, pulsating, large */
+        .state-listening .orb-core { 
+            transform: scale(1.2); 
+            background: #ffffff;
+            box-shadow: 0 0 80px rgba(255, 255, 255, 0.4);
+        }
+        .state-listening .wave { border-color: rgba(255, 255, 255, 0.6); animation: ripple 1.5s infinite; }
+
+        /* THINKING: Spinning/Processing */
+        .state-thinking .orb-core {
+            transform: scale(0.8);
+            background: #a855f7; /* Purple accent for thinking */
+            box-shadow: 0 0 60px rgba(168, 85, 247, 0.6);
+            animation: pulse-fast 1s infinite alternate;
+        }
+
+        /* SPEAKING: Audio reactive simulation */
+        .state-speaking .orb-core {
+            background: #6366f1; /* Indigo for speaking */
+            box-shadow: 0 0 70px rgba(99, 102, 241, 0.5);
+            animation: speak-bounce 0.8s infinite ease-in-out;
+        }
+
+        @keyframes ripple {
+            0% { width: 80px; height: 80px; opacity: 0.8; border-width: 2px; }
+            100% { width: 400px; height: 400px; opacity: 0; border-width: 0px; }
+        }
+        @keyframes pulse-fast { 0% { opacity: 0.7; } 100% { opacity: 1; } }
+        @keyframes speak-bounce { 0%, 100% { transform: scale(1.1); } 50% { transform: scale(1.3); } }
+
+        /* --- UI LAYER --- */
+        .ui-layer {
+            position: absolute;
+            bottom: 50px;
+            width: 100%;
+            text-align: center;
+            z-index: 20;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 20px;
+        }
+
+        .timer {
+            font-family: 'Inter', monospace;
+            font-size: 14px;
+            color: var(--secondary);
+            letter-spacing: 2px;
+            margin-bottom: 20px;
+            opacity: 0;
+            transition: opacity 1s;
+        }
+        .timer.visible { opacity: 1; }
+
+        /* Upload Button */
+        .upload-btn {
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            padding: 15px 30px;
+            border-radius: 30px;
+            color: white;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.3s;
+            backdrop-filter: blur(10px);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .upload-btn:hover { background: rgba(255, 255, 255, 0.2); transform: translateY(-2px); }
+        input[type="file"] { display: none; }
+
+        /* Control Buttons */
+        .control-btn {
+            background: transparent;
+            border: 1px solid var(--secondary);
+            color: var(--secondary);
+            padding: 10px 24px;
+            border-radius: 20px;
+            font-size: 12px;
+            cursor: pointer;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            transition: 0.3s;
+        }
+        .control-btn:hover { border-color: white; color: white; }
+        .control-btn.danger:hover { border-color: #ef4444; color: #ef4444; }
+
+        /* Modal */
+        .modal {
+            position: fixed; top:0; left:0; width:100%; height:100%;
+            background: rgba(0,0,0,0.95);
+            display: none; align-items: center; justify-content: center; z-index: 100;
+        }
+        .modal-content {
+            background: #111; border: 1px solid #333; padding: 40px;
+            border-radius: 24px; max-width: 600px; width: 85%;
+            color: #ccc; line-height: 1.6;
+        }
+        
+        .hidden { display: none !important; }
+    </style>
 </head>
-
 <body>
 
-<div class="orb-wrapper">
-<div id="orb" class="orb idle"></div>
-</div>
+    <div class="orb-stage state-idle" id="orbStage">
+        <div class="wave" style="animation-delay: 0s;"></div>
+        <div class="wave" style="animation-delay: 1s;"></div>
+        <div class="wave" style="animation-delay: 2s;"></div>
+        <div class="orb-core"></div>
+    </div>
 
-<div class="interface">
-<h3 id="status">AI INTERVIEWER</h3>
-<div id="timer">15:00</div>
-<div id="transcript" class="transcript">Upload resume to begin</div>
+    <div class="ui-layer">
+        
+        <div id="setupUI">
+            <h1 style="font-weight: 300; font-size: 18px; margin-bottom: 30px; color: #666;">AI INTERVIEWER</h1>
+            <label class="upload-btn">
+                <span>Upload Resume (PDF)</span>
+                <input type="file" id="cvInput" accept=".pdf">
+            </label>
+        </div>
 
-<input type="file" id="cvInput" accept=".pdf" />
-<br><br>
-<button id="startBtn" class="btn btn-primary hidden">Start Interview</button>
-<button id="endBtn" class="btn btn-danger hidden">End Interview</button>
-</div>
+        <div id="activeUI" class="hidden">
+            <div id="timer" class="timer">15:00</div>
+            <button id="endBtn" class="control-btn danger">End Session</button>
+        </div>
+
+    </div>
+
+    <div id="reportModal" class="modal">
+        <div class="modal-content">
+            <h2 style="color:white; margin-top:0;">Evaluation Report</h2>
+            <div id="reportText" style="white-space: pre-wrap;"></div>
+            <button onclick="location.reload()" class="control-btn" style="margin-top:20px; width:100%; border-color:white; color:white;">New Session</button>
+        </div>
+    </div>
 
 <script>
-const API_URL="https://evalis-ai.simpaticohrconsultancy.workers.dev";
+    // --- CONFIGURATION ---
+    const API_URL = "https://evalis-ai.simpaticohrconsultancy.workers.dev";
+    pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+    const isAndroid = typeof Android !== "undefined";
 
-const state={
-active:false,aiSpeaking:false,history:[],cvText:"",
-timeLeft:900,timer:null,recognition:null,synth:window.speechSynthesis,
-silence:null
-};
+    // --- STATE MANAGEMENT ---
+    let state = {
+        cvText: "",
+        history: [],
+        timeLeft: 900,
+        isListening: false
+    };
 
-const orb=document.getElementById("orb");
-const status=document.getElementById("status");
-const transcript=document.getElementById("transcript");
-const timerEl=document.getElementById("timer");
+    const orbStage = document.getElementById('orbStage');
+    const timerDisplay = document.getElementById('timer');
 
-function setOrb(mode){
-orb.className="orb "+mode;
-status.textContent=
-mode==="listening"?"Listening…":
-mode==="speaking"?"AI Speaking":
-mode==="thinking"?"Processing…":"AI INTERVIEWER";
-}
+    // --- VISUAL CONTROLLER ---
+    function setVisualState(mode) {
+        // modes: 'idle', 'listening', 'thinking', 'speaking'
+        orbStage.className = 'orb-stage state-' + mode;
+    }
 
-function startTimer(){
-state.timer=setInterval(()=>{
-if(!state.active)return;
-if(state.timeLeft<=0){endSession();return;}
-state.timeLeft--;
-const m=Math.floor(state.timeLeft/60);
-const s=state.timeLeft%60;
-timerEl.textContent=`${m}:${s<10?"0"+s:s}`;
-},1000);
-}
+    // --- WAKE LOCK (Keep screen on) ---
+    let wakeLock = null;
+    async function requestWakeLock() {
+        if ('wakeLock' in navigator) {
+            try { wakeLock = await navigator.wakeLock.request("screen"); } 
+            catch (err) { console.log('Wake Lock error:', err); }
+        }
+    }
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') requestWakeLock();
+    });
+    requestWakeLock();
 
-function hideTranscript(){
-setTimeout(()=>{transcript.textContent="";transcript.classList.add("fade")},1200);
-}
+    // --- CORE LOGIC ---
 
-function speak(text){
-state.synth.cancel();
-const u=new SpeechSynthesisUtterance(text.replace(/[*#]/g,""));
-u.rate=1.1;
-u.onstart=()=>{state.aiSpeaking=true;setOrb("speaking");transcript.classList.add("fade")};
-u.onend=()=>{state.aiSpeaking=false;setOrb("listening")};
-state.synth.speak(u);
-}
+    // 1. LISTENING
+    function startListening() {
+        state.isListening = true;
+        setVisualState('listening');
+        
+        if (isAndroid) {
+            Android.startInterview();
+        } else {
+            try { recognition.start(); } catch(e) {}
+        }
+    }
 
-async function sendToAI(text){
-setOrb("thinking");
-state.history.push({role:"user",content:text});
-hideTranscript();
+    // 2. SPEAKING
+    function speak(text) {
+        state.isListening = false;
+        setVisualState('speaking');
 
-const fd=new FormData();
-fd.append("mode","interview");
-fd.append("history",JSON.stringify(state.history));
-fd.append("text",text);
-fd.append("cvText",state.cvText);
+        if (isAndroid) {
+            Android.speak(text);
+        } else {
+            // PC: Interruptible Speech
+            window.speechSynthesis.cancel(); // Stop previous
+            const utterance = new SpeechSynthesisUtterance(text);
+            
+            // Voice Selection (Prefer Natural)
+            const voices = window.speechSynthesis.getVoices();
+            const preferred = voices.find(v => v.name.includes('Google US English') || v.name.includes('Natural') || v.name.includes('Samantha'));
+            if(preferred) utterance.voice = preferred;
+            
+            utterance.rate = 1.1;
+            utterance.onend = () => {
+                if(state.history.length > 0) onFinishedSpeaking();
+            };
+            window.speechSynthesis.speak(utterance);
+        }
+    }
 
-try{
-const r=await fetch(API_URL,{method:"POST",body:fd});
-const d=await r.json();
-state.history=d.history;
-speak(d.reply);
-}catch{ speak("Could you repeat that?") }
-}
+    // 3. PROCESSING
+    async function handleUserResponse(transcript) {
+        if (!transcript.trim()) return;
 
-function initSpeech(){
-const R=window.SpeechRecognition||window.webkitSpeechRecognition;
-const rec=new R();
-rec.continuous=true;
-rec.interimResults=true;
-rec.lang="en-US";
+        // PC: If user spoke, ensure TTS is cancelled (Barge-in)
+        if (!isAndroid) window.speechSynthesis.cancel();
 
-rec.onresult=e=>{
-let final="",interim="";
-for(let i=e.resultIndex;i<e.results.length;i++){
-if(e.results[i].isFinal)final+=e.results[i][0].transcript;
-else interim+=e.results[i][0].transcript;
-}
-if(state.aiSpeaking && (interim.length>5||final)){
-state.synth.cancel();
-state.aiSpeaking=false;
-setOrb("listening");
-}
-if(interim){transcript.textContent=interim;transcript.classList.remove("fade")}
-if(final){
-clearTimeout(state.silence);
-state.silence=setTimeout(()=>sendToAI(final),800);
-}
-};
+        setVisualState('thinking');
 
-rec.onend=()=>{if(state.active)rec.start()};
-rec.start();
-return rec;
-}
+        const fd = new FormData();
+        fd.append("mode", "interview");
+        fd.append("history", JSON.stringify(state.history));
+        fd.append("text", transcript);
+        fd.append("cvText", state.cvText);
 
-async function startSession(){
-state.active=true;
-document.getElementById("startBtn").classList.add("hidden");
-document.getElementById("endBtn").classList.remove("hidden");
-state.recognition=initSpeech();
-startTimer();
+        try {
+            const res = await fetch(API_URL, { method: "POST", body: fd });
+            const data = await res.json();
+            state.history = data.history;
+            speak(data.reply);
+        } catch (e) {
+            // Silent retry on network error
+            setTimeout(() => startListening(), 1000);
+        }
+    }
 
-try{await navigator.wakeLock?.request("screen")}catch{}
+    // --- BRIDGE CALLBACKS ---
+    window.onRecognitionResult = (text) => handleUserResponse(text);
+    
+    window.onFinishedSpeaking = () => {
+        // Seamless transition back to listening
+        startListening();
+    };
 
-const fd=new FormData();
-fd.append("mode","start");
-fd.append("cvText",state.cvText);
-const r=await fetch(API_URL,{method:"POST",body:fd});
-const d=await r.json();
-state.history=d.history;
-speak(d.reply);
-}
+    // --- PC SPEECH SETUP ---
+    let recognition;
+    if (!isAndroid) {
+        const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (Recognition) {
+            recognition = new Recognition();
+            recognition.continuous = false; // False + Restart is more robust than True
+            recognition.interimResults = false; 
+            recognition.lang = 'en-US';
 
-function endSession(){
-state.active=false;
-clearInterval(state.timer);
-state.synth.cancel();
-state.recognition?.stop();
-location.reload();
-}
+            recognition.onresult = (e) => {
+                const text = e.results[0][0].transcript;
+                handleUserResponse(text);
+            };
 
-document.getElementById("cvInput").onchange=async e=>{
-const f=e.target.files[0];
-if(!f)return;
-const b=await f.arrayBuffer();
-const pdf=await pdfjsLib.getDocument(b).promise;
-let t="";
-for(let i=1;i<=pdf.numPages;i++){
-const p=await pdf.getPage(i);
-const c=await p.getTextContent();
-t+=c.items.map(x=>x.str).join(" ");
-}
-state.cvText=t;
-document.getElementById("startBtn").classList.remove("hidden");
-transcript.textContent="Resume loaded ✓";
-};
+            // Auto-restart if silence (simulate continuous listening)
+            recognition.onend = () => {
+                if (state.isListening && !orbStage.classList.contains('state-speaking') && !orbStage.classList.contains('state-thinking')) {
+                    recognition.start();
+                }
+            };
+        }
+    }
 
-document.getElementById("startBtn").onclick=startSession;
-document.getElementById("endBtn").onclick=endSession;
+    // --- APP FLOW ---
+    
+    // Step 1: File Upload
+    document.getElementById('cvInput').onchange = async (e) => {
+        const file = e.target.files[0];
+        if(!file) return;
+
+        // Visual feedback
+        const btn = document.querySelector('.upload-btn');
+        btn.innerHTML = "Processing...";
+        btn.style.opacity = "0.7";
+
+        // Parse PDF
+        const buffer = await file.arrayBuffer();
+        const pdf = await pdfjsLib.getDocument(buffer).promise;
+        let fullText = "";
+        for (let i = 1; i <= pdf.numPages; i++) {
+            const page = await pdf.getPage(i);
+            const textContent = await page.getTextContent();
+            fullText += textContent.items.map(s => s.str).join(" ");
+        }
+        state.cvText = fullText;
+
+        // Start Interview Immediately
+        startSession();
+    };
+
+    // Step 2: Session Start
+    async function startSession() {
+        document.getElementById('setupUI').classList.add('hidden');
+        document.getElementById('activeUI').classList.remove('hidden');
+        document.getElementById('timer').classList.add('visible');
+
+        // Start Timer
+        const interval = setInterval(() => {
+            state.timeLeft--;
+            const m = Math.floor(state.timeLeft / 60);
+            const s = state.timeLeft % 60;
+            timerDisplay.textContent = `${m}:${s < 10 ? '0'+s : s}`;
+            if(state.timeLeft <= 0) { clearInterval(interval); finishSession(); }
+        }, 1000);
+
+        setVisualState('thinking');
+
+        // Initial AI Handshake
+        const fd = new FormData();
+        fd.append("mode", "start");
+        fd.append("cvText", state.cvText);
+
+        try {
+            const res = await fetch(API_URL, { method: "POST", body: fd });
+            const data = await res.json();
+            state.history = data.history;
+            speak(data.reply);
+        } catch (e) {
+            alert("Connection Error. Please refresh.");
+        }
+    }
+
+    // Step 3: End Session
+    document.getElementById('endBtn').onclick = finishSession;
+
+    async function finishSession() {
+        state.isListening = false;
+        if(!isAndroid && recognition) recognition.stop();
+        if(!isAndroid) window.speechSynthesis.cancel();
+
+        document.getElementById('activeUI').classList.add('hidden');
+        setVisualState('thinking'); // Shows it's calculating score
+
+        const fd = new FormData();
+        fd.append("mode", "score");
+        fd.append("history", JSON.stringify(state.history));
+
+        try {
+            const res = await fetch(API_URL, { method: "POST", body: fd });
+            const data = await res.json();
+            document.getElementById('reportText').textContent = data.reply;
+            document.getElementById('reportModal').style.display = 'flex';
+        } catch(e) {
+            console.error(e);
+        }
+    }
 </script>
 </body>
 </html>
