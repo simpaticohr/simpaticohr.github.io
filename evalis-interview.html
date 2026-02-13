@@ -1,240 +1,365 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
-<title>Evalis AI · Elite Interview</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>simpaticoai | Intel ligent Interviewer</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg: #05050a;
+            --surface: #0f1016;
+            --primary: #6366f1;
+            --accent: #a855f7;
+            --text: #e2e8f0;
+            --text-dim: #64748b;
+        }
 
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+        body {
+            margin: 0;
+            background: var(--bg);
+            color: var(--text);
+            font-family: 'Inter', sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            overflow: hidden;
+        }
 
-<style>
-:root{--bg:#000;--accent:#3b82f6;--good:#22c55e;--warn:#f59e0b;--bad:#ef4444}
-*{box-sizing:border-box}
-body{
-  margin:0;height:100vh;background:#000;color:#fff;
-  font-family:Inter;display:flex;flex-direction:column;
-  align-items:center;justify-content:center
-}
-.stage{height:50vh;display:flex;align-items:center;justify-content:center}
-.orb{
-  width:110px;height:110px;border-radius:50%;
-  background:#fff;transition:.35s ease;
-  box-shadow:0 0 60px rgba(255,255,255,.25)
-}
-.mode-listening .orb{background:var(--good)}
-.mode-thinking .orb{background:var(--warn);transform:scale(.9)}
-.mode-speaking .orb{background:var(--accent)}
-.ui{position:absolute;bottom:0;width:100%;padding:28px;text-align:center}
-.status{opacity:.7;margin-bottom:10px}
-.timer{font-size:38px;opacity:0;transition:.4s}
-.timer.active{opacity:1}
-.btn{
-  background:rgba(255,255,255,.1);
-  border:1px solid rgba(255,255,255,.2);
-  padding:14px 30px;border-radius:30px;
-  color:#fff;cursor:pointer
-}
-.btn-red{border-color:var(--bad);background:rgba(239,68,68,.15)}
-.hidden{display:none}
-.modal{
-  position:fixed;inset:0;background:rgba(0,0,0,.96);
-  display:none;align-items:center;justify-content:center
-}
-.modal.visible{display:flex}
-.card{
-  background:#111;border:1px solid #333;border-radius:22px;
-  padding:26px;width:90%;max-width:520px
-}
-.score{
-  width:90px;height:90px;border-radius:50%;
-  border:4px solid var(--accent);
-  display:flex;align-items:center;justify-content:center;
-  font-size:28px;margin:0 auto 20px
-}
-</style>
+        /* --- THE ORB --- */
+        .orb-container { position: relative; width: 200px; height: 200px; display: flex; align-items: center; justify-content: center; margin-bottom: 40px; }
+        .orb {
+            width: 120px; height: 120px;
+            background: linear-gradient(135deg, var(--primary), var(--accent));
+            border-radius: 50%;
+            box-shadow: 0 0 60px rgba(99, 102, 241, 0.4);
+            position: relative; z-index: 2;
+            transition: all 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+        }
+
+        /* Animation States */
+        .orb.idle { animation: breathe 4s ease-in-out infinite; }
+        .orb.listening { 
+            background: linear-gradient(135deg, #22c55e, #10b981);
+            box-shadow: 0 0 60px rgba(34, 197, 94, 0.4);
+            animation: pulse-green 1.5s infinite;
+        }
+        .orb.thinking {
+            background: linear-gradient(135deg, #f59e0b, #d97706);
+            box-shadow: 0 0 60px rgba(245, 158, 11, 0.4);
+            animation: spin 1.5s linear infinite;
+            border-radius: 40%;
+        }
+        .orb.speaking {
+            animation: breathe-fast 1s ease-in-out infinite;
+        }
+
+        .ring { position: absolute; border-radius: 50%; border: 1px solid rgba(255, 255, 255, 0.05); top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 1; }
+        .ring:nth-child(1) { width: 200px; height: 200px; animation: spin 10s linear infinite; border-color: rgba(99, 102, 241, 0.1); }
+        .ring:nth-child(2) { width: 300px; height: 300px; animation: spin-rev 15s linear infinite; border-style: dashed; }
+        
+        .interface { width: 100%; max-width: 500px; text-align: center; z-index: 10; }
+        h1 { font-weight: 300; margin-bottom: 5px; font-size: 1.5rem; }
+        .status-pill { display: inline-block; padding: 6px 16px; background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 50px; font-size: 0.85rem; color: var(--text-dim); margin-bottom: 30px; backdrop-filter: blur(5px); }
+        .timer { font-family: monospace; color: var(--text-dim); margin-top: 10px; opacity: 0; }
+        .timer.active { opacity: 1; }
+
+        .btn { background: var(--surface); color: var(--text); border: 1px solid rgba(255, 255, 255, 0.1); padding: 12px 24px; border-radius: 12px; cursor: pointer; font-weight: 600; margin-top: 10px; }
+        .btn-primary { background: var(--primary); border-color: var(--primary); }
+        .file-trigger { border: 2px dashed rgba(255, 255, 255, 0.2); padding: 30px; border-radius: 16px; cursor: pointer; display:block; color: var(--text-dim); }
+        .file-trigger:hover { border-color: var(--primary); color: var(--text); background: rgba(99, 102, 241, 0.05); }
+        input[type="file"] { display: none; }
+
+        @keyframes breathe { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.05); } }
+        @keyframes breathe-fast { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.15); } }
+        @keyframes pulse-green { 0% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.7); } 70% { box-shadow: 0 0 0 20px rgba(34, 197, 94, 0); } 100% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0); } }
+        @keyframes spin { 100% { transform: rotate(360deg); } }
+        @keyframes spin-rev { 100% { transform: rotate(0deg); } }
+
+        /* Modal */
+        .modal { position: fixed; top:0; left:0; width:100%; height:100%; background: rgba(0,0,0,0.9); display: none; align-items: center; justify-content: center; z-index: 100; }
+        .modal-content { background: var(--surface); padding: 40px; border-radius: 24px; max-width: 600px; border: 1px solid rgba(255,255,255,0.1); }
+    </style>
 </head>
+<body>
 
-<body class="mode-idle">
+    <div class="orb-container">
+        <div class="ring"></div>
+        <div class="ring"></div>
+        <div id="orb" class="orb idle"></div>
+    </div>
 
-<div class="stage"><div class="orb"></div></div>
+    <div class="interface">
+        <h1 id="mainTitle">Evalis AI</h1>
+        <div id="status" class="status-pill">Waiting for Resume</div>
+        
+        <div id="setupPanel">
+            <label class="file-trigger">
+                <span>📂 Upload PDF Resume</span>
+                <input type="file" id="cvInput" accept=".pdf">
+            </label>
+            <br>
+            <button id="startBtn" class="btn btn-primary" style="display:none; width:100%;">Start Interview</button>
+        </div>
 
-<div class="ui">
-  <div class="status" id="status">Ready for Elite Interview</div>
-  <div class="timer" id="timer">15:00</div>
+        <div id="activePanel" style="display:none;">
+            <button id="endBtn" class="btn btn-danger">End Session</button>
+            <div id="timer" class="timer">15:00</div>
+        </div>
+    </div>
 
-  <div id="startPanel">
-    <label class="btn">
-      Upload Resume
-      <input type="file" id="cvInput" accept=".pdf" hidden>
-    </label>
-  </div>
-
-  <div id="activePanel" class="hidden">
-    <button class="btn btn-red" id="endBtn">End Interview</button>
-  </div>
-</div>
-
-<div class="modal" id="reportModal">
-  <div class="card">
-    <div class="score" id="scoreValue">--</div>
-    <div id="reportText"></div>
-    <button class="btn" onclick="location.reload()" style="margin-top:20px;width:100%">Done</button>
-  </div>
-</div>
+    <div id="reportModal" class="modal">
+        <div class="modal-content">
+            <h2 style="color:var(--primary); margin-top:0;">Evaluation Report</h2>
+            <div id="reportText" style="line-height: 1.6; color: var(--text-dim); white-space: pre-wrap;"></div>
+            <button onclick="location.reload()" class="btn btn-primary" style="margin-top:20px; width:100%;">Start New Session</button>
+        </div>
+    </div>
 
 <script>
-document.addEventListener("DOMContentLoaded",()=>{
+    // --- CONFIGURATION ---
+    const API_URL = "https://evalis-ai.simpaticohrconsultancy.workers.dev";
+    pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
 
-/* ========= CONFIG ========= */
-const API="https://evalis-ai.simpaticohrconsultancy.workers.dev";
-pdfjsLib.GlobalWorkerOptions.workerSrc =
-"https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+    // --- DETECT PLATFORM ---
+    // Checks if the 'Android' interface is injected by WebView
+    const isAndroid = typeof Android !== "undefined";
 
-/* ========= PLATFORM ========= */
-const isAndroid=typeof Android!=="undefined";
-const hasWebSpeech="webkitSpeechRecognition"in window;
+    // --- STATE ---
+    let state = {
+        cvText: "",
+        history: [],
+        timeLeft: 900 // 15 mins
+    };
 
-/* ========= STATE ========= */
-const State={IDLE:"idle",LISTENING:"listening",THINKING:"thinking",SPEAKING:"speaking"};
-let app={state:State.IDLE,active:false,cv:"",history:[],time:900};
+    // --- DOM ELEMENTS ---
+    const orb = document.getElementById('orb');
+    const status = document.getElementById('status');
+    const timerDisplay = document.getElementById('timer');
 
-/* ========= UI ========= */
-const statusEl=document.getElementById("status");
-const timerEl=document.getElementById("timer");
+    // --- UNIFIED VISUAL UPDATES ---
+    function setOrbState(mode) {
+        // modes: 'idle', 'listening', 'thinking', 'speaking'
+        orb.className = 'orb ' + mode;
+        
+        if(mode === 'listening') status.textContent = "Listening...";
+        else if(mode === 'thinking') status.textContent = "Analysing response...";
+        else if(mode === 'speaking') status.textContent = "AI Speaking...";
+        else status.textContent = "Ready";
+    }
 
-function setMode(m){
-  app.state=m;
-  document.body.className="mode-"+m;
-  const map={
-    idle:"Ready",
-    listening:"Listening…",
-    thinking:"Analyzing…",
-    speaking:"Interviewer Speaking"
-  };
-  if(statusEl) statusEl.textContent=map[m];
+    // --- CORE INTERFACE FUNCTIONS (The Bridge) ---
+
+    // 1. START LISTENING
+    function startListening() {
+        setOrbState('listening');
+        if (isAndroid) {
+            // Call Android Java Method
+            Android.startInterview(); 
+        } else {
+            // Use Web API for PC
+            try {
+                recognition.start();
+            } catch(e) { /* ignore if already started */ }
+        }
+    }
+
+    // 2. SPEAK TEXT
+    function speak(text) {
+        setOrbState('speaking');
+        if (isAndroid) {
+            // Call Android Java Method
+            Android.speak(text);
+        } else {
+            // Use Web API for PC
+            const utterance = new SpeechSynthesisUtterance(text);
+            const voices = window.speechSynthesis.getVoices();
+            const preferred = voices.find(v => v.name.includes('Google US English') || v.name.includes('Natural'));
+            if(preferred) utterance.voice = preferred;
+            utterance.rate = 1.1;
+            
+            utterance.onend = () => {
+                onFinishedSpeaking(); // Trigger the loop manually on PC
+            };
+            window.speechSynthesis.speak(utterance);
+        }
+    }
+
+    // 3. HANDLE RESULTS (Called by PC or Android)
+    async function handleUserResponse(transcript) {
+        if (!transcript.trim()) return;
+
+        setOrbState('thinking');
+        
+        // Prepare Data
+        const fd = new FormData();
+        fd.append("mode", "interview");
+        fd.append("history", JSON.stringify(state.history));
+        fd.append("text", transcript);
+        fd.append("cvText", state.cvText);
+
+        try {
+            const res = await fetch(API_URL, { method: "POST", body: fd });
+            const data = await res.json();
+            
+            state.history = data.history;
+            speak(data.reply);
+        } catch (e) {
+            console.error(e);
+            status.textContent = "Connection Error. Retrying...";
+            setTimeout(() => startListening(), 2000);
+        }
+    }
+
+    // --- ANDROID SPECIFIC CALLBACKS ---
+    // These functions must be global so Android can find them via "javascript:on..."
+
+    window.onRecognitionResult = (text) => {
+        handleUserResponse(text);
+    };
+
+    window.onFinishedSpeaking = () => {
+        // When AI stops talking, we start listening again
+        if(state.history.length > 0) {
+            startListening();
+        }
+    };
+
+    // --- PC SPECIFIC SETUP (Web Speech API) ---
+    let recognition;
+    if (!isAndroid) {
+        const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (Recognition) {
+            recognition = new Recognition();
+            recognition.continuous = false;
+            recognition.lang = 'en-US';
+            
+            recognition.onresult = (event) => {
+                const text = event.results[0][0].transcript;
+                handleUserResponse(text);
+            };
+            
+            recognition.onerror = (e) => {
+                console.log("Web Speech Error", e);
+                // Simple retry for PC
+                setTimeout(() => { if(orb.classList.contains('listening')) recognition.start(); }, 500);
+            };
+        } else {
+            status.textContent = "Browser not supported (Use Chrome)";
+        }
+    }
+
+    // --- FILE UPLOAD & START ---
+    document.getElementById('cvInput').onchange = async (e) => {
+        const file = e.target.files[0];
+        if(!file) return;
+        
+        status.textContent = "Reading Resume...";
+        const buffer = await file.arrayBuffer();
+        const pdf = await pdfjsLib.getDocument(buffer).promise;
+        
+        let fullText = "";
+        for (let i = 1; i <= pdf.numPages; i++) {
+            const page = await pdf.getPage(i);
+            const textContent = await page.getTextContent();
+            fullText += textContent.items.map(s => s.str).join(" ");
+        }
+        
+        state.cvText = fullText;
+        status.textContent = "Resume Loaded";
+        document.getElementById('startBtn').style.display = "block";
+    };
+
+
+    document.getElementById('startBtn').onclick = async () => {
+        document.getElementById('setupPanel').style.display = 'none';
+        document.getElementById('activePanel').style.display = 'block';
+        document.getElementById('timer').classList.add('active');
+        
+        // Start Timer
+        let timerInterval = setInterval(() => {
+            if(state.timeLeft <= 0) {
+                finishSession();
+                clearInterval(timerInterval);
+            }
+            state.timeLeft--;
+            const m = Math.floor(state.timeLeft / 60);
+            const s = state.timeLeft % 60;
+            timerDisplay.textContent = `${m}:${s < 10 ? '0'+s : s}`;
+        }, 1000);
+
+        // Initial AI Interaction
+        setOrbState('thinking');
+        
+        const fd = new FormData();
+        fd.append("mode", "start");
+        fd.append("cvText", state.cvText);
+        
+        try {
+            const res = await fetch(API_URL, { method: "POST", body: fd });
+            const data = await res.json();
+            state.history = data.history;
+            speak(data.reply);
+        } catch (e) {
+            alert("Could not connect to AI Server.");
+        }
+    };
+
+    document.getElementById('endBtn').onclick = finishSession;
+
+    async function finishSession() {
+        if(!isAndroid) window.speechSynthesis.cancel();
+        
+        document.getElementById('activePanel').style.display = 'none';
+        setOrbState('thinking');
+        status.textContent = "Generating Final Score...";
+        
+        const fd = new FormData();
+        fd.append("mode", "score");
+        fd.append("history", JSON.stringify(state.history));
+        
+        try {
+            const res = await fetch(API_URL, { method: "POST", body: fd });
+            const data = await res.json();
+            
+            document.getElementById('reportText').textContent = data.reply;
+            document.getElementById('reportModal').style.display = 'flex';
+        } catch(e) {
+            console.error(e);
+        }
+    }
+let wakeLock = null;
+
+async function requestWakeLock() {
+    try {
+        wakeLock = await navigator.wakeLock.request("screen");
+        console.log('Wake Lock is active');
+    } catch (err) {
+        console.error('Wake Lock request failed:', err);
+    }
 }
 
-/* ========= SPEECH OUT ========= */
-const synth=window.speechSynthesis;
-function speak(text){
-  setMode(State.SPEAKING);
-  if(isAndroid){ Android.speak(text); return; }
-  synth.cancel();
-  const u=new SpeechSynthesisUtterance(text);
-  u.rate=1.05;
-  u.onend=()=>onSpeechEnd();
-  synth.speak(u);
-}
-function onSpeechEnd(){ if(app.active) listen(); }
-
-/* ========= SPEECH IN ========= */
-let recog=null;
-if(!isAndroid&&hasWebSpeech){
-  recog=new webkitSpeechRecognition();
-  recog.lang="en-US";
-  recog.continuous=false;
-  recog.onresult=e=>onUser(e.results[0][0].transcript);
-  recog.onerror=()=>app.active&&setTimeout(()=>recog.start(),400);
-  recog.onend=()=>app.active&&app.state===State.LISTENING&&setTimeout(()=>recog.start(),300);
-}
-
-function listen(){
-  if(!app.active) return;
-  setMode(State.LISTENING);
-  if(isAndroid) Android.startInterview();
-  else if(recog) try{recog.start()}catch{}
-}
-function stopListen(){ if(recog) try{recog.stop()}catch{} }
-
-/* ========= CORE LOOP ========= */
-async function send(mode,text=""){
-  setMode(State.THINKING);
-  const fd=new FormData();
-  fd.append("mode",mode);
-  fd.append("cvText",app.cv);
-  fd.append("history",JSON.stringify(app.history));
-  if(text) fd.append("text",text);
-
-  try{
-    const r=await fetch(API,{method:"POST",body:fd});
-    const d=await r.json();
-    if(d.reply){
-      app.history.push({role:"assistant",content:d.reply});
-      speak(d.reply);
-    }else speak("Please continue.");
-  }catch{
-    speak("Connection issue. Please continue.");
-  }
-}
-
-function onUser(text){
-  if(!text||!text.trim()) return listen();
-  stopListen();
-  app.history.push({role:"user",content:text});
-  send("interview",text);
-}
-
-/* ========= SESSION ========= */
-async function start(file){
-  if(!window.pdfjsLib){ alert("PDF engine failed."); return; }
-  app.active=true; setMode(State.THINKING);
-
-  const buf=await file.arrayBuffer();
-  const pdf=await pdfjsLib.getDocument(buf).promise;
-  for(let i=1;i<=pdf.numPages;i++){
-    const p=await pdf.getPage(i);
-    const t=await p.getTextContent();
-    app.cv+=t.items.map(x=>x.str).join(" ");
-  }
-
-  timerEl.classList.add("active");
-  setInterval(()=>{
-    if(!app.active) return;
-    app.time--;
-    timerEl.textContent=
-      Math.floor(app.time/60)+":"+String(app.time%60).padStart(2,"0");
-  },1000);
-
-  send("start");
-}
-
-async function end(){
-  app.active=false; stopListen(); setMode(State.THINKING);
-  const fd=new FormData();
-  fd.append("mode","score");
-  fd.append("history",JSON.stringify(app.history));
-  const r=await fetch(API,{method:"POST",body:fd});
-  showReport(await r.json());
-}
-
-/* ========= REPORT ========= */
-function showReport(r){
-  const avg=Math.round((r.technical_score+r.communication_score)/2);
-  document.getElementById("scoreValue").textContent=avg;
-  document.getElementById("reportText").innerHTML=`
-    <b>Technical:</b> ${r.technical_score}<br><br>
-    <b>Communication:</b> ${r.communication_score}<br><br>
-    <b>Strengths</b><ul>${r.strengths.map(x=>`<li>${x}</li>`).join("")}</ul>
-    <b>Gaps</b><ul>${r.gaps.map(x=>`<li>${x}</li>`).join("")}</ul>
-    <b>Verdict:</b> <b>${r.verdict}</b>
-  `;
-  document.getElementById("reportModal").classList.add("visible");
-}
-
-/* ========= ANDROID ========= */
-window.onRecognitionResult=t=>onUser(t);
-window.onFinishedSpeaking=()=>onSpeechEnd();
-
-/* ========= WAKE LOCK ========= */
-let wl=null;
-navigator.wakeLock?.request("screen").then(l=>wl=l).catch(()=>{});
-
-/* ========= BINDINGS ========= */
-document.getElementById("cvInput").onchange=e=>start(e.target.files[0]);
-document.getElementById("endBtn").onclick=end;
-
+// Request the wake lock when the page is active
+document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+        requestWakeLock();
+    } else {
+        if (wakeLock) {
+            wakeLock.release().then(() => {
+                wakeLock = null;
+                console.log('Wake Lock released');
+            });
+        }
+    }
 });
+
+// Request the wake lock initially when the page loads
+requestWakeLock();
+
 </script>
+
 </body>
 </html>
