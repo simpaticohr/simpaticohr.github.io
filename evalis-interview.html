@@ -3,405 +3,310 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Evalis AI | Executive Interview</title>
+    <title>Evalis AI | Next-Gen Interview</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
     <style>
         :root {
-            --bg: #000000;
-            --surface: #0a0a0a;
-            --border: #1f1f1f;
-            --primary: #ffffff;
-            --secondary: #666666;
-            --accent: #3b82f6;
-            --danger: #ef4444;
-            --glow: rgba(59, 130, 246, 0.5);
+            --bg: #030305;
+            --surface: #0f1016;
+            --primary: #6366f1;
+            --accent: #a855f7;
+            --text: #f8fafc;
+            --text-dim: #94a3b8;
         }
-
-        * { box-sizing: border-box; outline: none; -webkit-tap-highlight-color: transparent; }
 
         body {
-            margin: 0; background: var(--bg); color: var(--primary);
-            font-family: 'Inter', sans-serif; height: 100vh; overflow: hidden;
+            margin: 0; background: var(--bg); color: var(--text);
+            font-family: 'Inter', sans-serif; height: 100vh;
             display: flex; flex-direction: column; align-items: center; justify-content: center;
+            overflow: hidden;
         }
 
-        /* --- THE ORB (Clickable for Reset) --- */
-        .stage {
-            position: relative; width: 100%; height: 50vh;
-            display: flex; align-items: center; justify-content: center;
-            z-index: 10;
+        /* --- THE ORB & VISUALIZER --- */
+        .orb-container { position: relative; width: 300px; height: 300px; display: flex; align-items: center; justify-content: center; }
+        
+        #visualizer-canvas {
+            position: absolute; width: 100%; height: 100%;
+            z-index: 1; pointer-events: none;
         }
 
         .orb {
-            width: 110px; height: 110px; border-radius: 50%;
-            background: #fff;
-            box-shadow: 0 0 60px rgba(255,255,255,0.2);
-            position: relative; z-index: 20;
-            transition: all 0.4s cubic-bezier(0.25, 0.8, 0.25, 1);
-            cursor: pointer; /* Indicates it's interactive */
+            width: 130px; height: 130px;
+            background: linear-gradient(135deg, var(--primary), var(--accent));
+            border-radius: 50%;
+            box-shadow: 0 0 50px rgba(99, 102, 241, 0.3);
+            position: relative; z-index: 2;
+            transition: all 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275);
         }
 
-        .ring {
-            position: absolute; border-radius: 50%;
-            border: 1px solid rgba(255,255,255,0.05);
-            top: 50%; left: 50%; transform: translate(-50%, -50%);
-        }
-        .ring:nth-child(1) { width: 200px; height: 200px; animation: spin 20s linear infinite; }
-        .ring:nth-child(2) { width: 350px; height: 350px; border-color: rgba(255,255,255,0.03); animation: spin-rev 30s linear infinite; }
+        /* Mode Styles */
+        .listening .orb { transform: scale(1.1); background: #10b981; box-shadow: 0 0 70px rgba(16, 185, 129, 0.4); }
+        .thinking .orb { transform: scale(0.8); border-radius: 35%; animation: rotate 2s linear infinite; background: #f59e0b; }
+        .speaking .orb { animation: pulse 1s ease-in-out infinite; box-shadow: 0 0 80px rgba(168, 85, 247, 0.5); }
 
-        /* --- STATES --- */
-        .mode-idle .orb { transform: scale(1); opacity: 0.5; box-shadow: none; }
-        
-        /* Listening: Green Pulse */
-        .mode-listening .orb { 
-            transform: scale(1.1); background: #22c55e; 
-            box-shadow: 0 0 80px rgba(34, 197, 94, 0.3);
-            animation: pulse-green 2s infinite;
-        }
-        
-        /* Thinking: Amber Spin */
-        .mode-thinking .orb {
-            transform: scale(0.9); background: #f59e0b;
-            box-shadow: 0 0 60px rgba(245, 158, 11, 0.4);
-            animation: breathe 1s infinite alternate;
+        @keyframes rotate { 100% { transform: scale(0.8) rotate(360deg); } }
+        @keyframes pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.15); } }
+
+        /* --- UI ELEMENTS --- */
+        .interface { width: 90%; max-width: 400px; text-align: center; z-index: 10; margin-top: 20px; }
+        .status-pill { 
+            background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.1);
+            padding: 8px 20px; border-radius: 50px; font-size: 0.8rem; color: var(--text-dim);
+            text-transform: uppercase; letter-spacing: 1.5px; margin-bottom: 20px; display: inline-block;
         }
 
-        /* Speaking: Blue Glow */
-        .mode-speaking .orb {
-            transform: scale(1); background: var(--accent);
-            box-shadow: 0 0 100px var(--glow);
-            animation: speak-bounce 0.5s infinite alternate;
+        .timer { font-family: monospace; font-size: 1.5rem; color: var(--text-dim); margin-top: 10px; }
+        .btn { 
+            width: 100%; padding: 16px; border-radius: 12px; border: none;
+            font-weight: 600; cursor: pointer; transition: 0.3s; margin-top: 15px;
+        }
+        .btn-primary { background: var(--primary); color: white; box-shadow: 0 4px 15px rgba(99, 102, 241, 0.3); }
+        .btn-danger { background: rgba(239, 68, 68, 0.1); color: #ef4444; border: 1px solid rgba(239, 68, 68, 0.2); }
+
+        .file-upload { 
+            border: 2px dashed rgba(255, 255, 255, 0.1); padding: 40px 20px; border-radius: 20px;
+            cursor: pointer; color: var(--text-dim); display: block;
         }
 
-        @keyframes spin { 100% { transform: translate(-50%, -50%) rotate(360deg); } }
-        @keyframes spin-rev { 100% { transform: translate(-50%, -50%) rotate(-360deg); } }
-        @keyframes pulse-green { 0% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.7); } 70% { box-shadow: 0 0 0 20px rgba(34, 197, 94, 0); } 100% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0); } }
-        @keyframes speak-bounce { 0% { transform: scale(1); } 100% { transform: scale(1.05); } }
-
-        /* --- UI CONTROLS --- */
-        .interface {
-            position: absolute; bottom: 0; width: 100%; height: 40vh;
-            background: linear-gradient(to top, var(--bg) 20%, transparent);
-            display: flex; flex-direction: column; align-items: center; justify-content: flex-end;
-            padding-bottom: 50px; z-index: 30;
-        }
-
-        .status-text {
-            color: var(--secondary); font-size: 14px; letter-spacing: 1px;
-            margin-bottom: 20px; text-transform: uppercase; font-weight: 500;
-        }
-
-        .timer {
-            font-family: monospace; font-size: 32px; font-weight: 300; letter-spacing: -1px;
-            margin-bottom: 30px; opacity: 0; transform: translateY(20px); transition: 0.5s;
-        }
-        .timer.active { opacity: 1; transform: translateY(0); }
-
-        .btn-glass {
-            background: rgba(255, 255, 255, 0.08);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            color: #fff; padding: 16px 32px; border-radius: 50px;
-            font-size: 16px; font-weight: 500; cursor: pointer;
-            backdrop-filter: blur(12px); transition: all 0.2s;
-            display: flex; align-items: center; gap: 12px;
-        }
-        .btn-glass:hover { background: rgba(255, 255, 255, 0.15); transform: translateY(-2px); }
-        .btn-red { color: #ff8888; border-color: rgba(239, 68, 68, 0.3); background: rgba(239, 68, 68, 0.1); }
-
-        input[type="file"] { display: none; }
         .hidden { display: none !important; }
 
         /* Report Modal */
-        .modal {
-            position: fixed; top:0; left:0; width:100%; height:100%;
-            background: rgba(0,0,0,0.95); z-index: 100;
-            display: none; align-items: center; justify-content: center;
+        .modal { 
+            position: fixed; inset: 0; background: rgba(0,0,0,0.95); 
+            display: none; align-items: center; justify-content: center; z-index: 1000; padding: 20px;
         }
-        .modal-card {
-            background: #111; border: 1px solid #333; width: 90%; max-width: 500px;
-            padding: 30px; border-radius: 24px; max-height: 80vh; overflow-y: auto;
-        }
+        .modal-content { background: var(--surface); padding: 30px; border-radius: 24px; border: 1px solid #222; width: 100%; max-width: 500px; }
     </style>
 </head>
-<body class="mode-idle">
+<body>
 
-    <div class="stage" onclick="Engine.manualReset()">
-        <div class="ring"></div>
-        <div class="ring"></div>
-        <div class="orb" id="orb"></div>
+    <div class="orb-container" id="stage">
+        <canvas id="visualizer-canvas"></canvas>
+        <div id="orb" class="orb"></div>
     </div>
 
     <div class="interface">
-        <div id="status" class="status-text">Ready for Interview</div>
-        <div id="timer" class="timer">15:00</div>
-
-        <div id="startPanel">
-            <label class="btn-glass">
-                <span>Upload Resume (PDF)</span>
-                <input type="file" id="cvInput" accept=".pdf">
+        <div id="status" class="status-pill">Ready</div>
+        
+        <div id="setup-panel">
+            <label class="file-upload">
+                <span id="file-label">📂 Tap to upload Resume (PDF)</span>
+                <input type="file" id="cvInput" accept=".pdf" class="hidden">
             </label>
+            <button id="startBtn" class="btn btn-primary hidden">Begin Interview</button>
         </div>
 
-        <div id="activePanel" class="hidden">
-            <button id="endBtn" class="btn-glass btn-red">End Session</button>
+        <div id="active-panel" class="hidden">
+            <div id="timer" class="timer">15:00</div>
+            <button id="endBtn" class="btn btn-danger">End Session</button>
         </div>
     </div>
 
     <div id="reportModal" class="modal">
-        <div class="modal-card">
-            <h2 style="text-align:center; margin-top:0;">Evaluation Complete</h2>
-            <div id="reportText" style="color:#aaa; line-height:1.6; font-size:14px; white-space: pre-wrap;">Generating report...</div>
-            <button onclick="location.reload()" class="btn-glass" style="width:100%; justify-content:center; margin-top:20px;">Start New Session</button>
+        <div class="modal-content">
+            <h2 style="margin-top:0">Interview Report</h2>
+            <div id="reportText" style="white-space: pre-wrap; color: var(--text-dim); font-size: 0.9rem; line-height: 1.6;"></div>
+            <button onclick="location.reload()" class="btn btn-primary">Dismiss</button>
         </div>
     </div>
 
 <script>
-    /* --- CONFIGURATION --- */
     const API_URL = "https://evalis-ai.simpaticohrconsultancy.workers.dev";
     pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
     const isAndroid = typeof Android !== "undefined";
 
-    /* --- STATE MACHINE --- */
-    const State = { IDLE: 'idle', LISTENING: 'listening', THINKING: 'thinking', SPEAKING: 'speaking' };
-
-    let appState = {
-        mode: State.IDLE,
+    let state = {
         cvText: "",
         history: [],
         timeLeft: 900,
-        isActive: false
+        isStarted: false,
+        isThinking: false
     };
 
-    let timers = {
-        session: null,
-        watchdog: null // The "Anti-Freeze" timer
-    };
+    let timerInterval;
+    let audioContext, analyser, dataArray, canvas, ctx;
 
-    /* --- UI CONTROLLER --- */
-    const ui = {
-        body: document.body,
-        status: document.getElementById('status'),
-        timer: document.getElementById('timer'),
-        
-        setMode(mode) {
-            appState.mode = mode;
-            this.body.className = `mode-${mode}`;
+    // --- 1. THE SOUND WAVE (PRODUCTION Polish) ---
+    function initVisualizer() {
+        canvas = document.getElementById('visualizer-canvas');
+        ctx = canvas.getContext('2d');
+        canvas.width = 300;
+        canvas.height = 300;
+
+        navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
+            audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            const source = audioContext.createMediaStreamSource(stream);
+            analyser = audioContext.createAnalyser();
+            analyser.fftSize = 64;
+            source.connect(analyser);
             
-            if(mode === State.LISTENING) this.status.textContent = "Listening (Tap orb to reset)";
-            else if(mode === State.THINKING) this.status.textContent = "Processing...";
-            else if(mode === State.SPEAKING) this.status.textContent = "Interviewer Speaking";
-            else this.status.textContent = "Ready";
-        }
-    };
-
-    /* --- AUDIO ENGINE (ROBUST) --- */
-    const AudioEngine = {
-        recognition: null,
-        
-        init() {
-            if (!isAndroid && 'webkitSpeechRecognition' in window) {
-                this.recognition = new webkitSpeechRecognition();
-                this.recognition.continuous = false; 
-                this.recognition.interimResults = false;
-                this.recognition.lang = 'en-US';
-                
-                this.recognition.onresult = (e) => Engine.handleInput(e.results[0][0].transcript);
-                this.recognition.onerror = (e) => {
-                    console.log("Mic Error:", e);
-                    // If error occurs in listening mode, auto-restart
-                    if(appState.isActive && appState.mode === State.LISTENING) {
-                        setTimeout(() => this.startListening(), 500);
-                    }
-                };
-                this.recognition.onend = () => {
-                    // Critical: PC browsers stop after ~60s. Auto-restart if we should be listening.
-                    if (appState.isActive && appState.mode === State.LISTENING) {
-                        this.recognition.start();
-                    }
-                };
-            }
-        },
-
-        startListening() {
-            if (!appState.isActive || appState.mode === State.THINKING || appState.mode === State.SPEAKING) return;
-            
-            ui.setMode(State.LISTENING);
-            
-            // --- WATCHDOG: Restart mic if silence lasts > 8 seconds ---
-            clearTimeout(timers.watchdog);
-            timers.watchdog = setTimeout(() => {
-                if(appState.isActive && appState.mode === State.LISTENING) {
-                    console.log("Watchdog: Restarting listener...");
-                    this.stopListening();
-                    setTimeout(() => this.startListening(), 200);
-                }
-            }, 8000); // 8s safety check
-
-            if (isAndroid) {
-                try { Android.startInterview(); } catch(e) {}
-            } else if (this.recognition) {
-                try { this.recognition.start(); } catch(e) {}
-            }
-        },
-
-        stopListening() {
-            clearTimeout(timers.watchdog);
-            if (!isAndroid && this.recognition) this.recognition.stop();
-        },
-
-        speak(text) {
-            ui.setMode(State.SPEAKING);
-            this.stopListening(); 
-
-            if (isAndroid) {
-                Android.speak(text);
-            } else {
-                window.speechSynthesis.cancel();
-                const u = new SpeechSynthesisUtterance(text);
-                const voices = window.speechSynthesis.getVoices();
-                const preferred = voices.find(v => v.name.includes('Google US English') || v.name.includes('Natural'));
-                if(preferred) u.voice = preferred;
-                
-                u.rate = 1.0; // Normal speed
-                u.onend = () => Engine.onSpeechEnd();
-                
-                // Safety: If speaking takes too long (browser bug), force end
-                setTimeout(() => { if(appState.mode === State.SPEAKING) Engine.onSpeechEnd(); }, 30000);
-                
-                window.speechSynthesis.speak(u);
-            }
-        }
-    };
-
-    /* --- LOGIC ENGINE --- */
-    const Engine = {
-        async startSession(file) {
-            document.getElementById('startPanel').classList.add('hidden');
-            document.getElementById('activePanel').classList.remove('hidden');
-            ui.timer.classList.add('active');
-            
-            // PDF Parsing
-            try {
-                const buffer = await file.arrayBuffer();
-                const pdf = await pdfjsLib.getDocument(buffer).promise;
-                let fullText = "";
-                for (let i = 1; i <= pdf.numPages; i++) {
-                    const page = await pdf.getPage(i);
-                    const txt = await page.getTextContent();
-                    fullText += txt.items.map(s => s.str).join(" ");
-                }
-                appState.cvText = fullText;
-            } catch(e) {
-                alert("Error reading PDF. Please try again.");
-                location.reload();
-                return;
-            }
-
-            appState.isActive = true;
-
-            // Global Session Timer
-            timers.session = setInterval(() => {
-                appState.timeLeft--;
-                const m = Math.floor(appState.timeLeft / 60);
-                const s = appState.timeLeft % 60;
-                ui.timer.textContent = `${m}:${s<10?'0'+s:s}`;
-                if(appState.timeLeft <= 0) this.endSession();
-            }, 1000);
-
-            this.sendRequest("start");
-        },
-
-        manualReset() {
-            // Allows user to tap orb if they feel stuck
-            if(appState.isActive && appState.mode !== State.SPEAKING) {
-                console.log("Manual Reset");
-                AudioEngine.startListening();
-            }
-        },
-
-        async handleInput(text) {
-            if(!text || !text.trim()) return;
-            appState.history.push({role: "user", content: text});
-            this.sendRequest("interview", text);
-        },
-
-        async sendRequest(mode, text = "") {
-            ui.setMode(State.THINKING);
-            AudioEngine.stopListening();
-
-            const fd = new FormData();
-            fd.append("mode", mode);
-            fd.append("cvText", appState.cvText);
-            fd.append("history", JSON.stringify(appState.history));
-            if(text) fd.append("text", text);
-
-            try {
-                const res = await fetch(API_URL, {method:"POST", body:fd});
-                const data = await res.json();
-                
-                if(data.reply) {
-                    appState.history.push({role: "assistant", content: data.reply});
-                    AudioEngine.speak(data.reply);
-                }
-            } catch(e) {
-                console.error(e);
-                // On error, try to speak anyway or reset
-                AudioEngine.speak("I didn't quite catch that. Could you repeat?");
-            }
-        },
-
-        onSpeechEnd() {
-            if(!appState.isActive) return;
-            setTimeout(() => AudioEngine.startListening(), 300);
-        },
-
-        async endSession() {
-            appState.isActive = false;
-            clearInterval(timers.session);
-            clearInterval(timers.watchdog);
-            AudioEngine.stopListening();
-            if(!isAndroid) window.speechSynthesis.cancel();
-            
-            // Show Modal Immediately so user knows something is happening
-            const modal = document.getElementById('reportModal');
-            const reportText = document.getElementById('reportText');
-            modal.style.display = 'flex';
-            reportText.textContent = "Analyzing interview performance... (This may take 10-20 seconds)";
-
-            const fd = new FormData();
-            fd.append("mode", "score");
-            fd.append("history", JSON.stringify(appState.history));
-            
-            try {
-                const res = await fetch(API_URL, {method:"POST", body:fd});
-                const data = await res.json();
-                reportText.textContent = data.reply;
-            } catch(e) {
-                // Fallback if JSON fails
-                reportText.textContent = "Evaluation generated, but network display failed. Please check your connection.";
-            }
-        }
-    };
-
-    /* --- BINDINGS --- */
-    document.getElementById('cvInput').onchange = (e) => {
-        if(e.target.files[0]) Engine.startSession(e.target.files[0]);
-    };
-    document.getElementById('endBtn').onclick = () => Engine.endSession();
-
-    // Android Hooks (Must be global)
-    window.onRecognitionResult = (text) => Engine.handleInput(text);
-    window.onFinishedSpeaking = () => Engine.onSpeechEnd();
-
-    // Init
-    AudioEngine.init();
-
-    // Wake Lock
-    if ('wakeLock' in navigator) {
-        navigator.wakeLock.request("screen").catch(() => {});
+            dataArray = new Uint8Array(analyser.frequencyBinCount);
+            draw();
+        }).catch(err => console.log("Visualizer blocked or no mic found."));
     }
 
+    function draw() {
+        requestAnimationFrame(draw);
+        if (!analyser) return;
+        analyser.getByteFrequencyData(dataArray);
+
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        const centerX = canvas.width / 2;
+        const centerY = canvas.height / 2;
+        const radius = 75;
+
+        ctx.beginPath();
+        for (let i = 0; i < dataArray.length; i++) {
+            const barHeight = dataArray[i] * 0.4;
+            const angle = (i * 2 * Math.PI) / dataArray.length;
+            const x = centerX + Math.cos(angle) * (radius + barHeight);
+            const y = centerY + Math.sin(angle) * (radius + barHeight);
+            
+            if (i === 0) ctx.moveTo(x, y);
+            else ctx.lineTo(x, y);
+        }
+        ctx.closePath();
+        ctx.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue('--primary');
+        ctx.lineWidth = 2;
+        ctx.stroke();
+    }
+
+    // --- 2. THE INTERVIEW ENGINE ---
+    function setUI(mode) {
+        const orb = document.getElementById('orb');
+        const stage = document.getElementById('stage');
+        const status = document.getElementById('status');
+        
+        stage.className = "orb-container " + mode;
+        if(mode === 'listening') status.textContent = "Listening...";
+        else if(mode === 'thinking') status.textContent = "Analyzing...";
+        else if(mode === 'speaking') status.textContent = "AI Speaking...";
+    }
+
+    async function handleResponse(text) {
+        if (!state.isStarted || state.isThinking || !text.trim()) return;
+        
+        state.isThinking = true;
+        setUI('thinking');
+
+        const fd = new FormData();
+        fd.append("mode", "interview");
+        fd.append("history", JSON.stringify(state.history));
+        fd.append("text", text);
+        fd.append("cvText", state.cvText);
+
+        try {
+            const res = await fetch(API_URL, { method: "POST", body: fd });
+            const data = await res.json();
+            state.history = data.history;
+            state.isThinking = false;
+            speak(data.reply);
+        } catch (e) {
+            state.isThinking = false;
+            startListening(); // Fallback to listen again
+        }
+    }
+
+    function startListening() {
+        setUI('listening');
+        if (isAndroid) Android.startInterview();
+        else {
+            try { recognition.start(); } catch(e) {}
+        }
+    }
+
+    function speak(text) {
+        setUI('speaking');
+        if (isAndroid) Android.speak(text);
+        else {
+            const u = new SpeechSynthesisUtterance(text);
+            u.rate = 1.0;
+            u.onend = () => onFinishedSpeaking();
+            window.speechSynthesis.speak(u);
+        }
+    }
+
+    window.onRecognitionResult = (t) => handleResponse(t);
+    window.onFinishedSpeaking = () => { if(state.isStarted) startListening(); };
+
+    // --- 3. SYSTEM CONTROLS ---
+    document.getElementById('cvInput').onchange = async (e) => {
+        const file = e.target.files[0];
+        if(!file) return;
+        
+        document.getElementById('file-label').textContent = "Processing PDF...";
+        const buffer = await file.arrayBuffer();
+        const pdf = await pdfjsLib.getDocument(buffer).promise;
+        let text = "";
+        for (let i = 1; i <= pdf.numPages; i++) {
+            const page = await pdf.getPage(i);
+            const content = await page.getTextContent();
+            text += content.items.map(s => s.str).join(" ");
+        }
+        state.cvText = text;
+        document.getElementById('file-label').textContent = "Resume Ready ✓";
+        document.getElementById('startBtn').classList.remove('hidden');
+    };
+
+    document.getElementById('startBtn').onclick = async () => {
+        state.isStarted = true;
+        initVisualizer();
+        if (audioContext) audioContext.resume(); // CRITICAL: Resume audio on click
+        
+        document.getElementById('setup-panel').classList.add('hidden');
+        document.getElementById('active-panel').classList.remove('hidden');
+
+        timerInterval = setInterval(() => {
+            state.timeLeft--;
+            const m = Math.floor(state.timeLeft / 60);
+            const s = state.timeLeft % 60;
+            document.getElementById('timer').textContent = `${m}:${s < 10 ? '0'+s : s}`;
+            if (state.timeLeft <= 0) finish();
+        }, 1000);
+
+        setUI('thinking');
+        const fd = new FormData();
+        fd.append("mode", "start");
+        fd.append("cvText", state.cvText);
+        const res = await fetch(API_URL, { method: "POST", body: fd });
+        const data = await res.json();
+        state.history = data.history;
+        speak(data.reply);
+    };
+
+    async function finish() {
+        state.isStarted = false;
+        clearInterval(timerInterval);
+        setUI('thinking');
+        const fd = new FormData();
+        fd.append("mode", "score");
+        fd.append("history", JSON.stringify(state.history));
+        const res = await fetch(API_URL, { method: "POST", body: fd });
+        const data = await res.json();
+        document.getElementById('reportText').textContent = data.reply;
+        document.getElementById('reportModal').style.display = 'flex';
+    }
+
+    document.getElementById('endBtn').onclick = finish;
+
+    // --- 4. WAKE LOCK (STAY AWAKE) ---
+    let wakeLock = null;
+    async function stayAwake() {
+        try { if ('wakeLock' in navigator) wakeLock = await navigator.wakeLock.request('screen'); } catch(e) {}
+    }
+    stayAwake();
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') stayAwake(); });
+
+    // Web Speech PC Setup
+    let recognition;
+    if (!isAndroid) {
+        const R = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (R) {
+            recognition = new R();
+            recognition.onresult = (e) => handleResponse(e.results[0][0].transcript);
+        }
+    }
 </script>
 </body>
 </html>
