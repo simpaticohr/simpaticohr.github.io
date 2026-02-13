@@ -1,208 +1,223 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>Evalis AI | Executive Interview</title>
-
-<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
-
-<style>
-:root {
-  --bg:#000; --accent:#3b82f6; --danger:#ef4444;
-}
-*{box-sizing:border-box}
-body{
-  margin:0;background:#000;color:#fff;font-family:Inter;height:100vh;
-  display:flex;flex-direction:column;align-items:center;justify-content:center;
-}
-.stage{height:50vh;display:flex;align-items:center;justify-content:center}
-.orb{
-  width:100px;height:100px;border-radius:50%;
-  background:#fff;transition:.4s;box-shadow:0 0 60px rgba(255,255,255,.2)
-}
-.mode-listening .orb{background:#22c55e}
-.mode-thinking .orb{background:#f59e0b;transform:scale(.9)}
-.mode-speaking .orb{background:var(--accent)}
-.interface{position:absolute;bottom:0;width:100%;padding:30px;text-align:center}
-.status{opacity:.7;margin-bottom:10px}
-.timer{font-size:40px;opacity:0;transition:.4s}
-.timer.active{opacity:1}
-.btn{
-  background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.2);
-  padding:14px 30px;border-radius:30px;color:#fff;cursor:pointer
-}
-.btn-red{background:rgba(239,68,68,.2);border-color:#ef4444}
-.hidden{display:none}
-
-.modal{
-  position:fixed;inset:0;background:rgba(0,0,0,.95);
-  display:none;align-items:center;justify-content:center
-}
-.modal.visible{display:flex}
-.card{
-  background:#111;border:1px solid #333;border-radius:20px;
-  padding:25px;width:90%;max-width:500px
-}
-.score{
-  width:90px;height:90px;border-radius:50%;
-  border:4px solid var(--accent);
-  display:flex;align-items:center;justify-content:center;
-  font-size:28px;margin:0 auto 20px
-}
-</style>
-</head>
-
-<body class="mode-idle">
-
-<div class="stage">
-  <div class="orb"></div>
-</div>
-
-<div class="interface">
-  <div class="status" id="status">Ready for Interview</div>
-  <div class="timer" id="timer">15:00</div>
-
-  <div id="startPanel">
-    <label class="btn">
-      Upload Resume
-      <input type="file" id="cvInput" accept=".pdf" hidden>
-    </label>
-  </div>
-
-  <div id="activePanel" class="hidden">
-    <button class="btn btn-red" id="endBtn">End Interview</button>
-  </div>
-</div>
-
-<div class="modal" id="reportModal">
-  <div class="card">
-    <div class="score" id="scoreValue">--</div>
-    <div id="reportText"></div>
-    <button class="btn" onclick="location.reload()" style="margin-top:20px;width:100%">Done</button>
-  </div>
-</div>
-
 <script>
-/* ================= CONFIG ================= */
-const API_URL="https://evalis-ai.simpaticohrconsultancy.workers.dev";
-pdfjsLib.GlobalWorkerOptions.workerSrc =
-"https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+/* =====================================================
+   PLATFORM DETECTION
+===================================================== */
+const isAndroid = typeof Android !== "undefined";
+const hasWebSpeech = 'webkitSpeechRecognition' in window;
 
-/* ================= STATE ================= */
-let app={
-  history:[], cvText:"", active:false, time:900
+/* =====================================================
+   CONFIG
+===================================================== */
+const API_URL = "https://evalis-ai.simpaticohrconsultancy.workers.dev";
+
+/* =====================================================
+   APP STATE
+===================================================== */
+const State = {
+  IDLE: "idle",
+  LISTENING: "listening",
+  THINKING: "thinking",
+  SPEAKING: "speaking"
 };
-let timerInterval=null;
 
-/* ================= UI ================= */
-const ui={
-  setMode(m){document.body.className="mode-"+m;
-    status.textContent={
-      idle:"Ready",
-      listening:"Listening…",
-      thinking:"Analyzing…",
-      speaking:"Interviewer Speaking"
-    }[m];
-  },
-  showReport(r){
-    const avg=Math.round((r.technical_score+r.communication_score)/2);
-    scoreValue.textContent=avg;
-    reportText.innerHTML=`
-      <b>Technical:</b> ${r.technical_score}<br><br>
-      <b>Communication:</b> ${r.communication_score}<br><br>
-      <b>Strengths</b><ul>${r.strengths.map(s=>`<li>${s}</li>`).join("")}</ul>
-      <b>Gaps</b><ul>${r.gaps.map(g=>`<li>${g}</li>`).join("")}</ul>
-      <b>Verdict:</b>
-      <span style="color:${r.verdict==="Hire"?"#22c55e":"#ef4444"}">
-        ${r.verdict}
-      </span>
-    `;
-    reportModal.classList.add("visible");
+let app = {
+  state: State.IDLE,
+  history: [],
+  cvText: "",
+  active: false
+};
+
+/* =====================================================
+   UI STATE DRIVER
+===================================================== */
+function setMode(mode) {
+  app.state = mode;
+  document.body.className = `mode-${mode}`;
+
+  const map = {
+    idle: "Ready",
+    listening: "Listening…",
+    thinking: "Analyzing…",
+    speaking: "Interviewer Speaking"
+  };
+  document.getElementById("status").textContent = map[mode];
+}
+
+/* =====================================================
+   SPEECH OUTPUT (AI → USER)
+===================================================== */
+const synth = window.speechSynthesis;
+
+function speakAI(text) {
+  setMode(State.SPEAKING);
+
+  if (isAndroid) {
+    Android.speak(text); // must call window.onFinishedSpeaking()
+    return;
   }
-};
 
-/* ================= AUDIO ================= */
-const synth=window.speechSynthesis;
-function speak(text){
-  ui.setMode("speaking");
   synth.cancel();
-  const u=new SpeechSynthesisUtterance(text);
-  u.onend=()=>listen();
+  const u = new SpeechSynthesisUtterance(text);
+  u.rate = 1.05;
+  u.onend = () => onSpeechEnd();
   synth.speak(u);
 }
-function listen(){
-  ui.setMode("listening");
+
+function onSpeechEnd() {
+  if (!app.active) return;
+  startListening();
 }
 
-/* ================= ENGINE ================= */
-async function send(mode,text=""){
-  ui.setMode("thinking");
-  const fd=new FormData();
-  fd.append("mode",mode);
-  fd.append("cvText",app.cvText);
-  fd.append("history",JSON.stringify(app.history));
-  if(text) fd.append("text",text);
+/* =====================================================
+   SPEECH INPUT (USER → AI)
+===================================================== */
+let recognition = null;
 
-  const r=await fetch(API_URL,{method:"POST",body:fd});
-  const d=await r.json();
-  if(d.reply){
-    app.history.push({role:"assistant",content:d.reply});
-    speak(d.reply);
+if (!isAndroid && hasWebSpeech) {
+  recognition = new webkitSpeechRecognition();
+  recognition.lang = "en-US";
+  recognition.continuous = false;
+  recognition.interimResults = false;
+
+  recognition.onresult = (e) => {
+    const text = e.results[0][0].transcript;
+    onUserSpeech(text);
+  };
+
+  recognition.onerror = () => {
+    if (app.active) {
+      setTimeout(() => recognition.start(), 500);
+    }
+  };
+
+  recognition.onend = () => {
+    // Prevent dead state
+    if (app.active && app.state === State.LISTENING) {
+      setTimeout(() => recognition.start(), 300);
+    }
+  };
+}
+
+function startListening() {
+  if (!app.active) return;
+
+  setMode(State.LISTENING);
+
+  if (isAndroid) {
+    Android.startInterview(); // native mic → window.onRecognitionResult
+  } else if (recognition) {
+    try { recognition.start(); } catch {}
   }
 }
 
-async function startInterview(file){
-  startPanel.classList.add("hidden");
-  activePanel.classList.remove("hidden");
-  timer.classList.add("active");
+function stopListening() {
+  if (!isAndroid && recognition) {
+    try { recognition.stop(); } catch {}
+  }
+}
 
-  const buf=await file.arrayBuffer();
-  const pdf=await pdfjsLib.getDocument(buf).promise;
-  for(let i=1;i<=pdf.numPages;i++){
-    const p=await pdf.getPage(i);
-    const t=await p.getTextContent();
-    app.cvText+=t.items.map(x=>x.str).join(" ");
+/* =====================================================
+   USER SPOKE → SEND TO AI
+===================================================== */
+function onUserSpeech(text) {
+  if (!text || !text.trim()) {
+    startListening();
+    return;
   }
 
-  app.active=true;
-  timerInterval=setInterval(()=>{
-    app.time--;
-    timer.textContent=
-      Math.floor(app.time/60)+":"+String(app.time%60).padStart(2,"0");
-    if(app.time<=0) endInterview();
-  },1000);
-
-  send("start");
+  stopListening();
+  app.history.push({ role: "user", content: text });
+  sendToAI("interview", text);
 }
 
-async function endInterview(){
-  clearInterval(timerInterval);
-  ui.setMode("thinking");
+/* =====================================================
+   AI REQUEST PIPELINE
+===================================================== */
+async function sendToAI(mode, text = "") {
+  setMode(State.THINKING);
 
-  const fd=new FormData();
-  fd.append("mode","score");
-  fd.append("history",JSON.stringify(app.history));
+  const fd = new FormData();
+  fd.append("mode", mode);
+  fd.append("cvText", app.cvText);
+  fd.append("history", JSON.stringify(app.history));
+  if (text) fd.append("text", text);
 
-  const r=await fetch(API_URL,{method:"POST",body:fd});
-  const d=await r.json();
-  ui.showReport(d);
+  try {
+    const res = await fetch(API_URL, { method: "POST", body: fd });
+    const data = await res.json();
+
+    if (data.reply) {
+      app.history.push({ role: "assistant", content: data.reply });
+      speakAI(data.reply);
+    } else {
+      speakAI("Let’s continue. Please explain further.");
+    }
+  } catch (e) {
+    speakAI("Connection issue. Please continue.");
+  }
 }
 
-/* ================= EVENTS ================= */
-cvInput.onchange=e=>startInterview(e.target.files[0]);
-endBtn.onclick=endInterview;
+/* =====================================================
+   SESSION CONTROL
+===================================================== */
+async function startSession(file) {
+  app.active = true;
+  setMode(State.THINKING);
 
-/* ================= WAKE LOCK ================= */
-let wakeLock=null;
-async function keepAwake(){
-  try{wakeLock=await navigator.wakeLock.request("screen");}catch{}
+  // Parse PDF
+  const buf = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument(buf).promise;
+  for (let i = 1; i <= pdf.numPages; i++) {
+    const page = await pdf.getPage(i);
+    const text = await page.getTextContent();
+    app.cvText += text.items.map(s => s.str).join(" ");
+  }
+
+  sendToAI("start");
 }
-document.addEventListener("visibilitychange",()=>{
-  if(document.visibilityState==="visible") keepAwake();
+
+async function endSession() {
+  app.active = false;
+  stopListening();
+  setMode(State.THINKING);
+
+  const fd = new FormData();
+  fd.append("mode", "score");
+  fd.append("history", JSON.stringify(app.history));
+
+  const res = await fetch(API_URL, { method: "POST", body: fd });
+  const report = await res.json();
+  showReport(report);
+}
+
+/* =====================================================
+   ANDROID BRIDGE (MUST BE GLOBAL)
+===================================================== */
+window.onRecognitionResult = (text) => {
+  onUserSpeech(text);
+};
+
+window.onFinishedSpeaking = () => {
+  onSpeechEnd();
+};
+
+/* =====================================================
+   WAKE LOCK (ANTI-SLEEP)
+===================================================== */
+let wakeLock = null;
+async function keepAwake() {
+  try { wakeLock = await navigator.wakeLock.request("screen"); } catch {}
+}
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") keepAwake();
 });
 keepAwake();
+
+/* =====================================================
+   UI BINDINGS
+===================================================== */
+document.getElementById("cvInput").onchange = e =>
+  startSession(e.target.files[0]);
+
+document.getElementById("endBtn").onclick = endSession;
 </script>
-</body>
-</html>
