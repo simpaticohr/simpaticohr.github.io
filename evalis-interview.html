@@ -1,485 +1,201 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Evalis AI | Continuous Interview</title>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
-    <style>
-        :root {
-            --bg: #05050a;
-            --surface: #0f1016;
-            --primary: #6366f1;
-            --primary-glow: rgba(99, 102, 241, 0.4);
-            --accent: #a855f7;
-            --text: #f8fafc;
-            --text-dim: #64748b;
-            --danger: #ef4444;
-        }
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>Evalis AI | Intelligent Interview</title>
 
-        body {
-            margin: 0;
-            background: var(--bg);
-            color: var(--text);
-            font-family: 'Inter', sans-serif;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            min-height: 100vh;
-            overflow: hidden;
-            -webkit-tap-highlight-color: transparent;
-        }
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
 
-        /* --- THE ACTIVE ORB --- */
-        .orb-wrapper {
-            position: relative;
-            width: 280px;
-            height: 280px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            margin-bottom: 40px;
-        }
-
-        .orb {
-            width: 130px;
-            height: 130px;
-            background: linear-gradient(135deg, var(--primary), var(--accent));
-            border-radius: 50%;
-            position: relative;
-            z-index: 2;
-            box-shadow: 0 0 60px var(--primary-glow);
-            transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
-            will-change: transform, box-shadow;
-        }
-
-        /* ORB STATES */
-        .orb.idle { animation: breathe 4s infinite ease-in-out; opacity: 0.6; }
-        
-        /* Speaking: Fast pulsing */
-        .orb.speaking { 
-            animation: speak-pulse 1.2s infinite ease-in-out;
-            box-shadow: 0 0 90px var(--primary-glow);
-            background: linear-gradient(135deg, #818cf8, #c084fc);
-        }
-
-        /* Listening: Reacts to mic (Solid Greenish) */
-        .orb.listening {
-            background: linear-gradient(135deg, #34d399, #10b981);
-            box-shadow: 0 0 50px rgba(52, 211, 153, 0.4);
-            transform: scale(0.95);
-        }
-
-        /* Processing/Thinking */
-        .orb.thinking {
-            background: #f59e0b;
-            animation: spin-slow 2s linear infinite;
-            border-radius: 40%;
-        }
-
-        /* Background Rings */
-        .orb-ring {
-            position: absolute;
-            border-radius: 50%;
-            border: 1px solid rgba(255,255,255,0.03);
-            top: 50%; left: 50%;
-            transform: translate(-50%, -50%);
-            z-index: 0;
-            pointer-events: none;
-        }
-        
-        .ring-1 { width: 200px; height: 200px; animation: spin 20s linear infinite; border-color: rgba(99, 102, 241, 0.15); }
-        .ring-2 { width: 320px; height: 320px; animation: spin-rev 30s linear infinite; border-style: dashed; }
-        .ring-ripple { width: 130px; height: 130px; opacity: 0; border: 2px solid var(--primary); }
-        
-        .orb.speaking ~ .ring-ripple { animation: ripple 1.5s infinite; }
-
-        /* --- UI ELEMENTS --- */
-        .interface { z-index: 10; text-align: center; width: 85%; max-width: 450px; }
-        
-        h1 { font-weight: 500; font-size: 1.1rem; letter-spacing: 2px; margin-bottom: 2rem; color: var(--text-dim); text-transform: uppercase; }
-
-        .transcript-box {
-            min-height: 50px;
-            font-size: 0.95rem;
-            color: var(--text);
-            margin-bottom: 25px;
-            font-weight: 400;
-            text-shadow: 0 2px 10px rgba(0,0,0,0.5);
-            transition: opacity 0.3s;
-        }
-        .transcript-box.fade { opacity: 0.5; }
-
-        .controls { display: flex; gap: 12px; justify-content: center; flex-direction: column; width: 100%; }
-
-        .btn {
-            background: rgba(255,255,255,0.03);
-            color: var(--text);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            padding: 16px;
-            border-radius: 12px;
-            cursor: pointer;
-            font-weight: 600;
-            font-size: 1rem;
-            transition: all 0.2s;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 10px;
-            backdrop-filter: blur(10px);
-        }
-        
-        .btn:hover { background: rgba(255,255,255,0.08); border-color: var(--text-dim); transform: translateY(-1px); }
-        .btn:active { transform: scale(0.98); }
-        
-        .btn-primary { background: var(--text); color: #000; border: none; }
-        .btn-primary:hover { background: #e2e8f0; }
-        
-        .btn-danger { background: rgba(239, 68, 68, 0.1); color: var(--danger); border-color: rgba(239, 68, 68, 0.3); }
-        .btn-danger:hover { background: rgba(239, 68, 68, 0.2); }
-
-        .file-upload { position: relative; overflow: hidden; }
-        .file-upload input { position: absolute; left: 0; top: 0; opacity: 0; width: 100%; height: 100%; cursor: pointer; }
-
-        .toggle-container {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 10px;
-            margin-bottom: 20px;
-            color: var(--text-dim);
-            font-size: 0.8rem;
-        }
-
-        /* Animations */
-        @keyframes breathe { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.03); } }
-        @keyframes speak-pulse { 0% { transform: scale(1); } 50% { transform: scale(1.12); } 100% { transform: scale(1); } }
-        @keyframes spin { 100% { transform: translate(-50%, -50%) rotate(360deg); } }
-        @keyframes spin-slow { 100% { transform: rotate(360deg); } }
-        @keyframes spin-rev { 100% { transform: translate(-50%, -50%) rotate(-360deg); } }
-        @keyframes ripple { 0% { width: 130px; height: 130px; opacity: 0.6; } 100% { width: 300px; height: 300px; opacity: 0; } }
-
-        .hidden { display: none !important; }
-    </style>
+<style>
+:root{
+--bg:#05050a;--surface:#0f1016;--primary:#6366f1;--accent:#a855f7;
+--text:#f8fafc;--text-dim:#64748b;--danger:#ef4444;
+}
+body{
+margin:0;background:var(--bg);color:var(--text);font-family:Inter;
+display:flex;flex-direction:column;align-items:center;justify-content:center;
+min-height:100vh;overflow:hidden;
+}
+.orb-wrapper{position:relative;width:280px;height:280px;margin-bottom:24px}
+.orb{width:130px;height:130px;border-radius:50%;background:linear-gradient(135deg,var(--primary),var(--accent));
+box-shadow:0 0 60px rgba(99,102,241,.4);transition:.3s}
+.orb.idle{opacity:.6;animation:breathe 4s infinite}
+.orb.listening{background:linear-gradient(135deg,#34d399,#10b981)}
+.orb.speaking{animation:pulse 1.2s infinite}
+.orb.thinking{background:#f59e0b;animation:spin 2s linear infinite;border-radius:40%}
+.interface{text-align:center;width:85%;max-width:420px}
+#timer{font-family:monospace;color:var(--text-dim);margin-bottom:10px}
+.transcript{min-height:40px;opacity:.6;transition:.3s}
+.transcript.fade{opacity:0}
+.btn{padding:14px;border-radius:12px;border:1px solid rgba(255,255,255,.1);
+background:rgba(255,255,255,.05);color:var(--text);cursor:pointer}
+.btn-primary{background:#fff;color:#000}
+.btn-danger{border-color:#ef4444;color:#ef4444}
+.hidden{display:none}
+@keyframes breathe{50%{transform:scale(1.05)}}
+@keyframes pulse{50%{transform:scale(1.12)}}
+@keyframes spin{100%{transform:rotate(360deg)}}
+</style>
 </head>
+
 <body>
 
-    <div class="orb-wrapper">
-        <div class="orb-ring ring-1"></div>
-        <div class="orb-ring ring-2"></div>
-        <div class="orb-ring ring-ripple"></div>
-        <div id="orb" class="orb idle"></div>
-    </div>
+<div class="orb-wrapper">
+<div id="orb" class="orb idle"></div>
+</div>
 
-    <div class="interface">
-        <h1 id="statusText">AI INTERVIEWER</h1>
+<div class="interface">
+<h3 id="status">AI INTERVIEWER</h3>
+<div id="timer">15:00</div>
+<div id="transcript" class="transcript">Upload resume to begin</div>
 
-        <div id="transcript" class="transcript-box">
-            Upload resume to begin
-        </div>
-
-        <div id="setupScreen" class="controls">
-            <div class="toggle-container">
-                <input type="checkbox" id="headphoneMode" checked>
-                <label for="headphoneMode">I am using headphones (Recommended)</label>
-            </div>
-
-            <div class="file-upload btn">
-                <span id="fileName">📂 Upload PDF Resume</span>
-                <input type="file" id="cvInput" accept=".pdf">
-            </div>
-            <button id="startBtn" class="btn btn-primary hidden" onclick="startSession()">
-                Start Interview
-            </button>
-        </div>
-
-        <div id="activeScreen" class="controls hidden">
-            <button class="btn btn-danger" onclick="endSession()">End Session</button>
-        </div>
-    </div>
+<input type="file" id="cvInput" accept=".pdf" />
+<br><br>
+<button id="startBtn" class="btn btn-primary hidden">Start Interview</button>
+<button id="endBtn" class="btn btn-danger hidden">End Interview</button>
+</div>
 
 <script>
-    // ==========================================
-    // CONFIGURATION
-    // ==========================================
-    const API_URL = "https://evalis-ai.simpaticohrconsultancy.workers.dev";
-    
-    // ==========================================
-    // STATE MANAGEMENT
-    // ==========================================
-    const state = {
-        isSessionActive: false,
-        isAiSpeaking: false,
-        cvText: "",
-        history: [],
-        recognition: null,
-        synth: window.speechSynthesis,
-        silenceTimer: null,
-        useHeadphones: true
-    };
+const API_URL="https://evalis-ai.simpaticohrconsultancy.workers.dev";
 
-    // DOM Elements
-    const orb = document.getElementById('orb');
-    const statusText = document.getElementById('statusText');
-    const transcriptEl = document.getElementById('transcript');
+const state={
+active:false,aiSpeaking:false,history:[],cvText:"",
+timeLeft:900,timer:null,recognition:null,synth:window.speechSynthesis,
+silence:null
+};
 
-    // ==========================================
-    // 1. SPEECH RECOGNITION (The Ears)
-    // ==========================================
-    
-    function initSpeechRecognition() {
-        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-        if (!SpeechRecognition) {
-            alert("Your browser does not support Speech API. Please use Google Chrome.");
-            return null;
-        }
+const orb=document.getElementById("orb");
+const status=document.getElementById("status");
+const transcript=document.getElementById("transcript");
+const timerEl=document.getElementById("timer");
 
-        const recognition = new SpeechRecognition();
-        recognition.continuous = true;  // Keep listening forever
-        recognition.interimResults = true; // Essential for interruption detection
-        recognition.lang = 'en-US';
+function setOrb(mode){
+orb.className="orb "+mode;
+status.textContent=
+mode==="listening"?"Listening…":
+mode==="speaking"?"AI Speaking":
+mode==="thinking"?"Processing…":"AI INTERVIEWER";
+}
 
-        recognition.onstart = () => {
-            console.log("Mic Active");
-            // If AI isn't speaking, we are listening
-            if (!state.isAiSpeaking) setOrbState('listening');
-        };
+function startTimer(){
+state.timer=setInterval(()=>{
+if(!state.active)return;
+if(state.timeLeft<=0){endSession();return;}
+state.timeLeft--;
+const m=Math.floor(state.timeLeft/60);
+const s=state.timeLeft%60;
+timerEl.textContent=`${m}:${s<10?"0"+s:s}`;
+},1000);
+}
 
-        recognition.onend = () => {
-            // Auto-restart if session is active (Mobile browsers sometimes cut it off)
-            if (state.isSessionActive) {
-                console.log("Mic restarted");
-                recognition.start();
-            }
-        };
+function hideTranscript(){
+setTimeout(()=>{transcript.textContent="";transcript.classList.add("fade")},1200);
+}
 
-        recognition.onresult = (event) => {
-            if (!state.isSessionActive) return;
+function speak(text){
+state.synth.cancel();
+const u=new SpeechSynthesisUtterance(text.replace(/[*#]/g,""));
+u.rate=1.1;
+u.onstart=()=>{state.aiSpeaking=true;setOrb("speaking");transcript.classList.add("fade")};
+u.onend=()=>{state.aiSpeaking=false;setOrb("listening")};
+state.synth.speak(u);
+}
 
-            let finalTranscript = '';
-            let interimTranscript = '';
+async function sendToAI(text){
+setOrb("thinking");
+state.history.push({role:"user",content:text});
+hideTranscript();
 
-            for (let i = event.resultIndex; i < event.results.length; ++i) {
-                if (event.results[i].isFinal) {
-                    finalTranscript += event.results[i][0].transcript;
-                } else {
-                    interimTranscript += event.results[i][0].transcript;
-                }
-            }
+const fd=new FormData();
+fd.append("mode","interview");
+fd.append("history",JSON.stringify(state.history));
+fd.append("text",text);
+fd.append("cvText",state.cvText);
 
-            // --- BARGE-IN LOGIC (INTERRUPTION) ---
-            // If the user is speaking clearly and the AI is currently talking
-            if (state.isAiSpeaking && (finalTranscript || interimTranscript.length > 5)) {
-                
-                // If NOT using headphones, we must be careful not to let AI interrupt itself
-                // But for "Perfect" experience, we assume headphones or Echo Cancellation
-                if (state.useHeadphones) {
-                    console.log(">>> INTERRUPTING AI");
-                    state.synth.cancel(); // Shut up AI
-                    state.isAiSpeaking = false;
-                    setOrbState('listening');
-                }
-            }
+try{
+const r=await fetch(API_URL,{method:"POST",body:fd});
+const d=await r.json();
+state.history=d.history;
+speak(d.reply);
+}catch{ speak("Could you repeat that?") }
+}
 
-            // Visual feedback
-            if(interimTranscript) {
-                transcriptEl.textContent = interimTranscript;
-                transcriptEl.classList.add('fade');
-            }
+function initSpeech(){
+const R=window.SpeechRecognition||window.webkitSpeechRecognition;
+const rec=new R();
+rec.continuous=true;
+rec.interimResults=true;
+rec.lang="en-US";
 
-            // --- FINAL PROCESSING ---
-            if (finalTranscript) {
-                transcriptEl.textContent = finalTranscript;
-                transcriptEl.classList.remove('fade');
-                
-                // Debounce: Wait 800ms silence before sending to AI
-                // This allows the user to pause slightly without the AI jumping in too fast
-                clearTimeout(state.silenceTimer);
-                state.silenceTimer = setTimeout(() => {
-                    processUserResponse(finalTranscript);
-                }, 800);
-            }
-        };
+rec.onresult=e=>{
+let final="",interim="";
+for(let i=e.resultIndex;i<e.results.length;i++){
+if(e.results[i].isFinal)final+=e.results[i][0].transcript;
+else interim+=e.results[i][0].transcript;
+}
+if(state.aiSpeaking && (interim.length>5||final)){
+state.synth.cancel();
+state.aiSpeaking=false;
+setOrb("listening");
+}
+if(interim){transcript.textContent=interim;transcript.classList.remove("fade")}
+if(final){
+clearTimeout(state.silence);
+state.silence=setTimeout(()=>sendToAI(final),800);
+}
+};
 
-        return recognition;
-    }
+rec.onend=()=>{if(state.active)rec.start()};
+rec.start();
+return rec;
+}
 
-    // ==========================================
-    // 2. TEXT TO SPEECH (The Voice)
-    // ==========================================
+async function startSession(){
+state.active=true;
+document.getElementById("startBtn").classList.add("hidden");
+document.getElementById("endBtn").classList.remove("hidden");
+state.recognition=initSpeech();
+startTimer();
 
-    function speak(text) {
-        if (!state.isSessionActive) return;
+try{await navigator.wakeLock?.request("screen")}catch{}
 
-        state.synth.cancel(); // Clear queue
+const fd=new FormData();
+fd.append("mode","start");
+fd.append("cvText",state.cvText);
+const r=await fetch(API_URL,{method:"POST",body:fd});
+const d=await r.json();
+state.history=d.history;
+speak(d.reply);
+}
 
-        // Clean text (remove asterisks or markdown sometimes generated by LLMs)
-        const cleanText = text.replace(/\*/g, '').replace(/#/g, '');
+function endSession(){
+state.active=false;
+clearInterval(state.timer);
+state.synth.cancel();
+state.recognition?.stop();
+location.reload();
+}
 
-        const utterance = new SpeechSynthesisUtterance(cleanText);
-        
-        // Voice Selection: Try to find a "Google" or "Natural" voice
-        const voices = state.synth.getVoices();
-        const preferredVoice = voices.find(v => v.name.includes("Google US English")) || 
-                               voices.find(v => v.name.includes("Natural")) || 
-                               voices.find(v => v.lang === "en-US");
-        
-        if (preferredVoice) utterance.voice = preferredVoice;
-        
-        utterance.rate = 1.1; // Slightly faster is more natural
-        utterance.pitch = 1.0;
+document.getElementById("cvInput").onchange=async e=>{
+const f=e.target.files[0];
+if(!f)return;
+const b=await f.arrayBuffer();
+const pdf=await pdfjsLib.getDocument(b).promise;
+let t="";
+for(let i=1;i<=pdf.numPages;i++){
+const p=await pdf.getPage(i);
+const c=await p.getTextContent();
+t+=c.items.map(x=>x.str).join(" ");
+}
+state.cvText=t;
+document.getElementById("startBtn").classList.remove("hidden");
+transcript.textContent="Resume loaded ✓";
+};
 
-        utterance.onstart = () => {
-            state.isAiSpeaking = true;
-            setOrbState('speaking');
-        };
-
-        utterance.onend = () => {
-            state.isAiSpeaking = false;
-            // Immediately switch back to listening visual
-            if (state.isSessionActive) setOrbState('listening');
-        };
-
-        utterance.onerror = (e) => {
-            console.error("TTS Error", e);
-            state.isAiSpeaking = false;
-        };
-
-        state.synth.speak(utterance);
-    }
-
-    // ==========================================
-    // 3. LOGIC & API
-    // ==========================================
-
-    async function processUserResponse(text) {
-        setOrbState('thinking');
-        
-        state.history.push({role: "user", content: text});
-
-        const fd = new FormData();
-        fd.append("mode", "interview");
-        fd.append("history", JSON.stringify(state.history));
-        fd.append("text", text);
-        fd.append("cvText", state.cvText);
-
-        try {
-            // Using your actual Worker
-            const res = await fetch(API_URL, { method: "POST", body: fd });
-            const data = await res.json();
-            
-            // Only speak if the user hasn't started talking again in the meantime
-            // (A check for very fast interruptions)
-            state.history = data.history;
-            speak(data.reply);
-
-        } catch (e) {
-            console.error(e);
-            speak("I lost connection for a second. Could you say that again?");
-        }
-    }
-
-    // ==========================================
-    // 4. UI HELPERS
-    // ==========================================
-
-    function setOrbState(mode) {
-        // modes: idle, listening, speaking, thinking
-        orb.className = `orb ${mode}`;
-        
-        if(mode === 'listening') statusText.textContent = "I'm Listening...";
-        else if(mode === 'speaking') statusText.textContent = "AI Speaking";
-        else if(mode === 'thinking') statusText.textContent = "Processing...";
-        else statusText.textContent = "AI INTERVIEWER";
-    }
-
-    async function startSession() {
-        if (!state.cvText) return alert("Please wait for PDF processing.");
-
-        // Check Headphone setting
-        state.useHeadphones = document.getElementById('headphoneMode').checked;
-
-        // UI Transition
-        document.getElementById('setupScreen').classList.add('hidden');
-        document.getElementById('activeScreen').classList.remove('hidden');
-        state.isSessionActive = true;
-
-        // Start Mic
-        state.recognition = initSpeechRecognition();
-        try {
-            state.recognition.start();
-        } catch(e) {
-            console.log("Mic already active");
-        }
-
-        // Keep Screen Awake (Mobile)
-        try {
-            if (navigator.wakeLock) await navigator.wakeLock.request('screen');
-        } catch (err) { console.log("WakeLock not supported"); }
-
-        // Initial Server Call
-        setOrbState('thinking');
-        const fd = new FormData();
-        fd.append("mode", "start");
-        fd.append("cvText", state.cvText);
-        
-        try {
-            const res = await fetch(API_URL, { method: "POST", body: fd });
-            const data = await res.json();
-            state.history = data.history;
-            speak(data.reply);
-        } catch (e) {
-            console.error(e);
-            alert("Could not connect to server.");
-            endSession();
-        }
-    }
-
-    function endSession() {
-        state.isSessionActive = false;
-        state.synth.cancel();
-        if (state.recognition) state.recognition.stop();
-        
-        location.reload(); // Simplest reset
-    }
-
-    // ==========================================
-    // 5. PDF HANDLING
-    // ==========================================
-    pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
-
-    document.getElementById('cvInput').onchange = async (e) => {
-        const file = e.target.files[0];
-        if(!file) return;
-        
-        const label = document.getElementById('fileName');
-        label.textContent = "Parsing PDF...";
-        
-        try {
-            const buffer = await file.arrayBuffer();
-            const pdf = await pdfjsLib.getDocument(buffer).promise;
-            let fullText = "";
-            
-            for (let i = 1; i <= pdf.numPages; i++) {
-                const page = await pdf.getPage(i);
-                const textContent = await page.getTextContent();
-                fullText += textContent.items.map(s => s.str).join(" ");
-            }
-            
-            state.cvText = fullText;
-            label.textContent = "Resume Ready ✓";
-            document.getElementById('startBtn').classList.remove('hidden');
-            
-            // Pre-load voices on user interaction (Mobile requirement)
-            window.speechSynthesis.getVoices();
-            
-        } catch (err) {
-            console.error(err);
-            label.textContent = "Error. Try another PDF.";
-        }
-    };
+document.getElementById("startBtn").onclick=startSession;
+document.getElementById("endBtn").onclick=endSession;
 </script>
 </body>
 </html>
