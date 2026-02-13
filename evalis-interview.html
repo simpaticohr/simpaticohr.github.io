@@ -1,223 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
+<title>Evalis AI · Elite Interview</title>
+
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+
+<style>
+:root{--bg:#000;--accent:#3b82f6;--good:#22c55e;--warn:#f59e0b;--bad:#ef4444}
+*{box-sizing:border-box}
+body{
+  margin:0;height:100vh;background:#000;color:#fff;
+  font-family:Inter;display:flex;flex-direction:column;
+  align-items:center;justify-content:center
+}
+.stage{height:50vh;display:flex;align-items:center;justify-content:center}
+.orb{
+  width:110px;height:110px;border-radius:50%;
+  background:#fff;transition:.35s ease;
+  box-shadow:0 0 60px rgba(255,255,255,.25)
+}
+.mode-listening .orb{background:var(--good)}
+.mode-thinking .orb{background:var(--warn);transform:scale(.9)}
+.mode-speaking .orb{background:var(--accent)}
+.ui{position:absolute;bottom:0;width:100%;padding:28px;text-align:center}
+.status{opacity:.7;margin-bottom:10px}
+.timer{font-size:38px;opacity:0;transition:.4s}
+.timer.active{opacity:1}
+.btn{
+  background:rgba(255,255,255,.1);
+  border:1px solid rgba(255,255,255,.2);
+  padding:14px 30px;border-radius:30px;
+  color:#fff;cursor:pointer
+}
+.btn-red{border-color:var(--bad);background:rgba(239,68,68,.15)}
+.hidden{display:none}
+.modal{
+  position:fixed;inset:0;background:rgba(0,0,0,.96);
+  display:none;align-items:center;justify-content:center
+}
+.modal.visible{display:flex}
+.card{
+  background:#111;border:1px solid #333;border-radius:22px;
+  padding:26px;width:90%;max-width:520px
+}
+.score{
+  width:90px;height:90px;border-radius:50%;
+  border:4px solid var(--accent);
+  display:flex;align-items:center;justify-content:center;
+  font-size:28px;margin:0 auto 20px
+}
+</style>
+</head>
+
+<body class="mode-idle">
+
+<div class="stage"><div class="orb"></div></div>
+
+<div class="ui">
+  <div class="status" id="status">Ready for Elite Interview</div>
+  <div class="timer" id="timer">15:00</div>
+
+  <div id="startPanel">
+    <label class="btn">
+      Upload Resume
+      <input type="file" id="cvInput" accept=".pdf" hidden>
+    </label>
+  </div>
+
+  <div id="activePanel" class="hidden">
+    <button class="btn btn-red" id="endBtn">End Interview</button>
+  </div>
+</div>
+
+<div class="modal" id="reportModal">
+  <div class="card">
+    <div class="score" id="scoreValue">--</div>
+    <div id="reportText"></div>
+    <button class="btn" onclick="location.reload()" style="margin-top:20px;width:100%">Done</button>
+  </div>
+</div>
+
 <script>
-/* =====================================================
-   PLATFORM DETECTION
-===================================================== */
-const isAndroid = typeof Android !== "undefined";
-const hasWebSpeech = 'webkitSpeechRecognition' in window;
+document.addEventListener("DOMContentLoaded",()=>{
 
-/* =====================================================
-   CONFIG
-===================================================== */
-const API_URL = "https://evalis-ai.simpaticohrconsultancy.workers.dev";
+/* ========= CONFIG ========= */
+const API="https://evalis-ai.simpaticohrconsultancy.workers.dev";
+pdfjsLib.GlobalWorkerOptions.workerSrc =
+"https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
 
-/* =====================================================
-   APP STATE
-===================================================== */
-const State = {
-  IDLE: "idle",
-  LISTENING: "listening",
-  THINKING: "thinking",
-  SPEAKING: "speaking"
-};
+/* ========= PLATFORM ========= */
+const isAndroid=typeof Android!=="undefined";
+const hasWebSpeech="webkitSpeechRecognition"in window;
 
-let app = {
-  state: State.IDLE,
-  history: [],
-  cvText: "",
-  active: false
-};
+/* ========= STATE ========= */
+const State={IDLE:"idle",LISTENING:"listening",THINKING:"thinking",SPEAKING:"speaking"};
+let app={state:State.IDLE,active:false,cv:"",history:[],time:900};
 
-/* =====================================================
-   UI STATE DRIVER
-===================================================== */
-function setMode(mode) {
-  app.state = mode;
-  document.body.className = `mode-${mode}`;
+/* ========= UI ========= */
+const statusEl=document.getElementById("status");
+const timerEl=document.getElementById("timer");
 
-  const map = {
-    idle: "Ready",
-    listening: "Listening…",
-    thinking: "Analyzing…",
-    speaking: "Interviewer Speaking"
+function setMode(m){
+  app.state=m;
+  document.body.className="mode-"+m;
+  const map={
+    idle:"Ready",
+    listening:"Listening…",
+    thinking:"Analyzing…",
+    speaking:"Interviewer Speaking"
   };
-  document.getElementById("status").textContent = map[mode];
+  if(statusEl) statusEl.textContent=map[m];
 }
 
-/* =====================================================
-   SPEECH OUTPUT (AI → USER)
-===================================================== */
-const synth = window.speechSynthesis;
-
-function speakAI(text) {
+/* ========= SPEECH OUT ========= */
+const synth=window.speechSynthesis;
+function speak(text){
   setMode(State.SPEAKING);
-
-  if (isAndroid) {
-    Android.speak(text); // must call window.onFinishedSpeaking()
-    return;
-  }
-
+  if(isAndroid){ Android.speak(text); return; }
   synth.cancel();
-  const u = new SpeechSynthesisUtterance(text);
-  u.rate = 1.05;
-  u.onend = () => onSpeechEnd();
+  const u=new SpeechSynthesisUtterance(text);
+  u.rate=1.05;
+  u.onend=()=>onSpeechEnd();
   synth.speak(u);
 }
+function onSpeechEnd(){ if(app.active) listen(); }
 
-function onSpeechEnd() {
-  if (!app.active) return;
-  startListening();
+/* ========= SPEECH IN ========= */
+let recog=null;
+if(!isAndroid&&hasWebSpeech){
+  recog=new webkitSpeechRecognition();
+  recog.lang="en-US";
+  recog.continuous=false;
+  recog.onresult=e=>onUser(e.results[0][0].transcript);
+  recog.onerror=()=>app.active&&setTimeout(()=>recog.start(),400);
+  recog.onend=()=>app.active&&app.state===State.LISTENING&&setTimeout(()=>recog.start(),300);
 }
 
-/* =====================================================
-   SPEECH INPUT (USER → AI)
-===================================================== */
-let recognition = null;
-
-if (!isAndroid && hasWebSpeech) {
-  recognition = new webkitSpeechRecognition();
-  recognition.lang = "en-US";
-  recognition.continuous = false;
-  recognition.interimResults = false;
-
-  recognition.onresult = (e) => {
-    const text = e.results[0][0].transcript;
-    onUserSpeech(text);
-  };
-
-  recognition.onerror = () => {
-    if (app.active) {
-      setTimeout(() => recognition.start(), 500);
-    }
-  };
-
-  recognition.onend = () => {
-    // Prevent dead state
-    if (app.active && app.state === State.LISTENING) {
-      setTimeout(() => recognition.start(), 300);
-    }
-  };
-}
-
-function startListening() {
-  if (!app.active) return;
-
+function listen(){
+  if(!app.active) return;
   setMode(State.LISTENING);
-
-  if (isAndroid) {
-    Android.startInterview(); // native mic → window.onRecognitionResult
-  } else if (recognition) {
-    try { recognition.start(); } catch {}
-  }
+  if(isAndroid) Android.startInterview();
+  else if(recog) try{recog.start()}catch{}
 }
+function stopListen(){ if(recog) try{recog.stop()}catch{} }
 
-function stopListening() {
-  if (!isAndroid && recognition) {
-    try { recognition.stop(); } catch {}
-  }
-}
-
-/* =====================================================
-   USER SPOKE → SEND TO AI
-===================================================== */
-function onUserSpeech(text) {
-  if (!text || !text.trim()) {
-    startListening();
-    return;
-  }
-
-  stopListening();
-  app.history.push({ role: "user", content: text });
-  sendToAI("interview", text);
-}
-
-/* =====================================================
-   AI REQUEST PIPELINE
-===================================================== */
-async function sendToAI(mode, text = "") {
+/* ========= CORE LOOP ========= */
+async function send(mode,text=""){
   setMode(State.THINKING);
+  const fd=new FormData();
+  fd.append("mode",mode);
+  fd.append("cvText",app.cv);
+  fd.append("history",JSON.stringify(app.history));
+  if(text) fd.append("text",text);
 
-  const fd = new FormData();
-  fd.append("mode", mode);
-  fd.append("cvText", app.cvText);
-  fd.append("history", JSON.stringify(app.history));
-  if (text) fd.append("text", text);
-
-  try {
-    const res = await fetch(API_URL, { method: "POST", body: fd });
-    const data = await res.json();
-
-    if (data.reply) {
-      app.history.push({ role: "assistant", content: data.reply });
-      speakAI(data.reply);
-    } else {
-      speakAI("Let’s continue. Please explain further.");
-    }
-  } catch (e) {
-    speakAI("Connection issue. Please continue.");
+  try{
+    const r=await fetch(API,{method:"POST",body:fd});
+    const d=await r.json();
+    if(d.reply){
+      app.history.push({role:"assistant",content:d.reply});
+      speak(d.reply);
+    }else speak("Please continue.");
+  }catch{
+    speak("Connection issue. Please continue.");
   }
 }
 
-/* =====================================================
-   SESSION CONTROL
-===================================================== */
-async function startSession(file) {
-  app.active = true;
-  setMode(State.THINKING);
+function onUser(text){
+  if(!text||!text.trim()) return listen();
+  stopListen();
+  app.history.push({role:"user",content:text});
+  send("interview",text);
+}
 
-  // Parse PDF
-  const buf = await file.arrayBuffer();
-  const pdf = await pdfjsLib.getDocument(buf).promise;
-  for (let i = 1; i <= pdf.numPages; i++) {
-    const page = await pdf.getPage(i);
-    const text = await page.getTextContent();
-    app.cvText += text.items.map(s => s.str).join(" ");
+/* ========= SESSION ========= */
+async function start(file){
+  if(!window.pdfjsLib){ alert("PDF engine failed."); return; }
+  app.active=true; setMode(State.THINKING);
+
+  const buf=await file.arrayBuffer();
+  const pdf=await pdfjsLib.getDocument(buf).promise;
+  for(let i=1;i<=pdf.numPages;i++){
+    const p=await pdf.getPage(i);
+    const t=await p.getTextContent();
+    app.cv+=t.items.map(x=>x.str).join(" ");
   }
 
-  sendToAI("start");
+  timerEl.classList.add("active");
+  setInterval(()=>{
+    if(!app.active) return;
+    app.time--;
+    timerEl.textContent=
+      Math.floor(app.time/60)+":"+String(app.time%60).padStart(2,"0");
+  },1000);
+
+  send("start");
 }
 
-async function endSession() {
-  app.active = false;
-  stopListening();
-  setMode(State.THINKING);
-
-  const fd = new FormData();
-  fd.append("mode", "score");
-  fd.append("history", JSON.stringify(app.history));
-
-  const res = await fetch(API_URL, { method: "POST", body: fd });
-  const report = await res.json();
-  showReport(report);
+async function end(){
+  app.active=false; stopListen(); setMode(State.THINKING);
+  const fd=new FormData();
+  fd.append("mode","score");
+  fd.append("history",JSON.stringify(app.history));
+  const r=await fetch(API,{method:"POST",body:fd});
+  showReport(await r.json());
 }
 
-/* =====================================================
-   ANDROID BRIDGE (MUST BE GLOBAL)
-===================================================== */
-window.onRecognitionResult = (text) => {
-  onUserSpeech(text);
-};
-
-window.onFinishedSpeaking = () => {
-  onSpeechEnd();
-};
-
-/* =====================================================
-   WAKE LOCK (ANTI-SLEEP)
-===================================================== */
-let wakeLock = null;
-async function keepAwake() {
-  try { wakeLock = await navigator.wakeLock.request("screen"); } catch {}
+/* ========= REPORT ========= */
+function showReport(r){
+  const avg=Math.round((r.technical_score+r.communication_score)/2);
+  document.getElementById("scoreValue").textContent=avg;
+  document.getElementById("reportText").innerHTML=`
+    <b>Technical:</b> ${r.technical_score}<br><br>
+    <b>Communication:</b> ${r.communication_score}<br><br>
+    <b>Strengths</b><ul>${r.strengths.map(x=>`<li>${x}</li>`).join("")}</ul>
+    <b>Gaps</b><ul>${r.gaps.map(x=>`<li>${x}</li>`).join("")}</ul>
+    <b>Verdict:</b> <b>${r.verdict}</b>
+  `;
+  document.getElementById("reportModal").classList.add("visible");
 }
-document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "visible") keepAwake();
+
+/* ========= ANDROID ========= */
+window.onRecognitionResult=t=>onUser(t);
+window.onFinishedSpeaking=()=>onSpeechEnd();
+
+/* ========= WAKE LOCK ========= */
+let wl=null;
+navigator.wakeLock?.request("screen").then(l=>wl=l).catch(()=>{});
+
+/* ========= BINDINGS ========= */
+document.getElementById("cvInput").onchange=e=>start(e.target.files[0]);
+document.getElementById("endBtn").onclick=end;
+
 });
-keepAwake();
-
-/* =====================================================
-   UI BINDINGS
-===================================================== */
-document.getElementById("cvInput").onchange = e =>
-  startSession(e.target.files[0]);
-
-document.getElementById("endBtn").onclick = endSession;
 </script>
+</body>
+</html>
