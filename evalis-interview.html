@@ -27,6 +27,7 @@
         .orb-stage {
             position: relative; width: 300px; height: 300px;
             display: flex; align-items: center; justify-content: center; margin-bottom: 60px;
+            cursor: pointer; /* Indicates clickable for reset */
         }
 
         .orb-core {
@@ -99,7 +100,7 @@
 </head>
 <body>
 
-    <div class="orb-stage state-idle" id="orbStage">
+    <div class="orb-stage state-idle" id="orbStage" onclick="manualReset()">
         <div class="wave" style="animation-delay: 0s;"></div>
         <div class="wave" style="animation-delay: 1.3s;"></div>
         <div class="wave" style="animation-delay: 2.6s;"></div>
@@ -130,61 +131,63 @@
     </div>
 
 <script>
-    // --- CONFIGURATION & GLOBALS ---
+    // --- CONFIGURATION ---
     const API_URL = "https://evalis-ai.simpaticohrconsultancy.workers.dev";
     pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
     const isAndroid = typeof Android !== "undefined";
 
-    // STRICT STATE MANAGEMENT
+    // --- STATE MANAGEMENT ---
     let state = {
         cvText: "",
-        history: [], // Stores {role: "user"|"assistant", content: "..."}
-        timeLeft: 900, // 15 mins
-        isSessionActive: false, // CRITICAL: Controls flow and stops AI on timeout
-        isSpeaking: false
+        history: [],
+        timeLeft: 900,
+        isSessionActive: false,
+        isProcessing: false, // Locks mic while thinking/speaking
+        watchdogTimer: null // Prevents stuck listening
     };
 
     let timerInterval = null;
     let recognition = null;
-    let availableVoices = [];
 
     const orbStage = document.getElementById('orbStage');
     const timerDisplay = document.getElementById('timer');
 
-    // --- PRELOAD VOICES (Fixes the Male-to-Female bug) ---
-    function loadVoices() {
-        availableVoices = window.speechSynthesis.getVoices();
-    }
-    if (window.speechSynthesis.onvoiceschanged !== undefined) {
-        window.speechSynthesis.onvoiceschanged = loadVoices;
-    }
-    loadVoices();
-
-    // --- VISUALS & UTILS ---
+    // --- VISUALS ---
     function setVisualState(mode) {
-        if (!state.isSessionActive && mode !== 'thinking') return; // Don't change visuals if ended
+        if (!state.isSessionActive && mode !== 'thinking') return;
         orbStage.className = 'orb-stage state-' + mode;
     }
 
-    let wakeLock = null;
-    async function requestWakeLock() {
-        if ('wakeLock' in navigator) {
-            try { wakeLock = await navigator.wakeLock.request("screen"); } 
-            catch (err) { console.log('Wake Lock error:', err); }
+    // --- MANUAL RESET (Tap Orb) ---
+    // If Android gets stuck, user taps orb to force listen
+    window.manualReset = function() {
+        if(state.isSessionActive && !state.isProcessing) {
+            console.log("Manual Reset Triggered");
+            startListening();
         }
-    }
-    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') requestWakeLock(); });
-    requestWakeLock();
+    };
 
     // --- CORE LOGIC ---
 
-    // 1. LISTENING
+    // 1. START LISTENING (Robust)
     function startListening() {
-        if (!state.isSessionActive || state.isSpeaking) return;
+        if (!state.isSessionActive || state.isProcessing) return;
+
+        // Clear previous watchdog
+        clearTimeout(state.watchdogTimer);
+        
         setVisualState('listening');
         
+        // WATCHDOG: If no result in 15s, restart listening (Fixes stuck state)
+        state.watchdogTimer = setTimeout(() => {
+            if(state.isSessionActive && !state.isProcessing) {
+                console.log("Watchdog: Restarting Mic...");
+                startListening();
+            }
+        }, 15000);
+
         if (isAndroid) {
-            Android.startInterview();
+            try { Android.startInterview(); } catch(e) { console.error(e); }
         } else if (recognition) {
             try { recognition.start(); } catch(e) {}
         }
@@ -192,45 +195,39 @@
 
     // 2. SPEAKING
     function speak(text) {
-        if (!state.isSessionActive) return; // Strict halt
+        if (!state.isSessionActive) return;
         
-        state.isSpeaking = true;
+        state.isProcessing = true; // Lock Mic
         setVisualState('speaking');
 
         if (isAndroid) {
             Android.speak(text);
         } else {
+            // PC Fallback
             window.speechSynthesis.cancel();
             const utterance = new SpeechSynthesisUtterance(text);
-            
-            // Voice matching logic
-            const voices = availableVoices.length > 0 ? availableVoices : window.speechSynthesis.getVoices();
-            const preferred = voices.find(v => v.name.includes('Google US English') || v.name.includes('Natural') || v.name.includes('Female'));
+            const voices = window.speechSynthesis.getVoices();
+            const preferred = voices.find(v => v.name.includes('Google US English') || v.name.includes('Natural'));
             if(preferred) utterance.voice = preferred;
+            utterance.rate = 1.05; 
             
-            utterance.rate = 1.05; // Slightly slower, more natural
-            utterance.pitch = 1.0;
-            
-            utterance.onend = () => {
-                state.isSpeaking = false;
-                if (state.isSessionActive) setTimeout(startListening, 300); // Natural pause before listening
-            };
-            
-            // Fallback in case onend fails to fire (browser bug)
-            utterance.onerror = () => { state.isSpeaking = false; startListening(); };
-
+            utterance.onend = () => window.onFinishedSpeaking(); // Trigger loop manually for PC
             window.speechSynthesis.speak(utterance);
         }
     }
 
     // 3. PROCESSING
     async function handleUserResponse(transcript) {
-        if (!state.isSessionActive || !transcript.trim()) return;
+        // Prevent empty or duplicate processing
+        if (!state.isSessionActive || !transcript || !transcript.trim()) return;
         
-        if (!isAndroid) window.speechSynthesis.cancel(); // Stop talking if user interrupts
+        // Critical: Clear watchdog so we don't reset while thinking
+        clearTimeout(state.watchdogTimer);
+
+        state.isProcessing = true; // Lock Mic
         setVisualState('thinking');
 
-        // Cleanly push to history for better scoring
+        // Update history
         state.history.push({ role: "user", content: transcript });
 
         const fd = new FormData();
@@ -240,39 +237,52 @@
 
         try {
             const res = await fetch(API_URL, { method: "POST", body: fd });
-            if (!state.isSessionActive) return; // Abort if timer ended during fetch
+            if (!state.isSessionActive) return;
             
             const data = await res.json();
             
-            // Safely update history and speak
             if(data.reply) {
                 state.history.push({ role: "assistant", content: data.reply });
                 speak(data.reply);
+            } else {
+                // If API returns nothing, release lock
+                state.isProcessing = false;
+                startListening();
             }
         } catch (e) {
-            if (state.isSessionActive) setTimeout(startListening, 1000);
+            // Network error: release lock and retry listening
+            console.error(e);
+            state.isProcessing = false;
+            setTimeout(startListening, 1000);
         }
     }
+
+    // --- ANDROID CALLBACKS ---
+    // Make sure these are strictly global
+    window.onRecognitionResult = function(text) {
+        handleUserResponse(text);
+    };
+
+    window.onFinishedSpeaking = function() {
+        state.isProcessing = false;
+        // Important: Add delay to prevent self-hearing echo loop
+        if(state.isSessionActive) {
+            setTimeout(startListening, 500);
+        }
+    };
 
     // --- PC SPEECH SETUP ---
     if (!isAndroid) {
         const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
         if (Recognition) {
             recognition = new Recognition();
-            recognition.continuous = true; // Prevents rambling capture
-            recognition.interimResults = true; 
+            recognition.continuous = false; 
+            recognition.interimResults = false; 
             recognition.lang = 'en-US';
             
-            recognition.onresult = (e) => {
-                const transcript = e.results[0][0].transcript;
-                handleUserResponse(transcript);
-            };
-            
-            recognition.onend = () => {
-                // Only auto-restart if active, not speaking, and not thinking
-                if (state.isSessionActive && !state.isSpeaking && !orbStage.classList.contains('state-thinking')) {
-                    startListening();
-                }
+            recognition.onresult = (e) => handleUserResponse(e.results[0][0].transcript);
+            recognition.onerror = () => {
+                if(!state.isProcessing && state.isSessionActive) setTimeout(startListening, 500);
             };
         }
     }
@@ -282,8 +292,7 @@
         const file = e.target.files[0];
         if(!file) return;
 
-        const btnText = document.getElementById('uploadText');
-        btnText.innerText = "Analyzing Resume...";
+        document.getElementById('uploadText').innerText = "Analyzing Resume...";
         document.querySelector('.upload-btn').style.opacity = "0.6";
 
         try {
@@ -298,37 +307,31 @@
             state.cvText = fullText;
             startSession();
         } catch (error) {
-            alert("Error reading PDF. Please try again.");
-            btnText.innerText = "Upload Resume (PDF)";
-            document.querySelector('.upload-btn').style.opacity = "1";
+            alert("Error reading PDF.");
+            location.reload();
         }
     };
 
     async function startSession() {
         state.isSessionActive = true;
         state.timeLeft = 900; 
-        state.history = []; // Clear history
-        clearInterval(timerInterval); 
+        state.history = [];
+        clearInterval(timerInterval);
         
         document.getElementById('setupUI').classList.add('hidden');
         document.getElementById('activeUI').classList.remove('hidden');
         timerDisplay.classList.add('visible');
-        timerDisplay.classList.remove('warning');
 
-        // STRICT TIMER
         timerInterval = setInterval(() => {
             state.timeLeft--;
             const m = Math.floor(state.timeLeft / 60);
             const s = state.timeLeft % 60;
             timerDisplay.textContent = `${m}:${s < 10 ? '0'+s : s}`;
-            
-            if (state.timeLeft <= 60) timerDisplay.classList.add('warning'); // Red at 1 min
-
-            if(state.timeLeft <= 0) { 
-                finishSession(); // Auto-kill at 0:00
-            }
+            if(state.timeLeft <= 0) finishSession();
         }, 1000);
 
+        // Initial Greeting
+        state.isProcessing = true;
         setVisualState('thinking');
 
         const fd = new FormData();
@@ -343,40 +346,38 @@
                 speak(data.reply);
             }
         } catch (e) {
-            alert("Connection Error. Please refresh.");
+            alert("Connection Error.");
         }
     }
 
     document.getElementById('endBtn').onclick = finishSession;
 
     async function finishSession() {
-        // 1. STRICT HALT: Stop all active processes
         state.isSessionActive = false;
         clearInterval(timerInterval);
+        clearTimeout(state.watchdogTimer);
         
         if (!isAndroid) {
-            window.speechSynthesis.cancel(); // Kills AI voice immediately
-            if (recognition) recognition.stop(); // Kills mic
+            window.speechSynthesis.cancel();
+            if (recognition) recognition.stop();
         }
 
-        // 2. UI Update
         document.getElementById('activeUI').classList.add('hidden');
-        setVisualState('thinking'); // Shows processing state
+        setVisualState('thinking');
         
-        document.getElementById('reportText').textContent = "Generating comprehensive evaluation...";
+        document.getElementById('reportText').textContent = "Generating Score...";
         document.getElementById('reportModal').style.display = 'flex';
 
-        // 3. Send structured data to scoring backend
         const fd = new FormData();
         fd.append("mode", "score");
-        fd.append("history", JSON.stringify(state.history)); // Now cleanly formatted
+        fd.append("history", JSON.stringify(state.history));
 
         try {
             const res = await fetch(API_URL, { method: "POST", body: fd });
             const data = await res.json();
-            document.getElementById('reportText').textContent = data.reply || "Evaluation complete.";
+            document.getElementById('reportText').textContent = data.reply;
         } catch(e) {
-            document.getElementById('reportText').textContent = "Error generating report. Please check connection.";
+            document.getElementById('reportText').textContent = "Error generating report.";
         }
     }
 </script>
