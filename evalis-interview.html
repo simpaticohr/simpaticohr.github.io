@@ -222,16 +222,18 @@
         isListening: false
     };
 
+    // Global Timer Variable (Crucial Fix)
+    let timerInterval = null; 
+
     const orbStage = document.getElementById('orbStage');
     const timerDisplay = document.getElementById('timer');
 
     // --- VISUAL CONTROLLER ---
     function setVisualState(mode) {
-        // modes: 'idle', 'listening', 'thinking', 'speaking'
         orbStage.className = 'orb-stage state-' + mode;
     }
 
-    // --- WAKE LOCK (Keep screen on) ---
+    // --- WAKE LOCK ---
     let wakeLock = null;
     async function requestWakeLock() {
         if ('wakeLock' in navigator) {
@@ -266,15 +268,11 @@
         if (isAndroid) {
             Android.speak(text);
         } else {
-            // PC: Interruptible Speech
-            window.speechSynthesis.cancel(); // Stop previous
+            window.speechSynthesis.cancel();
             const utterance = new SpeechSynthesisUtterance(text);
-            
-            // Voice Selection (Prefer Natural)
             const voices = window.speechSynthesis.getVoices();
-            const preferred = voices.find(v => v.name.includes('Google US English') || v.name.includes('Natural') || v.name.includes('Samantha'));
+            const preferred = voices.find(v => v.name.includes('Google US English') || v.name.includes('Natural'));
             if(preferred) utterance.voice = preferred;
-            
             utterance.rate = 1.1;
             utterance.onend = () => {
                 if(state.history.length > 0) onFinishedSpeaking();
@@ -286,8 +284,6 @@
     // 3. PROCESSING
     async function handleUserResponse(transcript) {
         if (!transcript.trim()) return;
-
-        // PC: If user spoke, ensure TTS is cancelled (Barge-in)
         if (!isAndroid) window.speechSynthesis.cancel();
 
         setVisualState('thinking');
@@ -304,18 +300,12 @@
             state.history = data.history;
             speak(data.reply);
         } catch (e) {
-            // Silent retry on network error
             setTimeout(() => startListening(), 1000);
         }
     }
 
-    // --- BRIDGE CALLBACKS ---
     window.onRecognitionResult = (text) => handleUserResponse(text);
-    
-    window.onFinishedSpeaking = () => {
-        // Seamless transition back to listening
-        startListening();
-    };
+    window.onFinishedSpeaking = () => startListening();
 
     // --- PC SPEECH SETUP ---
     let recognition;
@@ -323,16 +313,10 @@
         const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
         if (Recognition) {
             recognition = new Recognition();
-            recognition.continuous = false; // False + Restart is more robust than True
+            recognition.continuous = false;
             recognition.interimResults = false; 
             recognition.lang = 'en-US';
-
-            recognition.onresult = (e) => {
-                const text = e.results[0][0].transcript;
-                handleUserResponse(text);
-            };
-
-            // Auto-restart if silence (simulate continuous listening)
+            recognition.onresult = (e) => handleUserResponse(e.results[0][0].transcript);
             recognition.onend = () => {
                 if (state.isListening && !orbStage.classList.contains('state-speaking') && !orbStage.classList.contains('state-thinking')) {
                     recognition.start();
@@ -343,17 +327,14 @@
 
     // --- APP FLOW ---
     
-    // Step 1: File Upload
     document.getElementById('cvInput').onchange = async (e) => {
         const file = e.target.files[0];
         if(!file) return;
 
-        // Visual feedback
         const btn = document.querySelector('.upload-btn');
         btn.innerHTML = "Processing...";
         btn.style.opacity = "0.7";
 
-        // Parse PDF
         const buffer = await file.arrayBuffer();
         const pdf = await pdfjsLib.getDocument(buffer).promise;
         let fullText = "";
@@ -363,29 +344,32 @@
             fullText += textContent.items.map(s => s.str).join(" ");
         }
         state.cvText = fullText;
-
-        // Start Interview Immediately
         startSession();
     };
 
-    // Step 2: Session Start
     async function startSession() {
+        // RESET STATE & TIMER
+        clearInterval(timerInterval); // Stop any existing timer
+        state.timeLeft = 900; // Reset to 15:00
+        
         document.getElementById('setupUI').classList.add('hidden');
         document.getElementById('activeUI').classList.remove('hidden');
         document.getElementById('timer').classList.add('visible');
 
-        // Start Timer
-        const interval = setInterval(() => {
+        // Start New Timer
+        timerInterval = setInterval(() => {
             state.timeLeft--;
             const m = Math.floor(state.timeLeft / 60);
             const s = state.timeLeft % 60;
             timerDisplay.textContent = `${m}:${s < 10 ? '0'+s : s}`;
-            if(state.timeLeft <= 0) { clearInterval(interval); finishSession(); }
+            
+            if(state.timeLeft <= 0) { 
+                finishSession(); 
+            }
         }, 1000);
 
         setVisualState('thinking');
 
-        // Initial AI Handshake
         const fd = new FormData();
         fd.append("mode", "start");
         fd.append("cvText", state.cvText);
@@ -400,16 +384,17 @@
         }
     }
 
-    // Step 3: End Session
     document.getElementById('endBtn').onclick = finishSession;
 
     async function finishSession() {
+        // Stop Everything
+        clearInterval(timerInterval); // Stop the timer loop
         state.isListening = false;
         if(!isAndroid && recognition) recognition.stop();
         if(!isAndroid) window.speechSynthesis.cancel();
 
         document.getElementById('activeUI').classList.add('hidden');
-        setVisualState('thinking'); // Shows it's calculating score
+        setVisualState('thinking');
 
         const fd = new FormData();
         fd.append("mode", "score");
