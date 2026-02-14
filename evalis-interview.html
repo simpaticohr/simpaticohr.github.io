@@ -6,7 +6,7 @@
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <title>simpatico AI | simpatico hr consultancy </title>
+    <title>Evalis AI | Elite AI Interviewer</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <style>
@@ -243,6 +243,39 @@
         .status-pill.speaking .status-indicator {
             background: var(--primary);
             animation: pulse-active 0.6s ease-in-out infinite;
+        }
+
+        /* Screen Lock Warning Banner */
+        .lock-warning {
+            position: fixed;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(245, 158, 11, 0.95);
+            color: white;
+            padding: 12px 24px;
+            border-radius: 12px;
+            font-size: 0.9rem;
+            font-weight: 600;
+            box-shadow: 0 4px 16px rgba(245, 158, 11, 0.3);
+            z-index: 1001;
+            display: none;
+            animation: slide-down 0.3s ease-out;
+        }
+
+        .lock-warning.show {
+            display: block;
+        }
+
+        @keyframes slide-down {
+            from {
+                opacity: 0;
+                transform: translateX(-50%) translateY(-20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateX(-50%) translateY(0);
+            }
         }
 
         /* Timer */
@@ -602,6 +635,11 @@
 </head>
 <body>
     <div class="bg-gradient"></div>
+    
+    <!-- Screen Lock Warning -->
+    <div id="lockWarning" class="lock-warning">
+        ⚠️ Screen locked - Keep screen on for best experience
+    </div>
 
     <div class="orb-container">
         <div class="ring"></div>
@@ -1061,6 +1099,16 @@
         document.getElementById('activePanel').style.display = 'block';
         
         state.isInterviewing = true;
+        
+        // Request wake lock immediately
+        await requestWakeLock();
+        
+        // Start wake lock heartbeat to keep it active
+        startWakeLockHeartbeat();
+        
+        // Start periodic state saving
+        startStateSaving();
+        
         startTimer();
         
         setOrbState('thinking', "Initializing interview...");
@@ -1099,6 +1147,20 @@
         if (timerInterval) clearInterval(timerInterval);
         if (retryTimeout) clearTimeout(retryTimeout);
         
+        // Stop state saving
+        stopStateSaving();
+        
+        // Stop wake lock heartbeat
+        stopWakeLockHeartbeat();
+        
+        // Release wake lock
+        await releaseWakeLock();
+        
+        // Clear saved state
+        try {
+            sessionStorage.removeItem('evalis_interview_state');
+        } catch (e) {}
+        
         // Stop all speech
         if (!isAndroid) {
             if (recognition) {
@@ -1133,29 +1195,214 @@
 
     // --- WAKE LOCK (Prevent screen sleep) ---
     let wakeLock = null;
+    let wakeLockRetryCount = 0;
+    const MAX_WAKELOCK_RETRIES = 10; // Increased retries
 
     async function requestWakeLock() {
+        // Remove the isInterviewing check for initial request
+        // This allows wake lock to be requested even before interview starts
         if ('wakeLock' in navigator) {
             try {
-                wakeLock = await navigator.wakeLock.request("screen");
-                console.log('Wake Lock active');
+                // Cancel previous wake lock if exists
+                if (wakeLock) {
+                    try {
+                        await wakeLock.release();
+                    } catch (e) {
+                        console.log('Previous wake lock already released');
+                    }
+                }
                 
-                wakeLock.addEventListener('release', () => {
-                    console.log('Wake Lock released');
+                wakeLock = await navigator.wakeLock.request("screen");
+                wakeLockRetryCount = 0;
+                console.log('✅ Wake Lock ACTIVE - Screen will NOT sleep');
+                
+                // Show confirmation to user (only during interview)
+                if (state.isInterviewing) {
+                    statusText.textContent = "Screen lock prevented ✓";
+                    setTimeout(() => {
+                        if (state.isListening) {
+                            statusText.textContent = "Listening to your response...";
+                        }
+                    }, 2000);
+                }
+                
+                wakeLock.addEventListener('release', async () => {
+                    console.log('⚠️ Wake Lock released - attempting to re-acquire');
+                    
+                    // Aggressive auto re-request if still interviewing
+                    if (state.isInterviewing && wakeLockRetryCount < MAX_WAKELOCK_RETRIES) {
+                        wakeLockRetryCount++;
+                        console.log(`🔄 Wake lock retry attempt ${wakeLockRetryCount}/${MAX_WAKELOCK_RETRIES}`);
+                        
+                        setTimeout(async () => {
+                            await requestWakeLock();
+                        }, 500); // Faster retry (500ms instead of 1000ms)
+                    }
                 });
             } catch (err) {
-                console.error('Wake Lock failed:', err);
+                console.error('❌ Wake Lock failed:', err);
+                
+                // Notify user if wake lock is not supported
+                if (err.name === 'NotSupportedError') {
+                    console.log('💡 Wake Lock not supported on this device');
+                    if (state.isInterviewing) {
+                        alert('⚠️ Screen may lock during interview. Please keep screen active manually or adjust your phone settings.');
+                    }
+                } else if (err.name === 'NotAllowedError') {
+                    console.log('Wake Lock permission denied');
+                }
+            }
+        } else {
+            console.log('⚠️ Wake Lock API not available');
+            if (state.isInterviewing) {
+                // Show one-time notification
+                if (!sessionStorage.getItem('wake_lock_warning_shown')) {
+                    alert('💡 Tip: Keep your screen on during the interview to prevent interruptions.');
+                    sessionStorage.setItem('wake_lock_warning_shown', 'true');
+                }
             }
         }
     }
 
+    async function releaseWakeLock() {
+        if (wakeLock) {
+            try {
+                await wakeLock.release();
+                wakeLock = null;
+                wakeLockRetryCount = 0;
+                console.log('Wake Lock released');
+            } catch (err) {
+                console.log('Wake Lock already released');
+            }
+        }
+    }
+
+    // Handle visibility changes (screen lock/unlock, tab switch)
+    const lockWarning = document.getElementById('lockWarning');
+    
     document.addEventListener('visibilitychange', async () => {
-        if (document.visibilityState === 'visible' && state.isInterviewing) {
-            await requestWakeLock();
+        console.log('👁️ Visibility changed:', document.visibilityState);
+        
+        if (document.visibilityState === 'visible') {
+            // Page became visible again (unlocked or tab focused)
+            if (state.isInterviewing) {
+                console.log('🔓 Screen unlocked - resuming interview');
+                
+                // Hide warning banner
+                lockWarning.classList.remove('show');
+                
+                // Re-request wake lock
+                await requestWakeLock();
+                
+                // Resume interview if it was interrupted
+                resumeInterviewAfterInterruption();
+            }
+        } else {
+            // Page hidden (locked or tab switched)
+            console.log('🔒 Screen locked or tab hidden');
+            
+            // Show warning banner briefly
+            if (state.isInterviewing) {
+                lockWarning.classList.add('show');
+                setTimeout(() => {
+                    lockWarning.classList.remove('show');
+                }, 3000);
+            }
+            
+            // Save current state
+            saveInterviewState();
         }
     });
 
-    // --- INITIALIZE ---
+    // --- STATE PERSISTENCE (For Recovery After Interruptions) ---
+    function saveInterviewState() {
+        if (!state.isInterviewing) return;
+        
+        try {
+            const stateToSave = {
+                history: state.history,
+                timeLeft: state.timeLeft,
+                timestamp: Date.now()
+            };
+            sessionStorage.setItem('evalis_interview_state', JSON.stringify(stateToSave));
+            console.log('💾 Interview state saved');
+        } catch (e) {
+            console.error('Failed to save state:', e);
+        }
+    }
+
+    function resumeInterviewAfterInterruption() {
+        if (!state.isInterviewing) return;
+        
+        console.log('🔄 Resuming interview...');
+        
+        // Stop any ongoing speech/recognition
+        if (!isAndroid) {
+            window.speechSynthesis.cancel();
+            if (recognition) {
+                try { recognition.stop(); } catch (e) {}
+            }
+        }
+        
+        // Reset states
+        state.isSpeaking = false;
+        state.isListening = false;
+        
+        // Wait a moment then restart listening
+        setTimeout(() => {
+            if (state.isInterviewing && !state.isSpeaking) {
+                setOrbState('idle', 'Resuming...');
+                
+                // Give user a moment to get ready
+                setTimeout(() => {
+                    startListening();
+                }, 1500);
+            }
+        }, 500);
+    }
+
+    // Periodic state saving during interview
+    let stateSaveInterval = null;
+    let wakeLockHeartbeat = null;
+    
+    function startStateSaving() {
+        if (stateSaveInterval) return;
+        
+        stateSaveInterval = setInterval(() => {
+            if (state.isInterviewing) {
+                saveInterviewState();
+            }
+        }, 5000); // Save every 5 seconds
+    }
+    
+    function stopStateSaving() {
+        if (stateSaveInterval) {
+            clearInterval(stateSaveInterval);
+            stateSaveInterval = null;
+        }
+    }
+
+    // Wake Lock Heartbeat - Ensures wake lock stays active
+    function startWakeLockHeartbeat() {
+        if (wakeLockHeartbeat) return;
+        
+        wakeLockHeartbeat = setInterval(async () => {
+            if (state.isInterviewing) {
+                // Check if wake lock is still active
+                if (!wakeLock || wakeLock.released) {
+                    console.log('🔄 Wake lock lost, re-requesting...');
+                    await requestWakeLock();
+                }
+            }
+        }, 10000); // Check every 10 seconds
+    }
+    
+    function stopWakeLockHeartbeat() {
+        if (wakeLockHeartbeat) {
+            clearInterval(wakeLockHeartbeat);
+            wakeLockHeartbeat = null;
+        }
+    }
     window.addEventListener('load', () => {
         console.log('🚀 Evalis AI loaded');
         console.log('📱 Platform:', isAndroid ? 'Android' : isMobile ? 'Mobile Web' : 'Desktop');
@@ -1179,15 +1426,84 @@
                 localStorage.setItem('evalis_hint_shown', 'true');
             }, 3000);
         }
+        
+        // Try to restore state if page was refreshed during interview
+        tryRestoreInterviewState();
     });
+
+    // Try to restore state after page refresh
+    function tryRestoreInterviewState() {
+        try {
+            const saved = sessionStorage.getItem('evalis_interview_state');
+            if (saved) {
+                const savedState = JSON.parse(saved);
+                const timeSinceInterruption = Date.now() - savedState.timestamp;
+                
+                // If less than 5 minutes, offer to resume
+                if (timeSinceInterruption < 5 * 60 * 1000) {
+                    const resume = confirm('Interview was interrupted. Resume where you left off?');
+                    if (resume && savedState.history && savedState.history.length > 0) {
+                        // Restore state
+                        state.history = savedState.history;
+                        state.timeLeft = savedState.timeLeft;
+                        
+                        // Show UI
+                        document.getElementById('setupPanel').style.display = 'none';
+                        document.getElementById('activePanel').style.display = 'block';
+                        state.isInterviewing = true;
+                        
+                        startTimer();
+                        requestWakeLock();
+                        startWakeLockHeartbeat();
+                        startStateSaving();
+                        
+                        setOrbState('idle', 'Interview resumed');
+                        
+                        // Start listening
+                        setTimeout(() => {
+                            startListening();
+                        }, 2000);
+                    } else {
+                        sessionStorage.removeItem('evalis_interview_state');
+                    }
+                } else {
+                    // Too old, clear it
+                    sessionStorage.removeItem('evalis_interview_state');
+                }
+            }
+        } catch (e) {
+            console.log('Could not restore state:', e);
+        }
+    }
 
     // Prevent accidental navigation during interview
     window.addEventListener('beforeunload', (e) => {
         if (state.isInterviewing) {
+            saveInterviewState();
             e.preventDefault();
-            e.returnValue = '';
+            e.returnValue = 'Interview in progress. Are you sure you want to leave?';
+            return e.returnValue;
         }
     });
+
+    // Handle page unload (save state)
+    window.addEventListener('unload', () => {
+        if (state.isInterviewing) {
+            saveInterviewState();
+        }
+    });
+
+    // Audio focus management for mobile
+    if (isMobile) {
+        // Resume audio context on user interaction
+        document.addEventListener('touchstart', () => {
+            if (window.speechSynthesis) {
+                // Ensure speech synthesis is ready
+                window.speechSynthesis.cancel();
+            }
+        }, { once: true });
+    }
+
 </script>
 
 </body>
