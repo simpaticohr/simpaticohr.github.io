@@ -218,7 +218,7 @@
             color: var(--text-secondary);
             margin-bottom: 36px;
             backdrop-filter: blur(10px);
-            transition: all 0.3s ease;
+            transition: color 0.3s ease, background 0.3s ease;
             font-weight: 500;
         }
 
@@ -243,39 +243,6 @@
         .status-pill.speaking .status-indicator {
             background: var(--primary);
             animation: pulse-active 0.6s ease-in-out infinite;
-        }
-
-        /* Screen Lock Warning Banner */
-        .lock-warning {
-            position: fixed;
-            top: 20px;
-            left: 50%;
-            transform: translateX(-50%);
-            background: rgba(245, 158, 11, 0.95);
-            color: white;
-            padding: 12px 24px;
-            border-radius: 12px;
-            font-size: 0.9rem;
-            font-weight: 600;
-            box-shadow: 0 4px 16px rgba(245, 158, 11, 0.3);
-            z-index: 1001;
-            display: none;
-            animation: slide-down 0.3s ease-out;
-        }
-
-        .lock-warning.show {
-            display: block;
-        }
-
-        @keyframes slide-down {
-            from {
-                opacity: 0;
-                transform: translateX(-50%) translateY(-20px);
-            }
-            to {
-                opacity: 1;
-                transform: translateX(-50%) translateY(0);
-            }
         }
 
         /* Timer */
@@ -635,11 +602,6 @@
 </head>
 <body>
     <div class="bg-gradient"></div>
-    
-    <!-- Screen Lock Warning -->
-    <div id="lockWarning" class="lock-warning">
-        ⚠️ Screen locked - Keep screen on for best experience
-    </div>
 
     <div class="orb-container">
         <div class="ring"></div>
@@ -1216,15 +1178,7 @@
                 wakeLockRetryCount = 0;
                 console.log('✅ Wake Lock ACTIVE - Screen will NOT sleep');
                 
-                // Show confirmation to user (only during interview)
-                if (state.isInterviewing) {
-                    statusText.textContent = "Screen lock prevented ✓";
-                    setTimeout(() => {
-                        if (state.isListening) {
-                            statusText.textContent = "Listening to your response...";
-                        }
-                    }, 2000);
-                }
+                // Wake lock now works silently in background (no UI feedback)
                 
                 wakeLock.addEventListener('release', async () => {
                     console.log('⚠️ Wake Lock released - attempting to re-acquire');
@@ -1278,8 +1232,6 @@
     }
 
     // Handle visibility changes (screen lock/unlock, tab switch)
-    const lockWarning = document.getElementById('lockWarning');
-    
     document.addEventListener('visibilitychange', async () => {
         console.log('👁️ Visibility changed:', document.visibilityState);
         
@@ -1287,9 +1239,6 @@
             // Page became visible again (unlocked or tab focused)
             if (state.isInterviewing) {
                 console.log('🔓 Screen unlocked - resuming interview');
-                
-                // Hide warning banner
-                lockWarning.classList.remove('show');
                 
                 // Re-request wake lock
                 await requestWakeLock();
@@ -1301,13 +1250,7 @@
             // Page hidden (locked or tab switched)
             console.log('🔒 Screen locked or tab hidden');
             
-            // Show warning banner briefly
-            if (state.isInterviewing) {
-                lockWarning.classList.add('show');
-                setTimeout(() => {
-                    lockWarning.classList.remove('show');
-                }, 3000);
-            }
+            // Wake lock continues working in background (no banner shown)
             
             // Save current state
             saveInterviewState();
@@ -1408,7 +1351,10 @@
         console.log('📱 Platform:', isAndroid ? 'Android' : isMobile ? 'Mobile Web' : 'Desktop');
         console.log('🎤 Speech Recognition:', !!recognition ? 'Available' : 'Not Available');
         
-        requestWakeLock();
+        // Only request wake lock on mobile (PC doesn't need it on load)
+        if (isMobile) {
+            requestWakeLock();
+        }
         
         // Add orb tap/click handler for manual interrupt
         orb.addEventListener('click', () => {
