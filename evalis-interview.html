@@ -6,7 +6,7 @@
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <title>Evalis AI | Elite AI Interviewer</title>
+    <title>simpatico AI | simpatico hr consultancy </title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <style>
@@ -684,7 +684,6 @@
 
     let timerInterval = null;
     let retryTimeout = null;
-    let interruptCheckInterval = null;
 
     // --- DOM ELEMENTS ---
     const orb = document.getElementById('orb');
@@ -779,12 +778,13 @@
         }
     }
 
-    // --- SPEECH RECOGNITION (Continuous with Bargie-In) ---
+    // --- SPEECH RECOGNITION (Continuous with Manual Bargie-In) ---
     function startListening() {
         if (!state.isInterviewing) return;
         
-        // BARGIE-IN: If AI is speaking, interrupt it
+        // BARGIE-IN: If AI is speaking, interrupt it (only via manual trigger)
         if (state.isSpeaking) {
+            console.log('🛑 Manual interrupt - Stopping AI speech');
             stopSpeaking();
         }
         
@@ -794,7 +794,7 @@
             Android.startInterview();
         } else {
             try {
-                if (recognition) {
+                if (recognition && !state.isSpeaking) {
                     recognition.start();
                 }
             } catch (e) {
@@ -804,8 +804,17 @@
         }
     }
 
-    // --- TEXT-TO-SPEECH (With Bargie-In Support) ---
+    // --- TEXT-TO-SPEECH (With Manual Bargie-In Only) ---
     function speak(text) {
+        // Stop any ongoing recognition before AI starts speaking
+        if (!isAndroid && recognition) {
+            try {
+                recognition.stop();
+            } catch (e) {
+                console.log('Recognition already stopped');
+            }
+        }
+        
         setOrbState('speaking');
         
         if (isAndroid) {
@@ -835,67 +844,7 @@
                 onFinishedSpeaking(); // Continue anyway
             };
             
-            // Start bargie-in monitoring (check for user speech interruption)
-            startBargieInMonitoring();
-            
             window.speechSynthesis.speak(utterance);
-        }
-    }
-
-    // --- BARGIE-IN MONITORING ---
-    function startBargieInMonitoring() {
-        // Clear any existing monitor
-        if (interruptCheckInterval) {
-            clearInterval(interruptCheckInterval);
-        }
-        
-        // On mobile/Android, start recognition in the background to detect interrupts
-        if (!isAndroid && recognition && 'webkitSpeechRecognition' in window) {
-            // Create a separate recognition instance for interrupt detection
-            const interruptRecognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
-            interruptRecognition.continuous = true;
-            interruptRecognition.interimResults = true;
-            interruptRecognition.lang = 'en-US';
-            
-            interruptRecognition.onresult = (event) => {
-                // User started speaking - interrupt!
-                if (state.isSpeaking) {
-                    console.log('🎤 User interrupted!');
-                    stopSpeaking();
-                    interruptRecognition.stop();
-                    
-                    // Process the interruption
-                    const text = event.results[event.results.length - 1][0].transcript;
-                    if (text.trim()) {
-                        handleUserResponse(text);
-                    } else {
-                        startListening();
-                    }
-                }
-            };
-            
-            interruptRecognition.onerror = () => {
-                interruptRecognition.stop();
-            };
-            
-            try {
-                interruptRecognition.start();
-                
-                // Auto-stop after AI finishes
-                setTimeout(() => {
-                    try { interruptRecognition.stop(); } catch(e) {}
-                }, 15000); // Max 15s monitoring
-                
-            } catch (e) {
-                console.log('Interrupt recognition already active');
-            }
-        }
-    }
-
-    function stopBargieInMonitoring() {
-        if (interruptCheckInterval) {
-            clearInterval(interruptCheckInterval);
-            interruptCheckInterval = null;
         }
     }
 
@@ -908,9 +857,6 @@
         }
 
         console.log('💬 User said:', transcript);
-        
-        // Stop any ongoing bargie-in monitoring
-        stopBargieInMonitoring();
         
         setOrbState('thinking');
         
@@ -957,13 +903,19 @@
     };
 
     window.onFinishedSpeaking = () => {
-        console.log('Finished speaking, continuous mode:', state.continuousMode);
+        console.log('✅ Finished speaking, continuous mode:', state.continuousMode);
+        
+        // Mark that we're no longer speaking
+        state.isSpeaking = false;
         
         // Continuous listening: Auto-restart after AI speaks
         if (state.isInterviewing && state.continuousMode) {
+            // Small delay for natural pacing
             setTimeout(() => {
-                startListening();
-            }, 600); // Small delay for natural pacing
+                if (!state.isSpeaking && state.isInterviewing) {
+                    startListening();
+                }
+            }, 600);
         }
     };
 
@@ -1002,7 +954,7 @@
                 if (e.error === 'no-speech') {
                     console.log('No speech detected, restarting...');
                     setTimeout(() => {
-                        if (state.isInterviewing && state.isListening) {
+                        if (state.isInterviewing && state.isListening && !state.isSpeaking) {
                             try { recognition.start(); } catch(ex) {}
                         }
                     }, 500);
@@ -1014,9 +966,9 @@
                 } else if (e.error === 'not-allowed') {
                     statusText.textContent = "Please allow microphone access";
                 } else {
-                    // Other errors, retry
+                    // Other errors, retry only if not speaking
                     setTimeout(() => {
-                        if (state.isInterviewing) {
+                        if (state.isInterviewing && !state.isSpeaking) {
                             try { recognition.start(); } catch(ex) {}
                         }
                     }, 1000);
@@ -1025,10 +977,16 @@
             
             recognition.onend = () => {
                 console.log('⏹️ Recognition ended');
-                // Auto-restart if still listening (for continuous mode)
+                // Auto-restart ONLY if still listening AND AI is NOT speaking
                 if (state.isInterviewing && state.isListening && !state.isSpeaking) {
                     setTimeout(() => {
-                        try { recognition.start(); } catch(e) {}
+                        try { 
+                            if (!state.isSpeaking) {
+                                recognition.start(); 
+                            }
+                        } catch(e) {
+                            console.log('Could not restart recognition:', e);
+                        }
                     }, 300);
                 }
             };
@@ -1140,7 +1098,6 @@
         
         if (timerInterval) clearInterval(timerInterval);
         if (retryTimeout) clearTimeout(retryTimeout);
-        stopBargieInMonitoring();
         
         // Stop all speech
         if (!isAndroid) {
