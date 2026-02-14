@@ -684,6 +684,9 @@
 
     let timerInterval = null;
     let retryTimeout = null;
+    let recognitionRestartTimeout = null; // Track restart timeouts
+    let lastRecognitionStart = 0; // Track when recognition last started
+    const MIN_RESTART_INTERVAL = 2000; // Minimum 2 seconds between restarts
 
     // --- DOM ELEMENTS ---
     const orb = document.getElementById('orb');
@@ -782,6 +785,20 @@
     function startListening() {
         if (!state.isInterviewing) return;
         
+        // Prevent rapid restarts - cooldown mechanism
+        const now = Date.now();
+        const timeSinceLastStart = now - lastRecognitionStart;
+        
+        if (timeSinceLastStart < MIN_RESTART_INTERVAL) {
+            console.log(`⏳ Cooldown active, waiting ${MIN_RESTART_INTERVAL - timeSinceLastStart}ms before restart`);
+            // Schedule restart after cooldown
+            clearTimeout(recognitionRestartTimeout);
+            recognitionRestartTimeout = setTimeout(() => {
+                startListening();
+            }, MIN_RESTART_INTERVAL - timeSinceLastStart);
+            return;
+        }
+        
         // BARGIE-IN: If AI is speaking, interrupt it (only via manual trigger)
         if (state.isSpeaking) {
             console.log('🛑 Manual interrupt - Stopping AI speech');
@@ -792,10 +809,13 @@
         
         if (isAndroid) {
             Android.startInterview();
+            lastRecognitionStart = now;
         } else {
             try {
                 if (recognition && !state.isSpeaking) {
                     recognition.start();
+                    lastRecognitionStart = now; // Track start time
+                    console.log('🎤 Started listening (cooldown active for next 2s)');
                 }
             } catch (e) {
                 // Already started, ignore
@@ -813,6 +833,12 @@
             } catch (e) {
                 console.log('Recognition already stopped');
             }
+        }
+        
+        // Clear any pending recognition restarts
+        if (recognitionRestartTimeout) {
+            clearTimeout(recognitionRestartTimeout);
+            recognitionRestartTimeout = null;
         }
         
         setOrbState('speaking');
@@ -910,12 +936,12 @@
         
         // Continuous listening: Auto-restart after AI speaks
         if (state.isInterviewing && state.continuousMode) {
-            // Small delay for natural pacing
+            // Longer delay for natural pacing and to prevent rapid cycling
             setTimeout(() => {
                 if (!state.isSpeaking && state.isInterviewing) {
-                    startListening();
+                    startListening(); // This will respect cooldown
                 }
-            }, 600);
+            }, 1200); // Increased from 600ms to 1200ms
         }
     };
 
@@ -950,44 +976,51 @@
             recognition.onerror = (e) => {
                 console.log('❌ Recognition error:', e.error);
                 
-                // Handle errors gracefully
+                // Handle errors gracefully with longer delays
                 if (e.error === 'no-speech') {
-                    console.log('No speech detected, restarting...');
-                    setTimeout(() => {
+                    console.log('No speech detected, will restart after cooldown...');
+                    // Longer delay for no-speech to prevent rapid cycling
+                    clearTimeout(recognitionRestartTimeout);
+                    recognitionRestartTimeout = setTimeout(() => {
                         if (state.isInterviewing && state.isListening && !state.isSpeaking) {
-                            try { recognition.start(); } catch(ex) {}
+                            startListening(); // Use startListening which has cooldown
                         }
-                    }, 500);
+                    }, 2000); // Increased from 500ms to 2000ms
                 } else if (e.error === 'aborted') {
                     // Intentional stop, don't restart
-                    console.log('Recognition aborted');
+                    console.log('Recognition aborted intentionally');
                 } else if (e.error === 'audio-capture') {
                     statusText.textContent = "Microphone access needed";
+                    state.isListening = false;
                 } else if (e.error === 'not-allowed') {
                     statusText.textContent = "Please allow microphone access";
+                    state.isListening = false;
                 } else {
-                    // Other errors, retry only if not speaking
-                    setTimeout(() => {
+                    // Other errors, longer retry delay
+                    console.log('Recognition error, scheduling restart...');
+                    clearTimeout(recognitionRestartTimeout);
+                    recognitionRestartTimeout = setTimeout(() => {
                         if (state.isInterviewing && !state.isSpeaking) {
-                            try { recognition.start(); } catch(ex) {}
+                            startListening(); // Use startListening with cooldown
                         }
-                    }, 1000);
+                    }, 2500); // Increased from 1000ms to 2500ms
                 }
             };
             
             recognition.onend = () => {
                 console.log('⏹️ Recognition ended');
-                // Auto-restart ONLY if still listening AND AI is NOT speaking
+                
+                // Auto-restart with cooldown - ONLY if still listening AND AI is NOT speaking
                 if (state.isInterviewing && state.isListening && !state.isSpeaking) {
-                    setTimeout(() => {
-                        try { 
-                            if (!state.isSpeaking) {
-                                recognition.start(); 
-                            }
-                        } catch(e) {
-                            console.log('Could not restart recognition:', e);
+                    // Clear any pending restart
+                    clearTimeout(recognitionRestartTimeout);
+                    
+                    // Use longer delay and cooldown mechanism
+                    recognitionRestartTimeout = setTimeout(() => {
+                        if (!state.isSpeaking && state.isInterviewing) {
+                            startListening(); // Use startListening which has cooldown
                         }
-                    }, 300);
+                    }, 1000); // Increased from 300ms to 1000ms
                 }
             };
             
@@ -1108,6 +1141,7 @@
         
         if (timerInterval) clearInterval(timerInterval);
         if (retryTimeout) clearTimeout(retryTimeout);
+        if (recognitionRestartTimeout) clearTimeout(recognitionRestartTimeout);
         
         // Stop state saving
         stopStateSaving();
