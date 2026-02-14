@@ -783,7 +783,16 @@
 
     // --- SPEECH RECOGNITION (Continuous with Manual Bargie-In) ---
     function startListening() {
-        if (!state.isInterviewing) return;
+        if (!state.isInterviewing) {
+            console.log('⚠️ Not interviewing, cannot start listening');
+            return;
+        }
+        
+        // Prevent starting if already listening
+        if (state.isListening && !state.isSpeaking) {
+            console.log('⚠️ Already listening, ignoring restart request');
+            return;
+        }
         
         // Prevent rapid restarts - cooldown mechanism
         const now = Date.now();
@@ -805,6 +814,7 @@
             stopSpeaking();
         }
         
+        console.log('▶️ Starting listening session');
         setOrbState('listening');
         
         if (isAndroid) {
@@ -815,11 +825,11 @@
                 if (recognition && !state.isSpeaking) {
                     recognition.start();
                     lastRecognitionStart = now; // Track start time
-                    console.log('🎤 Started listening (cooldown active for next 3s)');
+                    console.log('🎤 Microphone activated (cooldown: 3s)');
                 }
             } catch (e) {
                 // Already started, ignore
-                console.log('Recognition already active');
+                console.log('⚠️ Recognition already active:', e.message);
             }
         }
     }
@@ -877,13 +887,21 @@
     // --- HANDLE USER RESPONSE ---
     async function handleUserResponse(transcript) {
         if (!transcript || !transcript.trim()) {
-            console.log('Empty transcript, restarting listening...');
-            setTimeout(startListening, 500);
+            console.log('⚠️ Empty transcript, ignoring');
+            state.isListening = false;
             return;
         }
 
         console.log('💬 User said:', transcript);
         
+        // Clear any pending restarts
+        if (recognitionRestartTimeout) {
+            clearTimeout(recognitionRestartTimeout);
+            recognitionRestartTimeout = null;
+        }
+        
+        // Mark as not listening while processing
+        state.isListening = false;
         setOrbState('thinking');
         
         const fd = new FormData();
@@ -906,20 +924,18 @@
             if (data.reply) {
                 speak(data.reply);
             } else {
-                console.error('No reply from API');
-                setTimeout(startListening, 1000);
+                console.error('❌ No reply from API');
+                state.isListening = false;
+                // Don't restart - let user try again or end interview
+                statusText.textContent = "No response. Tap orb to try again.";
             }
         } catch (e) {
-            console.error('API Error:', e);
-            statusText.textContent = "Connection issue, retrying...";
+            console.error('❌ API Error:', e);
+            state.isListening = false;
+            statusText.textContent = "Connection error. Tap orb to retry.";
             
-            // Retry logic
-            clearTimeout(retryTimeout);
-            retryTimeout = setTimeout(() => {
-                if (state.isInterviewing) {
-                    startListening();
-                }
-            }, 2000);
+            // Don't auto-restart on error - let user manually retry
+            console.log('💡 Tap the orb to retry');
         }
     }
 
@@ -933,15 +949,17 @@
         
         // Mark that we're no longer speaking
         state.isSpeaking = false;
+        state.isListening = false; // Reset listening state
         
         // Continuous listening: Auto-restart after AI speaks
         if (state.isInterviewing && state.continuousMode) {
-            // Longer delay for natural pacing and to prevent noise-triggered restarts
+            // Longer delay to give user time and prevent any cycling
             setTimeout(() => {
                 if (!state.isSpeaking && state.isInterviewing) {
+                    console.log('🔄 Restarting mic after AI finished speaking');
                     startListening(); // This will respect cooldown
                 }
-            }, 1500); // Increased from 1200ms to 1500ms
+            }, 2000); // Increased from 1500ms to 2000ms for stability
         }
     };
 
@@ -974,42 +992,35 @@
                 
                 console.log('🎤 Recognition result:', text, 'Confidence:', confidence, 'Final:', isFinal);
                 
-                // Only process if:
-                // 1. Result is final (not interim)
-                // 2. Confidence is above threshold (0.5 = 50%)
-                // 3. Text is not empty
-                // 4. Text has minimum length (ignore single words/noise)
+                // Strict validation to filter out noise
+                // 1. Must be final (not interim)
+                // 2. Confidence must be above 60% (increased from 50%)
+                // 3. Text must be at least 5 characters (increased from 3)
+                // 4. Text must not be empty after trimming
                 
-                if (isFinal && confidence > 0.5 && text.trim().length > 3) {
+                if (isFinal && confidence > 0.6 && text.trim().length >= 5) {
                     console.log('✅ Valid response accepted');
+                    state.isListening = false; // Stop listening state
                     handleUserResponse(text);
                 } else {
                     console.log('⚠️ Low confidence or too short, ignoring:', confidence, text.length);
-                    // Restart listening for better input
-                    setTimeout(() => {
-                        if (state.isInterviewing && !state.isSpeaking) {
-                            startListening();
-                        }
-                    }, 1500);
+                    // Do NOT restart - let the normal cycle handle it
+                    state.isListening = false;
                 }
             };
             
             recognition.onerror = (e) => {
                 console.log('❌ Recognition error:', e.error);
                 
-                // Handle errors gracefully with longer delays
+                // Handle errors but DON'T auto-restart to prevent random cycling
                 if (e.error === 'no-speech') {
-                    console.log('No speech detected (possibly background noise), waiting longer before restart...');
-                    // Much longer delay for no-speech to prevent noise-triggered cycling
-                    clearTimeout(recognitionRestartTimeout);
-                    recognitionRestartTimeout = setTimeout(() => {
-                        if (state.isInterviewing && state.isListening && !state.isSpeaking) {
-                            startListening(); // Use startListening which has cooldown
-                        }
-                    }, 3500); // Increased from 2000ms to 3500ms
+                    console.log('No speech detected - will wait for next speaking cycle');
+                    // Do NOT restart automatically - prevents noise cycling
+                    state.isListening = false;
                 } else if (e.error === 'aborted') {
-                    // Intentional stop, don't restart
+                    // Intentional stop
                     console.log('Recognition aborted intentionally');
+                    state.isListening = false;
                 } else if (e.error === 'audio-capture') {
                     statusText.textContent = "Microphone access needed";
                     state.isListening = false;
@@ -1017,32 +1028,18 @@
                     statusText.textContent = "Please allow microphone access";
                     state.isListening = false;
                 } else {
-                    // Other errors, longer retry delay
-                    console.log('Recognition error, scheduling restart...');
-                    clearTimeout(recognitionRestartTimeout);
-                    recognitionRestartTimeout = setTimeout(() => {
-                        if (state.isInterviewing && !state.isSpeaking) {
-                            startListening(); // Use startListening with cooldown
-                        }
-                    }, 3000); // Increased from 2500ms to 3000ms
+                    // Other errors - do NOT restart automatically
+                    console.log('Recognition error - will wait for next speaking cycle');
+                    state.isListening = false;
                 }
             };
             
             recognition.onend = () => {
                 console.log('⏹️ Recognition ended');
                 
-                // Auto-restart with cooldown - ONLY if still listening AND AI is NOT speaking
-                if (state.isInterviewing && state.isListening && !state.isSpeaking) {
-                    // Clear any pending restart
-                    clearTimeout(recognitionRestartTimeout);
-                    
-                    // Use longer delay and cooldown mechanism to prevent noise cycling
-                    recognitionRestartTimeout = setTimeout(() => {
-                        if (!state.isSpeaking && state.isInterviewing) {
-                            startListening(); // Use startListening which has cooldown
-                        }
-                    }, 1500); // Increased from 1000ms to 1500ms
-                }
+                // DO NOT auto-restart here to prevent random cycling
+                // Will only restart after AI finishes speaking (in onFinishedSpeaking)
+                console.log('Waiting for next speaking cycle to restart mic');
             };
             
             // Load voices when available
@@ -1413,10 +1410,17 @@
         
         // Add orb tap/click handler for manual interrupt
         orb.addEventListener('click', () => {
-            if (state.isSpeaking && state.isInterviewing) {
-                console.log('👆 User tapped orb - interrupting');
+            if (!state.isInterviewing) return;
+            
+            if (state.isSpeaking) {
+                // Interrupt AI speaking
+                console.log('👆 User tapped orb - interrupting AI');
                 stopSpeaking();
-                setTimeout(startListening, 300);
+                setTimeout(startListening, 500);
+            } else if (!state.isListening && !state.isSpeaking) {
+                // Manually restart mic if idle
+                console.log('👆 User tapped orb - starting mic manually');
+                startListening();
             }
         });
         
