@@ -686,7 +686,7 @@
     let retryTimeout = null;
     let recognitionRestartTimeout = null; // Track restart timeouts
     let lastRecognitionStart = 0; // Track when recognition last started
-    const MIN_RESTART_INTERVAL = 2000; // Minimum 2 seconds between restarts
+    const MIN_RESTART_INTERVAL = 3000; // Minimum 3 seconds between restarts (increased for noise resistance)
 
     // --- DOM ELEMENTS ---
     const orb = document.getElementById('orb');
@@ -815,7 +815,7 @@
                 if (recognition && !state.isSpeaking) {
                     recognition.start();
                     lastRecognitionStart = now; // Track start time
-                    console.log('🎤 Started listening (cooldown active for next 2s)');
+                    console.log('🎤 Started listening (cooldown active for next 3s)');
                 }
             } catch (e) {
                 // Already started, ignore
@@ -936,12 +936,12 @@
         
         // Continuous listening: Auto-restart after AI speaks
         if (state.isInterviewing && state.continuousMode) {
-            // Longer delay for natural pacing and to prevent rapid cycling
+            // Longer delay for natural pacing and to prevent noise-triggered restarts
             setTimeout(() => {
                 if (!state.isSpeaking && state.isInterviewing) {
                     startListening(); // This will respect cooldown
                 }
-            }, 1200); // Increased from 600ms to 1200ms
+            }, 1500); // Increased from 1200ms to 1500ms
         }
     };
 
@@ -967,10 +967,31 @@
             };
             
             recognition.onresult = (event) => {
-                const text = event.results[0][0].transcript;
-                const confidence = event.results[0][0].confidence;
-                console.log('✅ Recognition result:', text, 'Confidence:', confidence);
-                handleUserResponse(text);
+                const result = event.results[0];
+                const text = result[0].transcript;
+                const confidence = result[0].confidence;
+                const isFinal = result.isFinal;
+                
+                console.log('🎤 Recognition result:', text, 'Confidence:', confidence, 'Final:', isFinal);
+                
+                // Only process if:
+                // 1. Result is final (not interim)
+                // 2. Confidence is above threshold (0.5 = 50%)
+                // 3. Text is not empty
+                // 4. Text has minimum length (ignore single words/noise)
+                
+                if (isFinal && confidence > 0.5 && text.trim().length > 3) {
+                    console.log('✅ Valid response accepted');
+                    handleUserResponse(text);
+                } else {
+                    console.log('⚠️ Low confidence or too short, ignoring:', confidence, text.length);
+                    // Restart listening for better input
+                    setTimeout(() => {
+                        if (state.isInterviewing && !state.isSpeaking) {
+                            startListening();
+                        }
+                    }, 1500);
+                }
             };
             
             recognition.onerror = (e) => {
@@ -978,14 +999,14 @@
                 
                 // Handle errors gracefully with longer delays
                 if (e.error === 'no-speech') {
-                    console.log('No speech detected, will restart after cooldown...');
-                    // Longer delay for no-speech to prevent rapid cycling
+                    console.log('No speech detected (possibly background noise), waiting longer before restart...');
+                    // Much longer delay for no-speech to prevent noise-triggered cycling
                     clearTimeout(recognitionRestartTimeout);
                     recognitionRestartTimeout = setTimeout(() => {
                         if (state.isInterviewing && state.isListening && !state.isSpeaking) {
                             startListening(); // Use startListening which has cooldown
                         }
-                    }, 2000); // Increased from 500ms to 2000ms
+                    }, 3500); // Increased from 2000ms to 3500ms
                 } else if (e.error === 'aborted') {
                     // Intentional stop, don't restart
                     console.log('Recognition aborted intentionally');
@@ -1003,7 +1024,7 @@
                         if (state.isInterviewing && !state.isSpeaking) {
                             startListening(); // Use startListening with cooldown
                         }
-                    }, 2500); // Increased from 1000ms to 2500ms
+                    }, 3000); // Increased from 2500ms to 3000ms
                 }
             };
             
@@ -1015,12 +1036,12 @@
                     // Clear any pending restart
                     clearTimeout(recognitionRestartTimeout);
                     
-                    // Use longer delay and cooldown mechanism
+                    // Use longer delay and cooldown mechanism to prevent noise cycling
                     recognitionRestartTimeout = setTimeout(() => {
                         if (!state.isSpeaking && state.isInterviewing) {
                             startListening(); // Use startListening which has cooldown
                         }
-                    }, 1000); // Increased from 300ms to 1000ms
+                    }, 1500); // Increased from 1000ms to 1500ms
                 }
             };
             
