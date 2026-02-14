@@ -135,6 +135,7 @@
             cursor: pointer;
             color: var(--text-dim);
             transition: 0.2s;
+            display: block; /* Fixes alignment on some browsers */
         }
         .file-trigger:hover { border-color: var(--primary); color: var(--text); background: rgba(99, 102, 241, 0.05); }
 
@@ -209,13 +210,23 @@ let state = {
     history: [],
     isListening: false,
     isSpeaking: false,
+    isMuted: false, 
     timeLeft: 900 // 15 mins
+};
+
+let timerInterval = null; // To store and clear the timer safely
+let currentUtterance = null; // Stored globally to prevent Chrome garbage collection bug
+
+// Load voices proactively
+window.speechSynthesis.onvoiceschanged = () => {
+    window.speechSynthesis.getVoices();
 };
 
 // --- DOM ELEMENTS ---
 const orb = document.getElementById('orb');
 const status = document.getElementById('status');
 const timerDisplay = document.getElementById('timer');
+const micToggleBtn = document.getElementById('micToggle');
 
 // --- AUDIO VISUALIZATION ---
 let audioCtx, analyser, dataArray;
@@ -224,7 +235,7 @@ async function initAudio() {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
         audioCtx = new (window.AudioContext || window.webkitAudioContext)();
         analyser = audioCtx.createAnalyser();
-        analyser.fftSize = 64; // Low detail for snappy animations
+        analyser.fftSize = 64; 
         const source = audioCtx.createMediaStreamSource(stream);
         source.connect(analyser);
         dataArray = new Uint8Array(analyser.frequencyBinCount);
@@ -238,7 +249,7 @@ async function initAudio() {
 
 function animateOrb() {
     requestAnimationFrame(animateOrb);
-    if (!state.isListening) {
+    if (!state.isListening || state.isMuted) {
         if (!state.isSpeaking) orb.style.transform = `scale(1)`;
         return;
     }
@@ -258,11 +269,15 @@ function animateOrb() {
 // --- SPEECH RECOGNITION (The "Ears") ---
 const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 const recognition = new Recognition();
-recognition.continuous = false; // Intentionally false to force pauses
+recognition.continuous = false; 
 recognition.interimResults = false;
 recognition.lang = 'en-US';
 
 recognition.onstart = () => {
+    if (state.isMuted) {
+        recognition.stop();
+        return;
+    }
     state.isListening = true;
     orb.classList.add('listening');
     orb.classList.remove('thinking');
@@ -272,10 +287,13 @@ recognition.onstart = () => {
 recognition.onend = () => {
     state.isListening = false;
     orb.classList.remove('listening');
-    // If we didn't trigger thinking/speaking, restart listening (loop protection)
-    if (!state.isSpeaking && state.history.length > 0) {
-        // Simple debounce
-        setTimeout(() => { if(!state.isSpeaking) recognition.start(); }, 500);
+    // Safely restart if not speaking, not muted, and session has started
+    if (!state.isSpeaking && !state.isMuted && state.history.length > 0) {
+        setTimeout(() => { 
+            if(!state.isSpeaking && !state.isMuted) {
+                try { recognition.start(); } catch(e){}
+            }
+        }, 500);
     }
 };
 
@@ -284,46 +302,51 @@ recognition.onresult = async (event) => {
     if (!transcript.trim()) return;
 
     // Transition to Thinking
-    state.isListening = false; // Stop visualizer
+    state.isListening = false; 
     orb.classList.remove('listening');
     orb.classList.add('thinking');
     status.textContent = "Analysing response...";
     
-    // Send to AI
     await processAIInteraction(transcript);
 };
 
 // --- SPEECH SYNTHESIS (The "Voice") ---
 function speak(text) {
     state.isSpeaking = true;
-    recognition.stop(); // Stop listening while speaking
+    try { recognition.stop(); } catch(e){} 
     orb.classList.remove('listening', 'thinking');
     status.textContent = "AI Speaking...";
 
-    const utterance = new SpeechSynthesisUtterance(text);
+    // Use global variable to prevent Chrome from abruptly stopping speech
+    currentUtterance = new SpeechSynthesisUtterance(text);
     
-    // Attempt to select a better voice
     const voices = window.speechSynthesis.getVoices();
-    const preferred = voices.find(v => v.name.includes('Google US English') || v.name.includes('Natural'));
-    if(preferred) utterance.voice = preferred;
+    const preferred = voices.find(v => v.name.includes('Google US English') || v.name.includes('Natural')) || voices[0];
+    if(preferred) currentUtterance.voice = preferred;
     
-    utterance.rate = 1.1; // Slightly faster for natural feel
-    utterance.pitch = 1.0;
+    // FIXED AI SPEED: Lowered from 1.1 to 0.95 for a more natural, pacing interviewer feel.
+    currentUtterance.rate = 0.95; 
+    currentUtterance.pitch = 1.0;
 
-    utterance.onend = () => {
+    currentUtterance.onend = () => {
         state.isSpeaking = false;
         orb.classList.remove('listening', 'thinking');
-        orb.classList.add('listening'); // Visual cue
-        recognition.start(); // Handshake back to user
+        
+        if (!state.isMuted) {
+            orb.classList.add('listening'); 
+            status.textContent = "Listening...";
+            try { recognition.start(); } catch(e){} 
+        } else {
+            status.textContent = "Microphone Muted";
+        }
     };
 
-    window.speechSynthesis.speak(utterance);
+    window.speechSynthesis.speak(currentUtterance);
     
-    // Visual modulation during speech (simulated)
     let speechInterval = setInterval(() => {
         if(!state.isSpeaking) clearInterval(speechInterval);
         else {
-            const randomScale = 1 + Math.random() * 0.2;
+            const randomScale = 1 + Math.random() * 0.15;
             orb.style.transform = `scale(${randomScale})`;
         }
     }, 100);
@@ -346,18 +369,41 @@ async function processAIInteraction(userText) {
     } catch (e) {
         console.error(e);
         status.textContent = "Connection Error. Retrying...";
-        setTimeout(() => recognition.start(), 2000);
+        setTimeout(() => {
+            if(!state.isMuted) recognition.start();
+        }, 2000);
     }
 }
 
 // --- SETUP & HANDLERS ---
+
+// NEW: Mute Button Logic
+micToggleBtn.onclick = () => {
+    state.isMuted = !state.isMuted;
+    if (state.isMuted) {
+        try { recognition.stop(); } catch(e){}
+        micToggleBtn.textContent = "🎙️ Unmute";
+        micToggleBtn.style.color = "#ef4444"; 
+        status.textContent = "Microphone Muted";
+        orb.classList.remove('listening');
+    } else {
+        micToggleBtn.textContent = "🎤 Mute";
+        micToggleBtn.style.color = "var(--text)";
+        if (!state.isSpeaking) {
+            try { recognition.start(); } catch(e){}
+        }
+    }
+};
+
 document.getElementById('cvInput').onchange = async (e) => {
     const file = e.target.files[0];
     if(!file) return;
     
     status.textContent = "Reading Resume...";
     const buffer = await file.arrayBuffer();
-    const pdf = await pdfjsLib.getDocument(buffer).promise;
+    
+    // FIXED PDF LOADING: Passing Uint8Array is safer across different pdf.js versions
+    const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(buffer) }).promise;
     
     let fullText = "";
     for (let i = 1; i <= pdf.numPages; i++) {
@@ -381,8 +427,8 @@ document.getElementById('startBtn').onclick = async () => {
     document.getElementById('activePanel').style.display = 'block';
     document.getElementById('timer').classList.add('active');
     
-    // Start countdown
-    setInterval(() => {
+    // FIXED TIMER: Assigned to variable so it can be cleared later
+    timerInterval = setInterval(() => {
         if(state.timeLeft <= 0) finishSession();
         state.timeLeft--;
         const m = Math.floor(state.timeLeft / 60);
@@ -405,14 +451,18 @@ document.getElementById('startBtn').onclick = async () => {
         speak(data.reply);
     } catch (e) {
         alert("Could not connect to AI Server.");
+        status.textContent = "Server Offline.";
     }
 };
 
 document.getElementById('endBtn').onclick = finishSession;
 
 async function finishSession() {
-    recognition.stop();
+    // Clean up timer and listening states properly
+    clearInterval(timerInterval); 
+    try { recognition.stop(); } catch(e){}
     window.speechSynthesis.cancel();
+    
     document.getElementById('activePanel').style.display = 'none';
     orb.classList.remove('listening');
     orb.classList.add('thinking');
@@ -422,10 +472,14 @@ async function finishSession() {
     fd.append("mode", "score");
     fd.append("history", JSON.stringify(state.history));
     
-    const res = await fetch(API_URL, { method: "POST", body: fd });
-    const data = await res.json();
+    try {
+        const res = await fetch(API_URL, { method: "POST", body: fd });
+        const data = await res.json();
+        document.getElementById('reportText').textContent = data.reply;
+    } catch(e) {
+        document.getElementById('reportText').textContent = "Could not generate score due to a server error.";
+    }
     
-    document.getElementById('reportText').textContent = data.reply;
     document.getElementById('reportModal').style.display = 'flex';
 }
 </script>
