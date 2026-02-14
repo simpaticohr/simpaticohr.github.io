@@ -2,7 +2,10 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <title>Evalis AI | Elite AI Interviewer</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
@@ -81,6 +84,13 @@
             z-index: 3;
             transition: all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
             cursor: pointer;
+            user-select: none;
+            -webkit-tap-highlight-color: transparent;
+            touch-action: manipulation;
+        }
+
+        .orb:active {
+            transform: scale(0.95);
         }
 
         /* Orb States with Enhanced Animations */
@@ -291,6 +301,17 @@
             box-shadow: 0 8px 28px var(--primary-glow);
         }
 
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none !important;
+        }
+
+        .btn:disabled:hover {
+            transform: none !important;
+            box-shadow: none;
+        }
+
         .btn-danger {
             background: rgba(239, 68, 68, 0.1);
             border-color: rgba(239, 68, 68, 0.3);
@@ -389,49 +410,50 @@
             overflow-y: auto;
         }
 
-        /* Transcript Display */
-        .transcript {
-            background: var(--surface);
-            border: 1px solid var(--border);
-            border-radius: 16px;
-            padding: 20px;
-            margin-top: 24px;
-            max-height: 200px;
-            overflow-y: auto;
-            text-align: left;
-            opacity: 0;
-            transition: opacity 0.3s;
+        /* Responsive */
+        @media (max-width: 640px) {
+            .orb-container {
+                width: 240px;
+                height: 240px;
+                margin-bottom: 40px;
+            }
+
+            .orb {
+                width: 120px;
+                height: 120px;
+            }
+
+            .ring:nth-child(1) { width: 180px; height: 180px; }
+            .ring:nth-child(2) { width: 240px; height: 240px; }
+            .ring:nth-child(3) { width: 300px; height: 300px; }
+
+            .logo {
+                font-size: 1.75rem;
+            }
+
+            .modal-content {
+                padding: 32px 24px;
+            }
+
+            .btn {
+                padding: 16px 24px;
+                font-size: 1rem;
+            }
+
+            .status-pill {
+                font-size: 0.85rem;
+                padding: 8px 16px;
+            }
         }
 
-        .transcript.active {
-            opacity: 1;
+        /* iOS Safe Area */
+        @supports (padding: max(0px)) {
+            body {
+                padding-left: max(12px, env(safe-area-inset-left));
+                padding-right: max(12px, env(safe-area-inset-right));
+                padding-bottom: max(12px, env(safe-area-inset-bottom));
+            }
         }
-
-        .transcript-item {
-            margin-bottom: 12px;
-            padding: 10px;
-            border-radius: 8px;
-            font-size: 0.9rem;
-        }
-
-        .transcript-item.user {
-            background: rgba(99, 102, 241, 0.1);
-            border-left: 3px solid var(--primary);
-        }
-
-        .transcript-item.ai {
-            background: rgba(168, 85, 247, 0.1);
-            border-left: 3px solid var(--accent);
-        }
-
-        .transcript-item .speaker {
-            font-weight: 600;
-            margin-bottom: 4px;
-            font-size: 0.8rem;
-            opacity: 0.7;
-        }
-
-        /* Animations */
         @keyframes breathe {
             0%, 100% { transform: scale(1); }
             50% { transform: scale(1.04); }
@@ -605,7 +627,7 @@
                 <div class="subtext">PDF format • Professional analysis</div>
                 <input type="file" id="cvInput" accept=".pdf">
             </label>
-            <button id="startBtn" class="btn btn-primary" style="display:none; width:100%;">
+            <button id="startBtn" class="btn btn-primary" style="width:100%;" disabled>
                 Begin Interview Session
             </button>
         </div>
@@ -615,10 +637,6 @@
                 End Interview
             </button>
             <div id="timer" class="timer">15:00</div>
-            
-            <div id="transcript" class="transcript">
-                <div id="transcriptContent"></div>
-            </div>
         </div>
     </div>
 
@@ -641,17 +659,32 @@
     const isAndroid = typeof Android !== "undefined";
     const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
 
+    /* 
+     * ANDROID INTEGRATION NOTES:
+     * For full Android WebView support, implement these methods in your native code:
+     * - Android.startInterview() - Start speech recognition
+     * - Android.speak(text) - Text-to-speech
+     * - Android.stopSpeaking() - Stop TTS (for bargie-in)
+     * 
+     * Callback from Android to JavaScript:
+     * - window.onRecognitionResult(text) - Called when user speaks
+     * - window.onFinishedSpeaking() - Called when TTS completes
+     */
+
     // --- STATE ---
     let state = {
         cvText: "",
         history: [],
         timeLeft: 900, // 15 minutes
         isInterviewing: false,
+        isSpeaking: false,
+        isListening: false,
         continuousMode: true // Always listen after speaking
     };
 
     let timerInterval = null;
     let retryTimeout = null;
+    let interruptCheckInterval = null;
 
     // --- DOM ELEMENTS ---
     const orb = document.getElementById('orb');
@@ -676,12 +709,55 @@
         
         statusText.textContent = message || messages[mode] || "Active";
         
+        // Update state flags
+        state.isListening = (mode === 'listening');
+        state.isSpeaking = (mode === 'speaking');
+        
         // Update listening indicator
         if (mode === 'listening') {
             listeningIndicator.classList.add('active');
             createParticles();
         } else {
             listeningIndicator.classList.remove('active');
+        }
+    }
+
+    // --- STOP AI SPEAKING (For Bargie-In) ---
+    function stopSpeaking() {
+        if (!state.isSpeaking) return;
+        
+        console.log('🛑 Interrupted - Stopping AI speech');
+        state.isSpeaking = false;
+        
+        if (isAndroid) {
+            // Android: Call native method to stop TTS
+            if (typeof Android.stopSpeaking === 'function') {
+                Android.stopSpeaking();
+            }
+        } else {
+            // Web: Cancel speech synthesis
+            window.speechSynthesis.cancel();
+        }
+        
+        // Clear any pending speaking callbacks
+        clearTimeout(retryTimeout);
+    }
+
+    // --- PARTICLE EFFECT FOR LISTENING ---
+    function createParticles() {
+        listeningIndicator.innerHTML = '';
+        const particleCount = 12;
+        for (let i = 0; i < particleCount; i++) {
+            const particle = document.createElement('div');
+            particle.className = 'particle';
+            const angle = (i / particleCount) * 360;
+            const radius = 100;
+            const x = Math.cos(angle * Math.PI / 180) * radius;
+            const y = Math.sin(angle * Math.PI / 180) * radius;
+            particle.style.left = `calc(50% + ${x}px)`;
+            particle.style.top = `calc(50% + ${y}px)`;
+            particle.style.animationDelay = `${i * 0.1}s`;
+            listeningIndicator.appendChild(particle);
         }
     }
 
@@ -703,22 +779,14 @@
         }
     }
 
-    // --- ADD TO TRANSCRIPT ---
-    function addToTranscript(speaker, text) {
-        const item = document.createElement('div');
-        item.className = `transcript-item ${speaker}`;
-        item.innerHTML = `
-            <div class="speaker">${speaker === 'user' ? 'You' : 'Evalis AI'}</div>
-            <div>${text}</div>
-        `;
-        transcriptContent.appendChild(item);
-        transcriptDiv.scrollTop = transcriptDiv.scrollHeight;
-        transcriptDiv.classList.add('active');
-    }
-
-    // --- SPEECH RECOGNITION (Continuous) ---
+    // --- SPEECH RECOGNITION (Continuous with Bargie-In) ---
     function startListening() {
         if (!state.isInterviewing) return;
+        
+        // BARGIE-IN: If AI is speaking, interrupt it
+        if (state.isSpeaking) {
+            stopSpeaking();
+        }
         
         setOrbState('listening');
         
@@ -736,7 +804,7 @@
         }
     }
 
-    // --- TEXT-TO-SPEECH ---
+    // --- TEXT-TO-SPEECH (With Bargie-In Support) ---
     function speak(text) {
         setOrbState('speaking');
         
@@ -767,11 +835,68 @@
                 onFinishedSpeaking(); // Continue anyway
             };
             
+            // Start bargie-in monitoring (check for user speech interruption)
+            startBargieInMonitoring();
+            
             window.speechSynthesis.speak(utterance);
         }
+    }
+
+    // --- BARGIE-IN MONITORING ---
+    function startBargieInMonitoring() {
+        // Clear any existing monitor
+        if (interruptCheckInterval) {
+            clearInterval(interruptCheckInterval);
+        }
         
-        // Add to transcript
-        addToTranscript('ai', text);
+        // On mobile/Android, start recognition in the background to detect interrupts
+        if (!isAndroid && recognition && 'webkitSpeechRecognition' in window) {
+            // Create a separate recognition instance for interrupt detection
+            const interruptRecognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
+            interruptRecognition.continuous = true;
+            interruptRecognition.interimResults = true;
+            interruptRecognition.lang = 'en-US';
+            
+            interruptRecognition.onresult = (event) => {
+                // User started speaking - interrupt!
+                if (state.isSpeaking) {
+                    console.log('🎤 User interrupted!');
+                    stopSpeaking();
+                    interruptRecognition.stop();
+                    
+                    // Process the interruption
+                    const text = event.results[event.results.length - 1][0].transcript;
+                    if (text.trim()) {
+                        handleUserResponse(text);
+                    } else {
+                        startListening();
+                    }
+                }
+            };
+            
+            interruptRecognition.onerror = () => {
+                interruptRecognition.stop();
+            };
+            
+            try {
+                interruptRecognition.start();
+                
+                // Auto-stop after AI finishes
+                setTimeout(() => {
+                    try { interruptRecognition.stop(); } catch(e) {}
+                }, 15000); // Max 15s monitoring
+                
+            } catch (e) {
+                console.log('Interrupt recognition already active');
+            }
+        }
+    }
+
+    function stopBargieInMonitoring() {
+        if (interruptCheckInterval) {
+            clearInterval(interruptCheckInterval);
+            interruptCheckInterval = null;
+        }
     }
 
     // --- HANDLE USER RESPONSE ---
@@ -782,8 +907,10 @@
             return;
         }
 
-        console.log('User said:', transcript);
-        addToTranscript('user', transcript);
+        console.log('💬 User said:', transcript);
+        
+        // Stop any ongoing bargie-in monitoring
+        stopBargieInMonitoring();
         
         setOrbState('thinking');
         
@@ -840,60 +967,81 @@
         }
     };
 
-    // --- WEB SPEECH API SETUP ---
+    // --- WEB SPEECH API SETUP (Optimized for Mobile & Bargie-In) ---
     let recognition;
     if (!isAndroid) {
         const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
         
         if (Recognition) {
             recognition = new Recognition();
-            recognition.continuous = false; // We'll manually restart for better control
-            recognition.interimResults = false;
+            recognition.continuous = false; // Manual restart for better control
+            recognition.interimResults = false; // Final results only
             recognition.lang = 'en-US';
             recognition.maxAlternatives = 1;
             
+            // Mobile optimization
+            if (isMobile) {
+                console.log('📱 Mobile optimizations enabled');
+            }
+            
+            recognition.onstart = () => {
+                console.log('🎤 Recognition started');
+            };
+            
             recognition.onresult = (event) => {
                 const text = event.results[0][0].transcript;
-                console.log('Recognition result:', text);
+                const confidence = event.results[0][0].confidence;
+                console.log('✅ Recognition result:', text, 'Confidence:', confidence);
                 handleUserResponse(text);
             };
             
             recognition.onerror = (e) => {
-                console.log('Recognition error:', e.error);
+                console.log('❌ Recognition error:', e.error);
                 
                 // Handle errors gracefully
                 if (e.error === 'no-speech') {
                     console.log('No speech detected, restarting...');
                     setTimeout(() => {
-                        if (state.isInterviewing && orb.classList.contains('listening')) {
-                            startListening();
+                        if (state.isInterviewing && state.isListening) {
+                            try { recognition.start(); } catch(ex) {}
                         }
                     }, 500);
                 } else if (e.error === 'aborted') {
                     // Intentional stop, don't restart
+                    console.log('Recognition aborted');
+                } else if (e.error === 'audio-capture') {
+                    statusText.textContent = "Microphone access needed";
+                } else if (e.error === 'not-allowed') {
+                    statusText.textContent = "Please allow microphone access";
                 } else {
                     // Other errors, retry
                     setTimeout(() => {
                         if (state.isInterviewing) {
-                            startListening();
+                            try { recognition.start(); } catch(ex) {}
                         }
                     }, 1000);
                 }
             };
             
             recognition.onend = () => {
-                console.log('Recognition ended');
-                // The onresult or onerror will handle restarting
+                console.log('⏹️ Recognition ended');
+                // Auto-restart if still listening (for continuous mode)
+                if (state.isInterviewing && state.isListening && !state.isSpeaking) {
+                    setTimeout(() => {
+                        try { recognition.start(); } catch(e) {}
+                    }, 300);
+                }
             };
             
             // Load voices when available
             if ('speechSynthesis' in window) {
                 speechSynthesis.onvoiceschanged = () => {
-                    console.log('Voices loaded:', speechSynthesis.getVoices().length);
+                    const voices = speechSynthesis.getVoices();
+                    console.log('🔊 Voices loaded:', voices.length);
                 };
             }
         } else {
-            statusText.textContent = "Speech not supported (Use Chrome/Edge)";
+            statusText.textContent = "Speech not supported (Use Chrome/Edge/Safari)";
         }
     }
 
@@ -940,7 +1088,7 @@
             
             state.cvText = fullText;
             setOrbState('idle', "Resume loaded successfully");
-            document.getElementById('startBtn').style.display = "block";
+            document.getElementById('startBtn').disabled = false;
             
             console.log('Resume loaded, length:', fullText.length);
         } catch (error) {
@@ -987,9 +1135,12 @@
 
     async function finishSession() {
         state.isInterviewing = false;
+        state.isSpeaking = false;
+        state.isListening = false;
         
         if (timerInterval) clearInterval(timerInterval);
         if (retryTimeout) clearTimeout(retryTimeout);
+        stopBargieInMonitoring();
         
         // Stop all speech
         if (!isAndroid) {
@@ -997,6 +1148,10 @@
                 try { recognition.stop(); } catch (e) {}
             }
             window.speechSynthesis.cancel();
+        } else {
+            if (typeof Android.stopSpeaking === 'function') {
+                Android.stopSpeaking();
+            }
         }
         
         document.getElementById('activePanel').style.display = 'none';
@@ -1045,11 +1200,28 @@
 
     // --- INITIALIZE ---
     window.addEventListener('load', () => {
-        console.log('Evalis AI loaded');
-        console.log('Platform:', isAndroid ? 'Android' : 'Web');
-        console.log('Speech Recognition available:', !!recognition);
+        console.log('🚀 Evalis AI loaded');
+        console.log('📱 Platform:', isAndroid ? 'Android' : isMobile ? 'Mobile Web' : 'Desktop');
+        console.log('🎤 Speech Recognition:', !!recognition ? 'Available' : 'Not Available');
         
         requestWakeLock();
+        
+        // Add orb tap/click handler for manual interrupt
+        orb.addEventListener('click', () => {
+            if (state.isSpeaking && state.isInterviewing) {
+                console.log('👆 User tapped orb - interrupting');
+                stopSpeaking();
+                setTimeout(startListening, 300);
+            }
+        });
+        
+        // Mobile-specific: show hint on first touch
+        if (isMobile && !localStorage.getItem('evalis_hint_shown')) {
+            setTimeout(() => {
+                statusText.textContent = "Tap orb anytime to interrupt";
+                localStorage.setItem('evalis_hint_shown', 'true');
+            }, 3000);
+        }
     });
 
     // Prevent accidental navigation during interview
