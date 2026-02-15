@@ -899,135 +899,7 @@
                 onFinishedSpeaking();
             };
             
-            utterance.onerror = (e) => {
-                console.error('Speech error:', e);
-                clearInterval(resumeInterval);
-                clearTimeout(safetyTimeout);
-                onFinishedSpeaking(); // Continue anyway
-            };
             
-            window.speechSynthesis.speak(utterance);
-        }
-    }
-
-    // --- HANDLE USER RESPONSE ---
-    async function handleUserResponse(transcript) {
-        if (!transcript || !transcript.trim()) {
-            console.log('⚠️ Empty transcript, ignoring');
-            state.isListening = false;
-            return;
-        }
-
-        console.log('💬 User said:', transcript);
-        
-        // Clear any pending restarts
-        if (recognitionRestartTimeout) {
-            clearTimeout(recognitionRestartTimeout);
-            recognitionRestartTimeout = null;
-        }
-        
-        // Mark as not listening while processing
-        state.isListening = false;
-        setOrbState('thinking');
-        
-        const fd = new FormData();
-        fd.append("mode", "interview");
-        fd.append("history", JSON.stringify(state.history));
-        fd.append("text", transcript);
-        fd.append("cvText", state.cvText);
-
-        try {
-            const res = await fetch(API_URL, { method: "POST", body: fd });
-            
-            if (!res.ok) {
-                throw new Error(`API returned ${res.status}`);
-            }
-            
-            const data = await res.json();
-            
-            state.history = data.history || state.history;
-            
-            if (data.reply) {
-                speak(data.reply);
-            } else {
-                console.error('❌ No reply from API');
-                state.isListening = false;
-                // Don't restart - let user try again or end interview
-                statusText.textContent = "No response. Tap orb to try again.";
-            }
-        } catch (e) {
-            console.error('❌ API Error:', e);
-            state.isListening = false;
-            statusText.textContent = "Connection error. Tap orb to retry.";
-            
-            // Don't auto-restart on error - let user manually retry
-            console.log('💡 Tap the orb to retry');
-        }
-    }
-
-    // --- CALLBACKS (Android & Web) ---
-    window.onRecognitionResult = (text) => {
-        handleUserResponse(text);
-    };
-
-    window.onFinishedSpeaking = () => {
-        console.log('✅ Finished speaking, continuous mode:', state.continuousMode);
-        
-        // Mark that we're no longer speaking
-        state.isSpeaking = false;
-        state.isListening = false; // Reset listening state
-        
-        // Continuous listening: Auto-restart after AI speaks
-        if (state.isInterviewing && state.continuousMode) {
-            // Longer delay to give user time and prevent any cycling
-            setTimeout(() => {
-                if (!state.isSpeaking && state.isInterviewing) {
-                    console.log('🔄 Restarting mic after AI finished speaking');
-                    startListening(); // This will respect cooldown
-                }
-            }, 2000); // Increased from 1500ms to 2000ms for stability
-        }
-    };
-    // --- WEB SPEECH API SETUP (Optimized for Stability) ---
-    let recognition;
-    let fatalErrorOccurred = false; // Flag to stop loops on permission errors
-
-    if (!isAndroid) {
-        const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-        
-        if (Recognition) {
-            recognition = new Recognition();
-            recognition.continuous = false; // Keep false for mobile stability
-            recognition.interimResults = false;
-            recognition.lang = 'en-US';
-            recognition.maxAlternatives = 1;
-            
-            recognition.onstart = () => {
-                console.log('🎤 Recognition started');
-                fatalErrorOccurred = false;
-            };
-            
-            recognition.onresult = (event) => {
-                const result = event.results[0];
-                const text = result[0].transcript;
-                const confidence = result[0].confidence;
-                const isFinal = result.isFinal;
-                
-                console.log('🎤 Result:', text, 'Conf:', confidence);
-                
-                // VALIDATION:
-                // 1. If valid speech: Process it and stop listening flag
-                // 2. If noise/low confidence: Do NOTHING. Let onend fire. 
-                //    This ensures the mic recycles and stays open.
-                
-                if (isFinal && confidence > 0.6 && text.trim().length >= 2) {
-                    console.log('✅ Valid response');
-                    state.isListening = false; // Logically stop listening to process
-                    handleUserResponse(text);
-                } else {
-                    console.log('⚠️ Low confidence/Noise - ignoring');
-                    // DO NOT set isListening = false here. 
-                    // Let onend handle the restart.
                 }
             };
             
@@ -1117,6 +989,34 @@
         try {
             const buffer = await file.arrayBuffer();
             const pdf = await pdfjsLib.getDocument(buffer).promise;
+            recognition.onend = () => {
+                console.log('⏹️ Recognition cycle ended');
+                
+                // RESTART LOGIC
+                // Only restart if:
+                // 1. We are still in an interview
+                // 2. The AI is NOT speaking (prevent self-listening)
+                // 3. We are supposedly "listening" (state wasn't cleared by valid input)
+                // 4. No fatal permission error occurred
+                
+                if (state.isInterviewing && !state.isSpeaking && state.isListening && !fatalErrorOccurred) {
+                    console.log('🔄 Recycling microphone...');
+                    setTimeout(() => {
+                        if (state.isInterviewing && !state.isSpeaking) {
+                            startListening();
+                        }
+                    }, 500); // Short delay to breathe
+                } else if (!state.isSpeaking) {
+                    // If we stopped listening naturally, go to idle
+                    if(!state.isInterviewing) setOrbState('idle');
+                }
+            };
+            
+        } else {
+            statusText.textContent = "Speech not supported (Use Chrome/Safari)";
+        }
+    }
+
             
             let fullText = "";
             for (let i = 1; i <= pdf.numPages; i++) {
