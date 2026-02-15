@@ -870,13 +870,39 @@
             if (preferredVoice) utterance.voice = preferredVoice;
             utterance.rate = 1.0; // Normal speaking speed
             utterance.pitch = 1.0;
+
+            // FIX 1: Chrome speechSynthesis pause bug workaround.
+            // Chrome silently pauses TTS after ~3-5 utterances and never fires onend.
+            // Calling resume() every 10s forces it to stay active.
+            const resumeInterval = setInterval(() => {
+                if (state.isSpeaking) {
+                    window.speechSynthesis.resume();
+                } else {
+                    clearInterval(resumeInterval);
+                }
+            }, 10000);
+
+            // FIX 2: Safety timeout in case onend never fires (Chrome bug).
+            // Estimate speech duration from word count (~150 wpm) + 5s buffer.
+            const estimatedDuration = Math.max(6000, (text.split(' ').length / 150) * 60000 + 5000);
+            const safetyTimeout = setTimeout(() => {
+                if (state.isSpeaking) {
+                    console.warn('⚠️ speechSynthesis onend never fired — forcing recovery');
+                    clearInterval(resumeInterval);
+                    onFinishedSpeaking();
+                }
+            }, estimatedDuration);
             
             utterance.onend = () => {
+                clearInterval(resumeInterval);
+                clearTimeout(safetyTimeout);
                 onFinishedSpeaking();
             };
             
             utterance.onerror = (e) => {
                 console.error('Speech error:', e);
+                clearInterval(resumeInterval);
+                clearTimeout(safetyTimeout);
                 onFinishedSpeaking(); // Continue anyway
             };
             
@@ -1037,9 +1063,17 @@
             recognition.onend = () => {
                 console.log('⏹️ Recognition ended');
                 
-                // DO NOT auto-restart here to prevent random cycling
-                // Will only restart after AI finishes speaking (in onFinishedSpeaking)
-                console.log('Waiting for next speaking cycle to restart mic');
+                // FIX 3: If recognition ended but we're still in listening state
+                // (no result came, e.g. silence or low-confidence rejection),
+                // and the AI isn't speaking, restart the mic so it doesn't get stuck.
+                if (state.isInterviewing && !state.isSpeaking && state.isListening) {
+                    console.log('🔄 Recognition ended without result — restarting mic');
+                    setTimeout(() => {
+                        if (state.isInterviewing && !state.isSpeaking) {
+                            startListening();
+                        }
+                    }, 1000);
+                }
             };
             
             // Load voices when available
