@@ -181,195 +181,214 @@
         </div>
     </div>
 
-    <script>
-        // Configuration
-        const API_BASE = 'https://divine-meadow-322b.simpaticohrconsultancy.workers.dev';
-        
-        let mediaRecorder;
-        let audioChunks = [];
-        let isRecording = false;
-        let conversationHistory = [];
+   <script>
+    // ⚠️ IMPORTANT: Replace this with your ACTUAL deployed Worker URL
+    // If you haven't deployed it, this URL will likely fail.
+    const API_BASE = 'https://divine-meadow-322b.simpaticohrconsultancy.workers.dev';
+    
+    let mediaRecorder;
+    let audioChunks = [];
+    let isRecording = false;
+    let conversationHistory = [];
+    let recordedMimeType = ''; // Store the detected mime type
 
-        // Practice scenarios
-        const scenarios = [
-            { id: 1, title: 'Job Interview', icon: '💼', difficulty: 'Advanced', category: 'Business' },
-            { id: 2, title: 'Ordering at Restaurant', icon: '🍽️', difficulty: 'Beginner', category: 'Daily Life' },
-            { id: 3, title: 'Airport Check-in', icon: '✈️', difficulty: 'Intermediate', category: 'Travel' },
-            { id: 4, title: 'Phone Conversation', icon: '📱', difficulty: 'Intermediate', category: 'Business' },
-            { id: 5, title: 'Meeting New People', icon: '👋', difficulty: 'Beginner', category: 'Social' },
-            { id: 6, title: 'Presentation Skills', icon: '📊', difficulty: 'Advanced', category: 'Business' },
-        ];
+    // Practice scenarios
+    const scenarios = [
+        { id: 1, title: 'Job Interview', icon: '💼', difficulty: 'Advanced', category: 'Business' },
+        { id: 2, title: 'Ordering at Restaurant', icon: '🍽️', difficulty: 'Beginner', category: 'Daily Life' },
+        { id: 3, title: 'Airport Check-in', icon: '✈️', difficulty: 'Intermediate', category: 'Travel' },
+        { id: 4, title: 'Phone Conversation', icon: '📱', difficulty: 'Intermediate', category: 'Business' },
+        { id: 5, title: 'Meeting New People', icon: '👋', difficulty: 'Beginner', category: 'Social' },
+        { id: 6, title: 'Presentation Skills', icon: '📊', difficulty: 'Advanced', category: 'Business' },
+    ];
 
-        // Load scenarios
-        function loadScenarios() {
-            const container = document.getElementById('scenarios');
-            container.innerHTML = scenarios.map(s => `
-                <div class="glass rounded-2xl p-6 hover:bg-white/10 transition-all cursor-pointer">
-                    <div class="text-4xl mb-4">${s.icon}</div>
-                    <h3 class="text-xl font-bold mb-2">${s.title}</h3>
-                    <div class="flex items-center gap-2 mb-4">
-                        <span class="px-3 py-1 rounded-full text-xs font-semibold ${
-                            s.difficulty === 'Beginner' ? 'bg-green-500/20 text-green-400' :
-                            s.difficulty === 'Intermediate' ? 'bg-yellow-500/20 text-yellow-400' :
-                            'bg-red-500/20 text-red-400'
-                        }">${s.difficulty}</span>
-                        <span class="px-3 py-1 rounded-full text-xs bg-blue-500/20 text-blue-400">${s.category}</span>
-                    </div>
-                    <button class="w-full py-3 bg-gradient-to-r from-blue-500 to-purple-500 rounded-xl font-semibold hover:shadow-lg hover:shadow-blue-500/50 transition-all">
-                        Start Practice
-                    </button>
+    function loadScenarios() {
+        const container = document.getElementById('scenarios');
+        container.innerHTML = scenarios.map(s => `
+            <div class="glass rounded-2xl p-6 hover:bg-white/10 transition-all cursor-pointer">
+                <div class="text-4xl mb-4">${s.icon}</div>
+                <h3 class="text-xl font-bold mb-2">${s.title}</h3>
+                <div class="flex items-center gap-2 mb-4">
+                    <span class="px-3 py-1 rounded-full text-xs font-semibold ${
+                        s.difficulty === 'Beginner' ? 'bg-green-500/20 text-green-400' :
+                        s.difficulty === 'Intermediate' ? 'bg-yellow-500/20 text-yellow-400' :
+                        'bg-red-500/20 text-red-400'
+                    }">${s.difficulty}</span>
+                    <span class="px-3 py-1 rounded-full text-xs bg-blue-500/20 text-blue-400">${s.category}</span>
                 </div>
-            `).join('');
+                <button class="w-full py-3 bg-gradient-to-r from-blue-500 to-purple-500 rounded-xl font-semibold hover:shadow-lg hover:shadow-blue-500/50 transition-all">
+                    Start Practice
+                </button>
+            </div>
+        `).join('');
+    }
+
+    async function toggleRecording() {
+        if (!isRecording) {
+            await startRecording();
+        } else {
+            stopRecording();
         }
+    }
 
-        // Toggle recording
-        async function toggleRecording() {
-            if (!isRecording) {
-                await startRecording();
-            } else {
-                stopRecording();
-            }
-        }
-
-        // Start recording
-        async function startRecording() {
-            try {
-                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                mediaRecorder = new MediaRecorder(stream);
-                audioChunks = [];
-
-                mediaRecorder.ondataavailable = (event) => {
-                    audioChunks.push(event.data);
-                };
-
-                mediaRecorder.onstop = async () => {
-                    const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
-                    await transcribeAudio(audioBlob);
-                    stream.getTracks().forEach(track => track.stop());
-                };
-
-                mediaRecorder.start();
-                isRecording = true;
-                
-                // Update UI
-                document.getElementById('recordBtn').classList.add('recording-pulse', 'from-red-500', 'to-pink-500');
-                document.getElementById('recordBtn').classList.remove('from-blue-500', 'to-purple-500');
-                document.getElementById('statusText').textContent = 'Recording... Click to stop';
-                document.getElementById('micIcon').innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"></path>';
-                
-            } catch (error) {
-                console.error('Error accessing microphone:', error);
-                alert('Unable to access microphone. Please grant permission.');
-            }
-        }
-
-        // Stop recording
-        function stopRecording() {
-            if (mediaRecorder && isRecording) {
-                mediaRecorder.stop();
-                isRecording = false;
-                
-                // Update UI
-                document.getElementById('recordBtn').classList.remove('recording-pulse', 'from-red-500', 'to-pink-500');
-                document.getElementById('recordBtn').classList.add('from-blue-500', 'to-purple-500');
-                document.getElementById('statusText').textContent = 'Processing...';
-                document.getElementById('micIcon').innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"></path>';
-            }
-        }
-
-        // Transcribe audio using Whisper
-        async function transcribeAudio(audioBlob) {
-            try {
-                const formData = new FormData();
-                formData.append('audio', audioBlob);
-
-                const response = await fetch(`${API_BASE}/api/transcribe`, {
-                    method: 'POST',
-                    body: formData
-                });
-
-                const data = await response.json();
-                
-                if (data.success) {
-                    displayTranscription(data.transcription);
-                    await getAIResponse(data.transcription);
-                } else {
-                    alert('Transcription failed: ' + data.error);
-                }
-                
-                document.getElementById('statusText').textContent = 'Click to start speaking';
-                
-            } catch (error) {
-                console.error('Transcription error:', error);
-                alert('Error transcribing audio: ' + error.message);
-                document.getElementById('statusText').textContent = 'Click to start speaking';
-            }
-        }
-
-        // Display transcription
-        function displayTranscription(text) {
-            document.getElementById('transcriptionBox').classList.remove('hidden');
-            document.getElementById('transcriptionText').textContent = text;
-        }
-
-        // Get AI response using Llama 3.3 70B
-        async function getAIResponse(userMessage) {
-            try {
-                const response = await fetch(`${API_BASE}/api/chat`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        message: userMessage,
-                        context: conversationHistory.slice(-6),
-                        mode: 'conversation'
-                    })
-                });
-
-                const data = await response.json();
-                
-                if (data.success) {
-                    conversationHistory.push(
-                        { role: 'user', content: userMessage },
-                        { role: 'assistant', content: data.response }
-                    );
-                    displayConversation();
-                    
-                    // Simulate score (in production, call analyze-pronunciation endpoint)
-                    const score = Math.floor(Math.random() * 30) + 70; // 70-100
-                    displayScore(score);
-                }
-                
-            } catch (error) {
-                console.error('AI response error:', error);
-                alert('Error getting AI response: ' + error.message);
-            }
-        }
-
-        // Display conversation
-        function displayConversation() {
-            const container = document.getElementById('chatHistory');
-            container.innerHTML = conversationHistory.map(msg => `
-                <div class="${msg.role === 'user' ? 'message-user ml-8' : 'message-ai mr-8'} p-4 rounded-xl">
-                    <p class="text-sm font-semibold mb-2 text-slate-400">${msg.role === 'user' ? 'You' : 'AI Coach'}</p>
-                    <p class="leading-relaxed">${msg.content}</p>
-                </div>
-            `).join('');
+    async function startRecording() {
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
             
-            // Scroll to bottom
-            container.scrollTop = container.scrollHeight;
-        }
+            // 🛠️ FIX: Determine supported MIME type
+            const mimeTypes = [
+                'audio/webm;codecs=opus', 
+                'audio/webm', 
+                'audio/mp4', 
+                'audio/mp4;codecs=mp4a', 
+                'audio/ogg;codecs=opus'
+            ];
+            
+            recordedMimeType = mimeTypes.find(type => MediaRecorder.isTypeSupported(type)) || '';
+            
+            const options = recordedMimeType ? { mimeType: recordedMimeType } : undefined;
+            
+            console.log("Recording with MIME type:", recordedMimeType || "Default");
 
-        // Display score
-        function displayScore(score) {
-            document.getElementById('scoreBox').classList.remove('hidden');
-            document.getElementById('scoreValue').textContent = score + '%';
-            document.getElementById('scoreBar').style.width = score + '%';
-        }
+            mediaRecorder = new MediaRecorder(stream, options);
+            audioChunks = [];
 
-        // Initialize
-        document.addEventListener('DOMContentLoaded', () => {
-            loadScenarios();
-        });
-    </script>
+            mediaRecorder.ondataavailable = (event) => {
+                if (event.data.size > 0) {
+                    audioChunks.push(event.data);
+                }
+            };
+
+            mediaRecorder.onstop = async () => {
+                // 🛠️ FIX: Use the DETECTED MimeType, not hardcoded 'audio/webm'
+                // If recordedMimeType is empty, let Blob figure it out or default to webm
+                const type = recordedMimeType || 'audio/webm';
+                const audioBlob = new Blob(audioChunks, { type: type });
+                
+                // Only transcribe if we have data
+                if(audioBlob.size > 0) {
+                    await transcribeAudio(audioBlob);
+                } else {
+                    alert("Recording was empty. Please try again.");
+                }
+                
+                stream.getTracks().forEach(track => track.stop());
+            };
+
+            mediaRecorder.start();
+            isRecording = true;
+            
+            // Update UI
+            document.getElementById('recordBtn').classList.add('recording-pulse', 'from-red-500', 'to-pink-500');
+            document.getElementById('recordBtn').classList.remove('from-blue-500', 'to-purple-500');
+            document.getElementById('statusText').textContent = 'Recording... Click to stop';
+            document.getElementById('micIcon').innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"></path>';
+            
+        } catch (error) {
+            console.error('Error accessing microphone:', error);
+            alert('Unable to access microphone. Please grant permission.');
+        }
+    }
+
+    function stopRecording() {
+        if (mediaRecorder && isRecording) {
+            mediaRecorder.stop();
+            isRecording = false;
+            
+            // Update UI
+            document.getElementById('recordBtn').classList.remove('recording-pulse', 'from-red-500', 'to-pink-500');
+            document.getElementById('recordBtn').classList.add('from-blue-500', 'to-purple-500');
+            document.getElementById('statusText').textContent = 'Processing...';
+            document.getElementById('micIcon').innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"></path>';
+        }
+    }
+
+    async function transcribeAudio(audioBlob) {
+        try {
+            const formData = new FormData();
+            formData.append('audio', audioBlob);
+
+            const response = await fetch(`${API_BASE}/api/transcribe`, {
+                method: 'POST',
+                body: formData
+            });
+
+            const data = await response.json();
+            
+            if (data.success) {
+                displayTranscription(data.transcription);
+                await getAIResponse(data.transcription);
+            } else {
+                console.error("Server Error Details:", data);
+                alert('Transcription failed: ' + (data.details || data.error));
+                document.getElementById('statusText').textContent = 'Click to start speaking';
+            }
+            
+        } catch (error) {
+            console.error('Transcription error:', error);
+            alert('Error transcribing audio: ' + error.message);
+            document.getElementById('statusText').textContent = 'Click to start speaking';
+        }
+    }
+
+    function displayTranscription(text) {
+        document.getElementById('transcriptionBox').classList.remove('hidden');
+        document.getElementById('transcriptionText').textContent = text;
+    }
+
+    async function getAIResponse(userMessage) {
+        try {
+            const response = await fetch(`${API_BASE}/api/chat`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    message: userMessage,
+                    context: conversationHistory.slice(-6),
+                    mode: 'conversation'
+                })
+            });
+
+            const data = await response.json();
+            
+            if (data.success) {
+                conversationHistory.push(
+                    { role: 'user', content: userMessage },
+                    { role: 'assistant', content: data.response }
+                );
+                displayConversation();
+                
+                // Simulate score
+                const score = Math.floor(Math.random() * 30) + 70;
+                displayScore(score);
+                document.getElementById('statusText').textContent = 'Click to start speaking';
+            }
+            
+        } catch (error) {
+            console.error('AI response error:', error);
+            document.getElementById('statusText').textContent = 'Click to start speaking';
+        }
+    }
+
+    function displayConversation() {
+        const container = document.getElementById('chatHistory');
+        container.innerHTML = conversationHistory.map(msg => `
+            <div class="${msg.role === 'user' ? 'message-user ml-8' : 'message-ai mr-8'} p-4 rounded-xl">
+                <p class="text-sm font-semibold mb-2 text-slate-400">${msg.role === 'user' ? 'You' : 'AI Coach'}</p>
+                <p class="leading-relaxed">${msg.content}</p>
+            </div>
+        `).join('');
+        container.scrollTop = container.scrollHeight;
+    }
+
+    function displayScore(score) {
+        document.getElementById('scoreBox').classList.remove('hidden');
+        document.getElementById('scoreValue').textContent = score + '%';
+        document.getElementById('scoreBar').style.width = score + '%';
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+        loadScenarios();
+    });
+</script>
 </body>
 </html>
