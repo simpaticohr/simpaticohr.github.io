@@ -1,244 +1,259 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Elite AI Tutor</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    // Add this at the very top of your <script>
-let voices = [];
-window.speechSynthesis.onvoiceschanged = () => {
-  voices = window.speechSynthesis.getVoices();
-};
-    <style>
-        body { background: #0f172a; color: white; font-family: sans-serif; }
-        .orb {
-            width: 150px; height: 150px;
-            border-radius: 50%;
-            background: radial-gradient(circle, #3b82f6, #1e40af);
-            box-shadow: 0 0 50px #3b82f6;
-            transition: all 0.2s ease;
-        }
-        .orb.listening { animation: pulse 1.5s infinite; background: radial-gradient(circle, #ef4444, #991b1b); box-shadow: 0 0 50px #ef4444; }
-        .orb.speaking { animation: bounce 0.5s infinite alternate; background: radial-gradient(circle, #10b981, #047857); box-shadow: 0 0 50px #10b981; }
-        @keyframes pulse { 0% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.1); opacity: 0.8; } 100% { transform: scale(1); opacity: 1; } }
-        @keyframes bounce { from { transform: scale(1); } to { transform: scale(1.05); } }
-    </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Zelvora AI Tutor</title>
+
+<style>
+body{
+  margin:0;
+  min-height:100vh;
+  display:flex;
+  justify-content:center;
+  align-items:center;
+  background:radial-gradient(circle at top,#0b1d3a,#020617);
+  font-family:system-ui;
+  color:#fff;
+}
+.app{
+  width:100%;
+  max-width:420px;
+  background:rgba(255,255,255,.08);
+  backdrop-filter:blur(18px);
+  border-radius:24px;
+  padding:22px;
+  box-shadow:0 30px 60px rgba(0,0,0,.6);
+}
+h2{text-align:center;margin-bottom:6px}
+#status{text-align:center;font-size:13px;color:#cbd5e1;min-height:18px}
+.mic{
+  width:80px;height:80px;border-radius:50%;
+  background:#2563eb;margin:18px auto;
+  display:flex;align-items:center;justify-content:center;
+  font-size:34px;
+}
+.mic.active{
+  background:#dc2626;
+  animation:pulse 1.4s infinite;
+}
+@keyframes pulse{
+  0%{box-shadow:0 0 0 0 rgba(220,38,38,.6)}
+  70%{box-shadow:0 0 0 20px rgba(220,38,38,0)}
+}
+.chat{
+  background:rgba(0,0,0,.3);
+  border-radius:14px;
+  padding:12px;
+  max-height:260px;
+  overflow-y:auto;
+  font-size:14px;
+}
+.msg{margin-bottom:12px}
+.user{color:#93c5fd}
+.ai{color:#c4b5fd}
+.label{font-size:11px;opacity:.6}
+.controls{
+  display:flex;gap:10px;margin-top:14px
+}
+button{
+  flex:1;padding:12px;border:none;border-radius:12px;
+  font-weight:600;cursor:pointer
+}
+.start{background:#2563eb;color:#fff}
+.stop{background:#dc2626;color:#fff}
+.clear{background:rgba(255,255,255,.12);color:#fff}
+</style>
 </head>
-<body class="h-screen flex flex-col items-center justify-center relative overflow-hidden">
 
-    <div class="absolute top-10 text-center">
-        <h1 class="text-3xl font-bold tracking-tight mb-2">English Tutor AI</h1>
-        <p id="status" class="text-slate-400 text-sm">Tap the orb to start the session</p>
+<body>
+
+<script>
+/* 🔐 ACCESS GUARD (MUST BE FIRST) */
+(() => {
+  const t = localStorage.getItem("career_token");
+  if(!t) location.href = "spoken-english-gate.html";
+
+  try{
+    const d = JSON.parse(atob(t));
+    if(Date.now() > d.exp || !d.uses || d.uses.spoken <= 0){
+      location.href = "spoken-english-gate.html";
+    }
+  }catch{
+    location.href = "spoken-english-gate.html";
+  }
+})();
+</script>
+
+<div class="app">
+  <h2>🎧 Zelvora AI Tutor</h2>
+  <div id="status">Tap Start to speak</div>
+
+  <div class="mic" id="mic">🎤</div>
+
+  <div class="chat" id="chat">
+    <div class="msg ai">
+      <div class="label">Tutor</div>
+      Hello! Start speaking and I’ll help you improve your English.
     </div>
+  </div>
 
-    <div id="orb" class="orb flex items-center justify-center cursor-pointer mb-12">
-        <svg id="icon" class="w-12 h-12 text-white/80" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"></path></svg>
-    </div>
+  <div class="controls">
+    <button class="start" onclick="start()">Start</button>
+    <button class="stop" onclick="stop()">Stop</button>
+    <button class="clear" onclick="clearChat()">Clear</button>
+  </div>
+</div>
 
-    <div class="w-full max-w-md px-6 space-y-4">
-        <div id="userText" class="text-right text-blue-300 text-lg opacity-0 transition-opacity"></div>
-        <div id="aiText" class="text-left text-green-300 text-lg opacity-0 transition-opacity"></div>
-    </div>
+<script>
+/* 🔗 BACKEND */
+const API_URL = "https://late-mouse-4aa2.zelvora-global.workers.dev";
 
-    <script>
-        // CONFIG
-        const WORKER_URL = 'https://divine-meadow-322b.simpaticohrconsultancy.workers.dev'; 
-        const SILENCE_THRESHOLD = 1500; // Time in ms to wait after silence to send
-        
-        // STATE
-        let mediaRecorder;
-        let audioChunks = [];
-        let isSessionActive = false;
-        let audioContext, analyser, microphone, silenceTimer;
-        let conversationHistory = [];
+/* 🎙️ Speech Recognition */
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+let recognition, listening=false, autoMode=false;
 
-        const orb = document.getElementById('orb');
-        const status = document.getElementById('status');
-        const userDisplay = document.getElementById('userText');
-        const aiDisplay = document.getElementById('aiText');
+/* 🧠 Memory */
+let memory = JSON.parse(sessionStorage.getItem("zelvoraMemory") || "[]");
+const MAX_MEMORY = 10;
 
-        // 1. INITIALIZE & PERMISSIONS
-        orb.addEventListener('click', async () => {
-            if (!isSessionActive) {
-                await startSession();
-            } else {
-                stopSession();
-            }
-        });
+/* ▶️ START */
+function start(){
+  autoMode = true;
+  startListening();
+}
 
-        async function startSession() {
-            try {
-                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                isSessionActive = true;
-                status.textContent = "Listening... (Auto-send on silence)";
-                orb.classList.add('listening');
-                
-                // Initialize Silence Detection
-                setupSilenceDetection(stream);
-                // Initialize Recorder
-                setupRecorder(stream);
+/* ⏹ STOP */
+function stop(){
+  autoMode = false;
+  listening = false;
+  if(recognition) recognition.stop();
+  setStatus("Stopped");
+  mic.classList.remove("active");
+}
 
-            } catch (e) {
-                alert("Microphone access denied or error: " + e.message);
-            }
-        }
+/* 🎤 LISTEN */
+function startListening(){
+  if(listening || !autoMode || !SR) return;
 
-        function stopSession() {
-            isSessionActive = false;
-            orb.classList.remove('listening', 'speaking');
-            status.textContent = "Session Paused. Tap to resume.";
-            if (mediaRecorder) mediaRecorder.stop();
-            if (audioContext) audioContext.close();
-            clearTimeout(silenceTimer);
-        }
+  recognition = new SR();
+  recognition.lang = "en-US";
+  recognition.continuous = false;
 
-        // 2. RECORDER SETUP (With MIME Type Fix)
-        function setupRecorder(stream) {
-            const mimeTypes = ['audio/webm', 'audio/mp4', 'audio/ogg', 'audio/wav'];
-            const mimeType = mimeTypes.find(type => MediaRecorder.isTypeSupported(type)) || '';
-            
-            mediaRecorder = new MediaRecorder(stream, { mimeType });
-            
-            mediaRecorder.ondataavailable = e => {
-                if (e.data.size > 0) audioChunks.push(e.data);
-            };
+  recognition.onstart = ()=>{
+    listening = true;
+    mic.classList.add("active");
+    setStatus("🎤 Listening...");
+  };
 
-            mediaRecorder.onstop = async () => {
-                if (!isSessionActive || audioChunks.length === 0) return;
-                
-                status.textContent = "Thinking...";
-                orb.classList.remove('listening');
-                
-                const audioBlob = new Blob(audioChunks, { type: mimeType });
-                audioChunks = []; // Reset for next turn
-                
-                await processAudio(audioBlob);
-            };
+  recognition.onresult = e=>{
+    const text = e.results[0][0].transcript.trim();
+    addMsg("user", text);
+    recognition.stop();
+    sendToAI(text);
+  };
 
-            mediaRecorder.start();
-        }
+  recognition.onend = ()=>{
+    listening = false;
+    mic.classList.remove("active");
+  };
 
-        // 3. SILENCE DETECTION (The "Hands-Free" Magic)
-        function setupSilenceDetection(stream) {
-            audioContext = new (window.AudioContext || window.webkitAudioContext)();
-            analyser = audioContext.createAnalyser();
-            microphone = audioContext.createMediaStreamSource(stream);
-            const scriptProcessor = audioContext.createScriptProcessor(2048, 1, 1);
+  recognition.onerror = ()=>{
+    listening = false;
+    mic.classList.remove("active");
+    if(autoMode) setTimeout(startListening, 1000);
+  };
 
-            analyser.fftSize = 512;
-            microphone.connect(analyser);
-            analyser.connect(scriptProcessor);
-            scriptProcessor.connect(audioContext.destination);
+  recognition.start();
+}
 
-            scriptProcessor.onaudioprocess = () => {
-                if (!isSessionActive) return;
+/* 🤖 SEND TO AI (CORRECT + AUTH) */
+async function sendToAI(text){
+  const token = localStorage.getItem("career_token");
+  if(!token){
+    location.href = "spoken-english-gate.html";
+    return;
+  }
 
-                const array = new Uint8Array(analyser.frequencyBinCount);
-                analyser.getByteFrequencyData(array);
-                
-                // Calculate average volume
-                let values = 0;
-                for (let i = 0; i < array.length; i++) values += array[i];
-                const average = values / array.length;
+  memory.push({ role:"user", content:text });
+  memory = memory.slice(-MAX_MEMORY);
+  sessionStorage.setItem("zelvoraMemory", JSON.stringify(memory));
 
-                // Simple Threshold Logic
-                if (average > 10) { // User is talking
-                    clearTimeout(silenceTimer);
-                    orb.classList.add('listening'); // Pulse effect
-                } else {
-                    // Silence detected, start timer
-                    if (mediaRecorder && mediaRecorder.state === 'recording') {
-                         // Only set timer if we haven't already
-                         if (!silenceTimer) {
-                             silenceTimer = setTimeout(() => {
-                                 console.log("Silence detected, sending...");
-                                 mediaRecorder.stop(); // This triggers onstop -> processAudio
-                                 silenceTimer = null;
-                             }, SILENCE_THRESHOLD);
-                         }
-                    }
-                }
-            };
-        }
+  setStatus("🤖 Thinking...");
 
-        // 4. API & AI LOGIC
-        async function processAudio(audioBlob) {
-            // A. Transcribe
-            const formData = new FormData();
-            formData.append('audio', audioBlob);
+  try{
+    const res = await fetch(API_URL,{
+      method:"POST",
+      headers:{
+        "Content-Type":"application/json",
+        "Authorization":"Bearer " + token
+      },
+      body: JSON.stringify({ text, history: memory })
+    });
 
-            try {
-                const transRes = await fetch(`${WORKER_URL}/api/transcribe`, { method: 'POST', body: formData });
-                const transData = await transRes.json();
-                
-                if (!transData.success) throw new Error(transData.error || "Transcription failed");
-                
-                const userText = transData.transcription;
-                if (!userText.trim()) {
-                    // False alarm (noise), restart recorder
-                    mediaRecorder.start();
-                    return;
-                }
+    const data = await res.json();
 
-                userDisplay.textContent = `"${userText}"`;
-                userDisplay.classList.remove('opacity-0');
+    if(data.error){
+      alert(data.error);
+      location.href = "spoken-english-gate.html";
+      return;
+    }
 
-                // B. Get AI Reply
-                const chatRes = await fetch(`${WORKER_URL}/api/chat`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ message: userText, history: conversationHistory })
-                });
-                const chatData = await chatRes.json();
-                
-                const aiResponse = chatData.response;
-                conversationHistory.push({ role: 'user', content: userText }, { role: 'assistant', content: aiResponse });
-                conversationHistory = conversationHistory.slice(-6); // Keep history small
+    if(data.token){
+      localStorage.setItem("career_token", data.token);
+    }
 
-                aiDisplay.textContent = aiResponse;
-                aiDisplay.classList.remove('opacity-0');
+    addMsg("ai", data.reply);
 
-                // C. Speak (TTS)
-                speakResponse(aiResponse);
+    memory.push({ role:"assistant", content:data.reply });
+    memory = memory.slice(-MAX_MEMORY);
+    sessionStorage.setItem("zelvoraMemory", JSON.stringify(memory));
 
-            } catch (error) {
-                console.error(error);
-                status.textContent = "Error: " + error.message;
-                setTimeout(() => { if(isSessionActive) mediaRecorder.start(); }, 2000);
-            }
-        }
+    speak(data.reply);
 
-        // 5. TEXT TO SPEECH (Browser Native)
-        function speakResponse(text) {
-            orb.classList.add('speaking');
-            status.textContent = "Speaking...";
+  }catch{
+    addMsg("ai","Temporary issue. Please continue.");
+  }
+}
 
-            // Cancel any previous speech
-            window.speechSynthesis.cancel();
+/* 🔊 SPEAK */
+function speak(text){
+  speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance(text);
+  u.rate = 0.9;
 
-            const utterance = new SpeechSynthesisUtterance(text);
-            
-            // Try to find a good English voice
-            const voices = window.speechSynthesis.getVoices();
-            const preferredVoice = voices.find(v => v.name.includes("Google US English")) || 
-                                   voices.find(v => v.lang === 'en-US');
-            if (preferredVoice) utterance.voice = preferredVoice;
+  u.onstart = ()=>setStatus("🔊 Speaking...");
+  u.onend = ()=>{
+    if(autoMode){
+      setStatus("🎤 Listening...");
+      setTimeout(startListening,600);
+    }
+  };
+  speechSynthesis.speak(u);
+}
 
-            utterance.rate = 1.0;
-            utterance.pitch = 1.0;
+/* 🧾 UI */
+function addMsg(type,text){
+  const d=document.createElement("div");
+  d.className="msg "+type;
+  d.innerHTML=`<div class="label">${type==="user"?"You":"Tutor"}</div>${text}`;
+  chat.appendChild(d);
+  chat.scrollTop=chat.scrollHeight;
+}
 
-            utterance.onend = () => {
-                orb.classList.remove('speaking');
-                status.textContent = "Listening...";
-                // IMPORTANT: Restart recording only after AI finishes speaking
-                if (isSessionActive && mediaRecorder.state === 'inactive') {
-                    mediaRecorder.start();
-                }
-            };
+function clearChat(){
+  memory=[];
+  sessionStorage.clear();
+  chat.innerHTML=`<div class="msg ai"><div class="label">Tutor</div>New conversation started.</div>`;
+}
 
-            window.speechSynthesis.speak(utterance);
-        }
-    </script>
+function setStatus(t){ status.textContent=t; }
+
+/* 🎧 MIC PERMISSION */
+navigator.mediaDevices.getUserMedia({audio:true}).catch(()=>{
+  setStatus("⚠️ Allow microphone to continue");
+});
+</script>
+
 </body>
 </html>
