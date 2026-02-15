@@ -988,26 +988,23 @@
             }, 2000); // Increased from 1500ms to 2000ms for stability
         }
     };
-
-    // --- WEB SPEECH API SETUP (Optimized for Mobile & Bargie-In) ---
+    // --- WEB SPEECH API SETUP (Optimized for Stability) ---
     let recognition;
+    let fatalErrorOccurred = false; // Flag to stop loops on permission errors
+
     if (!isAndroid) {
         const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
         
         if (Recognition) {
             recognition = new Recognition();
-            recognition.continuous = false; // Manual restart for better control
-            recognition.interimResults = false; // Final results only
+            recognition.continuous = false; // Keep false for mobile stability
+            recognition.interimResults = false;
             recognition.lang = 'en-US';
             recognition.maxAlternatives = 1;
             
-            // Mobile optimization
-            if (isMobile) {
-                console.log('📱 Mobile optimizations enabled');
-            }
-            
             recognition.onstart = () => {
                 console.log('🎤 Recognition started');
+                fatalErrorOccurred = false;
             };
             
             recognition.onresult = (event) => {
@@ -1016,71 +1013,70 @@
                 const confidence = result[0].confidence;
                 const isFinal = result.isFinal;
                 
-                console.log('🎤 Recognition result:', text, 'Confidence:', confidence, 'Final:', isFinal);
+                console.log('🎤 Result:', text, 'Conf:', confidence);
                 
-                // Strict validation to filter out noise
-                // 1. Must be final (not interim)
-                // 2. Confidence must be above 60% (increased from 50%)
-                // 3. Text must be at least 5 characters (increased from 3)
-                // 4. Text must not be empty after trimming
+                // VALIDATION:
+                // 1. If valid speech: Process it and stop listening flag
+                // 2. If noise/low confidence: Do NOTHING. Let onend fire. 
+                //    This ensures the mic recycles and stays open.
                 
-                if (isFinal && confidence > 0.6 && text.trim().length >= 5) {
-                    console.log('✅ Valid response accepted');
-                    state.isListening = false; // Stop listening state
+                if (isFinal && confidence > 0.6 && text.trim().length >= 2) {
+                    console.log('✅ Valid response');
+                    state.isListening = false; // Logically stop listening to process
                     handleUserResponse(text);
                 } else {
-                    console.log('⚠️ Low confidence or too short, ignoring:', confidence, text.length);
-                    // Do NOT restart - let the normal cycle handle it
-                    state.isListening = false;
+                    console.log('⚠️ Low confidence/Noise - ignoring');
+                    // DO NOT set isListening = false here. 
+                    // Let onend handle the restart.
                 }
             };
             
             recognition.onerror = (e) => {
                 console.log('❌ Recognition error:', e.error);
                 
-                // Handle errors but DON'T auto-restart to prevent random cycling
-                if (e.error === 'no-speech') {
-                    console.log('No speech detected - will wait for next speaking cycle');
-                    // Do NOT restart automatically - prevents noise cycling
+                if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
+                    // CRITICAL: This stops the infinite loop when browser kills access
+                    fatalErrorOccurred = true;
                     state.isListening = false;
-                } else if (e.error === 'aborted') {
-                    // Intentional stop
-                    console.log('Recognition aborted intentionally');
-                    state.isListening = false;
-                } else if (e.error === 'audio-capture') {
-                    statusText.textContent = "Microphone access needed";
-                    state.isListening = false;
-                } else if (e.error === 'not-allowed') {
-                    statusText.textContent = "Please allow microphone access";
-                    state.isListening = false;
+                    statusText.textContent = "Mic timed out. Tap orb to resume.";
+                    setOrbState('idle');
+                } else if (e.error === 'no-speech') {
+                    // Normal timeout - ignore, onend will restart
+                    console.log('Silence detected, recycling mic...');
                 } else {
-                    // Other errors - do NOT restart automatically
-                    console.log('Recognition error - will wait for next speaking cycle');
-                    state.isListening = false;
+                    // Other errors (network, etc) - let onend restart
                 }
             };
             
             recognition.onend = () => {
-                console.log('⏹️ Recognition ended');
+                console.log('⏹️ Recognition cycle ended');
                 
-                // FIX 3: If recognition ended but we're still in listening state
-                // (no result came, e.g. silence or low-confidence rejection),
-                // and the AI isn't speaking, restart the mic so it doesn't get stuck.
-                if (state.isInterviewing && !state.isSpeaking && state.isListening) {
-                    console.log('🔄 Recognition ended without result — restarting mic');
+                // RESTART LOGIC
+                // Only restart if:
+                // 1. We are still in an interview
+                // 2. The AI is NOT speaking (prevent self-listening)
+                // 3. We are supposedly "listening" (state wasn't cleared by valid input)
+                // 4. No fatal permission error occurred
+                
+                if (state.isInterviewing && !state.isSpeaking && state.isListening && !fatalErrorOccurred) {
+                    console.log('🔄 Recycling microphone...');
                     setTimeout(() => {
                         if (state.isInterviewing && !state.isSpeaking) {
                             startListening();
                         }
-                    }, 1000);
+                    }, 500); // Short delay to breathe
+                } else if (!state.isSpeaking) {
+                    // If we stopped listening naturally, go to idle
+                    if(!state.isInterviewing) setOrbState('idle');
                 }
             };
             
-            // Load voices when available
-            if ('speechSynthesis' in window) {
-                speechSynthesis.onvoiceschanged = () => {
-                    const voices = speechSynthesis.getVoices();
-                    console.log('🔊 Voices loaded:', voices.length);
+        } else {
+            statusText.textContent = "Speech not supported (Use Chrome/Safari)";
+        }
+    }
+
+    
                 };
             }
         } else {
