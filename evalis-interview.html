@@ -1179,16 +1179,31 @@ function addScoreMsg(text) {
   area.scrollTop = area.scrollHeight;
 }
 
-// --- TTS ---
+// ============================================
+// TTS WITH BULLETPROOF RESUME (replaces old speak function)
+// ============================================
+let ttsWatchdog = null;
+
 function speak(text) {
-  if (!('speechSynthesis' in window)) return;
-  const wasListening = engine.isListening;
-  if (wasListening) engine.pause();
+  if (!('speechSynthesis' in window)) {
+    // No TTS — just resume mic immediately
+    if (isInterviewActive) engine.resume();
+    return;
+  }
+
+  // Pause mic so it doesn't hear the speaker
+  if (engine.isListening) engine.pause();
+
+  // Kill any ongoing speech
   speechSynthesis.cancel();
+  clearTimeout(ttsWatchdog);
 
   const u = new SpeechSynthesisUtterance(text);
-  u.rate = 1.05; u.pitch = 1.0; u.volume = 1.0;
+  u.rate = 1.05;
+  u.pitch = 1.0;
+  u.volume = 1.0;
 
+  // Pick voice
   const voices = speechSynthesis.getVoices();
   const pref = voices.find(v =>
     v.name.includes("Samantha") || v.name.includes("Google US") ||
@@ -1196,15 +1211,66 @@ function speak(text) {
   );
   if (pref) u.voice = pref;
 
-  u.onend = () => { if (isInterviewActive) setTimeout(() => engine.resume(), 300); };
-  u.onerror = () => { if (isInterviewActive) engine.resume(); };
+  let hasResumed = false;
+
+  function resumeMic() {
+    if (hasResumed) return; // prevent double-resume
+    hasResumed = true;
+    clearTimeout(ttsWatchdog);
+    if (isInterviewActive) {
+      setTimeout(() => engine.resume(), 300);
+    }
+  }
+
+  // PRIMARY: TTS finished event
+  u.onend = resumeMic;
+
+  // SECONDARY: TTS error event
+  u.onerror = resumeMic;
+
+  // TERTIARY: Watchdog timer — if TTS takes too long or onend never fires
+  // Estimate speech duration: ~120ms per character is a safe upper bound
+  const estimatedMs = Math.max(text.length * 100, 3000);
+  ttsWatchdog = setTimeout(() => {
+    console.warn("TTS watchdog triggered — forcing mic resume");
+    speechSynthesis.cancel(); // force stop any stuck TTS
+    resumeMic();
+  }, estimatedMs);
+
+  // Chrome desktop bug: speechSynthesis pauses when tab loses focus
+  // This keeps it alive
+  if (!engine.isIOS) {
+    let keepAlive = setInterval(() => {
+      if (!speechSynthesis.speaking) {
+        clearInterval(keepAlive);
+        resumeMic(); // Backup: detect speaking stopped
+        return;
+      }
+      speechSynthesis.pause();
+      speechSynthesis.resume();
+    }, 5000);
+
+    // Clean up interval when done
+    u.onend = () => { clearInterval(keepAlive); resumeMic(); };
+    u.onerror = () => { clearInterval(keepAlive); resumeMic(); };
+  }
 
   speechSynthesis.speak(u);
-}
 
-if ('speechSynthesis' in window) {
-  speechSynthesis.getVoices();
-  speechSynthesis.onvoiceschanged = () => speechSynthesis.getVoices();
+  // QUATERNARY: Poll-based fallback check every 500ms
+  let pollCount = 0;
+  const maxPolls = Math.ceil(estimatedMs / 500) + 4;
+  const pollCheck = setInterval(() => {
+    pollCount++;
+    if (!speechSynthesis.speaking && pollCount > 2) {
+      clearInterval(pollCheck);
+      resumeMic();
+    }
+    if (pollCount >= maxPolls) {
+      clearInterval(pollCheck);
+      resumeMic();
+    }
+  }, 500);
 }
 
 // --- TIMER ---
