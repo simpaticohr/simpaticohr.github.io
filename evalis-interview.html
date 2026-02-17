@@ -1,1492 +1,1168 @@
-```html
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <meta name="mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <title>   simpatico hr | Elite AI Interviewer</title>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
-    <style>
-        :root {
-            --bg: #06060b;
-            --surface: #0d0d14;
-            --surface-elevated: #14141f;
-            --surface-hover: #1a1a28;
-            --primary: #6366f1;
-            --primary-light: #818cf8;
-            --primary-glow: rgba(99, 102, 241, 0.25);
-            --accent: #a855f7;
-            --accent-glow: rgba(168, 85, 247, 0.2);
-            --success: #10b981;
-            --success-light: #34d399;
-            --success-glow: rgba(16, 185, 129, 0.25);
-            --warning: #f59e0b;
-            --warning-glow: rgba(245, 158, 11, 0.25);
-            --danger: #ef4444;
-            --danger-glow: rgba(239, 68, 68, 0.2);
-            --text: #f1f5f9;
-            --text-secondary: #94a3b8;
-            --text-dim: #475569;
-            --border: rgba(255, 255, 255, 0.06);
-            --border-light: rgba(255, 255, 255, 0.1);
-            --radius: 16px;
-            --radius-sm: 10px;
-            --radius-lg: 24px;
-        }
-
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-
-        body {
-            background: var(--bg);
-            color: var(--text);
-            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-            min-height: 100vh;
-            min-height: 100dvh;
-            overflow: hidden;
-            position: relative;
-            display: flex;
-            flex-direction: column;
-        }
-
-        /* ── Ambient Background ── */
-        .bg-ambient {
-            position: fixed; inset: 0;
-            background:
-                radial-gradient(ellipse 80% 60% at 50% 20%, rgba(99,102,241,0.07) 0%, transparent 60%),
-                radial-gradient(ellipse 60% 50% at 80% 80%, rgba(168,85,247,0.05) 0%, transparent 60%),
-                radial-gradient(ellipse 50% 40% at 20% 70%, rgba(16,185,129,0.04) 0%, transparent 60%);
-            pointer-events: none; z-index: 0;
-        }
-
-        .noise-overlay {
-            position: fixed; inset: 0;
-            opacity: 0.015;
-            background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
-            pointer-events: none; z-index: 0;
-        }
-
-        /* ── Top Bar ── */
-        .top-bar {
-            position: fixed; top: 0; left: 0; right: 0;
-            height: 56px;
-            display: flex; align-items: center; justify-content: space-between;
-            padding: 0 20px;
-            background: rgba(6,6,11,0.85);
-            backdrop-filter: blur(20px);
-            border-bottom: 1px solid var(--border);
-            z-index: 100;
-        }
-
-        .top-bar .brand {
-            display: flex; align-items: center; gap: 10px;
-        }
-
-        .top-bar .brand-icon {
-            width: 32px; height: 32px;
-            background: linear-gradient(135deg, var(--primary), var(--accent));
-            border-radius: 8px;
-            display: flex; align-items: center; justify-content: center;
-            font-size: 16px; font-weight: 700; color: white;
-        }
-
-        .top-bar .brand-name {
-            font-weight: 700; font-size: 1.05rem;
-            background: linear-gradient(135deg, var(--text), var(--text-secondary));
-            -webkit-background-clip: text; -webkit-text-fill-color: transparent;
-        }
-
-        .top-bar .timer-display {
-            font-family: 'SF Mono', 'Fira Code', monospace;
-            font-size: 0.95rem; font-weight: 600;
-            color: var(--text-secondary);
-            padding: 6px 14px;
-            background: var(--surface-elevated);
-            border: 1px solid var(--border);
-            border-radius: 100px;
-            letter-spacing: 0.05em;
-            transition: all 0.3s;
-        }
-
-        .top-bar .timer-display.warning {
-            color: var(--warning);
-            border-color: rgba(245,158,11,0.3);
-            background: rgba(245,158,11,0.08);
-            animation: pulse-glow-warning 1.5s ease-in-out infinite;
-        }
-
-        .top-bar .timer-display.danger {
-            color: var(--danger);
-            border-color: rgba(239,68,68,0.3);
-            background: rgba(239,68,68,0.08);
-            animation: pulse-glow-danger 1s ease-in-out infinite;
-        }
-
-        /* ── Phase Progress Bar ── */
-        .phase-bar {
-            position: fixed; top: 56px; left: 0; right: 0;
-            height: 44px;
-            display: none; align-items: center; justify-content: center; gap: 6px;
-            padding: 0 16px;
-            background: rgba(6,6,11,0.8);
-            backdrop-filter: blur(16px);
-            border-bottom: 1px solid var(--border);
-            z-index: 99;
-        }
-
-        .phase-bar.active { display: flex; }
-
-        .phase-step {
-            display: flex; align-items: center; gap: 6px;
-            font-size: 0.72rem; font-weight: 600;
-            color: var(--text-dim);
-            text-transform: uppercase;
-            letter-spacing: 0.06em;
-            transition: color 0.3s;
-        }
-
-        .phase-step.current { color: var(--primary-light); }
-        .phase-step.done { color: var(--success); }
-
-        .phase-dot {
-            width: 6px; height: 6px;
-            border-radius: 50%;
-            background: var(--text-dim);
-            transition: all 0.3s;
-        }
-
-        .phase-step.current .phase-dot {
-            background: var(--primary);
-            box-shadow: 0 0 8px var(--primary-glow);
-            animation: pulse-dot 1.5s ease-in-out infinite;
-        }
-
-        .phase-step.done .phase-dot { background: var(--success); }
-
-        .phase-connector {
-            width: 20px; height: 1px;
-            background: var(--border-light);
-        }
-
-        .phase-step.done + .phase-connector { background: var(--success); }
-
-        /* ── Main Content Area ── */
-        .main-content {
-            flex: 1;
-            display: flex; flex-direction: column;
-            align-items: center; justify-content: center;
-            padding: 80px 20px 20px;
-            position: relative; z-index: 1;
-            overflow: hidden;
-        }
-
-        .main-content.with-phase { padding-top: 120px; }
-
-        /* ── Orb ── */
-        .orb-wrapper {
-            position: relative;
-            width: 260px; height: 260px;
-            display: flex; align-items: center; justify-content: center;
-            margin-bottom: 32px;
-            flex-shrink: 0;
-        }
-
-        .orb-ring {
-            position: absolute;
-            border-radius: 50%;
-            border: 1.5px solid rgba(99,102,241,0.08);
-            top: 50%; left: 50%;
-            transform: translate(-50%, -50%);
-            pointer-events: none;
-            transition: border-color 0.5s;
-        }
-
-        .orb-ring:nth-child(1) {
-            width: 200px; height: 200px;
-            animation: ring-float 8s ease-in-out infinite, ring-spin 25s linear infinite;
-        }
-        .orb-ring:nth-child(2) {
-            width: 260px; height: 260px;
-            animation: ring-float-alt 10s ease-in-out infinite, ring-spin-rev 30s linear infinite;
-            border-style: dashed;
-            border-color: rgba(168,85,247,0.06);
-        }
-
-        .orb-core {
-            width: 130px; height: 130px;
-            border-radius: 50%;
-            background: linear-gradient(135deg, var(--primary), var(--accent));
-            box-shadow:
-                0 0 60px var(--primary-glow),
-                0 0 100px rgba(99,102,241,0.15),
-                inset 0 0 30px rgba(255,255,255,0.08);
-            position: relative; z-index: 3;
-            cursor: pointer;
-            user-select: none;
-            -webkit-tap-highlight-color: transparent;
-            touch-action: manipulation;
-            transition: all 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
-            display: flex; align-items: center; justify-content: center;
-        }
-
-        .orb-core:active { transform: scale(0.93); }
-
-        .orb-icon {
-            font-size: 2rem;
-            opacity: 0.9;
-            transition: all 0.3s;
-            filter: drop-shadow(0 2px 8px rgba(0,0,0,0.3));
-        }
-
-        /* Orb States */
-        .orb-core.idle { animation: orb-breathe 4s ease-in-out infinite; }
-
-        .orb-core.listening {
-            background: linear-gradient(135deg, #059669, var(--success));
-            box-shadow:
-                0 0 60px var(--success-glow),
-                0 0 100px rgba(16,185,129,0.15),
-                inset 0 0 30px rgba(255,255,255,0.1);
-            animation: orb-pulse-listen 1.5s ease-in-out infinite;
-            transform: scale(1.08);
-        }
-
-        .orb-core.thinking {
-            background: linear-gradient(135deg, #d97706, var(--warning));
-            box-shadow:
-                0 0 60px var(--warning-glow),
-                0 0 100px rgba(245,158,11,0.15),
-                inset 0 0 30px rgba(255,255,255,0.1);
-            animation: orb-spin-think 2.5s linear infinite;
-            border-radius: 42%;
-        }
-
-        .orb-core.speaking {
-            animation: orb-breathe-speak 0.8s ease-in-out infinite;
-            transform: scale(1.04);
-        }
-
-        .listening .orb-ring { border-color: rgba(16,185,129,0.12); }
-        .thinking .orb-ring { border-color: rgba(245,158,11,0.1); }
-        .speaking .orb-ring { border-color: rgba(99,102,241,0.12); }
-
-        /* ── Status Area ── */
-        .status-area {
-            text-align: center;
-            margin-bottom: 24px;
-            flex-shrink: 0;
-        }
-
-        .status-badge {
-            display: inline-flex; align-items: center; gap: 8px;
-            padding: 8px 18px;
-            background: var(--surface-elevated);
-            border: 1px solid var(--border);
-            border-radius: 100px;
-            font-size: 0.85rem; font-weight: 500;
-            color: var(--text-secondary);
-            backdrop-filter: blur(10px);
-            transition: all 0.3s;
-        }
-
-        .status-dot {
-            width: 7px; height: 7px;
-            border-radius: 50%;
-            background: var(--text-dim);
-            transition: all 0.3s;
-        }
-
-        .status-badge.listening { border-color: rgba(16,185,129,0.2); }
-        .status-badge.listening .status-dot {
-            background: var(--success);
-            box-shadow: 0 0 6px var(--success-glow);
-            animation: dot-pulse 1s ease-in-out infinite;
-        }
-
-        .status-badge.thinking { border-color: rgba(245,158,11,0.2); }
-        .status-badge.thinking .status-dot {
-            background: var(--warning);
-            animation: dot-pulse 0.7s ease-in-out infinite;
-        }
-
-        .status-badge.speaking { border-color: rgba(99,102,241,0.2); }
-        .status-badge.speaking .status-dot {
-            background: var(--primary);
-            animation: dot-pulse 0.5s ease-in-out infinite;
-        }
-
-        .question-counter {
-            font-size: 0.75rem;
-            color: var(--text-dim);
-            margin-top: 8px;
-            font-weight: 500;
-        }
-
-        /* ── Transcript Panel ── */
-        .transcript-panel {
-            width: 100%; max-width: 600px;
-            flex: 1;
-            min-height: 0;
-            background: var(--surface);
-            border: 1px solid var(--border);
-            border-radius: var(--radius);
-            overflow: hidden;
-            display: none;
-            flex-direction: column;
-        }
-
-        .transcript-panel.active { display: flex; }
-
-        .transcript-header {
-            padding: 12px 16px;
-            border-bottom: 1px solid var(--border);
-            display: flex; align-items: center; justify-content: space-between;
-            flex-shrink: 0;
-        }
-
-        .transcript-header span {
-            font-size: 0.8rem; font-weight: 600;
-            color: var(--text-dim);
-            text-transform: uppercase;
-            letter-spacing: 0.06em;
-        }
-
-        .transcript-body {
-            flex: 1;
-            overflow-y: auto;
-            padding: 16px;
-            scroll-behavior: smooth;
-        }
-
-        .transcript-body::-webkit-scrollbar { width: 4px; }
-        .transcript-body::-webkit-scrollbar-track { background: transparent; }
-        .transcript-body::-webkit-scrollbar-thumb {
-            background: var(--border-light);
-            border-radius: 4px;
-        }
-
-        .msg {
-            margin-bottom: 16px;
-            animation: msg-appear 0.3s ease-out;
-        }
-
-        .msg-label {
-            font-size: 0.7rem; font-weight: 700;
-            text-transform: uppercase;
-            letter-spacing: 0.08em;
-            margin-bottom: 6px;
-        }
-
-        .msg-label.ai { color: var(--primary-light); }
-        .msg-label.user { color: var(--success-light); }
-
-        .msg-text {
-            font-size: 0.88rem;
-            line-height: 1.6;
-            color: var(--text-secondary);
-            padding: 12px 16px;
-            border-radius: var(--radius-sm);
-            background: var(--surface-elevated);
-            border: 1px solid var(--border);
-        }
-
-        .msg.ai .msg-text {
-            border-left: 3px solid var(--primary);
-        }
-
-        .msg.user .msg-text {
-            border-left: 3px solid var(--success);
-        }
-
-        /* ── Setup Panel ── */
-        .setup-panel {
-            width: 100%; max-width: 480px;
-            text-align: center;
-        }
-
-        .setup-title {
-            font-size: 2rem; font-weight: 800;
-            background: linear-gradient(135deg, var(--primary), var(--accent));
-            -webkit-background-clip: text; -webkit-text-fill-color: transparent;
-            margin-bottom: 6px;
-            letter-spacing: -0.02em;
-        }
-
-        .setup-subtitle {
-            color: var(--text-secondary);
-            font-size: 0.95rem; font-weight: 400;
-            margin-bottom: 36px;
-        }
-
-        .upload-zone {
-            border: 2px dashed var(--border-light);
-            padding: 44px 28px;
-            border-radius: var(--radius-lg);
-            cursor: pointer;
-            display: block;
-            color: var(--text-secondary);
-            transition: all 0.3s ease;
-            background: var(--surface);
-            margin-bottom: 16px;
-        }
-
-        .upload-zone:hover, .upload-zone.dragover {
-            border-color: var(--primary);
-            color: var(--text);
-            background: rgba(99,102,241,0.04);
-            transform: translateY(-2px);
-            box-shadow: 0 8px 32px rgba(99,102,241,0.1);
-        }
-
-        .upload-zone .uz-icon { font-size: 2.8rem; margin-bottom: 14px; display: block; }
-        .upload-zone .uz-title { font-weight: 700; font-size: 1.05rem; margin-bottom: 4px; }
-        .upload-zone .uz-sub { font-size: 0.82rem; color: var(--text-dim); }
-
-        .upload-zone.loaded {
-            border-color: var(--success);
-            border-style: solid;
-            background: rgba(16,185,129,0.04);
-        }
-
-        .upload-zone.loaded .uz-icon::after { content: ' ✓'; }
-
-        input[type="file"] { display: none; }
-
-        /* ── Buttons ── */
-        .btn {
-            display: inline-flex; align-items: center; justify-content: center; gap: 8px;
-            padding: 14px 28px;
-            border-radius: var(--radius-sm);
-            font-family: 'Inter', sans-serif;
-            font-weight: 600; font-size: 0.95rem;
-            cursor: pointer;
-            border: 1px solid var(--border);
-            background: var(--surface-elevated);
-            color: var(--text);
-            transition: all 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
-            width: 100%;
-        }
-
-        .btn:hover:not(:disabled) {
-            transform: translateY(-2px);
-            box-shadow: 0 8px 24px rgba(0,0,0,0.3);
-        }
-
-        .btn:active:not(:disabled) { transform: translateY(0); }
-
-        .btn:disabled {
-            opacity: 0.4; cursor: not-allowed;
-        }
-
-        .btn-primary {
-            background: linear-gradient(135deg, var(--primary), var(--accent));
-            border: none; color: white;
-            box-shadow: 0 4px 16px var(--primary-glow);
-        }
-
-        .btn-primary:hover:not(:disabled) {
-            box-shadow: 0 8px 32px var(--primary-glow);
-        }
-
-        .btn-end {
-            background: rgba(239,68,68,0.08);
-            border-color: rgba(239,68,68,0.2);
-            color: var(--danger);
-            width: auto;
-            padding: 8px 18px;
-            font-size: 0.82rem;
-        }
-
-        .btn-end:hover:not(:disabled) {
-            background: rgba(239,68,68,0.12);
-            box-shadow: 0 4px 16px var(--danger-glow);
-        }
-
-        /* ── Report Modal ── */
-        .modal-overlay {
-            position: fixed; inset: 0;
-            background: rgba(0,0,0,0.92);
-            backdrop-filter: blur(12px);
-            display: none; align-items: center; justify-content: center;
-            z-index: 1000; padding: 20px;
-        }
-
-        .modal-overlay.open { display: flex; }
-
-        .modal-card {
-            background: var(--surface);
-            border: 1px solid var(--border);
-            border-radius: var(--radius-lg);
-            max-width: 640px; width: 100%;
-            max-height: 85vh;
-            overflow: hidden;
-            box-shadow: 0 24px 64px rgba(0,0,0,0.5);
-            animation: modal-in 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
-            display: flex; flex-direction: column;
-        }
-
-        .modal-header {
-            padding: 28px 28px 0;
-            flex-shrink: 0;
-        }
-
-        .modal-header h2 {
-            font-size: 1.5rem; font-weight: 700;
-            background: linear-gradient(135deg, var(--primary), var(--accent));
-            -webkit-background-clip: text; -webkit-text-fill-color: transparent;
-            margin-bottom: 4px;
-        }
-
-        .modal-header p {
-            color: var(--text-dim); font-size: 0.85rem;
-        }
-
-        .modal-body {
-            flex: 1; overflow-y: auto;
-            padding: 20px 28px;
-        }
-
-        .report-content {
-            line-height: 1.75;
-            color: var(--text-secondary);
-            white-space: pre-wrap;
-            font-size: 0.9rem;
-            background: var(--bg);
-            padding: 20px;
-            border-radius: var(--radius-sm);
-            border: 1px solid var(--border);
-        }
-
-        .modal-footer {
-            padding: 16px 28px 28px;
-            flex-shrink: 0;
-        }
-
-        /* ── Animations ── */
-        @keyframes orb-breathe {
-            0%, 100% { transform: scale(1); }
-            50% { transform: scale(1.03); }
-        }
-
-        @keyframes orb-breathe-speak {
-            0%, 100% { transform: scale(1.04); }
-            50% { transform: scale(1.1); }
-        }
-
-        @keyframes orb-pulse-listen {
-            0%, 100% {
-                box-shadow: 0 0 60px var(--success-glow), 0 0 100px rgba(16,185,129,0.15), inset 0 0 30px rgba(255,255,255,0.1);
-            }
-            50% {
-                box-shadow: 0 0 80px var(--success-glow), 0 0 130px rgba(16,185,129,0.2), inset 0 0 40px rgba(255,255,255,0.15);
-            }
-        }
-
-        @keyframes orb-spin-think {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-
-        @keyframes ring-float {
-            0%, 100% { transform: translate(-50%, -50%) translateY(0); }
-            50% { transform: translate(-50%, -50%) translateY(-8px); }
-        }
-
-        @keyframes ring-float-alt {
-            0%, 100% { transform: translate(-50%, -50%) translateY(0); }
-            50% { transform: translate(-50%, -50%) translateY(8px); }
-        }
-
-        @keyframes ring-spin { 100% { transform: translate(-50%, -50%) rotate(360deg); } }
-        @keyframes ring-spin-rev { 100% { transform: translate(-50%, -50%) rotate(-360deg); } }
-
-        @keyframes dot-pulse {
-            0%, 100% { opacity: 1; transform: scale(1); }
-            50% { opacity: 0.6; transform: scale(1.3); }
-        }
-
-        @keyframes pulse-dot {
-            0%, 100% { box-shadow: 0 0 4px var(--primary-glow); }
-            50% { box-shadow: 0 0 12px var(--primary-glow); }
-        }
-
-        @keyframes pulse-glow-warning {
-            0%, 100% { box-shadow: 0 0 0 rgba(245,158,11,0); }
-            50% { box-shadow: 0 0 12px rgba(245,158,11,0.15); }
-        }
-
-        @keyframes pulse-glow-danger {
-            0%, 100% { box-shadow: 0 0 0 rgba(239,68,68,0); }
-            50% { box-shadow: 0 0 12px rgba(239,68,68,0.2); }
-        }
-
-        @keyframes msg-appear {
-            from { opacity: 0; transform: translateY(8px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
-
-        @keyframes modal-in {
-            from { opacity: 0; transform: scale(0.92) translateY(16px); }
-            to { opacity: 1; transform: scale(1) translateY(0); }
-        }
-
-        /* ── Responsive ── */
-        @media (max-width: 640px) {
-            .orb-wrapper { width: 220px; height: 220px; margin-bottom: 24px; }
-            .orb-core { width: 110px; height: 110px; }
-            .orb-ring:nth-child(1) { width: 170px; height: 170px; }
-            .orb-ring:nth-child(2) { width: 220px; height: 220px; }
-            .setup-title { font-size: 1.6rem; }
-            .modal-header, .modal-body, .modal-footer { padding-left: 20px; padding-right: 20px; }
-            .phase-step { font-size: 0.65rem; }
-            .phase-connector { width: 12px; }
-        }
-
-        @supports (padding: max(0px)) {
-            .top-bar { padding-top: env(safe-area-inset-top); height: calc(56px + env(safe-area-inset-top)); }
-        }
-
-        /* ── Scrollbar ── */
-        ::-webkit-scrollbar { width: 5px; }
-        ::-webkit-scrollbar-track { background: transparent; }
-        ::-webkit-scrollbar-thumb { background: var(--border-light); border-radius: 4px; }
-    </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Evalis AI Interview</title>
+<style>
+  :root {
+    --primary: #6C5CE7;
+    --bg: #0a0a0f;
+    --card: #12121a;
+    --text: #e0e0e0;
+    --accent: #00cec9;
+    --danger: #ff4757;
+    --success: #00b894;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100dvh;
+    overflow-x: hidden;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  .container {
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 16px;
+    padding-bottom: env(safe-area-inset-bottom, 16px);
+  }
+
+  /* --- AUTH SCREEN --- */
+  .auth-screen {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 100dvh;
+    gap: 20px;
+    text-align: center;
+  }
+
+  .auth-screen h1 {
+    font-size: 2rem;
+    background: linear-gradient(135deg, var(--primary), var(--accent));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+
+  .auth-input {
+    width: 100%;
+    max-width: 320px;
+    padding: 14px 18px;
+    border-radius: 12px;
+    border: 2px solid #2a2a3a;
+    background: var(--card);
+    color: var(--text);
+    font-size: 16px; /* prevents iOS zoom */
+    text-align: center;
+    letter-spacing: 2px;
+    outline: none;
+    transition: border-color 0.3s;
+  }
+
+  .auth-input:focus { border-color: var(--primary); }
+
+  /* --- INTERVIEW SCREEN --- */
+  .interview-screen { display: none; }
+  .interview-screen.active { display: block; }
+
+  .header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 0;
+    border-bottom: 1px solid #1a1a2a;
+    margin-bottom: 16px;
+  }
+
+  .timer {
+    font-variant-numeric: tabular-nums;
+    font-size: 1.1rem;
+    color: var(--accent);
+  }
+
+  /* --- CHAT --- */
+  .chat-container {
+    height: calc(100dvh - 280px);
+    overflow-y: auto;
+    scroll-behavior: smooth;
+    -webkit-overflow-scrolling: touch;
+    padding: 8px 0;
+  }
+
+  .message {
+    margin-bottom: 16px;
+    padding: 14px 18px;
+    border-radius: 16px;
+    max-width: 88%;
+    line-height: 1.55;
+    font-size: 0.95rem;
+    animation: fadeSlide 0.3s ease;
+  }
+
+  @keyframes fadeSlide {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .message.ai {
+    background: linear-gradient(135deg, #1a1a2e, #16213e);
+    border: 1px solid #2a2a4a;
+    border-bottom-left-radius: 4px;
+    margin-right: auto;
+  }
+
+  .message.user {
+    background: linear-gradient(135deg, #2d1b69, #1b3a4b);
+    border: 1px solid #3a3a5a;
+    border-bottom-right-radius: 4px;
+    margin-left: auto;
+  }
+
+  .message.score {
+    max-width: 100%;
+    background: linear-gradient(135deg, #0a2a1a, #1a2a0a);
+    border: 1px solid #2a4a3a;
+    white-space: pre-wrap;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    font-size: 0.85rem;
+  }
+
+  /* --- VOICE CONTROL AREA --- */
+  .controls {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: linear-gradient(transparent, var(--bg) 20%);
+    padding: 20px 16px;
+    padding-bottom: calc(env(safe-area-inset-bottom, 16px) + 16px);
+  }
+
+  .controls-inner {
+    max-width: 720px;
+    margin: 0 auto;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    align-items: center;
+  }
+
+  /* Live transcript preview */
+  .live-transcript {
+    width: 100%;
+    min-height: 40px;
+    padding: 10px 16px;
+    background: rgba(255,255,255,0.03);
+    border: 1px solid #2a2a3a;
+    border-radius: 12px;
+    font-size: 0.9rem;
+    color: #888;
+    font-style: italic;
+    text-align: center;
+    transition: all 0.3s;
+  }
+
+  .live-transcript.has-text {
+    color: var(--text);
+    font-style: normal;
+    border-color: var(--primary);
+    background: rgba(108, 92, 231, 0.05);
+  }
+
+  .btn-row {
+    display: flex;
+    gap: 12px;
+    width: 100%;
+    justify-content: center;
+  }
+
+  .btn {
+    padding: 14px 24px;
+    border-radius: 14px;
+    border: none;
+    font-size: 0.95rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    -webkit-tap-highlight-color: transparent;
+    user-select: none;
+  }
+
+  .btn:active { transform: scale(0.96); }
+
+  .btn-primary {
+    background: linear-gradient(135deg, var(--primary), #5a4bd1);
+    color: white;
+    flex: 1;
+    justify-content: center;
+  }
+
+  .btn-send {
+    background: linear-gradient(135deg, var(--accent), #00b3a8);
+    color: #000;
+    padding: 14px 20px;
+  }
+
+  .btn-danger {
+    background: linear-gradient(135deg, var(--danger), #e04040);
+    color: white;
+    padding: 14px 20px;
+  }
+
+  .btn-score {
+    background: linear-gradient(135deg, var(--success), #00a884);
+    color: #000;
+    flex: 1;
+    justify-content: center;
+  }
+
+  .btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+    transform: none;
+  }
+
+  /* --- MIC VISUALIZER --- */
+  .mic-status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.85rem;
+    color: #666;
+  }
+
+  .mic-status.listening {
+    color: var(--success);
+  }
+
+  .mic-status.listening .pulse-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--success);
+    animation: pulse 1.5s infinite;
+  }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.4; transform: scale(1.5); }
+  }
+
+  .visualizer-bar {
+    display: flex;
+    gap: 2px;
+    align-items: center;
+    height: 20px;
+  }
+
+  .visualizer-bar .bar {
+    width: 3px;
+    background: var(--accent);
+    border-radius: 2px;
+    transition: height 0.1s;
+    height: 4px;
+  }
+
+  /* --- FALLBACK TEXT INPUT --- */
+  .fallback-input-row {
+    display: none;
+    width: 100%;
+    gap: 8px;
+  }
+
+  .fallback-input-row.active {
+    display: flex;
+  }
+
+  .fallback-input {
+    flex: 1;
+    padding: 14px 16px;
+    border-radius: 12px;
+    border: 2px solid #2a2a3a;
+    background: var(--card);
+    color: var(--text);
+    font-size: 16px;
+    outline: none;
+  }
+
+  .fallback-input:focus { border-color: var(--primary); }
+
+  /* --- UPLOAD AREA --- */
+  .upload-area {
+    width: 100%;
+    max-width: 400px;
+    padding: 30px;
+    border: 2px dashed #3a3a5a;
+    border-radius: 16px;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.3s;
+  }
+
+  .upload-area:hover, .upload-area.dragover {
+    border-color: var(--primary);
+    background: rgba(108, 92, 231, 0.05);
+  }
+
+  .upload-area.loaded {
+    border-color: var(--success);
+    border-style: solid;
+  }
+
+  /* --- TOAST --- */
+  .toast {
+    position: fixed;
+    top: 20px;
+    left: 50%;
+    transform: translateX(-50%) translateY(-100px);
+    background: var(--card);
+    border: 1px solid #3a3a5a;
+    padding: 12px 24px;
+    border-radius: 12px;
+    font-size: 0.9rem;
+    z-index: 1000;
+    transition: transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    pointer-events: none;
+  }
+
+  .toast.show { transform: translateX(-50%) translateY(0); }
+
+  /* --- RESPONSIVE --- */
+  @media (max-width: 480px) {
+    .chat-container { height: calc(100dvh - 320px); }
+    .message { max-width: 94%; font-size: 0.9rem; }
+    .btn { padding: 12px 16px; font-size: 0.9rem; }
+  }
+</style>
 </head>
 <body>
 
-<div class="bg-ambient"></div>
-<div class="noise-overlay"></div>
+<!-- TOAST -->
+<div class="toast" id="toast"></div>
 
-<!-- Top Bar -->
-<div class="top-bar">
-    <div class="brand">
-        <div class="brand-icon">E</div>
-        <span class="brand-name">Evalis AI</span>
-    </div>
-    <div id="timerDisplay" class="timer-display" style="display:none;">15:00</div>
-    <button id="endBtn" class="btn-end" style="display:none;" title="End Interview">✕ End</button>
+<!-- AUTH SCREEN -->
+<div class="auth-screen" id="authScreen">
+  <h1>⚡ Evalis AI</h1>
+  <p style="color:#888; max-width:300px;">Enterprise-grade AI Interview Platform</p>
+
+  <input type="text" class="auth-input" id="accessCode"
+         placeholder="Enter Access Code"
+         autocomplete="off" autocorrect="off" spellcheck="false">
+
+  <div class="upload-area" id="uploadArea" onclick="document.getElementById('cvFile').click()">
+    <input type="file" id="cvFile" accept=".pdf,.txt,.doc,.docx" hidden>
+    <p style="font-size:1.5rem;">📄</p>
+    <p style="margin-top:8px;">Upload Resume (PDF/TXT)</p>
+    <p style="font-size:0.8rem; color:#666; margin-top:4px;" id="fileName">No file selected</p>
+  </div>
+
+  <button class="btn btn-primary" style="max-width:320px; width:100%;" onclick="startInterview()">
+    🎙️ Start Interview
+  </button>
 </div>
 
-<!-- Phase Progress -->
-<div id="phaseBar" class="phase-bar">
-    <div class="phase-step" data-phase="intro"><span class="phase-dot"></span> Intro</div>
-    <div class="phase-connector"></div>
-    <div class="phase-step" data-phase="technical"><span class="phase-dot"></span> Technical</div>
-    <div class="phase-connector"></div>
-    <div class="phase-step" data-phase="behavioral"><span class="phase-dot"></span> Behavioral</div>
-    <div class="phase-connector"></div>
-    <div class="phase-step" data-phase="design"><span class="phase-dot"></span> Design</div>
-    <div class="phase-connector"></div>
-    <div class="phase-step" data-phase="wrapup"><span class="phase-dot"></span> Wrap-up</div>
-</div>
-
-<!-- Main Content -->
-<div id="mainContent" class="main-content">
-
-    <!-- Orb -->
-    <div class="orb-wrapper" id="orbWrapper">
-        <div class="orb-ring"></div>
-        <div class="orb-ring"></div>
-        <div class="orb-core idle" id="orbCore">
-            <span class="orb-icon" id="orbIcon">🎙️</span>
-        </div>
+<!-- INTERVIEW SCREEN -->
+<div class="interview-screen" id="interviewScreen">
+  <div class="container">
+    <div class="header">
+      <span style="font-weight:700; font-size:1.1rem;">⚡ Evalis</span>
+      <span class="timer" id="timer">00:00</span>
+      <div class="mic-status" id="micStatus">
+        <div class="pulse-dot"></div>
+        <span id="micLabel">Initializing...</span>
+      </div>
     </div>
 
-    <!-- Status -->
-    <div class="status-area">
-        <div id="statusBadge" class="status-badge">
-            <span class="status-dot"></span>
-            <span id="statusText">Upload your resume to begin</span>
-        </div>
-        <div id="questionCounter" class="question-counter" style="display:none;"></div>
-    </div>
+    <div class="chat-container" id="chatContainer"></div>
+  </div>
 
-    <!-- Setup Panel -->
-    <div id="setupPanel" class="setup-panel">
-        <h1 class="setup-title">Elite AI Interview</h1>
-        <p class="setup-subtitle">Powered by advanced conversational AI</p>
+  <!-- CONTROLS -->
+  <div class="controls">
+    <div class="controls-inner">
+      <!-- Live transcript preview -->
+      <div class="live-transcript" id="liveTranscript">Listening...</div>
 
-        <label class="upload-zone" id="uploadZone">
-            <span class="uz-icon">📄</span>
-            <div class="uz-title">Upload Your Resume</div>
-            <div class="uz-sub">PDF format • Drag & drop supported</div>
-            <input type="file" id="cvInput" accept=".pdf">
-        </label>
+      <!-- Audio Visualizer -->
+      <div class="visualizer-bar" id="visualizer">
+        <!-- Bars injected by JS -->
+      </div>
 
-        <button id="startBtn" class="btn btn-primary" disabled>
-            🚀 Begin Interview Session
+      <!-- Voice buttons -->
+      <div class="btn-row" id="voiceBtnRow">
+        <button class="btn btn-primary" id="btnListen" onclick="toggleListening()">
+          🎙️ Listening...
         </button>
-    </div>
+        <button class="btn btn-send" id="btnSend" onclick="sendCurrent()" disabled>
+          Send ➤
+        </button>
+        <button class="btn btn-danger" id="btnEnd" onclick="endInterview()">
+          ⏹️
+        </button>
+      </div>
 
-    <!-- Transcript Panel (shown during interview) -->
-    <div id="transcriptPanel" class="transcript-panel">
-        <div class="transcript-header">
-            <span>💬 Live Transcript</span>
-            <span id="transcriptCount">0 exchanges</span>
-        </div>
-        <div class="transcript-body" id="transcriptBody"></div>
-    </div>
-</div>
+      <!-- Fallback text input for unsupported browsers -->
+      <div class="fallback-input-row" id="fallbackRow">
+        <input type="text" class="fallback-input" id="fallbackInput"
+               placeholder="Type your answer..." enterkeyhint="send">
+        <button class="btn btn-send" onclick="sendFallback()">➤</button>
+        <button class="btn btn-danger" onclick="endInterview()">⏹️</button>
+      </div>
 
-<!-- Report Modal -->
-<div id="reportModal" class="modal-overlay">
-    <div class="modal-card">
-        <div class="modal-header">
-            <h2>📊 Performance Evaluation</h2>
-            <p>AI-generated assessment of your interview</p>
-        </div>
-        <div class="modal-body">
-            <div class="report-content" id="reportContent">Generating report...</div>
-        </div>
-        <div class="modal-footer">
-            <button class="btn btn-primary" onclick="location.reload()">
-                🔄 Start New Session
-            </button>
-        </div>
+      <!-- Score button (shown after end) -->
+      <div class="btn-row" id="scoreBtnRow" style="display:none;">
+        <button class="btn btn-score" onclick="getScore()">📊 Get Interview Score</button>
+      </div>
     </div>
+  </div>
 </div>
 
 <script>
-// ═══════════════════════════════════════════════════════════════
-// EVALIS AI — Elite Interview Engine
-// ═══════════════════════════════════════════════════════════════
+// ============================================
+// CONFIG
+// ============================================
+const WORKER_URL = "https://your-worker.your-subdomain.workers.dev"; // ← UPDATE THIS
 
-const API_URL = "https://evalis-ai.simpaticohrconsultancy.workers.dev";
-pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
-
-// ── Platform Detection ──
-const isAndroid = typeof Android !== "undefined";
-const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-
-// ── State ──
-const state = {
-    cvText: "",
-    history: [],
-    timeLeft: 900,
-    isInterviewing: false,
-    isSpeaking: false,
-    isListening: false,
-    questionCount: 0,
-    currentPhase: "intro",
-    phases: ["intro", "technical", "behavioral", "design", "wrapup"]
-};
-
+// ============================================
+// STATE
+// ============================================
+let accessCode = "";
+let cvText = "";
+let history = [];
 let timerInterval = null;
-let wakeLock = null;
-let wakeLockHeartbeat = null;
-let stateSaveInterval = null;
-let recognition = null;
-let fatalMicError = false;
-let lastRecognitionStart = 0;
-const MIN_RESTART_INTERVAL = 2500;
-let recognitionRestartTimeout = null;
+let seconds = 0;
+let isInterviewActive = false;
 
-// ── DOM ──
-const $ = id => document.getElementById(id);
-const orbCore = $('orbCore');
-const orbIcon = $('orbIcon');
-const statusBadge = $('statusBadge');
-const statusText = $('statusText');
-const timerDisplay = $('timerDisplay');
-const phaseBar = $('phaseBar');
-const transcriptPanel = $('transcriptPanel');
-const transcriptBody = $('transcriptBody');
-const transcriptCount = $('transcriptCount');
-const questionCounter = $('questionCounter');
-const mainContent = $('mainContent');
-const uploadZone = $('uploadZone');
+// ============================================
+// CONTINUOUS LISTENING ENGINE
+// ============================================
+class ContinuousListeningEngine {
+  constructor() {
+    this.recognition = null;
+    this.isListening = false;
+    this.isPaused = false;
+    this.isSupported = false;
+    this.finalTranscript = "";
+    this.interimTranscript = "";
+    this.restartAttempts = 0;
+    this.maxRestartAttempts = 50; // very resilient
+    this.restartDelay = 100;
+    this.silenceTimer = null;
+    this.silenceThreshold = 1500; // ms of silence before allowing send
+    this.lastSpeechTime = 0;
+    this.audioContext = null;
+    this.analyser = null;
+    this.mediaStream = null;
+    this.isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+    this.isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
+    this.isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
+    this.wakeLock = null;
 
-// ═══════════════════════════════════════════════════════════════
-// VISUAL STATE MANAGEMENT
-// ═══════════════════════════════════════════════════════════════
+    // Callbacks
+    this.onInterim = null;
+    this.onFinal = null;
+    this.onStateChange = null;
+    this.onVolumeChange = null;
 
-function setOrbState(mode, message) {
-    orbCore.className = 'orb-core ' + mode;
-    statusBadge.className = 'status-badge ' + mode;
+    this._init();
+  }
 
-    const icons = { idle: '🎙️', listening: '👂', thinking: '🧠', speaking: '🔊' };
-    const defaults = {
-        idle: 'Ready',
-        listening: 'Listening to your response…',
-        thinking: 'Analyzing your answer…',
-        speaking: 'AI is responding…'
-    };
-
-    orbIcon.textContent = icons[mode] || '🎙️';
-    statusText.textContent = message || defaults[mode] || 'Active';
-
-    state.isListening = mode === 'listening';
-    state.isSpeaking = mode === 'speaking';
-}
-
-// ═══════════════════════════════════════════════════════════════
-// PHASE MANAGEMENT
-// ═══════════════════════════════════════════════════════════════
-
-function updatePhase() {
-    const q = state.questionCount;
-    let phase;
-    if (q <= 2) phase = "intro";
-    else if (q <= 5) phase = "technical";
-    else if (q <= 8) phase = "behavioral";
-    else if (q <= 10) phase = "design";
-    else phase = "wrapup";
-
-    state.currentPhase = phase;
-
-    document.querySelectorAll('.phase-step').forEach(el => {
-        const p = el.dataset.phase;
-        const idx = state.phases.indexOf(p);
-        const currentIdx = state.phases.indexOf(phase);
-
-        el.classList.remove('current', 'done');
-        if (idx < currentIdx) el.classList.add('done');
-        else if (idx === currentIdx) el.classList.add('current');
-    });
-
-    questionCounter.textContent = `Question ${q} • ${phase.charAt(0).toUpperCase() + phase.slice(1)} Phase`;
-}
-
-// ═══════════════════════════════════════════════════════════════
-// TRANSCRIPT
-// ═══════════════════════════════════════════════════════════════
-
-function addTranscriptMessage(role, text) {
-    const div = document.createElement('div');
-    div.className = `msg ${role}`;
-    div.innerHTML = `
-        <div class="msg-label ${role}">${role === 'ai' ? '🤖 Interviewer' : '👤 You'}</div>
-        <div class="msg-text">${escapeHtml(text)}</div>
-    `;
-    transcriptBody.appendChild(div);
-    transcriptBody.scrollTop = transcriptBody.scrollHeight;
-
-    const exchanges = Math.floor(transcriptBody.children.length / 2);
-    transcriptCount.textContent = `${exchanges} exchange${exchanges !== 1 ? 's' : ''}`;
-}
-
-function escapeHtml(str) {
-    const d = document.createElement('div');
-    d.textContent = str;
-    return d.innerHTML;
-}
-
-// ═══════════════════════════════════════════════════════════════
-// SPEECH RECOGNITION
-// ═══════════════════════════════════════════════════════════════
-
-function initRecognition() {
+  _init() {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SpeechRecognition) {
-        console.warn('Speech Recognition not available');
-        return;
+      console.warn("Speech Recognition not supported");
+      this.isSupported = false;
+      return;
     }
+    this.isSupported = true;
+    this._createRecognition();
+  }
 
-    recognition = new SpeechRecognition();
-    recognition.lang = 'en-US';
-    recognition.interimResults = false;
-    recognition.continuous = false;
+  _createRecognition() {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    const recognition = new SpeechRecognition();
+
+    recognition.continuous = !this.isIOS; // iOS doesn't support continuous well
+    recognition.interimResults = true;
     recognition.maxAlternatives = 1;
+    recognition.lang = "en-US";
 
-    recognition.onresult = (e) => {
-        const transcript = e.results[e.results.length - 1][0].transcript.trim();
-        if (!transcript || transcript.length < 2) return;
-
-        console.log('🗣️ User said:', transcript);
-        state.isListening = false;
-        addTranscriptMessage('user', transcript);
-        processUserResponse(transcript);
+    recognition.onstart = () => {
+      this.isListening = true;
+      this.restartAttempts = 0;
+      this.restartDelay = 100;
+      this._updateState("listening");
     };
 
-    recognition.onerror = (e) => {
-        console.log('❌ Recognition error:', e.error);
+    recognition.onresult = (event) => {
+      this.interimTranscript = "";
+      let newFinals = "";
 
-        if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
-            fatalMicError = true;
-            state.isListening = false;
-            setOrbState('idle', 'Mic blocked — tap orb to retry');
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const transcript = event.results[i][0].transcript;
+        if (event.results[i].isFinal) {
+          newFinals += transcript + " ";
+        } else {
+          this.interimTranscript += transcript;
         }
-        // 'no-speech' and 'aborted' are handled by onend
+      }
+
+      if (newFinals) {
+        this.finalTranscript += newFinals;
+        this.lastSpeechTime = Date.now();
+        this._resetSilenceTimer();
+      }
+
+      // Callbacks
+      const display = this.finalTranscript + this.interimTranscript;
+      if (this.interimTranscript && this.onInterim) {
+        this.onInterim(display, false);
+      }
+      if (newFinals && this.onFinal) {
+        this.onFinal(display, true);
+      }
+    };
+
+    recognition.onerror = (event) => {
+      console.warn("Recognition error:", event.error);
+
+      // These errors are recoverable
+      const recoverable = ["no-speech", "audio-capture", "network", "aborted"];
+
+      if (recoverable.includes(event.error) && !this.isPaused && isInterviewActive) {
+        this._scheduleRestart();
+      } else if (event.error === "not-allowed") {
+        this._updateState("denied");
+        showToast("🎙️ Microphone access denied. Please allow mic access.");
+      }
     };
 
     recognition.onend = () => {
-        console.log('⏹️ Recognition ended');
+      this.isListening = false;
 
-        if (state.isInterviewing && !state.isSpeaking && state.isListening && !fatalMicError) {
-            console.log('🔄 Recycling mic…');
-            setTimeout(() => {
-                if (state.isInterviewing && !state.isSpeaking) {
-                    startListening();
-                }
-            }, 400);
-        }
-    };
-}
-
-function startListening() {
-    if (!state.isInterviewing) return;
-    if (state.isListening && !state.isSpeaking) return;
-
-    const now = Date.now();
-    if (now - lastRecognitionStart < MIN_RESTART_INTERVAL) {
-        clearTimeout(recognitionRestartTimeout);
-        recognitionRestartTimeout = setTimeout(startListening, MIN_RESTART_INTERVAL - (now - lastRecognitionStart));
-        return;
-    }
-
-    if (state.isSpeaking) stopSpeaking();
-
-    fatalMicError = false;
-    setOrbState('listening');
-
-    if (isAndroid) {
-        Android.startInterview();
-        lastRecognitionStart = now;
-    } else if (recognition) {
-        try {
-            recognition.start();
-            lastRecognitionStart = now;
-            console.log('🎤 Mic active');
-        } catch (e) {
-            console.log('⚠️ Mic already active:', e.message);
-        }
-    }
-}
-
-// ═══════════════════════════════════════════════════════════════
-// TEXT-TO-SPEECH
-// ═══════════════════════════════════════════════════════════════
-
-function speak(text) {
-    // Stop recognition before speaking
-    if (!isAndroid && recognition) {
-        try { recognition.stop(); } catch (e) {}
-    }
-    clearTimeout(recognitionRestartTimeout);
-
-    setOrbState('speaking');
-    addTranscriptMessage('ai', text);
-
-    if (isAndroid) {
-        Android.speak(text);
-        return;
-    }
-
-    const utterance = new SpeechSynthesisUtterance(text);
-    const voices = window.speechSynthesis.getVoices();
-
-    const preferred = voices.find(v =>
-        v.name.includes('Google US English') ||
-        v.name.includes('Samantha') ||
-        v.name.includes('Natural') ||
-        (v.lang === 'en-US' && !v.localService)
-    ) || voices.find(v => v.lang.startsWith('en'));
-
-    if (preferred) utterance.voice = preferred;
-    utterance.rate = 1.0;
-    utterance.pitch = 1.0;
-
-    // Chrome bug workaround: keep synthesis alive
-    const keepAlive = setInterval(() => {
-        if (state.isSpeaking) window.speechSynthesis.resume();
-        else clearInterval(keepAlive);
-    }, 8000);
-
-    // Safety timeout
-    const wordCount = text.split(/\s+/).length;
-    const estimatedMs = Math.max(5000, (wordCount / 150) * 60000 + 4000);
-    const safety = setTimeout(() => {
-        if (state.isSpeaking) {
-            console.warn('⚠️ TTS onend never fired — forcing recovery');
-            clearInterval(keepAlive);
-            onFinishedSpeaking();
-        }
-    }, estimatedMs);
-
-    utterance.onend = () => {
-        clearInterval(keepAlive);
-        clearTimeout(safety);
-        onFinishedSpeaking();
+      // Auto-restart if we should still be listening
+      if (!this.isPaused && isInterviewActive) {
+        this._scheduleRestart();
+      } else {
+        this._updateState("stopped");
+      }
     };
 
-    utterance.onerror = (e) => {
-        console.error('TTS error:', e);
-        clearInterval(keepAlive);
-        clearTimeout(safety);
-        onFinishedSpeaking();
-    };
+    this.recognition = recognition;
+  }
 
-    window.speechSynthesis.cancel();
-    window.speechSynthesis.speak(utterance);
-}
-
-function stopSpeaking() {
-    if (!state.isSpeaking) return;
-    console.log('🛑 Stopping AI speech');
-    state.isSpeaking = false;
-
-    if (isAndroid) {
-        if (typeof Android.stopSpeaking === 'function') Android.stopSpeaking();
-    } else {
-        window.speechSynthesis.cancel();
+  _scheduleRestart() {
+    if (this.restartAttempts >= this.maxRestartAttempts) {
+      this._updateState("error");
+      showToast("⚠️ Mic connection lost. Tap the mic button to retry.");
+      return;
     }
-}
 
-function onFinishedSpeaking() {
-    console.log('✅ AI finished speaking');
-    state.isSpeaking = false;
+    this.restartAttempts++;
 
-    if (state.isInterviewing) {
-        setTimeout(startListening, 600);
-    } else {
-        setOrbState('idle', 'Session ended');
+    // Exponential backoff capped at 2s
+    const delay = Math.min(this.restartDelay * Math.pow(1.3, this.restartAttempts - 1), 2000);
+
+    setTimeout(() => {
+      if (!this.isPaused && isInterviewActive) {
+        this._safeStart();
+      }
+    }, delay);
+  }
+
+  _safeStart() {
+    try {
+      // Recreate recognition instance to avoid stale state (important on mobile)
+      this._createRecognition();
+      this.recognition.start();
+    } catch (e) {
+      console.warn("Start failed, retrying:", e.message);
+      setTimeout(() => this._safeStart(), 500);
     }
+  }
+
+  _resetSilenceTimer() {
+    clearTimeout(this.silenceTimer);
+    this.silenceTimer = setTimeout(() => {
+      // User has been silent — auto-enable send button
+      if (this.finalTranscript.trim().length > 0) {
+        this._updateState("ready-to-send");
+      }
+    }, this.silenceThreshold);
+  }
+
+  _updateState(state) {
+    if (this.onStateChange) this.onStateChange(state);
+  }
+
+  // --- PUBLIC API ---
+
+  async start() {
+    if (!this.isSupported) return false;
+
+    this.isPaused = false;
+    this.finalTranscript = "";
+    this.interimTranscript = "";
+    this.restartAttempts = 0;
+
+    // Request mic permission proactively & get audio stream for visualizer
+    try {
+      this.mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      this._initVisualizer(this.mediaStream);
+    } catch (e) {
+      console.warn("Could not get media stream:", e);
+      // Still try recognition — it may work without getUserMedia on some browsers
+    }
+
+    // Acquire wake lock to prevent screen sleep on mobile
+    await this._acquireWakeLock();
+
+    this._safeStart();
+    return true;
+  }
+
+  pause() {
+    this.isPaused = true;
+    clearTimeout(this.silenceTimer);
+    try { this.recognition.stop(); } catch(e) {}
+    this._updateState("paused");
+  }
+
+  resume() {
+    if (!this.isSupported) return;
+    this.isPaused = false;
+    this.finalTranscript = "";
+    this.interimTranscript = "";
+    this._safeStart();
+  }
+
+  stop() {
+    this.isPaused = true;
+    clearTimeout(this.silenceTimer);
+    try { this.recognition.stop(); } catch(e) {}
+    this._destroyVisualizer();
+    this._releaseWakeLock();
+    this._updateState("stopped");
+  }
+
+  getCurrentTranscript() {
+    return (this.finalTranscript + this.interimTranscript).trim();
+  }
+
+  clearTranscript() {
+    this.finalTranscript = "";
+    this.interimTranscript = "";
+  }
+
+  // --- AUDIO VISUALIZER ---
+
+  _initVisualizer(stream) {
+    try {
+      this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      this.analyser = this.audioContext.createAnalyser();
+      this.analyser.fftSize = 64;
+      const source = this.audioContext.createMediaStreamSource(stream);
+      source.connect(this.analyser);
+      this._drawVisualizer();
+    } catch(e) {
+      console.warn("Visualizer init failed:", e);
+    }
+  }
+
+  _drawVisualizer() {
+    if (!this.analyser || this.isPaused) return;
+
+    const bufferLength = this.analyser.frequencyBinCount;
+    const dataArray = new Uint8Array(bufferLength);
+    this.analyser.getByteFrequencyData(dataArray);
+
+    // Send volume data to UI
+    if (this.onVolumeChange) {
+      this.onVolumeChange(dataArray);
+    }
+
+    requestAnimationFrame(() => this._drawVisualizer());
+  }
+
+  _destroyVisualizer() {
+    if (this.audioContext) {
+      this.audioContext.close().catch(() => {});
+      this.audioContext = null;
+      this.analyser = null;
+    }
+    if (this.mediaStream) {
+      this.mediaStream.getTracks().forEach(t => t.stop());
+      this.mediaStream = null;
+    }
+  }
+
+  // --- WAKE LOCK (prevent screen sleep during interview) ---
+
+  async _acquireWakeLock() {
+    if ('wakeLock' in navigator) {
+      try {
+        this.wakeLock = await navigator.wakeLock.request('screen');
+        this.wakeLock.addEventListener('release', () => {
+          // Re-acquire if page becomes visible again
+          if (!this.isPaused && isInterviewActive) {
+            this._acquireWakeLock();
+          }
+        });
+      } catch(e) {
+        console.warn("Wake lock failed:", e);
+      }
+    }
+  }
+
+  _releaseWakeLock() {
+    if (this.wakeLock) {
+      this.wakeLock.release().catch(() => {});
+      this.wakeLock = null;
+    }
+  }
 }
 
-// Android callbacks
-window.onRecognitionResult = function(text) {
-    if (!text || text.trim().length < 2) return;
-    state.isListening = false;
-    addTranscriptMessage('user', text.trim());
-    processUserResponse(text.trim());
+// ============================================
+// GLOBAL ENGINE INSTANCE
+// ============================================
+const listeningEngine = new ContinuousListeningEngine();
+
+// Wire up callbacks
+listeningEngine.onInterim = (text, isFinal) => {
+  updateLiveTranscript(text, false);
 };
 
-window.onFinishedSpeaking = onFinishedSpeaking;
+listeningEngine.onFinal = (text, isFinal) => {
+  updateLiveTranscript(text, true);
+  document.getElementById("btnSend").disabled = false;
+};
 
-// ═══════════════════════════════════════════════════════════════
-// INTERVIEW LOGIC
-// ═══════════════════════════════════════════════════════════════
+listeningEngine.onStateChange = (state) => {
+  const micStatus = document.getElementById("micStatus");
+  const micLabel = document.getElementById("micLabel");
+  const btnListen = document.getElementById("btnListen");
 
-async function processUserResponse(userText) {
-    setOrbState('thinking');
-    state.questionCount++;
-    updatePhase();
+  switch(state) {
+    case "listening":
+      micStatus.className = "mic-status listening";
+      micLabel.textContent = "Listening";
+      btnListen.innerHTML = "🎙️ Listening...";
+      btnListen.disabled = false;
+      break;
+    case "paused":
+      micStatus.className = "mic-status";
+      micLabel.textContent = "Paused";
+      btnListen.innerHTML = "🎙️ Resume";
+      break;
+    case "ready-to-send":
+      micStatus.className = "mic-status listening";
+      micLabel.textContent = "Ready to send";
+      // Auto-pulse the send button
+      document.getElementById("btnSend").style.animation = "pulse 1s infinite";
+      break;
+    case "stopped":
+      micStatus.className = "mic-status";
+      micLabel.textContent = "Stopped";
+      btnListen.innerHTML = "🎙️ Start Mic";
+      break;
+    case "denied":
+      micStatus.className = "mic-status";
+      micLabel.textContent = "Mic Denied";
+      showFallbackInput();
+      break;
+    case "error":
+      micStatus.className = "mic-status";
+      micLabel.textContent = "Mic Error";
+      btnListen.innerHTML = "🎙️ Retry";
+      btnListen.disabled = false;
+      break;
+  }
+};
 
-    const fd = new FormData();
-    fd.append("mode", "interview");
-    fd.append("history", JSON.stringify(state.history));
-    fd.append("userMessage", userText);
-    fd.append("cvText", state.cvText);
-    fd.append("questionCount", state.questionCount);
-    fd.append("phase", state.currentPhase);
-fd.append("accessCode", localStorage.getItem("career_access_code") || "");
+listeningEngine.onVolumeChange = (dataArray) => {
+  const bars = document.querySelectorAll("#visualizer .bar");
+  if (!bars.length) return;
 
-    try {
-        const res = await fetch(API_URL, { method: "POST", body: fd });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = await res.json();
+  // Map frequency data to bar heights
+  const step = Math.floor(dataArray.length / bars.length);
+  for (let i = 0; i < bars.length; i++) {
+    const value = dataArray[i * step] || 0;
+    const height = Math.max(4, (value / 255) * 28);
+    bars[i].style.height = height + "px";
+  }
+};
 
-        state.history = data.history || state.history;
+// ============================================
+// UI FUNCTIONS
+// ============================================
 
-        if (data.reply) {
-            speak(data.reply);
-        } else {
-            throw new Error('Empty reply');
-        }
-    } catch (e) {
-        console.error('API error:', e);
-        setOrbState('idle', 'Connection error — tap orb to retry');
-
-        // Auto-retry once after 3s
-        setTimeout(() => {
-            if (state.isInterviewing && !state.isSpeaking && !state.isListening) {
-                startListening();
-            }
-        }, 3000);
-    }
+function initVisualizer() {
+  const viz = document.getElementById("visualizer");
+  viz.innerHTML = "";
+  for (let i = 0; i < 20; i++) {
+    const bar = document.createElement("div");
+    bar.className = "bar";
+    viz.appendChild(bar);
+  }
 }
 
-// ═══════════════════════════════════════════════════════════════
-// TIMER
-// ═══════════════════════════════════════════════════════════════
+function updateLiveTranscript(text, hasFinal) {
+  const el = document.getElementById("liveTranscript");
+  if (text.trim()) {
+    el.textContent = text;
+    el.className = "live-transcript has-text";
+  } else {
+    el.textContent = "Listening...";
+    el.className = "live-transcript";
+  }
+}
 
+function showFallbackInput() {
+  document.getElementById("voiceBtnRow").style.display = "none";
+  document.getElementById("fallbackRow").className = "fallback-input-row active";
+  document.getElementById("liveTranscript").textContent = "Voice not supported — type below";
+  document.getElementById("visualizer").style.display = "none";
+
+  // Enter key to send
+  document.getElementById("fallbackInput").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") sendFallback();
+  });
+}
+
+function toggleListening() {
+  if (listeningEngine.isListening) {
+    listeningEngine.pause();
+  } else {
+    listeningEngine.resume();
+  }
+}
+
+function addMessage(role, text) {
+  const container = document.getElementById("chatContainer");
+  const div = document.createElement("div");
+  div.className = `message ${role}`;
+  div.textContent = text;
+  container.appendChild(div);
+  container.scrollTop = container.scrollHeight;
+}
+
+function addScoreMessage(text) {
+  const container = document.getElementById("chatContainer");
+  const div = document.createElement("div");
+  div.className = "message score";
+  div.textContent = text;
+  container.appendChild(div);
+  container.scrollTop = container.scrollHeight;
+}
+
+// --- TTS (Text-to-Speech for AI responses) ---
+function speak(text) {
+  if (!('speechSynthesis' in window)) return;
+
+  // Pause listening while AI speaks to prevent feedback
+  const wasListening = listeningEngine.isListening;
+  if (wasListening) listeningEngine.pause();
+
+  // Cancel any ongoing speech
+  speechSynthesis.cancel();
+
+  const utterance = new SpeechSynthesisUtterance(text);
+  utterance.rate = 1.05;
+  utterance.pitch = 1.0;
+  utterance.volume = 1.0;
+
+  // Pick a good voice
+  const voices = speechSynthesis.getVoices();
+  const preferred = voices.find(v =>
+    v.name.includes("Samantha") ||
+    v.name.includes("Google US") ||
+    v.name.includes("Microsoft Aria") ||
+    (v.lang === "en-US" && v.localService)
+  );
+  if (preferred) utterance.voice = preferred;
+
+  utterance.onend = () => {
+    // Resume listening after AI finishes speaking
+    if (wasListening || isInterviewActive) {
+      setTimeout(() => listeningEngine.resume(), 300);
+    }
+  };
+
+  utterance.onerror = () => {
+    if (wasListening || isInterviewActive) {
+      listeningEngine.resume();
+    }
+  };
+
+  speechSynthesis.speak(utterance);
+}
+
+// Ensure voices are loaded
+if ('speechSynthesis' in window) {
+  speechSynthesis.getVoices();
+  speechSynthesis.onvoiceschanged = () => speechSynthesis.getVoices();
+}
+
+// --- TIMER ---
 function startTimer() {
-    timerDisplay.style.display = '';
-    updateTimerDisplay();
-
-    timerInterval = setInterval(() => {
-        if (state.timeLeft <= 0) {
-            clearInterval(timerInterval);
-            finishSession();
-            return;
-        }
-
-        state.timeLeft--;
-        updateTimerDisplay();
-
-        if (state.timeLeft === 120) timerDisplay.classList.add('warning');
-        if (state.timeLeft === 30) {
-            timerDisplay.classList.remove('warning');
-            timerDisplay.classList.add('danger');
-        }
-    }, 1000);
+  seconds = 0;
+  timerInterval = setInterval(() => {
+    seconds++;
+    const m = String(Math.floor(seconds / 60)).padStart(2, "0");
+    const s = String(seconds % 60).padStart(2, "0");
+    document.getElementById("timer").textContent = `${m}:${s}`;
+  }, 1000);
 }
 
-function updateTimerDisplay() {
-    const m = Math.floor(state.timeLeft / 60);
-    const s = state.timeLeft % 60;
-    timerDisplay.textContent = `${m}:${s < 10 ? '0' + s : s}`;
+function stopTimer() {
+  clearInterval(timerInterval);
 }
 
-// ═══════════════════════════════════════════════════════════════
-// FILE UPLOAD
-// ═══════════════════════════════════════════════════════════════
+// --- TOAST ---
+function showToast(msg) {
+  const toast = document.getElementById("toast");
+  toast.textContent = msg;
+  toast.classList.add("show");
+  setTimeout(() => toast.classList.remove("show"), 3000);
+}
 
-$('cvInput').addEventListener('change', handleFileUpload);
+// ============================================
+// CORE INTERVIEW LOGIC
+// ============================================
 
-// Drag & drop
-uploadZone.addEventListener('dragover', (e) => { e.preventDefault(); uploadZone.classList.add('dragover'); });
-uploadZone.addEventListener('dragleave', () => uploadZone.classList.remove('dragover'));
-uploadZone.addEventListener('drop', (e) => {
-    e.preventDefault();
-    uploadZone.classList.remove('dragover');
-    const file = e.dataTransfer.files[0];
-    if (file && file.type === 'application/pdf') {
-        processFile(file);
-    }
+// --- CV Upload ---
+document.getElementById("cvFile").addEventListener("change", async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+
+  document.getElementById("fileName").textContent = file.name;
+  document.getElementById("uploadArea").classList.add("loaded");
+
+  if (file.type === "text/plain") {
+    cvText = await file.text();
+  } else if (file.type === "application/pdf") {
+    // Basic PDF text extraction
+    cvText = await extractPDFText(file);
+  } else {
+    cvText = `[Uploaded: ${file.name}]`;
+  }
+
+  showToast("✅ Resume loaded!");
 });
 
-async function handleFileUpload(e) {
-    const file = e.target.files[0];
-    if (!file) return;
-    await processFile(file);
+async function extractPDFText(file) {
+  // Simple PDF text extraction without external library
+  try {
+    const buffer = await file.arrayBuffer();
+    const text = new TextDecoder("utf-8").decode(buffer);
+    // Extract readable strings from PDF
+    const readable = text.match(/[\x20-\x7E]{4,}/g);
+    return readable ? readable.join(" ").substring(0, 3000) : `[PDF: ${file.name}]`;
+  } catch(e) {
+    return `[PDF: ${file.name}]`;
+  }
 }
 
-async function processFile(file) {
-    setOrbState('thinking', 'Analyzing your resume…');
+// Drag and drop
+const uploadArea = document.getElementById("uploadArea");
+uploadArea.addEventListener("dragover", (e) => {
+  e.preventDefault();
+  uploadArea.classList.add("dragover");
+});
+uploadArea.addEventListener("dragleave", () => uploadArea.classList.remove("dragover"));
+uploadArea.addEventListener("drop", (e) => {
+  e.preventDefault();
+  uploadArea.classList.remove("dragover");
+  const file = e.dataTransfer.files[0];
+  if (file) {
+    document.getElementById("cvFile").files = e.dataTransfer.files;
+    document.getElementById("cvFile").dispatchEvent(new Event("change"));
+  }
+});
 
-    try {
-        const buffer = await file.arrayBuffer();
-        const pdf = await pdfjsLib.getDocument(buffer).promise;
+// --- API CALL ---
+async function apiCall(mode, extra = {}) {
+  const fd = new FormData();
+  fd.append("mode", mode);
+  fd.append("accessCode", accessCode);
+  fd.append("cvText", cvText);
+  fd.append("history", JSON.stringify(history));
+  for (const [k, v] of Object.entries(extra)) {
+    fd.append(k, v);
+  }
 
-        let fullText = "";
-        for (let i = 1; i <= pdf.numPages; i++) {
-            const page = await pdf.getPage(i);
-            const content = await page.getTextContent();
-            fullText += content.items.map(s => s.str).join(" ") + "\n";
-        }
+  const res = await fetch(WORKER_URL, { method: "POST", body: fd });
+  const data = await res.json();
 
-        state.cvText = fullText.trim();
+  if (res.status === 403) {
+    showToast(data.reply);
+    throw new Error("Access denied");
+  }
 
-        if (state.cvText.length < 50) {
-            throw new Error('Resume text too short — may be a scanned image');
-        }
-
-        uploadZone.classList.add('loaded');
-        uploadZone.querySelector('.uz-title').textContent = file.name;
-        uploadZone.querySelector('.uz-sub').textContent = `${pdf.numPages} page${pdf.numPages > 1 ? 's' : ''} • ${state.cvText.length.toLocaleString()} characters extracted`;
-
-        setOrbState('idle', 'Resume loaded — ready to begin');
-        $('startBtn').disabled = false;
-
-        console.log('📄 Resume loaded:', state.cvText.length, 'chars');
-    } catch (err) {
-        console.error('PDF error:', err);
-        setOrbState('idle', 'Error reading PDF — try another file');
-        uploadZone.classList.remove('loaded');
-    }
+  return data;
 }
 
-// ═══════════════════════════════════════════════════════════════
-// START INTERVIEW
-// ═══════════════════════════════════════════════════════════════
+// --- START INTERVIEW ---
+async function startInterview() {
+  accessCode = document.getElementById("accessCode").value.trim();
+  if (!accessCode) {
+    showToast("⚠️ Enter your access code");
+    return;
+  }
 
-$('startBtn').addEventListener('click', async () => {
-    $('setupPanel').style.display = 'none';
-    $('endBtn').style.display = '';
-    transcriptPanel.classList.add('active');
-    phaseBar.classList.add('active');
-    mainContent.classList.add('with-phase');
-    questionCounter.style.display = '';
+  showToast("🚀 Starting interview...");
 
-    state.isInterviewing = true;
-    state.questionCount = 0;
-    updatePhase();
+  try {
+    const data = await apiCall("start");
 
-    initRecognition();
-    await requestWakeLock();
-    startWakeLockHeartbeat();
-    startStateSaving();
+    // Switch screens
+    document.getElementById("authScreen").style.display = "none";
+    document.getElementById("interviewScreen").classList.add("active");
+    isInterviewActive = true;
+
+    // Setup
+    history = data.history || [];
+    addMessage("ai", data.reply);
+    speak(data.reply);
     startTimer();
+    initVisualizer();
 
-    setOrbState('thinking', 'Starting your interview…');
-
-    const fd = new FormData();
-    fd.append("mode", "start");
-    fd.append("cvText", state.cvText);
-fd.append("accessCode", localStorage.getItem("career_access_code") || "");
-
-    try {
-        const res = await fetch(API_URL, { method: "POST", body: fd });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = await res.json();
-
-        state.history = data.history || [];
-
-        if (data.reply) {
-            speak(data.reply);
-        } else {
-            throw new Error('No initial reply');
-        }
-    } catch (e) {
-        console.error('Failed to start:', e);
-        setOrbState('idle', 'Connection failed — please refresh');
-        alert('Could not connect to the AI server. Please check your connection and try again.');
-    }
-});
-
-// ═══════════════════════════════════════════════════════════════
-// END SESSION
-// ═══════════════════════════════════════════════════════════════
-
-$('endBtn').addEventListener('click', () => {
-    if (confirm('End the interview and generate your evaluation?')) {
-        finishSession();
-    }
-});
-
-async function finishSession() {
-    state.isInterviewing = false;
-    state.isSpeaking = false;
-    state.isListening = false;
-
-    clearInterval(timerInterval);
-    clearTimeout(recognitionRestartTimeout);
-    stopStateSaving();
-    stopWakeLockHeartbeat();
-    await releaseWakeLock();
-
-    try { sessionStorage.removeItem('evalis_interview_state'); } catch (e) {}
-
-    if (!isAndroid) {
-        if (recognition) { try { recognition.stop(); } catch (e) {} }
-        window.speechSynthesis.cancel();
+    // Start continuous listening
+    if (listeningEngine.isSupported) {
+      const started = await listeningEngine.start();
+      if (!started) showFallbackInput();
     } else {
-        if (typeof Android.stopSpeaking === 'function') Android.stopSpeaking();
+      showFallbackInput();
     }
 
-    $('endBtn').style.display = 'none';
-    timerDisplay.style.display = 'none';
-    phaseBar.classList.remove('active');
-    transcriptPanel.classList.remove('active');
-    mainContent.classList.remove('with-phase');
-
-    setOrbState('thinking', 'Generating your evaluation…');
-
-    const fd = new FormData();
-    fd.append("mode", "score");
-    fd.append("history", JSON.stringify(state.history));
-fd.append("accessCode", localStorage.getItem("career_access_code") || "");
-
-    try {
-        const res = await fetch(API_URL, { method: "POST", body: fd });
-        const data = await res.json();
-        $('reportContent').textContent = data.reply || 'Evaluation complete. Thank you for your time.';
-    } catch (e) {
-        console.error('Report error:', e);
-        $('reportContent').textContent = 'Unable to generate report. Your interview data has been recorded.';
-    }
-
-    $('reportModal').classList.add('open');
-    setOrbState('idle', 'Interview complete');
+  } catch(e) {
+    console.error(e);
+  }
 }
 
-// ═══════════════════════════════════════════════════════════════
-// WAKE LOCK
-// ═══════════════════════════════════════════════════════════════
+// --- SEND CURRENT TRANSCRIPT ---
+async function sendCurrent() {
+  const text = listeningEngine.getCurrentTranscript();
+  if (!text) {
+    showToast("No speech detected. Say something first!");
+    return;
+  }
 
-async function requestWakeLock() {
-    if (!('wakeLock' in navigator)) return;
+  // Disable send, pause mic
+  document.getElementById("btnSend").disabled = true;
+  document.getElementById("btnSend").style.animation = "";
+  listeningEngine.pause();
 
-    try {
-        if (wakeLock) { try { await wakeLock.release(); } catch (e) {} }
+  // Show user message
+  addMessage("user", text);
+  listeningEngine.clearTranscript();
+  updateLiveTranscript("", false);
 
-        wakeLock = await navigator.wakeLock.request("screen");
-        console.log('✅ Wake Lock active');
-
-        wakeLock.addEventListener('release', async () => {
-            console.log('⚠️ Wake Lock released');
-            if (state.isInterviewing) {
-                setTimeout(() => requestWakeLock(), 500);
-            }
-        });
-    } catch (err) {
-        console.log('Wake Lock unavailable:', err.message);
-    }
+  try {
+    const data = await apiCall("interview", { userMessage: text });
+    history = data.history || history;
+    addMessage("ai", data.reply);
+    speak(data.reply); // This will auto-resume listening after TTS finishes
+  } catch(e) {
+    console.error(e);
+    listeningEngine.resume();
+  }
 }
 
-async function releaseWakeLock() {
-    if (wakeLock) {
-        try { await wakeLock.release(); } catch (e) {}
-        wakeLock = null;
-    }
+// --- SEND FALLBACK TEXT ---
+function sendFallback() {
+  const input = document.getElementById("fallbackInput");
+  const text = input.value.trim();
+  if (!text) return;
+
+  input.value = "";
+  addMessage("user", text);
+
+  apiCall("interview", { userMessage: text }).then(data => {
+    history = data.history || history;
+    addMessage("ai", data.reply);
+    speak(data.reply);
+  }).catch(console.error);
 }
 
-function startWakeLockHeartbeat() {
-    wakeLockHeartbeat = setInterval(async () => {
-        if (state.isInterviewing && (!wakeLock || wakeLock.released)) {
-            await requestWakeLock();
-        }
-    }, 15000);
+// --- END INTERVIEW ---
+function endInterview() {
+  isInterviewActive = false;
+  listeningEngine.stop();
+  stopTimer();
+  speechSynthesis.cancel();
+
+  document.getElementById("voiceBtnRow").style.display = "none";
+  document.getElementById("fallbackRow").className = "fallback-input-row";
+  document.getElementById("liveTranscript").style.display = "none";
+  document.getElementById("visualizer").style.display = "none";
+  document.getElementById("scoreBtnRow").style.display = "flex";
+  document.getElementById("micLabel").textContent = "Interview Ended";
+
+  addMessage("ai", "Interview concluded. Click below to get your score.");
+  showToast("⏹️ Interview ended");
 }
 
-function stopWakeLockHeartbeat() {
-    clearInterval(wakeLockHeartbeat);
-    wakeLockHeartbeat = null;
+// --- GET SCORE ---
+async function getScore() {
+  addMessage("ai", "⏳ Analyzing your performance...");
+  showToast("📊 Generating report...");
+
+  try {
+    const data = await apiCall("score");
+    addScoreMessage(data.reply);
+    document.getElementById("scoreBtnRow").style.display = "none";
+  } catch(e) {
+    console.error(e);
+    addMessage("ai", "Failed to generate score. Please try again.");
+  }
 }
 
-// ═══════════════════════════════════════════════════════════════
-// STATE PERSISTENCE
-// ═══════════════════════════════════════════════════════════════
+// ============================================
+// VISIBILITY & LIFECYCLE HANDLERS
+// ============================================
 
-function saveInterviewState() {
-    if (!state.isInterviewing) return;
-    try {
-        sessionStorage.setItem('evalis_interview_state', JSON.stringify({
-            history: state.history,
-            timeLeft: state.timeLeft,
-            questionCount: state.questionCount,
-            cvText: state.cvText,
-            timestamp: Date.now()
-        }));
-    } catch (e) {}
-}
-
-function startStateSaving() {
-    stateSaveInterval = setInterval(() => saveInterviewState(), 5000);
-}
-
-function stopStateSaving() {
-    clearInterval(stateSaveInterval);
-    stateSaveInterval = null;
-}
-
-// Visibility change handler
-document.addEventListener('visibilitychange', async () => {
-    if (document.visibilityState === 'visible' && state.isInterviewing) {
-        await requestWakeLock();
-
-        // Resume if stuck
-        if (!state.isSpeaking && !state.isListening) {
-            setTimeout(startListening, 1000);
-        }
-    } else if (state.isInterviewing) {
-        saveInterviewState();
-    }
+// Handle page visibility changes (critical for mobile!)
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible" && isInterviewActive && !listeningEngine.isPaused) {
+    // Page came back into focus — restart recognition
+    console.log("Page visible again, restarting recognition");
+    setTimeout(() => {
+      if (!listeningEngine.isListening) {
+        listeningEngine.resume();
+      }
+    }, 300);
+  }
 });
 
-// Restore state after refresh
-function tryRestoreState() {
-    try {
-        const saved = sessionStorage.getItem('evalis_interview_state');
-        if (!saved) return;
+// Handle iOS audio context resume (required after user interaction)
+document.addEventListener("touchstart", () => {
+  if (listeningEngine.audioContext && listeningEngine.audioContext.state === "suspended") {
+    listeningEngine.audioContext.resume();
+  }
+}, { once: true });
 
-        const data = JSON.parse(saved);
-        if (Date.now() - data.timestamp > 300000) {
-            sessionStorage.removeItem('evalis_interview_state');
-            return;
-        }
-
-        if (data.history?.length > 0 && confirm('Resume interrupted interview?')) {
-            state.history = data.history;
-            state.timeLeft = data.timeLeft;
-            state.questionCount = data.questionCount;
-            state.cvText = data.cvText;
-
-            $('setupPanel').style.display = 'none';
-            $('endBtn').style.display = '';
-            transcriptPanel.classList.add('active');
-            phaseBar.classList.add('active');
-            mainContent.classList.add('with-phase');
-            questionCounter.style.display = '';
-
-            state.isInterviewing = true;
-            initRecognition();
-            updatePhase();
-            startTimer();
-            requestWakeLock();
-            startWakeLockHeartbeat();
-            startStateSaving();
-
-            // Rebuild transcript from history
-            state.history.forEach(msg => {
-                if (msg.role === 'assistant') addTranscriptMessage('ai', msg.content);
-                else if (msg.role === 'user') addTranscriptMessage('user', msg.content);
-            });
-
-            setOrbState('idle', 'Interview resumed');
-            setTimeout(startListening, 2000);
-        } else {
-            sessionStorage.removeItem('evalis_interview_state');
-        }
-    } catch (e) {
-        console.log('Restore failed:', e);
-    }
-}
-
-// ═══════════════════════════════════════════════════════════════
-// INITIALIZATION
-// ═══════════════════════════════════════════════════════════════
-
-window.addEventListener('load', () => {
-    console.log('🚀 Evalis AI loaded');
-    console.log('📱 Platform:', isAndroid ? 'Android WebView' : isMobile ? 'Mobile Web' : 'Desktop');
-
-    // Pre-load voices
-    if (window.speechSynthesis) {
-        window.speechSynthesis.getVoices();
-        window.speechSynthesis.onvoiceschanged = () => window.speechSynthesis.getVoices();
-    }
-
-    // Orb click handler
-    orbCore.addEventListener('click', () => {
-        if (!state.isInterviewing) return;
-
-        if (state.isSpeaking) {
-            console.log('👆 Barge-in: interrupting AI');
-            stopSpeaking();
-            setTimeout(startListening, 500);
-        } else if (!state.isListening) {
-            console.log('👆 Manual mic restart');
-            fatalMicError = false;
-            startListening();
-        }
-    });
-
-    // Mobile hint
-    if (isMobile && !localStorage.getItem('evalis_hint')) {
-        setTimeout(() => {
-            if (!state.isInterviewing) {
-                statusText.textContent = 'Tap the orb anytime to interrupt';
-                setTimeout(() => {
-                    if (!state.isInterviewing) statusText.textContent = 'Upload your resume to begin';
-                }, 3000);
-            }
-            localStorage.setItem('evalis_hint', '1');
-        }, 2000);
-    }
-
-    tryRestoreState();
+// Prevent accidental page close during interview
+window.addEventListener("beforeunload", (e) => {
+  if (isInterviewActive) {
+    e.preventDefault();
+    e.returnValue = "";
+  }
 });
 
-// Prevent accidental navigation
-window.addEventListener('beforeunload', (e) => {
-    if (state.isInterviewing) {
-        saveInterviewState();
-        e.preventDefault();
-        return e.returnValue = 'Interview in progress. Leave?';
-    }
+// Handle Enter key on access code input
+document.getElementById("accessCode").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") startInterview();
 });
-
-// Mobile audio unlock
-if (isMobile) {
-    document.addEventListener('touchstart', () => {
-        if (window.speechSynthesis) window.speechSynthesis.cancel();
-    }, { once: true });
-}
 </script>
 
 </body>
