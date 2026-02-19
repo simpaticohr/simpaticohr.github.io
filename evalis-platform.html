@@ -341,8 +341,10 @@
   <div class="proctor-cam hidden" id="proctorCam"><video id="proctorVideo" autoplay muted playsinline></video><div class="cam-label">🔴 REC</div></div>
 
 <script>
-const W="https://evalis-ai.simpaticohrconsultancy.workers.dev";
+  const W="https://evalis-ai.simpaticohrconsultancy.workers.dev";
 const SILENCE_TIMEOUT=3.0,MIN_ANS=10,MAX_RETRIES=3,MAX_VIOLATIONS=3;
+const HR_PASSWORD="simpatico2025";
+let hrAuth=false;
 let mode="mock",cv="",lang="en",role="",level="",totalQ=10;
 let mainQ=0,isFollowUp=false,chat=[],answers=[];
 let rec=null,transcript="",timerInt=null,secs=0;
@@ -350,72 +352,1135 @@ let listening=false,silTimer=null,lastSpeech=0;
 let speaking=false,processing=false,ansStart=0;
 let evalRetry=0,violations=[],screenStr=null,camStr=null;
 let curJobId=null,curAppId=null,selHRJob=null;let _resumeFile=null;
-const L={en:{s:"en-US",t:"en-US",n:"English"},hi:{s:"hi-IN",t:"hi-IN",n:"Hindi"},ml:{s:"ml-IN",t:"ml-IN",n:"Malayalam"},ta:{s:"ta-IN",t:"ta-IN",n:"Tamil"},te:{s:"te-IN",t:"te-IN",n:"Telugu"},kn:{s:"kn-IN",t:"kn-IN",n:"Kannada"},bn:{s:"bn-IN",t:"bn-IN",n:"Bengali"},es:{s:"es-ES",t:"es-ES",n:"Spanish"},ar:{s:"ar-SA",t:"ar-SA",n:"Arabic"},fr:{s:"fr-FR",t:"fr-FR",n:"French"},de:{s:"de-DE",t:"de-DE",n:"German"},ur:{s:"ur-PK",t:"ur-PK",n:"Urdu"}};
-async function db(a,t,d=null,f=null,s=null,o=null){const r=await fetch(W+"/db",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:a,table:t,data:d,filters:f,select:s,order:o})});return await r.json()}
-async function uploadFile(file,fn){const fd=new FormData();fd.append("file",file);fd.append("fileName",fn);const r=await fetch(W+"/upload",{method:"POST",body:fd});return await r.json()}
-function toast(m){const c=document.getElementById("toasts"),t=document.createElement("div");t.className="toast";t.textContent=m;c.appendChild(t);setTimeout(()=>t.remove(),3200)}
-function showError(m){const b=document.getElementById("errorBox");if(b){b.textContent=m;b.classList.add("show");setTimeout(()=>b.classList.remove("show"),8000)}}
-function nav(p){const pages=['home','jobs','apply','setup','live','results','hr'];pages.forEach(x=>document.getElementById('page-'+x)?.classList.add('hidden'));document.getElementById('page-'+p)?.classList.remove('hidden');document.querySelectorAll('#mainNav .nav-btn').forEach(b=>b.classList.remove('active'));const map={home:0,jobs:1,apply:2,setup:3,live:3,results:3,hr:4};document.querySelectorAll('#mainNav .nav-btn')[map[p]||0]?.classList.add('active');if(p==='jobs')loadJobs();if(p==='hr')loadHR()}
-async function loadJobs(){const el=document.getElementById('jobsList');el.innerHTML='<span class="loading"></span> Loading...';try{const data=await db('select','jobs',null,{is_active:true},null,'created_at.desc');if(!data||data.error||!Array.isArray(data)||!data.length){el.innerHTML='<p style="color:var(--muted);text-align:center;padding:20px;">No open positions.</p>';return}el.innerHTML=data.map(j=>`<div class="job-card"><h3>${j.title||''}</h3><div class="job-meta"><span>🏢 ${j["Company Name"]||j.department||''}</span><span>📍 ${j.location||''} ${j.Country?'('+j.Country+')':''}</span><span>📊 ${j.level||'Mid-Level'}</span></div><p style="font-size:0.82rem;color:var(--muted);margin:6px 0;">${(j.description||'').substring(0,180)}</p><div>${(j.skills||[]).map(s=>'<span class="skill-tag">'+s+'</span>').join('')}</div><button class="btn btn-go" style="margin-top:10px;padding:10px;" onclick="applyTo('${j.id}','${(j.title||'').replace(/'/g,"\\'")}')">📝 Apply</button></div>`).join('')}catch(e){el.innerHTML='<p style="color:var(--red);">Error: '+e.message+'</p>'}}
-function applyTo(id,title){curJobId=id;document.getElementById('applyJobInfo').textContent='Applying for: '+title;nav('apply')}
-document.getElementById('applyFile').addEventListener('change',async e=>{const file=e.target.files[0];if(!file)return;document.getElementById('applyFileName').textContent='⏳ Processing...';try{cv=await exFile(file);if(cv.length<30){document.getElementById('applyFileName').textContent='⚠️ Try TXT';cv='';return}document.getElementById('applyFileName').textContent='✅ '+file.name;document.getElementById('applyUpload').classList.add('ok');_resumeFile=file;toast('✅ Loaded!')}catch(err){document.getElementById('applyFileName').textContent='❌ Error';cv=''}});
-async function submitApplication(){const name=document.getElementById('applyName').value.trim();const email=document.getElementById('applyEmail').value.trim();if(!name||!email){toast('❌ Name & Email required');return}if(!cv){toast('❌ Upload resume');return}const btn=document.getElementById('applyBtn');btn.disabled=true;btn.textContent='⏳ Submitting...';const st=document.getElementById('applyStatus');st.textContent='';try{let resume_url='';if(_resumeFile){st.textContent='📤 Uploading...';const fn=Date.now()+'_'+_resumeFile.name;const up=await uploadFile(_resumeFile,fn);resume_url=up.url||''}st.textContent='📝 Saving...';const result=await db('insert','applications',{job_id:curJobId||null,name,email,phone:document.getElementById('applyPhone').value.trim(),resume_url,resume_text:cv.substring(0,5000),status:'applied'});const app=Array.isArray(result)?result[0]:result;curAppId=app?.id;st.textContent='🤖 AI screening...';if(app?.id)await runATS(app);st.innerHTML='<span style="color:var(--green);">✅ Application submitted!</span>';toast('✅ Submitted!');document.getElementById('applyName').value='';document.getElementById('applyEmail').value='';document.getElementById('applyFileName').textContent='No file';document.getElementById('applyUpload').classList.remove('ok');cv='';_resumeFile=null}catch(err){st.innerHTML='<span style="color:var(--red);">❌ '+err.message+'</span>'}btn.disabled=false;btn.textContent='📨 Submit Application'}
-async function runATS(app){try{let jd='',sk=[],th=70,jr='',jl='';if(app.job_id){const job=await db('select','jobs',null,{id:app.job_id});const j=Array.isArray(job)?job[0]:job;if(j){jd=j.description||'';sk=j.skills||[];th=j.ats_threshold||70;jr=j.title;jl=j.level}}const raw=await callAI([{role:"system",content:"ATS screening AI. Return ONLY valid JSON."},{role:"user",content:`Score resume for "${jr||'General'}" (${jl||'Mid-Level'}).\nJob: ${jd||'Standard'}\nSkills: ${sk.join(',')||'General'}\nResume: ${app.resume_text||cv}\nReturn ONLY: {"atsScore":75,"matchedSkills":["s1"],"missingSkills":["s1"],"summary":"Brief"}`}]);const r=safeJSON(raw);const score=Math.min(100,Math.max(0,r.atsScore||50));const status=th>0&&score>=th?'shortlisted':'applied';await db('update','applications',{ats_score:score,ats_matched_skills:r.matchedSkills||[],ats_missing_skills:r.missingSkills||[],ats_summary:r.summary||'',status},{id:app.id});if(status==='shortlisted'){const token=crypto.randomUUID?crypto.randomUUID():Date.now().toString(36)+Math.random().toString(36);await db('insert','interviews',{application_id:app.id,job_id:app.job_id,token,interview_type:'real',status:'pending',interview_role:jr,interview_level:jl,question_count:10,interview_language:'en',expires_at:new Date(Date.now()+72*3600000).toISOString()})}}catch(e){console.error('[ATS]',e)}}
-async function exFile(f){const ext=f.name.split('.').pop().toLowerCase();let t='';if(ext==='txt')t=await f.text();else if(ext==='pdf')t=await exPDF(f);else if(ext==='doc'||ext==='docx')t=await exDOC(f);else t=await f.text();return t.replace(/\s+/g,' ').replace(/[^\x20-\x7E\n]/g,'').trim().substring(0,5000)}
-async function exPDF(f){if(!window.pdfjsLib)return await exFB(f);try{const b=await f.arrayBuffer(),p=await pdfjsLib.getDocument({data:b}).promise;let t='';for(let i=1;i<=p.numPages;i++){const pg=await p.getPage(i),c=await pg.getTextContent();t+=c.items.map(x=>x.str).join(' ')+'\n'}return t}catch(e){return await exFB(f)}}
-async function exDOC(f){const b=await f.arrayBuffer();if(f.name.endsWith('.docx')){try{const t=new TextDecoder('utf-8').decode(new Uint8Array(b)),m=t.match(/<w:t[^>]*>([^<]+)<\/w:t>/g);if(m&&m.length)return m.map(x=>x.replace(/<[^>]+>/g,'')).join(' ')}catch(e){}}return await exFB(f)}
-async function exFB(f){const b=await f.arrayBuffer(),t=new TextDecoder('utf-8',{fatal:false}).decode(b),r=t.match(/[a-zA-Z0-9@.,:;!?\-/()\s]{5,}/g);return r?r.filter(s=>(s.match(/[a-zA-Z]/g)||[]).length/s.length>0.5&&s.trim().length>5).join(' '):''}
-document.getElementById('cvFile').addEventListener('change',async e=>{const file=e.target.files[0];if(!file)return;document.getElementById('cvFileName').textContent='⏳ Processing...';try{cv=await exFile(file);if(cv.length<30){document.getElementById('cvFileName').textContent='⚠️ Try TXT';cv='';return}document.getElementById('cvFileName').textContent='✅ '+file.name;document.getElementById('cvUpArea').classList.add('ok');toast('✅ Loaded!')}catch(e){document.getElementById('cvFileName').textContent='❌ Error';cv=''}});
-async function callAI(messages){const ctrl=new AbortController();const tm=setTimeout(()=>ctrl.abort(),45000);try{const r=await fetch(W,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({messages}),signal:ctrl.signal});clearTimeout(tm);if(!r.ok)throw new Error('Error '+r.status);const d=await r.json();if(!d.response)throw new Error("Empty");return d.response}catch(e){clearTimeout(tm);if(e.name==='AbortError')throw new Error("Timeout");throw e}}
-function safeJSON(raw){let c=raw.replace(/```json\s*/gi,'').replace(/```\s*/g,'').trim();const m=c.match(/\{[\s\S]*\}/);if(!m)throw new Error('No JSON');c=m[0].replace(/,\s*([}\]])/g,'$1');c=c.replace(/:\s*"([^"]*?)"/gs,(m,v)=>': "'+v.replace(/\n/g,' ').replace(/\r/g,'').replace(/\t/g,' ').replace(/\\/g,'\\\\').replace(/"/g,'\\"')+'"');try{return JSON.parse(c)}catch(e){try{return JSON.parse(c.replace(/[\x00-\x1F\x7F]/g,' '))}catch(e2){return exFields(raw)}}}
-function exFields(raw){const gn=k=>{const m=raw.match(new RegExp(`"${k}"\\s*:\\s*(\\d+)`));return m?parseInt(m[1]):0};const gs=k=>{const m=raw.match(new RegExp(`"${k}"\\s*:\\s*"([^"]*?)"`));return m?m[1]:''};const ga=k=>{const m=raw.match(new RegExp(`"${k}"\\s*:\\s*\\[([^\\]]*?)\\]`,'s'));if(!m)return[];const i=m[1].match(/"([^"]*?)"/g);return i?i.map(s=>s.replace(/"/g,'')):[]};const fb=[];for(const m of raw.matchAll(/"question"\s*:\s*"([^"]*?)"[^}]*?"score"\s*:\s*(\d+)[^}]*?"comment"\s*:\s*"([^"]*?)"/gs))fb.push({question:m[1].substring(0,100),score:parseInt(m[2]),comment:m[3],type:'main'});return{overallScore:gn('overallScore')||50,grade:gs('grade')||'C',recommendation:gs('recommendation')||'Pending',summary:gs('summary')||'Done.',strengths:ga('strengths'),improvements:ga('improvements'),feedback:fb.length?fb:answers.map(a=>({question:a.question.substring(0,80),score:a.skipped?0:5,comment:a.skipped?'Skipped':'Recorded',type:a.type}))}}
-document.getElementById("roleSel").addEventListener("change",e=>{document.getElementById("customWrap").classList.toggle("hidden",e.target.value!=="custom")});
-function startMode(m){mode=m;nav('setup');const ind=document.getElementById('modeIndicator');if(m==='real'){ind.innerHTML='<span class="mode-badge" style="background:rgba(239,68,68,.15);color:var(--red);font-size:0.85rem;padding:6px 16px;">🔒 PROCTORED</span>';document.getElementById('realInfoCard').classList.remove('hidden');document.getElementById('proctorReqCard').classList.remove('hidden')}else{ind.innerHTML='<span class="mode-badge" style="background:rgba(16,185,129,.15);color:var(--green);font-size:0.85rem;padding:6px 16px;">🎯 MOCK PRACTICE</span>';document.getElementById('realInfoCard').classList.add('hidden');document.getElementById('proctorReqCard').classList.add('hidden')}}
-function setOrb(s){const o=document.getElementById('orb'),l=document.getElementById('orbLabel');if(!o)return;o.className='orb';switch(s){case'speaking':o.classList.add('speaking');l.textContent='Speaking...';break;case'listening':o.classList.add('listening');l.textContent='Listening...';break;case'thinking':o.classList.add('thinking');l.textContent='Thinking...';break;case'processing':o.classList.add('processing');l.textContent='Processing...';break;default:l.textContent='Ready'}}
-function updateProg(){const p=Math.round((mainQ/totalQ)*100);document.getElementById('progBar').style.width=p+'%';if(isFollowUp){document.getElementById('progText').textContent=`Follow-up Q${mainQ}/${totalQ}`;document.getElementById('qTag').textContent=`Q${mainQ}↩`;document.getElementById('qTag').className='followup-tag'}else{document.getElementById('progText').textContent=`Question ${mainQ}/${totalQ} — ${p}%`;document.getElementById('qTag').textContent=`Q${mainQ}`;document.getElementById('qTag').className='q-tag'}}
-if('speechSynthesis' in window){speechSynthesis.getVoices();speechSynthesis.onvoiceschanged=()=>{}}
-function speak(text){return new Promise(res=>{if(!('speechSynthesis' in window)){res();return}speechSynthesis.cancel();speaking=true;setOrb('speaking');setTimeout(()=>{const u=new SpeechSynthesisUtterance(text);u.lang=L[lang]?.t||'en-US';u.rate=0.92;u.pitch=1;u.volume=1;const v=speechSynthesis.getVoices().find(v=>v.lang.startsWith((L[lang]?.t||'en-US').split('-')[0]));if(v)u.voice=v;u.onend=()=>{speaking=false;res()};u.onerror=()=>{speaking=false;res()};speechSynthesis.speak(u)},100)})}
-function initSTT(){const SR=window.SpeechRecognition||window.webkitSpeechRecognition;if(!SR){toast('⚠️ Use Chrome');return}rec=new SR();rec.lang=L[lang]?.s||'en-US';rec.interimResults=true;rec.continuous=true;rec.onresult=e=>{let f='';for(let i=e.resultIndex;i<e.results.length;i++){if(e.results[i].isFinal)f+=e.results[i][0].transcript+' '}if(f){transcript+=f;lastSpeech=Date.now();resetSil();startSil()}};rec.onerror=e=>{if(e.error!=='no-speech'&&e.error!=='aborted')console.error('[STT]',e.error)};rec.onend=()=>{if(listening&&!processing&&!speaking)try{rec.start()}catch(e){}}}
-function startListen(){if(!rec||listening)return;listening=true;transcript='';lastSpeech=Date.now();ansStart=Date.now();try{rec.start()}catch(e){try{rec.stop()}catch(e2){}setTimeout(()=>{try{rec.start()}catch(e3){}},200)}setOrb('listening');document.getElementById('waveWrap').classList.add('active');document.getElementById('hfInfo').textContent='🎤 Listening...';startTimer();startSil()}
-function stopListen(){listening=false;resetSil();try{rec?.stop()}catch(e){}document.getElementById('waveWrap')?.classList.remove('active');stopTimer()}
-function startSil(){resetSil();silTimer=setInterval(()=>{if(!listening||processing||speaking)return;const sf=(Date.now()-lastSpeech)/1000;if(transcript.trim().length>=MIN_ANS&&sf>=1){const rem=Math.max(0,SILENCE_TIMEOUT-sf);document.getElementById('silenceWrap').classList.add('show');document.getElementById('silenceFill').style.width=(rem/SILENCE_TIMEOUT*100)+'%';document.getElementById('silenceText').textContent=rem>0?`Auto-submit ${rem.toFixed(1)}s...`:'Submitting...';if(sf>=SILENCE_TIMEOUT)autoSubmit()}else{document.getElementById('silenceWrap').classList.remove('show')}},200)}
-function resetSil(){clearInterval(silTimer);silTimer=null;document.getElementById('silenceWrap')?.classList.remove('show')}
+
+const L={
+  en:{s:"en-US",t:"en-US",n:"English"},
+  hi:{s:"hi-IN",t:"hi-IN",n:"Hindi"},
+  ml:{s:"ml-IN",t:"ml-IN",n:"Malayalam"},
+  ta:{s:"ta-IN",t:"ta-IN",n:"Tamil"},
+  te:{s:"te-IN",t:"te-IN",n:"Telugu"},
+  kn:{s:"kn-IN",t:"kn-IN",n:"Kannada"},
+  bn:{s:"bn-IN",t:"bn-IN",n:"Bengali"},
+  es:{s:"es-ES",t:"es-ES",n:"Spanish"},
+  ar:{s:"ar-SA",t:"ar-SA",n:"Arabic"},
+  fr:{s:"fr-FR",t:"fr-FR",n:"French"},
+  de:{s:"de-DE",t:"de-DE",n:"German"},
+  ur:{s:"ur-PK",t:"ur-PK",n:"Urdu"}
+};
+
+// ═══════════════════════════════════════
+// DB + UPLOAD (Worker Proxy)
+// ═══════════════════════════════════════
+async function db(a,t,d=null,f=null,s=null,o=null){
+  const r=await fetch(W+"/db",{method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({action:a,table:t,data:d,filters:f,select:s,order:o})});
+  return await r.json();
+}
+
+async function uploadFile(file,fn){
+  const fd=new FormData();fd.append("file",file);fd.append("fileName",fn);
+  const r=await fetch(W+"/upload",{method:"POST",body:fd});
+  return await r.json();
+}
+
+// ═══════════════════════════════════════
+// UTILITY
+// ═══════════════════════════════════════
+function toast(m){
+  const c=document.getElementById("toasts"),t=document.createElement("div");
+  t.className="toast";t.textContent=m;c.appendChild(t);
+  setTimeout(()=>t.remove(),3200);
+}
+
+function showError(m){
+  const b=document.getElementById("errorBox");
+  if(b){b.textContent=m;b.classList.add("show");setTimeout(()=>b.classList.remove("show"),8000)}
+}
+
+// ═══════════════════════════════════════
+// NAVIGATION (with HR password)
+// ═══════════════════════════════════════
+function nav(p){
+  if(p==='hr'&&!hrAuth){
+    const pwd=prompt("🔒 Enter HR Admin Password:");
+    if(!pwd)return;
+    if(pwd!==HR_PASSWORD){toast("❌ Wrong password!");return}
+    hrAuth=true;toast("✅ HR Access granted!");
+  }
+  const pages=['home','jobs','apply','setup','live','results','hr'];
+  pages.forEach(x=>document.getElementById('page-'+x)?.classList.add('hidden'));
+  document.getElementById('page-'+p)?.classList.remove('hidden');
+  document.querySelectorAll('#mainNav .nav-btn').forEach(b=>b.classList.remove('active'));
+  const map={home:0,jobs:1,apply:2,setup:3,live:3,results:3,hr:4};
+  document.querySelectorAll('#mainNav .nav-btn')[map[p]||0]?.classList.add('active');
+  if(p==='jobs')loadJobs();
+  if(p==='hr')loadHR();
+}
+
+// ═══════════════════════════════════════
+// JOBS
+// ═══════════════════════════════════════
+async function loadJobs(){
+  const el=document.getElementById('jobsList');
+  el.innerHTML='<span class="loading"></span> Loading...';
+  try{
+    const data=await db('select','jobs',null,{is_active:true},null,'created_at.desc');
+    if(!data||data.error||!Array.isArray(data)||!data.length){
+      el.innerHTML='<p style="color:var(--muted);text-align:center;padding:20px;">No open positions.</p>';return;
+    }
+    el.innerHTML=data.map(j=>`<div class="job-card">
+      <h3>${j.title||''}</h3>
+      <div class="job-meta">
+        <span>🏢 ${j["Company Name"]||j.department||''}</span>
+        <span>📍 ${j.location||''} ${j.Country?'('+j.Country+')':''}</span>
+        <span>📊 ${j.level||'Mid-Level'}</span>
+      </div>
+      <p style="font-size:0.82rem;color:var(--muted);margin:6px 0;">${(j.description||'').substring(0,180)}</p>
+      <div>${(j.skills||[]).map(s=>'<span class="skill-tag">'+s+'</span>').join('')}</div>
+      <button class="btn btn-go" style="margin-top:10px;padding:10px;" 
+        onclick="applyTo('${j.id}','${(j.title||'').replace(/'/g,"\\'")}')">📝 Apply</button>
+    </div>`).join('');
+  }catch(e){el.innerHTML='<p style="color:var(--red);">Error: '+e.message+'</p>'}
+}
+
+function applyTo(id,title){
+  curJobId=id;
+  document.getElementById('applyJobInfo').textContent='Applying for: '+title;
+  nav('apply');
+}
+
+// ═══════════════════════════════════════
+// APPLICATION
+// ═══════════════════════════════════════
+document.getElementById('applyFile').addEventListener('change',async e=>{
+  const file=e.target.files[0];if(!file)return;
+  document.getElementById('applyFileName').textContent='⏳ Processing...';
+  try{
+    cv=await exFile(file);
+    if(cv.length<30){document.getElementById('applyFileName').textContent='⚠️ Try TXT';cv='';return}
+    document.getElementById('applyFileName').textContent='✅ '+file.name;
+    document.getElementById('applyUpload').classList.add('ok');
+    _resumeFile=file;toast('✅ Loaded!');
+  }catch(err){document.getElementById('applyFileName').textContent='❌ Error';cv=''}
+});
+
+async function submitApplication(){
+  const name=document.getElementById('applyName').value.trim();
+  const email=document.getElementById('applyEmail').value.trim();
+  if(!name||!email){toast('❌ Name & Email required');return}
+  if(!cv){toast('❌ Upload resume');return}
+  const btn=document.getElementById('applyBtn');
+  btn.disabled=true;btn.textContent='⏳ Submitting...';
+  const st=document.getElementById('applyStatus');st.textContent='';
+  try{
+    let resume_url='';
+    if(_resumeFile){
+      st.textContent='📤 Uploading...';
+      const fn=Date.now()+'_'+_resumeFile.name;
+      const up=await uploadFile(_resumeFile,fn);
+      resume_url=up.url||'';
+    }
+    st.textContent='📝 Saving...';
+    const result=await db('insert','applications',{
+      job_id:curJobId||null,name,email,
+      phone:document.getElementById('applyPhone').value.trim(),
+      resume_url,resume_text:cv.substring(0,5000),status:'applied'
+    });
+    const app=Array.isArray(result)?result[0]:result;
+    curAppId=app?.id;
+    st.textContent='🤖 AI screening...';
+    if(app?.id)await runATS(app);
+    st.innerHTML='<span style="color:var(--green);">✅ Application submitted!</span>';
+    toast('✅ Submitted!');
+    document.getElementById('applyName').value='';
+    document.getElementById('applyEmail').value='';
+    document.getElementById('applyFileName').textContent='No file';
+    document.getElementById('applyUpload').classList.remove('ok');
+    cv='';_resumeFile=null;
+  }catch(err){st.innerHTML='<span style="color:var(--red);">❌ '+err.message+'</span>'}
+  btn.disabled=false;btn.textContent='📨 Submit Application';
+}
+
+async function runATS(app){
+  try{
+    let jd='',sk=[],th=70,jr='',jl='';
+    if(app.job_id){
+      const job=await db('select','jobs',null,{id:app.job_id});
+      const j=Array.isArray(job)?job[0]:job;
+      if(j){jd=j.description||'';sk=j.skills||[];th=j.ats_threshold||70;jr=j.title;jl=j.level}
+    }
+    const raw=await callAI([
+      {role:"system",content:"ATS screening AI. Return ONLY valid JSON."},
+      {role:"user",content:`Score resume for "${jr||'General'}" (${jl||'Mid-Level'}).\nJob: ${jd||'Standard'}\nSkills: ${sk.join(',')||'General'}\nResume: ${app.resume_text||cv}\nReturn ONLY: {"atsScore":75,"matchedSkills":["s1"],"missingSkills":["s1"],"summary":"Brief"}`}
+    ]);
+    const r=safeJSON(raw);
+    const score=Math.min(100,Math.max(0,r.atsScore||50));
+    const status=th>0&&score>=th?'shortlisted':'applied';
+    await db('update','applications',{
+      ats_score:score,ats_matched_skills:r.matchedSkills||[],
+      ats_missing_skills:r.missingSkills||[],ats_summary:r.summary||'',status
+    },{id:app.id});
+    if(status==='shortlisted'){
+      const token=crypto.randomUUID?crypto.randomUUID():Date.now().toString(36)+Math.random().toString(36);
+      await db('insert','interviews',{
+        application_id:app.id,job_id:app.job_id,token,
+        interview_type:'real',status:'pending',interview_role:jr,
+        interview_level:jl,question_count:10,interview_language:'en',
+        expires_at:new Date(Date.now()+72*3600000).toISOString()
+      });
+    }
+  }catch(e){console.error('[ATS]',e)}
+}
+
+// ═══════════════════════════════════════
+// FILE EXTRACTORS
+// ═══════════════════════════════════════
+async function exFile(f){
+  const ext=f.name.split('.').pop().toLowerCase();let t='';
+  if(ext==='txt')t=await f.text();
+  else if(ext==='pdf')t=await exPDF(f);
+  else if(ext==='doc'||ext==='docx')t=await exDOC(f);
+  else t=await f.text();
+  return t.replace(/\s+/g,' ').replace(/[^\x20-\x7E\n]/g,'').trim().substring(0,5000);
+}
+
+async function exPDF(f){
+  if(!window.pdfjsLib)return await exFB(f);
+  try{
+    const b=await f.arrayBuffer(),p=await pdfjsLib.getDocument({data:b}).promise;
+    let t='';
+    for(let i=1;i<=p.numPages;i++){
+      const pg=await p.getPage(i),c=await pg.getTextContent();
+      t+=c.items.map(x=>x.str).join(' ')+'\n';
+    }
+    return t;
+  }catch(e){return await exFB(f)}
+}
+
+async function exDOC(f){
+  const b=await f.arrayBuffer();
+  if(f.name.endsWith('.docx')){
+    try{
+      const t=new TextDecoder('utf-8').decode(new Uint8Array(b));
+      const m=t.match(/<w:t[^>]*>([^<]+)<\/w:t>/g);
+      if(m&&m.length)return m.map(x=>x.replace(/<[^>]+>/g,'')).join(' ');
+    }catch(e){}
+  }
+  return await exFB(f);
+}
+
+async function exFB(f){
+  const b=await f.arrayBuffer();
+  const t=new TextDecoder('utf-8',{fatal:false}).decode(b);
+  const r=t.match(/[a-zA-Z0-9@.,:;!?\-/()\s]{5,}/g);
+  return r?r.filter(s=>(s.match(/[a-zA-Z]/g)||[]).length/s.length>0.5&&s.trim().length>5).join(' '):'';
+}
+
+document.getElementById('cvFile').addEventListener('change',async e=>{
+  const file=e.target.files[0];if(!file)return;
+  document.getElementById('cvFileName').textContent='⏳ Processing...';
+  try{
+    cv=await exFile(file);
+    if(cv.length<30){document.getElementById('cvFileName').textContent='⚠️ Try TXT';cv='';return}
+    document.getElementById('cvFileName').textContent='✅ '+file.name;
+    document.getElementById('cvUpArea').classList.add('ok');
+    toast('✅ Loaded!');
+  }catch(e){document.getElementById('cvFileName').textContent='❌ Error';cv=''}
+});
+
+// ═══════════════════════════════════════
+// AI CALL
+// ═══════════════════════════════════════
+async function callAI(messages){
+  const ctrl=new AbortController();
+  const tm=setTimeout(()=>ctrl.abort(),45000);
+  try{
+    const r=await fetch(W,{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({messages}),signal:ctrl.signal});
+    clearTimeout(tm);
+    if(!r.ok)throw new Error('Error '+r.status);
+    const d=await r.json();
+    if(!d.response)throw new Error("Empty");
+    return d.response;
+  }catch(e){clearTimeout(tm);if(e.name==='AbortError')throw new Error("Timeout");throw e}
+}
+
+// ═══════════════════════════════════════
+// JSON PARSER
+// ═══════════════════════════════════════
+function safeJSON(raw){
+  let c=raw.replace(/```json\s*/gi,'').replace(/```\s*/g,'').trim();
+  const m=c.match(/\{[\s\S]*\}/);if(!m)throw new Error('No JSON');
+  c=m[0].replace(/,\s*([}\]])/g,'$1');
+  c=c.replace(/:\s*"([^"]*?)"/gs,(m,v)=>': "'+v.replace(/\n/g,' ').replace(/\r/g,'').replace(/\t/g,' ').replace(/\\/g,'\\\\').replace(/"/g,'\\"')+'"');
+  try{return JSON.parse(c)}
+  catch(e){try{return JSON.parse(c.replace(/[\x00-\x1F\x7F]/g,' '))}
+  catch(e2){return exFields(raw)}}
+}
+
+function exFields(raw){
+  const gn=k=>{const m=raw.match(new RegExp(`"${k}"\\s*:\\s*(\\d+)`));return m?parseInt(m[1]):0};
+  const gs=k=>{const m=raw.match(new RegExp(`"${k}"\\s*:\\s*"([^"]*?)"`));return m?m[1]:''};
+  const ga=k=>{const m=raw.match(new RegExp(`"${k}"\\s*:\\s*\\[([^\\]]*?)\\]`,'s'));if(!m)return[];const i=m[1].match(/"([^"]*?)"/g);return i?i.map(s=>s.replace(/"/g,'')):[]};
+  const fb=[];
+  for(const m of raw.matchAll(/"question"\s*:\s*"([^"]*?)"[^}]*?"score"\s*:\s*(\d+)[^}]*?"comment"\s*:\s*"([^"]*?)"/gs))
+    fb.push({question:m[1].substring(0,100),score:parseInt(m[2]),comment:m[3],type:'main'});
+  return{
+    overallScore:gn('overallScore')||50,grade:gs('grade')||'C',
+    recommendation:gs('recommendation')||'Pending',summary:gs('summary')||'Done.',
+    strengths:ga('strengths'),improvements:ga('improvements'),
+    feedback:fb.length?fb:answers.map(a=>({question:a.question.substring(0,80),score:a.skipped?0:5,comment:a.skipped?'Skipped':'Recorded',type:a.type}))
+  };
+}
+
+// ═══════════════════════════════════════
+// INTERVIEW SETUP
+// ═══════════════════════════════════════
+document.getElementById("roleSel").addEventListener("change",e=>{
+  document.getElementById("customWrap").classList.toggle("hidden",e.target.value!=="custom");
+});
+
+function startMode(m){
+  mode=m;nav('setup');
+  const ind=document.getElementById('modeIndicator');
+  if(m==='real'){
+    ind.innerHTML='<span class="mode-badge" style="background:rgba(239,68,68,.15);color:var(--red);font-size:0.85rem;padding:6px 16px;">🔒 PROCTORED</span>';
+    document.getElementById('realInfoCard').classList.remove('hidden');
+    document.getElementById('proctorReqCard').classList.remove('hidden');
+  }else{
+    ind.innerHTML='<span class="mode-badge" style="background:rgba(16,185,129,.15);color:var(--green);font-size:0.85rem;padding:6px 16px;">🎯 MOCK PRACTICE</span>';
+    document.getElementById('realInfoCard').classList.add('hidden');
+    document.getElementById('proctorReqCard').classList.add('hidden');
+  }
+}
+
+// ═══════════════════════════════════════
+// ORB
+// ═══════════════════════════════════════
+function setOrb(s){
+  const o=document.getElementById('orb'),l=document.getElementById('orbLabel');
+  if(!o)return;o.className='orb';
+  switch(s){
+    case'speaking':o.classList.add('speaking');l.textContent='Speaking...';break;
+    case'listening':o.classList.add('listening');l.textContent='Listening...';break;
+    case'thinking':o.classList.add('thinking');l.textContent='Thinking...';break;
+    case'processing':o.classList.add('processing');l.textContent='Processing...';break;
+    default:l.textContent='Ready';
+  }
+}
+
+function updateProg(){
+  const p=Math.round((mainQ/totalQ)*100);
+  document.getElementById('progBar').style.width=p+'%';
+  if(isFollowUp){
+    document.getElementById('progText').textContent=`Follow-up Q${mainQ}/${totalQ}`;
+    document.getElementById('qTag').textContent=`Q${mainQ}↩`;
+    document.getElementById('qTag').className='followup-tag';
+  }else{
+    document.getElementById('progText').textContent=`Question ${mainQ}/${totalQ} — ${p}%`;
+    document.getElementById('qTag').textContent=`Q${mainQ}`;
+    document.getElementById('qTag').className='q-tag';
+  }
+}
+
+// ═══════════════════════════════════════
+// ★ FIXED TTS (Text-to-Speech)
+// ═══════════════════════════════════════
+let voicesLoaded=false;
+let cachedVoices=[];
+
+function loadVoices(){
+  cachedVoices=speechSynthesis.getVoices();
+  if(cachedVoices.length>0){
+    voicesLoaded=true;
+    console.log('[TTS] Loaded',cachedVoices.length,'voices');
+  }
+}
+
+if('speechSynthesis' in window){
+  loadVoices();
+  speechSynthesis.onvoiceschanged=()=>{loadVoices()};
+  // Force load on some browsers
+  setTimeout(loadVoices,100);
+  setTimeout(loadVoices,500);
+  setTimeout(loadVoices,1000);
+}
+
+function speak(text){
+  return new Promise(resolve=>{
+    if(!('speechSynthesis' in window)){
+      console.warn('[TTS] Not supported');
+      resolve();return;
+    }
+
+    // Cancel any ongoing speech
+    speechSynthesis.cancel();
+    speaking=true;
+    setOrb('speaking');
+
+    function doSpeak(){
+      try{
+        const utterance=new SpeechSynthesisUtterance(text);
+        utterance.lang=L[lang]?.t||'en-US';
+        utterance.rate=0.92;
+        utterance.pitch=1;
+        utterance.volume=1;
+
+        // Find best voice
+        const targetLang=(L[lang]?.t||'en-US').split('-')[0];
+        const voices=speechSynthesis.getVoices();
+
+        if(voices.length>0){
+          // Prefer non-default voice for better quality
+          const match=voices.find(v=>v.lang.startsWith(targetLang)&&!v.localService)
+            ||voices.find(v=>v.lang.startsWith(targetLang))
+            ||voices.find(v=>v.lang.startsWith('en'));
+          if(match){
+            utterance.voice=match;
+            console.log('[TTS] Using voice:',match.name,match.lang);
+          }
+        }
+
+        utterance.onend=()=>{
+          speaking=false;
+          console.log('[TTS] Finished speaking');
+          resolve();
+        };
+
+        utterance.onerror=(e)=>{
+          console.error('[TTS] Error:',e.error||e);
+          speaking=false;
+          resolve();
+        };
+
+        // Chrome bug: long text gets cut off
+        // Workaround: keep speechSynthesis alive
+        const keepAlive=setInterval(()=>{
+          if(!speaking){clearInterval(keepAlive);return}
+          speechSynthesis.pause();
+          speechSynthesis.resume();
+        },10000);
+
+        utterance.onend=()=>{
+          clearInterval(keepAlive);
+          speaking=false;
+          resolve();
+        };
+
+        utterance.onerror=(e)=>{
+          clearInterval(keepAlive);
+          console.error('[TTS] Error:',e.error||e);
+          speaking=false;
+          resolve();
+        };
+
+        speechSynthesis.speak(utterance);
+        console.log('[TTS] Speaking:',text.substring(0,50)+'...');
+
+      }catch(err){
+        console.error('[TTS] Exception:',err);
+        speaking=false;
+        resolve();
+      }
+    }
+
+    // Wait for voices to be ready
+    const voices=speechSynthesis.getVoices();
+    if(voices.length>0){
+      setTimeout(doSpeak,150);
+    }else{
+      console.log('[TTS] Waiting for voices...');
+      const handler=()=>{
+        speechSynthesis.onvoiceschanged=null;
+        setTimeout(doSpeak,150);
+      };
+      speechSynthesis.onvoiceschanged=handler;
+      // Fallback: try anyway after 1 second
+      setTimeout(()=>{
+        if(speaking&&!speechSynthesis.speaking){
+          console.log('[TTS] Fallback: speaking without voice match');
+          speechSynthesis.onvoiceschanged=null;
+          doSpeak();
+        }
+      },1000);
+    }
+  });
+}
+
+// ═══════════════════════════════════════
+// STT (Speech-to-Text)
+// ═══════════════════════════════════════
+function initSTT(){
+  const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+  if(!SR){toast('⚠️ Use Chrome');return}
+  rec=new SR();
+  rec.lang=L[lang]?.s||'en-US';
+  rec.interimResults=true;
+  rec.continuous=true;
+  rec.onresult=e=>{
+    let f='';
+    for(let i=e.resultIndex;i<e.results.length;i++){
+      if(e.results[i].isFinal)f+=e.results[i][0].transcript+' ';
+    }
+    if(f){transcript+=f;lastSpeech=Date.now();resetSil();startSil()}
+  };
+  rec.onerror=e=>{if(e.error!=='no-speech'&&e.error!=='aborted')console.error('[STT]',e.error)};
+  rec.onend=()=>{if(listening&&!processing&&!speaking)try{rec.start()}catch(e){}};
+}
+
+function startListen(){
+  if(!rec||listening)return;
+  listening=true;transcript='';lastSpeech=Date.now();ansStart=Date.now();
+  try{rec.start()}catch(e){try{rec.stop()}catch(e2){}setTimeout(()=>{try{rec.start()}catch(e3){}},200)}
+  setOrb('listening');
+  document.getElementById('waveWrap').classList.add('active');
+  document.getElementById('hfInfo').textContent='🎤 Listening...';
+  startTimer();startSil();
+}
+
+function stopListen(){
+  listening=false;resetSil();
+  try{rec?.stop()}catch(e){}
+  document.getElementById('waveWrap')?.classList.remove('active');
+  stopTimer();
+}
+
+// ═══════════════════════════════════════
+// SILENCE DETECTION
+// ═══════════════════════════════════════
+function startSil(){
+  resetSil();
+  silTimer=setInterval(()=>{
+    if(!listening||processing||speaking)return;
+    const sf=(Date.now()-lastSpeech)/1000;
+    if(transcript.trim().length>=MIN_ANS&&sf>=1){
+      const rem=Math.max(0,SILENCE_TIMEOUT-sf);
+      document.getElementById('silenceWrap').classList.add('show');
+      document.getElementById('silenceFill').style.width=(rem/SILENCE_TIMEOUT*100)+'%';
+      document.getElementById('silenceText').textContent=rem>0?`Auto-submit ${rem.toFixed(1)}s...`:'Submitting...';
+      if(sf>=SILENCE_TIMEOUT)autoSubmit();
+    }else{
+      document.getElementById('silenceWrap').classList.remove('show');
+    }
+  },200);
+}
+
+function resetSil(){
+  clearInterval(silTimer);silTimer=null;
+  document.getElementById('silenceWrap')?.classList.remove('show');
+}
+
+// ═══════════════════════════════════════
+// TIMER
+// ═══════════════════════════════════════
 function startTimer(){secs=0;showTime();timerInt=setInterval(()=>{secs++;showTime()},1000)}
 function stopTimer(){clearInterval(timerInt)}
-function showTime(){const el=document.getElementById('timer');if(el)el.textContent=`${Math.floor(secs/60).toString().padStart(2,'0')}:${(secs%60).toString().padStart(2,'0')}`}
-function showThink(s){document.getElementById('thinkBox')?.classList.toggle('hidden',!s);const w=document.getElementById('waveWrap');if(w)w.style.display=s?'none':'flex';const h=document.getElementById('hfInfo');if(h)h.style.display=s?'none':'block';document.getElementById('silenceWrap')?.classList.remove('show');if(s)document.getElementById('questionBox').textContent=''}
-function addViolation(type,detail){if(mode!=='real')return;violations.push({type,detail,time:new Date().toLocaleTimeString(),qNum:mainQ});document.getElementById('violationCount').textContent=violations.length;toast('⚠️ '+detail);if(violations.length>=MAX_VIOLATIONS){toast('🚫 Terminated!');endEarly()}}
-function startProctor(){if(mode!=='real')return;document.getElementById('proctorBar').style.display='flex';violations=[];document.addEventListener('visibilitychange',onVis);window.addEventListener('blur',onBlur);document.addEventListener('copy',onClip);document.addEventListener('paste',onClip);document.addEventListener('cut',onClip);document.addEventListener('contextmenu',onCtx);document.addEventListener('keydown',onKey);startCam()}
-function stopProctor(){document.removeEventListener('visibilitychange',onVis);window.removeEventListener('blur',onBlur);document.removeEventListener('copy',onClip);document.removeEventListener('paste',onClip);document.removeEventListener('cut',onClip);document.removeEventListener('contextmenu',onCtx);document.removeEventListener('keydown',onKey);if(screenStr){screenStr.getTracks().forEach(t=>t.stop());screenStr=null}if(camStr){camStr.getTracks().forEach(t=>t.stop());camStr=null}document.getElementById('proctorCam')?.classList.add('hidden');document.getElementById('proctorBar').style.display='none'}
+function showTime(){
+  const el=document.getElementById('timer');
+  if(el)el.textContent=`${Math.floor(secs/60).toString().padStart(2,'0')}:${(secs%60).toString().padStart(2,'0')}`;
+}
+
+function showThink(s){
+  document.getElementById('thinkBox')?.classList.toggle('hidden',!s);
+  const w=document.getElementById('waveWrap');if(w)w.style.display=s?'none':'flex';
+  const h=document.getElementById('hfInfo');if(h)h.style.display=s?'none':'block';
+  document.getElementById('silenceWrap')?.classList.remove('show');
+  if(s)document.getElementById('questionBox').textContent='';
+}
+
+// ═══════════════════════════════════════
+// PROCTORING
+// ═══════════════════════════════════════
+function addViolation(type,detail){
+  if(mode!=='real')return;
+  violations.push({type,detail,time:new Date().toLocaleTimeString(),qNum:mainQ});
+  document.getElementById('violationCount').textContent=violations.length;
+  toast('⚠️ '+detail);
+  if(violations.length>=MAX_VIOLATIONS){toast('🚫 Terminated!');endEarly()}
+}
+
+function startProctor(){
+  if(mode!=='real')return;
+  document.getElementById('proctorBar').style.display='flex';
+  violations=[];
+  document.addEventListener('visibilitychange',onVis);
+  window.addEventListener('blur',onBlur);
+  document.addEventListener('copy',onClip);
+  document.addEventListener('paste',onClip);
+  document.addEventListener('cut',onClip);
+  document.addEventListener('contextmenu',onCtx);
+  document.addEventListener('keydown',onKey);
+  startCam();
+}
+
+function stopProctor(){
+  document.removeEventListener('visibilitychange',onVis);
+  window.removeEventListener('blur',onBlur);
+  document.removeEventListener('copy',onClip);
+  document.removeEventListener('paste',onClip);
+  document.removeEventListener('cut',onClip);
+  document.removeEventListener('contextmenu',onCtx);
+  document.removeEventListener('keydown',onKey);
+  if(screenStr){screenStr.getTracks().forEach(t=>t.stop());screenStr=null}
+  if(camStr){camStr.getTracks().forEach(t=>t.stop());camStr=null}
+  document.getElementById('proctorCam')?.classList.add('hidden');
+  document.getElementById('proctorBar').style.display='none';
+}
+
 function onVis(){if(document.hidden&&mode==='real')addViolation('tab','Switched tab')}
 function onBlur(){if(mode==='real'&&!document.hidden)addViolation('blur','Window lost focus')}
 function onClip(e){if(mode==='real'){e.preventDefault();addViolation('clip','Attempted '+e.type)}}
 function onCtx(e){if(mode==='real')e.preventDefault()}
-function onKey(e){if(mode!=='real')return;if((e.ctrlKey||e.metaKey)&&['c','v','u','s','a','p'].includes(e.key.toLowerCase())){e.preventDefault();addViolation('key','Ctrl+'+e.key.toUpperCase())}if(e.key==='F12'||(e.ctrlKey&&e.shiftKey&&['i','j','c'].includes(e.key.toLowerCase()))){e.preventDefault();addViolation('dev','DevTools attempt')}}
-async function startCam(){try{camStr=await navigator.mediaDevices.getUserMedia({video:true,audio:false});document.getElementById('proctorVideo').srcObject=camStr;document.getElementById('proctorCam').classList.remove('hidden')}catch(e){addViolation('cam','Camera denied')}}
-async function requestScreenShare(){try{screenStr=await navigator.mediaDevices.getDisplayMedia({video:{displaySurface:'monitor'}});screenStr.getVideoTracks()[0].onended=()=>{if(mode==='real')addViolation('screen','Screen share stopped')};document.getElementById('screenShareOverlay').classList.add('hidden');toast('✅ Screen sharing active');actuallyStart()}catch(e){toast('❌ Screen share required')}}
-async function startInterview(){const rs=document.getElementById('roleSel').value;if(!rs){toast('❌ Select role');return}role=rs==='custom'?document.getElementById('customRole').value.trim():rs;if(!role){toast('❌ Enter role');return}lang=document.getElementById('langSel').value;level=document.getElementById('levelSel').value;totalQ=parseInt(document.getElementById('qCount').value);mainQ=0;isFollowUp=false;answers=[];chat=[];evalRetry=0;violations=[];if(mode==='real'){const n=document.getElementById('candName').value.trim();const e=document.getElementById('candEmail').value.trim();if(!n||!e){toast('❌ Name & Email required');return}document.getElementById('screenShareOverlay').classList.remove('hidden');return}const btn=document.getElementById('startBtn');btn.disabled=true;btn.textContent='⏳ Connecting...';try{const t=await fetch(W,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({messages:[{role:'user',content:'Say OK'}]})});if(!t.ok)throw new Error('Worker error')}catch(e){toast('❌ '+e.message);btn.disabled=false;btn.textContent='🚀 Start Interview';return}btn.disabled=false;btn.textContent='🚀 Start Interview';actuallyStart()}
-async function actuallyStart(){document.getElementById('screenShareOverlay').classList.add('hidden');const sys=`You are an expert AI interviewer for a ${level}-level "${role}" position.\nLANGUAGE: ${L[lang]?.n||'English'} only.\n${cv?'\nRESUME:\n'+cv+'\n':''}RULES:\n1. Ask ${totalQ} MAIN questions. Mix behavioral, technical, situational.\n2. For vague answers, ask C.L.A.I.M. follow-ups.\n3. Follow-ups don't count toward ${totalQ} total.\n4. Be conversational, professional. Adapt to ${level} level.\nFORMAT: [NEXT] new question | [FOLLOWUP] follow-up | [DONE] end message\nStart with [NEXT] and first question.`;chat=[{role:'system',content:sys}];nav('live');if(mode==='real')startProctor();setOrb('thinking');showThink(true);try{const fq=await callAI(chat);chat.push({role:'assistant',content:fq});const cl=fq.replace(/\[NEXT\]\s*/i,'').replace(/\[FOLLOWUP\]\s*/i,'').trim();mainQ=1;isFollowUp=false;showThink(false);document.getElementById('questionBox').textContent=cl;updateProg();initSTT();await speak(cl);startListen();toast('🎯 Started!')}catch(e){showError('❌ '+e.message);showThink(false);setOrb('idle')}}
-async function autoSubmit(){if(processing)return;processing=true;stopListen();setOrb('processing');const ans=transcript.trim();if(!ans||ans.length<MIN_ANS){processing=false;toast('🎤 Still listening...');setTimeout(()=>startListen(),500);return}const q=document.getElementById('questionBox').textContent;const dur=Math.round((Date.now()-ansStart)/1000);answers.push({question:q,answer:ans,type:isFollowUp?'followup':'main',mainQNum:mainQ,duration:dur,skipped:false});transcript='';await getNext(ans);processing=false}
-async function getNext(ans){showThink(true);setOrb('thinking');const p=`Candidate answered: "${ans}"\nMain asked: ${mainQ}/${totalQ}.\n- Vague → [FOLLOWUP] probe\n- Good → [NEXT] new question\n${mainQ>=totalQ&&!isFollowUp?'- All done → [DONE] brief thanks':''}\nOutput ONLY tag + question. Stay in ${L[lang]?.n||'English'}.`;chat.push({role:'user',content:p});try{const r=await callAI(chat);chat.push({role:'assistant',content:r});showThink(false);const u=r.toUpperCase(),cl=r.replace(/\[FOLLOWUP\]\s*/i,'').replace(/\[NEXT\]\s*/i,'').replace(/\[DONE\]\s*/i,'').trim();if(u.includes('[DONE]')){document.getElementById('questionBox').textContent=cl;mainQ=totalQ;updateProg();await speak(cl);setTimeout(()=>showResults(),2000);return}if(u.includes('[NEXT]')){mainQ++;isFollowUp=false;if(mainQ>totalQ)mainQ=totalQ}if(u.includes('[FOLLOWUP]'))isFollowUp=true;document.getElementById('questionBox').textContent=cl;updateProg();await speak(cl);startListen()}catch(e){showError('❌ '+e.message);showThink(false);setOrb('idle')}}
-function endEarly(){if(answers.length<1){toast('⚠️ Answer at least 1');return}stopListen();speechSynthesis?.cancel();showResults()}
-async function showResults(){stopListen();speechSynthesis?.cancel();stopProctor();nav('results');toast('📊 Evaluating...');await genEval()}
-async function genEval(){const qa=answers.map(a=>{const t=a.type==='followup'?'FOLLOW-UP':'MAIN Q'+a.mainQNum;return`[${t}] (${a.duration||0}s)\nQ: ${a.question.replace(/["\n\r\t\\]/g,' ').substring(0,200)}\nA: ${a.skipped?'SKIPPED':a.answer.replace(/["\n\r\t\\]/g,' ').substring(0,300)}`}).join('\n\n');const em=[{role:'system',content:'Hiring evaluator. Return ONLY valid JSON. No markdown.'},{role:'user',content:`Evaluate this ${level} interview for ${role}.\n${violations.length?'VIOLATIONS: '+violations.length+'\n':''}Transcript:\n${qa}\nReturn ONLY: {"overallScore":65,"grade":"B","recommendation":"Lean Hire","summary":"Brief.","strengths":["s1"],"improvements":["i1"],"feedback":[{"question":"q","score":7,"comment":"c","type":"main"}]}\nKeep strings short. ONLY JSON.`}];try{const raw=await callAI(em);const r=safeJSON(raw);if(typeof r.overallScore!=='number'||r.overallScore<0||r.overallScore>100)r.overallScore=50;if(violations.length){r.overallScore=Math.max(0,r.overallScore-violations.length*5);r.summary+=' ('+violations.length+' violations, -'+violations.length*5+'pts)'}renderRes(r);await saveResults(r);toast('🏆 Done!');document.getElementById('retryWrap').style.display='none'}catch(e){console.error('[EVAL]',e);evalRetry++;if(evalRetry<MAX_RETRIES){toast('⚠️ Retry '+evalRetry+'/'+MAX_RETRIES);await genEval()}else{toast('⚠️ Local eval');renderFallback();document.getElementById('retryWrap').style.display='block'}}}
-async function saveResults(r){try{if(!curAppId)return;const token=crypto.randomUUID?crypto.randomUUID():Date.now().toString(36);await db('insert','interviews',{application_id:curAppId,job_id:curJobId,token,interview_type:mode,status:'completed',interview_role:role,interview_level:level,interview_language:lang,question_count:totalQ,started_at:new Date(Date.now()-secs*1000).toISOString(),completed_at:new Date().toISOString(),duration_seconds:secs,overall_score:r.overallScore,grade:r.grade,recommendation:r.recommendation,summary:r.summary,strengths:r.strengths||[],improvements:r.improvements||[],feedback:r.feedback||[],answers:answers,violation_log:violations,violation_count:violations.length});await db('update','applications',{status:'interviewed'},{id:curAppId})}catch(e){console.error('[DB]',e)}}
-async function retryEvaluation(){evalRetry=0;toast('🔄 Retrying...');document.getElementById('scoreNum').textContent='0';document.getElementById('gradeBadge').textContent='—';document.getElementById('fbList').innerHTML='';document.getElementById('strengthsCard').style.display='none';document.getElementById('hireBadge').style.display='none';document.getElementById('retryWrap').style.display='none';await genEval()}
-function renderFallback(){const ma=answers.filter(a=>a.type==='main'&&!a.skipped).length;const sc=Math.max(0,Math.round((ma/Math.max(totalQ,1))*70)-violations.length*5);renderRes({overallScore:sc,grade:sc>=70?'B':sc>=50?'C':'D',recommendation:sc>=60?'Lean Hire':'Lean No Hire',summary:`Answered ${ma}/${totalQ}.${violations.length?' '+violations.length+' violations.':''}`,strengths:ma>0?['Participated']:[],improvements:['More detail'],feedback:answers.map(a=>({question:a.question.substring(0,80),score:a.skipped?0:5,comment:a.skipped?'Skipped':'Recorded',type:a.type}))})}
-function renderRes(r){const sc=r.overallScore||0,gr=r.grade||'?',ok=sc>=80,mid=sc>=60;const col=ok?'#10b981':mid?'#f59e0b':'#ef4444',bg=ok?'rgba(16,185,129,.15)':mid?'rgba(245,158,11,.15)':'rgba(239,68,68,.15)';document.getElementById('scoreRing').style.background=`conic-gradient(${col} ${sc*3.6}deg, rgba(255,255,255,.05) 0deg)`;const b=document.getElementById('gradeBadge');b.textContent='Grade: '+gr;b.style.background=bg;b.style.color=col;if(r.recommendation){const h=document.getElementById('hireBadge');h.style.display='inline-block';h.textContent=r.recommendation;const hire=r.recommendation.toLowerCase().includes('hire')&&!r.recommendation.toLowerCase().includes('no');h.style.background=hire?'rgba(16,185,129,.15)':'rgba(239,68,68,.15)';h.style.color=hire?'#10b981':'#ef4444'}document.getElementById('scoreSummary').textContent=r.summary||'';if(r.strengths?.length||r.improvements?.length){document.getElementById('strengthsCard').style.display='block';const sl=document.getElementById('strengthsList');sl.innerHTML='';(r.strengths||[]).forEach(s=>{sl.innerHTML+='<li><span>✅</span> '+s+'</li>'});const il=document.getElementById('improveList');il.innerHTML='';(r.improvements||[]).forEach(s=>{il.innerHTML+='<li><span>📈</span> '+s+'</li>'})}if(violations.length){document.getElementById('violationsCard').style.display='block';const vl=document.getElementById('violationsList');vl.innerHTML='';violations.forEach(v=>{vl.innerHTML+='<div class="violation-item"><span style="font-size:0.7rem;color:var(--muted);">'+v.time+'</span> ⚠️ '+v.detail+'</div>'})}const list=document.getElementById('fbList');list.innerHTML='';(r.feedback||[]).forEach((fb,i)=>{const s=fb.score||0,c=s>=7?'#10b981':s>=5?'#f59e0b':'#ef4444',bg2=s>=7?'rgba(16,185,129,.15)':s>=5?'rgba(245,158,11,.15)':'rgba(239,68,68,.15)';const tc=fb.type==='followup'?'rgba(139,92,246,.15)':'rgba(99,102,241,.15)',tt=fb.type==='followup'?'#a78bfa':'#818cf8',tl=fb.type==='followup'?'Follow-up':'Main';const ma=answers[i],pv=ma?(ma.skipped?'[Skipped]':ma.answer.substring(0,120)+(ma.answer.length>120?'...':'')):'';const d=document.createElement('div');d.className='fb-item';d.innerHTML=`<div class="fb-q">${fb.question}<span class="fb-type" style="background:${tc};color:${tt};">${tl}</span></div>${pv?`<div class="fb-a">"${pv}"</div>`:''}<span class="fb-score" style="background:${bg2};color:${c};">${s}/10</span><div class="fb-text">${fb.comment}</div>`;list.appendChild(d)});let cur=0;const el=document.getElementById('scoreNum');const iv=setInterval(()=>{cur+=Math.ceil(sc/30);if(cur>=sc){cur=sc;clearInterval(iv)}el.textContent=cur},30)}
-async function loadHR(){try{const jobs=await db('select','jobs');const apps=await db('select','applications');const ints=await db('select','interviews');document.getElementById('statJobs').textContent=Array.isArray(jobs)?jobs.length:0;document.getElementById('statApps').textContent=Array.isArray(apps)?apps.length:0;document.getElementById('statShort').textContent=Array.isArray(apps)?apps.filter(a=>a.status==='shortlisted').length:0;document.getElementById('statInt').textContent=Array.isArray(ints)?ints.length:0}catch(e){console.error(e)}loadHRJobs()}
-async function loadHRJobs(){const el=document.getElementById('hrJobsList');try{const data=await db('select','jobs',null,null,null,'created_at.desc');if(!data?.length||data.error){el.innerHTML='<p style="color:var(--muted);text-align:center;">No jobs.</p>';return}el.innerHTML=data.map(j=>`<div class="job-card" onclick="loadCands('${j.id}','${(j.title||'').replace(/'/g,"\\'")}')"><div style="display:flex;justify-content:space-between;"><h3>${j.title}</h3><span class="status-pill" style="background:${j.is_active?'rgba(16,185,129,.15)':'rgba(239,68,68,.15)'};color:${j.is_active?'#10b981':'#ef4444'};">${j.is_active?'Active':'Inactive'}</span></div><div class="job-meta"><span>🏢 ${j["Company Name"]||j.department||''}</span><span>📍 ${j.location||''}</span><span>📊 ${j.level||''}</span><span>🎯 ATS:${j.ats_threshold>0?j.ats_threshold+'+':'Manual'}</span></div></div>`).join('')}catch(e){el.innerHTML='<p style="color:var(--red);">'+e.message+'</p>'}}
-async function postJob(){const title=document.getElementById('hrTitle').value.trim();if(!title){toast('❌ Enter title');return}try{await db('insert','jobs',{title,category:document.getElementById('hrCat').value,department:document.getElementById('hrDept').value.trim(),"Company Name":document.getElementById('hrCompany').value.trim(),location:document.getElementById('hrLocation').value.trim(),level:document.getElementById('hrLevel').value,description:document.getElementById('hrJD').value.trim(),skills:document.getElementById('hrSkills').value.split(',').map(s=>s.trim()).filter(Boolean),question_count:parseInt(document.getElementById('hrQCount').value),ats_threshold:parseInt(document.getElementById('hrATS').value),is_active:true,status:'active'});toast('✅ Posted!');document.getElementById('hrTitle').value='';document.getElementById('hrJD').value='';document.getElementById('hrSkills').value='';loadHRJobs();loadHR()}catch(e){toast('❌ '+e.message)}}
-async function loadCands(jobId,title){selHRJob=jobId;document.getElementById('hrCandCard').style.display='block';document.getElementById('hrCandTitle').textContent='👥 '+title;const el=document.getElementById('hrCandList');el.innerHTML='<span class="loading"></span>';try{const data=await db('select','applications',null,{job_id:jobId},null,'created_at.desc');if(!data?.length||data.error){el.innerHTML='<p style="color:var(--muted);text-align:center;padding:16px;">No candidates.</p>';return}el.innerHTML=data.map(c=>{const sc=c.ats_score||0,col=sc>=70?'#10b981':sc>=50?'#f59e0b':'#ef4444',bg=sc>=70?'rgba(16,185,129,.15)':sc>=50?'rgba(245,158,11,.15)':'rgba(239,68,68,.15)';const stc={applied:'#f59e0b',shortlisted:'#10b981',interviewed:'#3b82f6',rejected:'#ef4444'}[c.status]||'#94a3b8';const stb={applied:'rgba(245,158,11,.15)',shortlisted:'rgba(16,185,129,.15)',interviewed:'rgba(59,130,246,.15)',rejected:'rgba(239,68,68,.15)'}[c.status]||'rgba(255,255,255,.05)';return`<div class="cand-row"><div style="display:flex;align-items:center;gap:8px;flex:1;min-width:180px;"><div class="cand-avatar">${(c.name||'?')[0].toUpperCase()}</div><div><div style="font-weight:700;font-size:0.88rem;">${c.name||'?'}</div><div style="font-size:0.72rem;color:var(--muted);">${c.email||''}</div></div></div><div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;"><span class="score-badge" style="background:${bg};color:${col};">ATS:${sc}</span><span class="status-pill" style="background:${stb};color:${stc};">${c.status}</span>${c.status==='applied'?`<button class="btn btn-sm btn-success" onclick="shortlist('${c.id}')">✅</button>`:''} ${c.status==='shortlisted'?`<button class="btn btn-sm" style="background:var(--accent);color:#fff;" onclick="sendInvite('${c.id}','${(c.email||'').replace(/'/g,"\\'")}')">📧</button>`:''} ${c.status!=='rejected'?`<button class="btn btn-sm btn-danger" onclick="reject('${c.id}')">❌</button>`:''} ${c.resume_url?`<a href="${c.resume_url}" target="_blank" class="btn btn-sm btn-secondary" style="text-decoration:none;">📄</a>`:''}</div></div>`}).join('')}catch(e){el.innerHTML='<p style="color:var(--red);">'+e.message+'</p>'}}
-async function shortlist(id){try{await db('update','applications',{status:'shortlisted'},{id});toast('✅ Shortlisted');loadCands(selHRJob,'')}catch(e){toast('❌ '+e.message)}}
-async function reject(id){try{await db('update','applications',{status:'rejected'},{id});toast('Rejected');loadCands(selHRJob,'')}catch(e){toast('❌ '+e.message)}}
-async function sendInvite(appId,email){try{const token=crypto.randomUUID?crypto.randomUUID():Date.now().toString(36)+Math.random().toString(36);const job=await db('select','jobs',null,{id:selHRJob});const j=Array.isArray(job)?job[0]:job;await db('insert','interviews',{application_id:appId,job_id:selHRJob,token,interview_type:'real',status:'pending',interview_role:j?.title||'',interview_level:j?.level||'Mid-Level',question_count:j?.question_count||10,interview_language:j?.interview_language||'en',expires_at:new Date(Date.now()+72*3600000).toISOString()});const url=`${location.origin}${location.pathname}?token=${token}`;try{await navigator.clipboard.writeText(url)}catch(e){}toast('✅ Link created!');alert(`📧 Send to ${email}:\n\n${url}\n\n(Copied!)`);loadCands(selHRJob,'')}catch(e){toast('❌ '+e.message)}}
-async function checkToken(){const token=new URLSearchParams(location.search).get('token');if(!token){const hash=location.hash.replace('#','');if(hash)nav(hash);return}toast('🔒 Token detected...');try{const data=await db('select','interviews',null,{token});const d=Array.isArray(data)?data[0]:data;if(!d||d.error){toast('❌ Invalid token');return}if(d.status==='completed'){toast('❌ Already completed');return}if(d.expires_at&&new Date(d.expires_at)<new Date()){toast('❌ Expired');return}mode='real';curAppId=d.application_id;curJobId=d.job_id;startMode('real');if(d.interview_role){document.getElementById('roleSel').value=d.interview_role;role=d.interview_role}if(d.interview_level)document.getElementById('levelSel').value=d.interview_level;if(d.question_count)document.getElementById('qCount').value=d.question_count;if(d.interview_language)document.getElementById('langSel').value=d.interview_language;if(d.application_id){const apps=await db('select','applications',null,{id:d.application_id});const a=Array.isArray(apps)?apps[0]:apps;if(a){document.getElementById('candName').value=a.name||'';document.getElementById('candEmail').value=a.email||'';if(a.resume_text){cv=a.resume_text;document.getElementById('cvFileName').textContent='✅ Resume loaded'}}}document.getElementById('candToken').value=token;toast('✅ Ready!')}catch(e){toast('❌ '+e.message)}}
-// Handle ?mode=real from career-lab
-function checkMode(){const params=new URLSearchParams(location.search);const m=params.get('mode');if(m==='real')startMode('real');else if(m==='mock')startMode('mock')}
-window.addEventListener('DOMContentLoaded',()=>{if(window.pdfjsLib)console.log('✅ PDF.js');if(!window.SpeechRecognition&&!window.webkitSpeechRecognition)console.warn('⚠️ Use Chrome');checkToken();checkMode()});
+function onKey(e){
+  if(mode!=='real')return;
+  if((e.ctrlKey||e.metaKey)&&['c','v','u','s','a','p'].includes(e.key.toLowerCase())){
+    e.preventDefault();addViolation('key','Ctrl+'+e.key.toUpperCase());
+  }
+  if(e.key==='F12'||(e.ctrlKey&&e.shiftKey&&['i','j','c'].includes(e.key.toLowerCase()))){
+    e.preventDefault();addViolation('dev','DevTools attempt');
+  }
+}
+
+async function startCam(){
+  try{
+    camStr=await navigator.mediaDevices.getUserMedia({video:true,audio:false});
+    document.getElementById('proctorVideo').srcObject=camStr;
+    document.getElementById('proctorCam').classList.remove('hidden');
+  }catch(e){addViolation('cam','Camera denied')}
+}
+
+async function requestScreenShare(){
+  try{
+    screenStr=await navigator.mediaDevices.getDisplayMedia({video:{displaySurface:'monitor'}});
+    screenStr.getVideoTracks()[0].onended=()=>{
+      if(mode==='real')addViolation('screen','Screen share stopped');
+    };
+    document.getElementById('screenShareOverlay').classList.add('hidden');
+    toast('✅ Screen sharing active');
+    actuallyStart();
+  }catch(e){toast('❌ Screen share required')}
+}
+
+// ═══════════════════════════════════════
+// ★ START INTERVIEW (with token validation)
+// ═══════════════════════════════════════
+async function startInterview(){
+  const rs=document.getElementById('roleSel').value;
+  if(!rs){toast('❌ Select role');return}
+  role=rs==='custom'?document.getElementById('customRole').value.trim():rs;
+  if(!role){toast('❌ Enter role');return}
+  lang=document.getElementById('langSel').value;
+  level=document.getElementById('levelSel').value;
+  totalQ=parseInt(document.getElementById('qCount').value);
+  mainQ=0;isFollowUp=false;answers=[];chat=[];evalRetry=0;violations=[];
+
+  if(mode==='real'){
+    const n=document.getElementById('candName').value.trim();
+    const e=document.getElementById('candEmail').value.trim();
+    const token=document.getElementById('candToken').value.trim();
+
+    if(!n||!e){toast('❌ Name & Email required');return}
+
+    // Validate token
+    if(!token){
+      toast('❌ Token required!');
+      alert('🔒 You need a valid interview token.\n\nTokens are sent by HR after your application is shortlisted.\n\nTo practice, use Mock Interview instead.');
+      return;
+    }
+
+    try{
+      toast('🔍 Validating token...');
+      const data=await db('select','interviews',null,{token});
+      const interview=Array.isArray(data)?data[0]:data;
+
+      if(!interview||interview.error){
+        toast('❌ Invalid token!');
+        alert('This token is not valid.');return;
+      }
+      if(interview.status==='completed'){
+        toast('❌ Already completed!');
+        alert('This interview was already completed.');return;
+      }
+      if(interview.expires_at&&new Date(interview.expires_at)<new Date()){
+        toast('❌ Token expired!');
+        alert('This token has expired. Contact HR.');return;
+      }
+
+      curAppId=interview.application_id;
+      curJobId=interview.job_id;
+
+      await db('update','interviews',{
+        status:'in_progress',started_at:new Date().toISOString()
+      },{token});
+
+      toast('✅ Token verified!');
+    }catch(err){
+      toast('❌ Validation failed: '+err.message);return;
+    }
+
+    document.getElementById('screenShareOverlay').classList.remove('hidden');
+    return;
+  }
+
+  // Mock mode
+  const btn=document.getElementById('startBtn');
+  btn.disabled=true;btn.textContent='⏳ Connecting...';
+  try{
+    const t=await fetch(W,{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({messages:[{role:'user',content:'Say OK'}]})});
+    if(!t.ok)throw new Error('Worker error');
+  }catch(e){
+    toast('❌ '+e.message);
+    btn.disabled=false;btn.textContent='🚀 Start Interview';return;
+  }
+  btn.disabled=false;btn.textContent='🚀 Start Interview';
+  actuallyStart();
+}
+
+// ═══════════════════════════════════════
+// ACTUALLY START INTERVIEW
+// ═══════════════════════════════════════
+async function actuallyStart(){
+  document.getElementById('screenShareOverlay').classList.add('hidden');
+  const sys=`You are an expert AI interviewer for a ${level}-level "${role}" position.
+LANGUAGE: ${L[lang]?.n||'English'} only.
+${cv?'\nRESUME:\n'+cv+'\n':''}
+RULES:
+1. Ask ${totalQ} MAIN questions. Mix behavioral, technical, situational.
+2. For vague answers, ask C.L.A.I.M. follow-ups.
+3. Follow-ups don't count toward ${totalQ} total.
+4. Be conversational, professional. Adapt to ${level} level.
+FORMAT: [NEXT] new question | [FOLLOWUP] follow-up | [DONE] end message
+Start with [NEXT] and first question.`;
+
+  chat=[{role:'system',content:sys}];
+  nav('live');
+  if(mode==='real')startProctor();
+  setOrb('thinking');showThink(true);
+
+  try{
+    const fq=await callAI(chat);
+    chat.push({role:'assistant',content:fq});
+    const cl=fq.replace(/\[NEXT\]\s*/i,'').replace(/\[FOLLOWUP\]\s*/i,'').trim();
+    mainQ=1;isFollowUp=false;
+    showThink(false);
+    document.getElementById('questionBox').textContent=cl;
+    updateProg();
+    initSTT();
+    await speak(cl);
+    startListen();
+    toast('🎯 Started!');
+  }catch(e){
+    showError('❌ '+e.message);
+    showThink(false);setOrb('idle');
+  }
+}
+
+// ═══════════════════════════════════════
+// AUTO SUBMIT + NEXT QUESTION
+// ═══════════════════════════════════════
+async function autoSubmit(){
+  if(processing)return;processing=true;stopListen();setOrb('processing');
+  const ans=transcript.trim();
+  if(!ans||ans.length<MIN_ANS){
+    processing=false;toast('🎤 Still listening...');
+    setTimeout(()=>startListen(),500);return;
+  }
+  const q=document.getElementById('questionBox').textContent;
+  const dur=Math.round((Date.now()-ansStart)/1000);
+  answers.push({question:q,answer:ans,type:isFollowUp?'followup':'main',mainQNum:mainQ,duration:dur,skipped:false});
+  transcript='';
+  await getNext(ans);
+  processing=false;
+}
+
+async function getNext(ans){
+  showThink(true);setOrb('thinking');
+  const p=`Candidate answered: "${ans}"
+Main asked: ${mainQ}/${totalQ}.
+- Vague → [FOLLOWUP] probe
+- Good → [NEXT] new question
+${mainQ>=totalQ&&!isFollowUp?'- All done → [DONE] brief thanks':''}
+Output ONLY tag + question. Stay in ${L[lang]?.n||'English'}.`;
+
+  chat.push({role:'user',content:p});
+  try{
+    const r=await callAI(chat);
+    chat.push({role:'assistant',content:r});
+    showThink(false);
+    const u=r.toUpperCase();
+    const cl=r.replace(/\[FOLLOWUP\]\s*/i,'').replace(/\[NEXT\]\s*/i,'').replace(/\[DONE\]\s*/i,'').trim();
+
+    if(u.includes('[DONE]')){
+      document.getElementById('questionBox').textContent=cl;
+      mainQ=totalQ;updateProg();
+      await speak(cl);
+      setTimeout(()=>showResults(),2000);return;
+    }
+    if(u.includes('[NEXT]')){mainQ++;isFollowUp=false;if(mainQ>totalQ)mainQ=totalQ}
+    if(u.includes('[FOLLOWUP]'))isFollowUp=true;
+
+    document.getElementById('questionBox').textContent=cl;
+    updateProg();
+    await speak(cl);
+    startListen();
+  }catch(e){showError('❌ '+e.message);showThink(false);setOrb('idle')}
+}
+
+function endEarly(){
+  if(answers.length<1){toast('⚠️ Answer at least 1');return}
+  stopListen();speechSynthesis?.cancel();showResults();
+}
+
+// ═══════════════════════════════════════
+// RESULTS
+// ═══════════════════════════════════════
+async function showResults(){
+  stopListen();speechSynthesis?.cancel();stopProctor();
+  nav('results');toast('📊 Evaluating...');
+  await genEval();
+}
+
+async function genEval(){
+  const qa=answers.map(a=>{
+    const t=a.type==='followup'?'FOLLOW-UP':'MAIN Q'+a.mainQNum;
+    return`[${t}] (${a.duration||0}s)\nQ: ${a.question.replace(/["\n\r\t\\]/g,' ').substring(0,200)}\nA: ${a.skipped?'SKIPPED':a.answer.replace(/["\n\r\t\\]/g,' ').substring(0,300)}`;
+  }).join('\n\n');
+
+  const em=[
+    {role:'system',content:'Hiring evaluator. Return ONLY valid JSON. No markdown.'},
+    {role:'user',content:`Evaluate this ${level} interview for ${role}.
+${violations.length?'VIOLATIONS: '+violations.length+'\n':''}Transcript:
+${qa}
+Return ONLY: {"overallScore":65,"grade":"B","recommendation":"Lean Hire","summary":"Brief.","strengths":["s1"],"improvements":["i1"],"feedback":[{"question":"q","score":7,"comment":"c","type":"main"}]}
+Keep strings short. ONLY JSON.`}
+  ];
+
+  try{
+    const raw=await callAI(em);
+    const r=safeJSON(raw);
+    if(typeof r.overallScore!=='number'||r.overallScore<0||r.overallScore>100)r.overallScore=50;
+    if(violations.length){
+      r.overallScore=Math.max(0,r.overallScore-violations.length*5);
+      r.summary+=' ('+violations.length+' violations, -'+violations.length*5+'pts)';
+    }
+    renderRes(r);
+    await saveResults(r);
+    toast('🏆 Done!');
+    document.getElementById('retryWrap').style.display='none';
+  }catch(e){
+    console.error('[EVAL]',e);evalRetry++;
+    if(evalRetry<MAX_RETRIES){toast('⚠️ Retry '+evalRetry+'/'+MAX_RETRIES);await genEval()}
+    else{toast('⚠️ Local eval');renderFallback();document.getElementById('retryWrap').style.display='block'}
+  }
+}
+
+async function saveResults(r){
+  try{
+    if(!curAppId)return;
+    const token=crypto.randomUUID?crypto.randomUUID():Date.now().toString(36);
+    await db('insert','interviews',{
+      application_id:curAppId,job_id:curJobId,token,
+      interview_type:mode,status:'completed',
+      interview_role:role,interview_level:level,interview_language:lang,
+      question_count:totalQ,
+      started_at:new Date(Date.now()-secs*1000).toISOString(),
+      completed_at:new Date().toISOString(),
+      duration_seconds:secs,overall_score:r.overallScore,
+      grade:r.grade,recommendation:r.recommendation,summary:r.summary,
+      strengths:r.strengths||[],improvements:r.improvements||[],
+      feedback:r.feedback||[],answers:answers,
+      violation_log:violations,violation_count:violations.length
+    });
+    await db('update','applications',{status:'interviewed'},{id:curAppId});
+    console.log('[DB] Results saved!');
+  }catch(e){console.error('[DB]',e)}
+}
+
+async function retryEvaluation(){
+  evalRetry=0;toast('🔄 Retrying...');
+  document.getElementById('scoreNum').textContent='0';
+  document.getElementById('gradeBadge').textContent='—';
+  document.getElementById('fbList').innerHTML='';
+  document.getElementById('strengthsCard').style.display='none';
+  document.getElementById('hireBadge').style.display='none';
+  document.getElementById('retryWrap').style.display='none';
+  await genEval();
+}
+
+function renderFallback(){
+  const ma=answers.filter(a=>a.type==='main'&&!a.skipped).length;
+  const sc=Math.max(0,Math.round((ma/Math.max(totalQ,1))*70)-violations.length*5);
+  renderRes({
+    overallScore:sc,grade:sc>=70?'B':sc>=50?'C':'D',
+    recommendation:sc>=60?'Lean Hire':'Lean No Hire',
+    summary:`Answered ${ma}/${totalQ}.${violations.length?' '+violations.length+' violations.':''}`,
+    strengths:ma>0?['Participated']:[],improvements:['More detail'],
+    feedback:answers.map(a=>({question:a.question.substring(0,80),score:a.skipped?0:5,comment:a.skipped?'Skipped':'Recorded',type:a.type}))
+  });
+}
+
+function renderRes(r){
+  const sc=r.overallScore||0,gr=r.grade||'?';
+  const ok=sc>=80,mid=sc>=60;
+  const col=ok?'#10b981':mid?'#f59e0b':'#ef4444';
+  const bg=ok?'rgba(16,185,129,.15)':mid?'rgba(245,158,11,.15)':'rgba(239,68,68,.15)';
+
+  document.getElementById('scoreRing').style.background=`conic-gradient(${col} ${sc*3.6}deg, rgba(255,255,255,.05) 0deg)`;
+  const b=document.getElementById('gradeBadge');
+  b.textContent='Grade: '+gr;b.style.background=bg;b.style.color=col;
+
+  if(r.recommendation){
+    const h=document.getElementById('hireBadge');h.style.display='inline-block';
+    h.textContent=r.recommendation;
+    const hire=r.recommendation.toLowerCase().includes('hire')&&!r.recommendation.toLowerCase().includes('no');
+    h.style.background=hire?'rgba(16,185,129,.15)':'rgba(239,68,68,.15)';
+    h.style.color=hire?'#10b981':'#ef4444';
+  }
+
+  document.getElementById('scoreSummary').textContent=r.summary||'';
+
+  if(r.strengths?.length||r.improvements?.length){
+    document.getElementById('strengthsCard').style.display='block';
+    const sl=document.getElementById('strengthsList');sl.innerHTML='';
+    (r.strengths||[]).forEach(s=>{sl.innerHTML+='<li><span>✅</span> '+s+'</li>'});
+    const il=document.getElementById('improveList');il.innerHTML='';
+    (r.improvements||[]).forEach(s=>{il.innerHTML+='<li><span>📈</span> '+s+'</li>'});
+  }
+
+  if(violations.length){
+    document.getElementById('violationsCard').style.display='block';
+    const vl=document.getElementById('violationsList');vl.innerHTML='';
+    violations.forEach(v=>{
+      vl.innerHTML+='<div class="violation-item"><span style="font-size:0.7rem;color:var(--muted);">'+v.time+'</span> ⚠️ '+v.detail+'</div>';
+    });
+  }
+
+  const list=document.getElementById('fbList');list.innerHTML='';
+  (r.feedback||[]).forEach((fb,i)=>{
+    const s=fb.score||0;
+    const c=s>=7?'#10b981':s>=5?'#f59e0b':'#ef4444';
+    const bg2=s>=7?'rgba(16,185,129,.15)':s>=5?'rgba(245,158,11,.15)':'rgba(239,68,68,.15)';
+    const tc=fb.type==='followup'?'rgba(139,92,246,.15)':'rgba(99,102,241,.15)';
+    const tt=fb.type==='followup'?'#a78bfa':'#818cf8';
+    const tl=fb.type==='followup'?'Follow-up':'Main';
+    const ma=answers[i];
+    const pv=ma?(ma.skipped?'[Skipped]':ma.answer.substring(0,120)+(ma.answer.length>120?'...':'')):'';
+    const d=document.createElement('div');d.className='fb-item';
+    d.innerHTML=`<div class="fb-q">${fb.question}<span class="fb-type" style="background:${tc};color:${tt};">${tl}</span></div>${pv?`<div class="fb-a">"${pv}"</div>`:''}<span class="fb-score" style="background:${bg2};color:${c};">${s}/10</span><div class="fb-text">${fb.comment}</div>`;
+    list.appendChild(d);
+  });
+
+  // Animated score counter
+  let cur=0;
+  const el=document.getElementById('scoreNum');
+  const iv=setInterval(()=>{
+    cur+=Math.ceil(sc/30);
+    if(cur>=sc){cur=sc;clearInterval(iv)}
+    el.textContent=cur;
+  },30);
+}
+
+// ═══════════════════════════════════════
+// HR DASHBOARD
+// ═══════════════════════════════════════
+async function loadHR(){
+  try{
+    const jobs=await db('select','jobs');
+    const apps=await db('select','applications');
+    const ints=await db('select','interviews');
+    document.getElementById('statJobs').textContent=Array.isArray(jobs)?jobs.length:0;
+    document.getElementById('statApps').textContent=Array.isArray(apps)?apps.length:0;
+    document.getElementById('statShort').textContent=Array.isArray(apps)?apps.filter(a=>a.status==='shortlisted').length:0;
+    document.getElementById('statInt').textContent=Array.isArray(ints)?ints.length:0;
+  }catch(e){console.error(e)}
+  loadHRJobs();
+}
+
+async function loadHRJobs(){
+  const el=document.getElementById('hrJobsList');
+  try{
+    const data=await db('select','jobs',null,null,null,'created_at.desc');
+    if(!data?.length||data.error){
+      el.innerHTML='<p style="color:var(--muted);text-align:center;">No jobs.</p>';return;
+    }
+    el.innerHTML=data.map(j=>`<div class="job-card" onclick="loadCands('${j.id}','${(j.title||'').replace(/'/g,"\\'")}')">
+      <div style="display:flex;justify-content:space-between;">
+        <h3>${j.title}</h3>
+        <span class="status-pill" style="background:${j.is_active?'rgba(16,185,129,.15)':'rgba(239,68,68,.15)'};color:${j.is_active?'#10b981':'#ef4444'};">
+          ${j.is_active?'Active':'Inactive'}
+        </span>
+      </div>
+      <div class="job-meta">
+        <span>🏢 ${j["Company Name"]||j.department||''}</span>
+        <span>📍 ${j.location||''}</span>
+        <span>📊 ${j.level||''}</span>
+        <span>🎯 ATS:${j.ats_threshold>0?j.ats_threshold+'+':'Manual'}</span>
+      </div>
+    </div>`).join('');
+  }catch(e){el.innerHTML='<p style="color:var(--red);">'+e.message+'</p>'}
+}
+
+async function postJob(){
+  const title=document.getElementById('hrTitle').value.trim();
+  if(!title){toast('❌ Enter title');return}
+  try{
+    await db('insert','jobs',{
+      title,
+      category:document.getElementById('hrCat').value,
+      department:document.getElementById('hrDept').value.trim(),
+      "Company Name":document.getElementById('hrCompany').value.trim(),
+      location:document.getElementById('hrLocation').value.trim(),
+      level:document.getElementById('hrLevel').value,
+      description:document.getElementById('hrJD').value.trim(),
+      skills:document.getElementById('hrSkills').value.split(',').map(s=>s.trim()).filter(Boolean),
+      question_count:parseInt(document.getElementById('hrQCount').value),
+      ats_threshold:parseInt(document.getElementById('hrATS').value),
+      is_active:true,status:'active'
+    });
+    toast('✅ Posted!');
+    document.getElementById('hrTitle').value='';
+    document.getElementById('hrJD').value='';
+    document.getElementById('hrSkills').value='';
+    document.getElementById('hrDept').value='';
+    document.getElementById('hrCompany').value='';
+    document.getElementById('hrLocation').value='';
+    loadHRJobs();loadHR();
+  }catch(e){toast('❌ '+e.message)}
+}
+
+async function loadCands(jobId,title){
+  selHRJob=jobId;
+  document.getElementById('hrCandCard').style.display='block';
+  document.getElementById('hrCandTitle').textContent='👥 '+(title||'Candidates');
+  const el=document.getElementById('hrCandList');
+  el.innerHTML='<span class="loading"></span>';
+  try{
+    const data=await db('select','applications',null,{job_id:jobId},null,'created_at.desc');
+    if(!data?.length||data.error){
+      el.innerHTML='<p style="color:var(--muted);text-align:center;padding:16px;">No candidates.</p>';return;
+    }
+    el.innerHTML=data.map(c=>{
+      const sc=c.ats_score||0;
+      const col=sc>=70?'#10b981':sc>=50?'#f59e0b':'#ef4444';
+      const bg=sc>=70?'rgba(16,185,129,.15)':sc>=50?'rgba(245,158,11,.15)':'rgba(239,68,68,.15)';
+      const stc={applied:'#f59e0b',shortlisted:'#10b981',interviewed:'#3b82f6',rejected:'#ef4444'}[c.status]||'#94a3b8';
+      const stb={applied:'rgba(245,158,11,.15)',shortlisted:'rgba(16,185,129,.15)',interviewed:'rgba(59,130,246,.15)',rejected:'rgba(239,68,68,.15)'}[c.status]||'rgba(255,255,255,.05)';
+      return`<div class="cand-row">
+        <div style="display:flex;align-items:center;gap:8px;flex:1;min-width:180px;">
+          <div class="cand-avatar">${(c.name||'?')[0].toUpperCase()}</div>
+          <div>
+            <div style="font-weight:700;font-size:0.88rem;">${c.name||'?'}</div>
+            <div style="font-size:0.72rem;color:var(--muted);">${c.email||''}</div>
+          </div>
+        </div>
+        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+          <span class="score-badge" style="background:${bg};color:${col};">ATS:${sc}</span>
+          <span class="status-pill" style="background:${stb};color:${stc};">${c.status}</span>
+          ${c.status==='applied'?`<button class="btn btn-sm btn-success" onclick="event.stopPropagation();shortlist('${c.id}')">✅</button>`:''}
+          ${c.status==='shortlisted'?`<button class="btn btn-sm" style="background:var(--accent);color:#fff;" onclick="event.stopPropagation();sendInvite('${c.id}','${(c.email||'').replace(/'/g,"\\'")}')">📧</button>`:''}
+          ${c.status!=='rejected'?`<button class="btn btn-sm btn-danger" onclick="event.stopPropagation();reject('${c.id}')">❌</button>`:''}
+          ${c.resume_url?`<a href="${c.resume_url}" target="_blank" class="btn btn-sm btn-secondary" style="text-decoration:none;" onclick="event.stopPropagation()">📄</a>`:''}
+        </div>
+      </div>`;
+    }).join('');
+  }catch(e){el.innerHTML='<p style="color:var(--red);">'+e.message+'</p>'}
+}
+
+async function shortlist(id){
+  try{await db('update','applications',{status:'shortlisted'},{id});toast('✅ Shortlisted');loadCands(selHRJob,'')}
+  catch(e){toast('❌ '+e.message)}
+}
+
+async function reject(id){
+  try{await db('update','applications',{status:'rejected'},{id});toast('Rejected');loadCands(selHRJob,'')}
+  catch(e){toast('❌ '+e.message)}
+}
+
+async function sendInvite(appId,email){
+  try{
+    const token=crypto.randomUUID?crypto.randomUUID():Date.now().toString(36)+Math.random().toString(36);
+    const job=await db('select','jobs',null,{id:selHRJob});
+    const j=Array.isArray(job)?job[0]:job;
+    await db('insert','interviews',{
+      application_id:appId,job_id:selHRJob,token,
+      interview_type:'real',status:'pending',
+      interview_role:j?.title||'',interview_level:j?.level||'Mid-Level',
+      question_count:j?.question_count||10,
+      interview_language:j?.interview_language||'en',
+      expires_at:new Date(Date.now()+72*3600000).toISOString()
+    });
+    const url=`${location.origin}${location.pathname}?token=${token}`;
+    try{await navigator.clipboard.writeText(url)}catch(e){}
+    toast('✅ Link created!');
+    alert(`📧 Send to ${email}:\n\n${url}\n\n(Copied to clipboard!)`);
+    loadCands(selHRJob,'');
+  }catch(e){toast('❌ '+e.message)}
+}
+
+// ═══════════════════════════════════════
+// TOKEN FROM URL
+// ═══════════════════════════════════════
+async function checkToken(){
+  const params=new URLSearchParams(location.search);
+  const token=params.get('token');
+
+  // Handle #hr hash
+  const hash=location.hash.replace('#','');
+  if(hash==='hr'){nav('hr');return}
+  if(hash&&!token){nav(hash);return}
+
+  if(!token)return;
+
+  toast('🔒 Token detected...');
+  try{
+    const data=await db('select','interviews',null,{token});
+    const d=Array.isArray(data)?data[0]:data;
+
+    if(!d||d.error){toast('❌ Invalid token');return}
+    if(d.status==='completed'){toast('❌ Already completed');alert('This interview was already completed.');return}
+    if(d.expires_at&&new Date(d.expires_at)<new Date()){toast('❌ Expired');alert('Token expired. Contact HR.');return}
+
+    mode='real';curAppId=d.application_id;curJobId=d.job_id;
+    startMode('real');
+
+    if(d.interview_role){document.getElementById('roleSel').value=d.interview_role;role=d.interview_role}
+    if(d.interview_level)document.getElementById('levelSel').value=d.interview_level;
+    if(d.question_count)document.getElementById('qCount').value=d.question_count;
+    if(d.interview_language)document.getElementById('langSel').value=d.interview_language;
+
+    if(d.application_id){
+      const apps=await db('select','applications',null,{id:d.application_id});
+      const a=Array.isArray(apps)?apps[0]:apps;
+      if(a){
+        document.getElementById('candName').value=a.name||'';
+        document.getElementById('candEmail').value=a.email||'';
+        if(a.resume_text){cv=a.resume_text;document.getElementById('cvFileName').textContent='✅ Resume loaded'}
+      }
+    }
+
+    document.getElementById('candToken').value=token;
+    toast('✅ Interview loaded! Click Start.');
+  }catch(e){toast('❌ '+e.message)}
+}
+
+function checkMode(){
+  const params=new URLSearchParams(location.search);
+  const m=params.get('mode');
+  if(m==='real')startMode('real');
+  else if(m==='mock')startMode('mock');
+}
+
+// ═══════════════════════════════════════
+// INIT
+// ═══════════════════════════════════════
+window.addEventListener('DOMContentLoaded',()=>{
+  if(window.pdfjsLib)console.log('✅ PDF.js loaded');
+  if(!window.SpeechRecognition&&!window.webkitSpeechRecognition)console.warn('⚠️ Use Chrome for voice');
+  console.log('[TTS] Voices ready:',speechSynthesis.getVoices().length);
+  checkToken();
+  checkMode();
+});
 </script>
 </body>
 </html>
