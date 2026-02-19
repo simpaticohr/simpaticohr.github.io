@@ -398,21 +398,25 @@
 
 <script>
   // ═══════════════════════════════════════
-  // ★ NO SUPABASE KEYS — Uses Worker Proxy
+  // ★ DIRECT SUPABASE CONNECTION
   // ═══════════════════════════════════════
-  const WORKER_URL = "https://evalis-ai.simpaticohrconsultancy.workers.dev";
+  const SUPABASE_URL = "https://cvkxtsvgnynxexmemfuy.supabase.co";
+  const SUPABASE_KEY = "PASTE_YOUR_ANON_KEY_HERE";
 
   let allJobs = [];
   let currentFilter = 'all';
 
-  // ═══════════════════════════════════════
-  // DB Helper (calls Worker, NOT Supabase)
-  // ═══════════════════════════════════════
-  async function db(action, table, data = null, filters = null, select = null, order = null) {
-    const res = await fetch(WORKER_URL + "/db", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action, table, data, filters, select, order })
+  async function supabaseGet(table, filters = {}) {
+    let url = `${SUPABASE_URL}/rest/v1/${table}?`;
+    for (const [key, val] of Object.entries(filters)) {
+      url += `${key}=eq.${val}&`;
+    }
+    url += `order=created_at.desc`;
+    const res = await fetch(url, {
+      headers: {
+        "apikey": SUPABASE_KEY,
+        "Authorization": "Bearer " + SUPABASE_KEY
+      }
     });
     return await res.json();
   }
@@ -422,9 +426,9 @@
   // ═══════════════════════════════════════
   async function loadJobs() {
     const el = document.getElementById("jobsList");
-    
+
     try {
-      const data = await db('select', 'jobs', null, { is_active: true }, null, 'created_at.desc');
+      const data = await supabaseGet('jobs', { is_active: true });
 
       if (!data || data.error || !Array.isArray(data) || data.length === 0) {
         el.innerHTML = `
@@ -439,7 +443,6 @@
       allJobs = data;
       renderJobs(allJobs);
 
-      // Stats
       document.getElementById('totalJobs').textContent = data.length;
       const depts = [...new Set(data.map(j => j.department || j.category || 'General'))];
       document.getElementById('totalDepts').textContent = depts.length;
@@ -482,8 +485,7 @@
       }[job.level] || 'level-mid';
 
       const skills = job.skills || [];
-      const company = job["Company Name"] || job.company_name || "Simpatico HR";
-      const country = job["Country"] || "";
+      const company = job.company_name || "Simpatico HR";
       const location = job.location || "Remote";
       const dept = job.department || job.category || "General";
       const level = job.level || "Mid-Level";
@@ -500,18 +502,11 @@
             <div class="job-meta">
               <div class="job-meta-item"><i class="fa fa-building"></i>${company}</div>
               <div class="job-meta-item"><i class="fa fa-briefcase"></i>${dept}</div>
-              <div class="job-meta-item"><i class="fa fa-location-dot"></i>${location}${country ? ' • ' + country : ''}</div>
+              <div class="job-meta-item"><i class="fa fa-location-dot"></i>${location}</div>
               ${atsThreshold > 0 ? `<div class="job-meta-item"><i class="fa fa-robot"></i>AI Screening</div>` : ''}
             </div>
-
             <p class="job-desc">${desc.length > 250 ? desc.substring(0, 250) + '...' : desc}</p>
-
-            ${skills.length ? `
-              <div class="job-skills">
-                ${skills.map(s => `<span class="skill-tag">${s}</span>`).join('')}
-              </div>
-            ` : ''}
-
+            ${skills.length ? `<div class="job-skills">${skills.map(s => `<span class="skill-tag">${s}</span>`).join('')}</div>` : ''}
             <div class="job-footer">
               <span class="job-level ${levelClass}">${level}</span>
               <a class="apply-btn" href="career.html?job_id=${job.id}">
@@ -524,49 +519,33 @@
   }
 
   // ═══════════════════════════════════════
-  // Filter
+  // Filter & Search
   // ═══════════════════════════════════════
   function filterJobs(category, btn) {
     currentFilter = category;
-    
-    // Update active button
     document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
-
-    // Filter
-    const searchTerm = document.getElementById('searchInput').value.toLowerCase();
-    applyFilters(category, searchTerm);
+    applyFilters(category, document.getElementById('searchInput').value.toLowerCase());
   }
 
   function applyFilters(category, searchTerm) {
     let filtered = allJobs;
-
-    // Category filter
     if (category !== 'all') {
-      filtered = filtered.filter(j => 
+      filtered = filtered.filter(j =>
         (j.category || '').toLowerCase() === category.toLowerCase() ||
         (j.department || '').toLowerCase() === category.toLowerCase()
       );
     }
-
-    // Search filter
     if (searchTerm) {
       filtered = filtered.filter(j => {
-        const text = [
-          j.title, j.description, j.department, j.category,
-          j.location, j["Company Name"], j["Country"],
-          j.level, ...(j.skills || [])
-        ].filter(Boolean).join(' ').toLowerCase();
+        const text = [j.title, j.description, j.department, j.category, j.location, j.level, ...(j.skills || [])]
+          .filter(Boolean).join(' ').toLowerCase();
         return text.includes(searchTerm);
       });
     }
-
     renderJobs(filtered);
   }
 
-  // ═══════════════════════════════════════
-  // Search (debounced)
-  // ═══════════════════════════════════════
   let searchTimeout;
   document.getElementById('searchInput').addEventListener('input', (e) => {
     clearTimeout(searchTimeout);
@@ -575,9 +554,7 @@
     }, 300);
   });
 
-  // ═══════════════════════════════════════
   // Init
-  // ═══════════════════════════════════════
   loadJobs();
 </script>
 
