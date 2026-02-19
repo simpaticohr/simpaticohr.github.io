@@ -118,91 +118,283 @@
 </div>
 
 <script>
-  /* =============================
-     SUPABASE CONFIG
-  ============================== */
+  // ═══════════════════════════════════════
+  // ★ DIRECT SUPABASE CONNECTION
+  // ═══════════════════════════════════════
   const SUPABASE_URL = "https://cvkxtsvgnynxexmemfuy.supabase.co";
-  const SUPABASE_ANON_KEY = "PASTE_YOUR_REAL_ANON_KEY_HERE";
+  const SUPABASE_KEY = "PASTE_YOUR_ANON_KEY_HERE";
 
-  const supabaseClient = supabase.createClient(
-    SUPABASE_URL,
-    SUPABASE_ANON_KEY
-  );
+  let resumeText = "";
+  let currentJobId = null;
+  let currentJobTitle = "";
 
-  /* =============================
-     GET JOB ID FROM URL
-  ============================== */
-  const params = new URLSearchParams(window.location.search);
-  const jobId = params.get("job_id");
-
-  if (!jobId) {
-    document.body.innerHTML = "<h2 style='text-align:center'>Invalid job link</h2>";
+  function toast(m) {
+    const c = document.getElementById("toasts");
+    const t = document.createElement("div");
+    t.className = "toast";
+    t.textContent = m;
+    c.appendChild(t);
+    setTimeout(() => t.remove(), 3200);
   }
 
-  /* =============================
-     FORM SUBMIT
-  ============================== */
-  document.getElementById("applyForm").addEventListener("submit", async (e) => {
-    e.preventDefault();
-
-    const status = document.getElementById("status");
-    status.style.color = "#555";
-    status.textContent = "Submitting application…";
-
-    const fullName = document.getElementById("full_name").value;
-    const email = document.getElementById("email").value;
-    const file = document.getElementById("resume_file").files[0];
-
-    if (file.size > 5 * 1024 * 1024) {
-      status.style.color = "red";
-      status.textContent = "CV must be under 5 MB";
-      return;
+  // ═══════════════════════════════════════
+  // Supabase Helpers
+  // ═══════════════════════════════════════
+  async function supabaseGet(table, filters = {}) {
+    let url = `${SUPABASE_URL}/rest/v1/${table}?`;
+    for (const [key, val] of Object.entries(filters)) {
+      url += `${key}=eq.${val}&`;
     }
+    const res = await fetch(url, {
+      headers: {
+        "apikey": SUPABASE_KEY,
+        "Authorization": "Bearer " + SUPABASE_KEY
+      }
+    });
+    return await res.json();
+  }
 
-    /* =============================
-       UPLOAD CV TO STORAGE
-    ============================== */
-    const filePath = `cv-${Date.now()}-${file.name}`;
+  async function supabaseInsert(table, data) {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}`, {
+      method: "POST",
+      headers: {
+        "apikey": SUPABASE_KEY,
+        "Authorization": "Bearer " + SUPABASE_KEY,
+        "Content-Type": "application/json",
+        "Prefer": "return=representation"
+      },
+      body: JSON.stringify(data)
+    });
+    return await res.json();
+  }
 
-    const { error: uploadError } = await supabaseClient
-      .storage
-      .from("resumes")
-      .upload(filePath, file);
-
-    if (uploadError) {
-      console.error(uploadError);
-      status.style.color = "red";
-      status.textContent = "CV upload failed";
-      return;
+  async function supabaseUpdate(table, data, filters = {}) {
+    let url = `${SUPABASE_URL}/rest/v1/${table}?`;
+    for (const [key, val] of Object.entries(filters)) {
+      url += `${key}=eq.${val}&`;
     }
+    const res = await fetch(url, {
+      method: "PATCH",
+      headers: {
+        "apikey": SUPABASE_KEY,
+        "Authorization": "Bearer " + SUPABASE_KEY,
+        "Content-Type": "application/json",
+        "Prefer": "return=representation"
+      },
+      body: JSON.stringify(data)
+    });
+    return await res.json();
+  }
 
-    const resumeUrl = `${SUPABASE_URL}/storage/v1/object/public/resumes/${filePath}`;
-
-    /* =============================
-       INSERT CANDIDATE
-    ============================== */
-    const { error } = await supabaseClient
-      .from("candidates")
-      .insert([{
-        full_name: fullName,
-        email: email,
-        resume_url: resumeUrl,
-        job_id: jobId,
-        status: "applied"
-      }]);
-
-    if (error) {
-      console.error(error);
-      status.style.color = "red";
-      status.textContent = "Submission failed";
-      return;
+  async function uploadToStorage(file, fileName) {
+    const res = await fetch(
+      `${SUPABASE_URL}/storage/v1/object/resumes/${fileName}`,
+      {
+        method: "POST",
+        headers: {
+          "apikey": SUPABASE_KEY,
+          "Authorization": "Bearer " + SUPABASE_KEY,
+          "Content-Type": file.type
+        },
+        body: file
+      }
+    );
+    if (res.ok) {
+      return { url: `${SUPABASE_URL}/storage/v1/object/public/resumes/${fileName}` };
     }
+    return { url: '' };
+  }
 
-    status.style.color = "green";
-    status.textContent = "Application submitted successfully ✅";
-    e.target.reset();
+  // ═══════════════════════════════════════
+  // Get job_id from URL
+  // ═══════════════════════════════════════
+  function getJobFromURL() {
+    const params = new URLSearchParams(window.location.search);
+    const jobId = params.get('job_id');
+    if (jobId) {
+      currentJobId = jobId;
+      loadJobInfo(jobId);
+    }
+  }
+
+  async function loadJobInfo(jobId) {
+    try {
+      const data = await supabaseGet('jobs', { id: jobId });
+      const job = Array.isArray(data) ? data[0] : data;
+      if (job && job.title) {
+        currentJobTitle = job.title;
+        const badge = document.getElementById('jobBadge');
+        badge.textContent = '💼 ' + job.title;
+        badge.style.display = 'inline-block';
+
+        if (job.category) {
+          const sel = document.getElementById('jobCategory');
+          for (let i = 0; i < sel.options.length; i++) {
+            if (sel.options[i].value === job.category) {
+              sel.selectedIndex = i;
+              break;
+            }
+          }
+        }
+      }
+    } catch (e) {
+      console.error('Job load error:', e);
+    }
+  }
+
+  // ═══════════════════════════════════════
+  // File Upload Handler
+  // ═══════════════════════════════════════
+  document.getElementById('resume').addEventListener('change', async e => {
+    const file = e.target.files[0];
+    if (!file) return;
+    document.getElementById('fileName').textContent = '⏳ Processing...';
+
+    try {
+      const ext = file.name.split('.').pop().toLowerCase();
+      if (ext === 'txt') resumeText = await file.text();
+      else if (ext === 'pdf') resumeText = await extractPDF(file);
+      else resumeText = await file.text();
+
+      resumeText = resumeText.replace(/\s+/g, ' ').replace(/[^\x20-\x7E\n]/g, '').trim().substring(0, 5000);
+
+      if (resumeText.length < 30) {
+        document.getElementById('fileName').textContent = '⚠️ Could not read file. Try TXT format.';
+        resumeText = '';
+        return;
+      }
+
+      document.getElementById('fileName').textContent = '✅ ' + file.name + ' (' + resumeText.length + ' chars)';
+      document.getElementById('uploadArea').classList.add('ok');
+      window._resumeFile = file;
+      toast('✅ Resume loaded!');
+    } catch (err) {
+      document.getElementById('fileName').textContent = '❌ Error reading file';
+      resumeText = '';
+    }
   });
-</script>
 
+  async function extractPDF(f) {
+    if (!window.pdfjsLib) return await f.text();
+    try {
+      const b = await f.arrayBuffer();
+      const p = await pdfjsLib.getDocument({ data: b }).promise;
+      let t = '';
+      for (let i = 1; i <= p.numPages; i++) {
+        const pg = await p.getPage(i);
+        const c = await pg.getTextContent();
+        t += c.items.map(x => x.str).join(' ') + '\n';
+      }
+      return t;
+    } catch (e) {
+      return await f.text();
+    }
+  }
+
+  // ═══════════════════════════════════════
+  // Submit Application
+  // ═══════════════════════════════════════
+  async function submitApplication() {
+    const name = document.getElementById('name').value.trim();
+    const email = document.getElementById('email').value.trim();
+    const phone = document.getElementById('phone').value.trim();
+    const category = document.getElementById('jobCategory').value;
+
+    if (!name) { toast('❌ Enter your name'); return; }
+    if (!email) { toast('❌ Enter your email'); return; }
+    if (!resumeText) { toast('❌ Upload your resume'); return; }
+
+    const btn = document.getElementById('submitBtn');
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fa fa-spinner fa-spin"></i> Submitting...';
+    const st = document.getElementById('status');
+    st.textContent = '';
+
+    try {
+      // 1. Upload resume
+      let resume_url = '';
+      if (window._resumeFile) {
+        st.textContent = '📤 Uploading resume...';
+        const fn = Date.now() + '_' + window._resumeFile.name;
+        const up = await uploadToStorage(window._resumeFile, fn);
+        resume_url = up.url || '';
+      }
+
+      // 2. Save application
+      st.textContent = '📝 Saving application...';
+      const result = await supabaseInsert('applications', {
+        job_id: currentJobId || null,
+        name, email, phone,
+        resume_url,
+        resume_text: resumeText.substring(0, 5000),
+        status: 'applied'
+      });
+
+      const app = Array.isArray(result) ? result[0] : result;
+      if (!app || app.error) throw new Error(app?.error || 'Failed to save');
+
+      // 3. Show success (without AI screening since worker is down)
+      showSuccess(app, { score: 0, status: 'applied', summary: 'Application received. HR will review your profile.' });
+      toast('✅ Application submitted!');
+
+    } catch (err) {
+      console.error(err);
+      st.innerHTML = `<span style="color:#f87171;">❌ Error: ${err.message}</span>`;
+      toast('❌ Submission failed');
+    }
+
+    btn.disabled = false;
+    btn.innerHTML = '<i class="fa fa-paper-plane"></i> Submit Application';
+  }
+
+  function showSuccess(app, ats) {
+    document.getElementById('formSection').style.display = 'none';
+    document.getElementById('successSection').style.display = 'block';
+
+    const score = ats.score || 0;
+    const isGood = score >= 75;
+    const isOk = score >= 50;
+    const color = isGood ? '#10b981' : isOk ? '#f59e0b' : '#ef4444';
+    const bg = isGood ? 'rgba(16,185,129,.15)' : isOk ? 'rgba(245,158,11,.15)' : 'rgba(239,68,68,.15)';
+
+    const scoreEl = document.getElementById('atsScoreDisplay');
+    if (score > 0) {
+      scoreEl.textContent = 'ATS Score: ' + score + '/100';
+      scoreEl.style.background = bg;
+      scoreEl.style.color = color;
+    } else {
+      scoreEl.textContent = '✅ Received';
+      scoreEl.style.background = 'rgba(16,185,129,.15)';
+      scoreEl.style.color = '#10b981';
+    }
+
+    document.getElementById('successMsg').textContent =
+      'Your application has been received. HR will review your profile and contact you if shortlisted.';
+
+    if (ats.summary) {
+      document.getElementById('summarySection').style.display = 'block';
+      document.getElementById('atsSummary').textContent = ats.summary;
+    }
+  }
+
+  function resetForm() {
+    document.getElementById('formSection').style.display = 'block';
+    document.getElementById('successSection').style.display = 'none';
+    document.getElementById('name').value = '';
+    document.getElementById('email').value = '';
+    document.getElementById('phone').value = '';
+    document.getElementById('fileName').textContent = 'No file selected';
+    document.getElementById('uploadArea').classList.remove('ok');
+    document.getElementById('status').textContent = '';
+    document.getElementById('matchedSection').style.display = 'none';
+    document.getElementById('missingSection').style.display = 'none';
+    document.getElementById('summarySection').style.display = 'none';
+    resumeText = '';
+    window._resumeFile = null;
+  }
+
+  // Init
+  getJobFromURL();
+</script>
 </body>
 </html>
