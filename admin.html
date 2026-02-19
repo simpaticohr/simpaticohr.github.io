@@ -1,47 +1,1132 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <title>Admin | Simpatico HR ATS</title>
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-</head>
-<body style="font-family:system-ui;padding:30px">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Admin Panel | Simpatico HR</title>
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" rel="stylesheet">
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box}
+    :root{--bg:#06090f;--card:#0d1117;--card2:#161b22;--border:#21262d;--accent:#6366f1;--accent2:#bc8cff;--green:#3fb950;--red:#f85149;--yellow:#d29922;--text:#e6edf3;--text2:#8b949e;--glow:rgba(99,102,241,0.15)}
+    body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--text);min-height:100vh}
 
-<h2>Recruiter Admin Panel</h2>
-<div id="list">Loading…</div>
+    /* Layout */
+    .app{display:flex;min-height:100vh}
+    .sidebar{width:260px;background:var(--card);border-right:1px solid var(--border);padding:0;position:fixed;height:100vh;overflow-y:auto;z-index:50}
+    .main{margin-left:260px;flex:1;padding:24px;min-height:100vh}
+
+    /* Sidebar */
+    .sidebar-header{padding:20px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px}
+    .sidebar-header img{height:32px;width:32px;border-radius:8px}
+    .sidebar-header span{font-weight:800;font-size:0.95rem}
+    .sidebar-header .tech{color:var(--accent)}
+    .sidebar-badge{display:block;font-size:0.65rem;color:var(--accent);font-weight:700;letter-spacing:1px;margin-top:2px}
+
+    .sidebar-nav{padding:12px}
+    .sidebar-section{font-size:0.7rem;color:var(--text2);font-weight:700;letter-spacing:1.5px;text-transform:uppercase;padding:16px 12px 6px;margin-top:4px}
+    .nav-item{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:10px;color:var(--text2);cursor:pointer;font-size:0.85rem;font-weight:500;transition:all 0.15s;margin-bottom:2px}
+    .nav-item:hover{background:rgba(255,255,255,0.04);color:var(--text)}
+    .nav-item.active{background:rgba(99,102,241,0.12);color:var(--accent)}
+    .nav-item i{width:18px;text-align:center;font-size:0.85rem}
+    .nav-item .badge{margin-left:auto;background:var(--red);color:#fff;padding:1px 7px;border-radius:10px;font-size:0.65rem;font-weight:700}
+
+    /* Top bar */
+    .topbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:24px;flex-wrap:wrap;gap:12px}
+    .topbar h1{font-size:1.4rem;font-weight:700}
+    .topbar-right{display:flex;align-items:center;gap:12px}
+    .user-pill{display:flex;align-items:center;gap:8px;background:var(--card);border:1px solid var(--border);padding:6px 14px;border-radius:10px;font-size:0.82rem}
+    .user-avatar{width:28px;height:28px;border-radius:50%;background:linear-gradient(135deg,var(--accent),var(--accent2));display:flex;align-items:center;justify-content:center;font-weight:700;font-size:0.75rem;color:#fff}
+
+    /* Cards */
+    .card{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:24px;margin-bottom:16px}
+    .card h2{font-size:1rem;font-weight:600;margin-bottom:16px;display:flex;align-items:center;gap:8px}
+    .card h2 .count{background:rgba(99,102,241,0.15);color:var(--accent);padding:2px 10px;border-radius:10px;font-size:0.75rem;margin-left:8px}
+
+    /* Stats */
+    .stat-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:24px}
+    .stat-card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:18px}
+    .stat-card .stat-icon{width:40px;height:40px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:1.1rem;margin-bottom:10px}
+    .stat-card .stat-num{font-size:1.8rem;font-weight:800}
+    .stat-card .stat-label{font-size:0.75rem;color:var(--text2);margin-top:2px}
+    .stat-card .stat-change{font-size:0.72rem;margin-top:4px}
+
+    /* Table */
+    .table-wrap{overflow-x:auto}
+    table{width:100%;border-collapse:collapse;font-size:0.85rem}
+    th{text-align:left;padding:10px 12px;color:var(--text2);font-size:0.75rem;font-weight:600;letter-spacing:0.5px;text-transform:uppercase;border-bottom:1px solid var(--border);background:var(--card2)}
+    td{padding:10px 12px;border-bottom:1px solid var(--border)}
+    tr:hover td{background:rgba(255,255,255,0.02)}
+
+    .pill{padding:3px 10px;border-radius:8px;font-size:0.72rem;font-weight:600;display:inline-block}
+    .pill-green{background:rgba(63,185,80,0.12);color:var(--green)}
+    .pill-yellow{background:rgba(210,153,34,0.12);color:var(--yellow)}
+    .pill-red{background:rgba(248,81,73,0.12);color:var(--red)}
+    .pill-blue{background:rgba(99,102,241,0.12);color:var(--accent)}
+    .pill-purple{background:rgba(188,140,255,0.12);color:var(--accent2)}
+
+    /* Buttons */
+    .btn{display:inline-flex;align-items:center;gap:6px;padding:8px 16px;border:none;border-radius:8px;font-size:0.82rem;font-weight:600;cursor:pointer;transition:all 0.15s;font-family:inherit;color:#fff}
+    .btn-primary{background:var(--accent)}
+    .btn-primary:hover{background:#4f46e5}
+    .btn-success{background:var(--green)}
+    .btn-danger{background:var(--red)}
+    .btn-ghost{background:transparent;border:1px solid var(--border);color:var(--text2)}
+    .btn-ghost:hover{border-color:var(--accent);color:var(--text)}
+    .btn-sm{padding:5px 10px;font-size:0.75rem;border-radius:6px}
+    .btn-group{display:flex;gap:6px;flex-wrap:wrap}
+
+    /* Forms */
+    .form-group{margin-bottom:14px}
+    .form-group label{display:block;font-size:0.78rem;color:var(--text2);margin-bottom:4px;font-weight:600}
+    .form-group input,.form-group select,.form-group textarea{width:100%;padding:10px 12px;background:var(--card2);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:0.88rem;outline:none;font-family:inherit}
+    .form-group input:focus,.form-group select:focus,.form-group textarea:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--glow)}
+    .form-row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+    .form-row3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px}
+
+    /* Toggle */
+    .toggle-wrap{display:flex;align-items:center;gap:8px;font-size:0.85rem}
+    .toggle{width:42px;height:24px;background:var(--border);border-radius:12px;position:relative;cursor:pointer;transition:background 0.2s}
+    .toggle.on{background:var(--green)}
+    .toggle::after{content:'';position:absolute;width:18px;height:18px;background:#fff;border-radius:50%;top:3px;left:3px;transition:transform 0.2s}
+    .toggle.on::after{transform:translateX(18px)}
+
+    /* Modal */
+    .modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);backdrop-filter:blur(4px);z-index:200;align-items:center;justify-content:center}
+    .modal-overlay.active{display:flex}
+    .modal{background:var(--card);border:1px solid var(--border);border-radius:20px;padding:28px;width:90%;max-width:560px;max-height:90vh;overflow-y:auto}
+    .modal h3{font-size:1.15rem;margin-bottom:20px;display:flex;align-items:center;gap:8px}
+    .modal-footer{display:flex;gap:10px;justify-content:flex-end;margin-top:20px;padding-top:16px;border-top:1px solid var(--border)}
+
+    /* Settings cards */
+    .setting-row{display:flex;justify-content:space-between;align-items:center;padding:14px 0;border-bottom:1px solid var(--border)}
+    .setting-row:last-child{border-bottom:none}
+    .setting-info h4{font-size:0.88rem;margin-bottom:2px}
+    .setting-info p{font-size:0.78rem;color:var(--text2)}
+
+    /* Search */
+    .search-bar{position:relative;margin-bottom:16px}
+    .search-bar i{position:absolute;left:12px;top:50%;transform:translateY(-50%);color:var(--text2)}
+    .search-bar input{width:100%;padding:10px 12px 10px 36px;background:var(--card2);border:1px solid var(--border);border-radius:10px;color:var(--text);font-size:0.88rem;outline:none}
+    .search-bar input:focus{border-color:var(--accent)}
+
+    /* Tabs */
+    .tabs{display:flex;gap:4px;margin-bottom:16px;background:var(--card2);padding:4px;border-radius:10px;border:1px solid var(--border)}
+    .tab{padding:8px 16px;border-radius:8px;font-size:0.82rem;font-weight:600;cursor:pointer;color:var(--text2);transition:all 0.15s;border:none;background:none;font-family:inherit}
+    .tab.active{background:var(--accent);color:#fff}
+    .tab:hover:not(.active){background:rgba(255,255,255,0.04)}
+
+    /* Toast */
+    .toast-box{position:fixed;top:16px;right:16px;z-index:9999;display:flex;flex-direction:column;gap:8px}
+    .toast{background:var(--card);border:1px solid var(--border);color:var(--text);padding:12px 20px;border-radius:12px;font-size:0.85rem;box-shadow:0 8px 24px rgba(0,0,0,0.4);animation:tIn 0.3s ease,tOut 0.3s ease 2.7s forwards}
+    @keyframes tIn{from{transform:translateX(120%);opacity:0}to{transform:translateX(0);opacity:1}}
+    @keyframes tOut{to{transform:translateX(120%);opacity:0}}
+
+    /* Login */
+    .login-page{display:flex;align-items:center;justify-content:center;min-height:100vh;padding:20px}
+    .login-card{background:var(--card);border:1px solid var(--border);border-radius:24px;padding:40px;width:100%;max-width:400px;text-align:center}
+    .login-card img{height:48px;margin-bottom:16px;border-radius:12px}
+    .login-card h1{font-size:1.4rem;margin-bottom:4px}
+    .login-card p{color:var(--text2);font-size:0.88rem;margin-bottom:24px}
+    .login-card .form-group{text-align:left}
+    .login-card .btn{width:100%;justify-content:center;padding:12px;font-size:0.95rem;margin-top:8px}
+    .login-error{color:var(--red);font-size:0.82rem;margin-top:8px;display:none}
+
+    .hidden{display:none!important}
+    .loading{display:inline-block;width:16px;height:16px;border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin 0.8s linear infinite}
+    @keyframes spin{to{transform:rotate(360deg)}}
+
+    /* Responsive */
+    @media(max-width:768px){
+      .sidebar{display:none}
+      .main{margin-left:0}
+      .stat-grid{grid-template-columns:1fr 1fr}
+      .form-row,.form-row3{grid-template-columns:1fr}
+      .mobile-menu{display:block!important}
+    }
+    .mobile-menu{display:none;position:fixed;top:12px;left:12px;z-index:60;background:var(--card);border:1px solid var(--border);padding:8px 12px;border-radius:10px;cursor:pointer}
+  </style>
+</head>
+<body>
+
+<div class="toast-box" id="toasts"></div>
+
+<!-- ══════════════════════════════════════ -->
+<!-- LOGIN PAGE -->
+<!-- ══════════════════════════════════════ -->
+<div id="loginPage" class="login-page">
+  <div class="login-card">
+    <img src="favicon-96x96.png" alt="Logo">
+    <h1>SIMPATICO <span style="color:var(--accent)">HR</span></h1>
+    <p>Super Admin Panel</p>
+    <div class="form-group">
+      <label>Email</label>
+      <input type="email" id="loginEmail" placeholder="admin@simpaticohrconsultancy.com">
+    </div>
+    <div class="form-group">
+      <label>Password</label>
+      <input type="password" id="loginPass" placeholder="Enter password">
+    </div>
+    <div class="login-error" id="loginError">Invalid credentials</div>
+    <button class="btn btn-primary" onclick="doLogin()">🔐 Sign In</button>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════ -->
+<!-- MAIN APP -->
+<!-- ══════════════════════════════════════ -->
+<div class="app hidden" id="appMain">
+
+  <!-- Mobile Menu Toggle -->
+  <div class="mobile-menu" onclick="document.querySelector('.sidebar').style.display='block'">☰</div>
+
+  <!-- SIDEBAR -->
+  <div class="sidebar">
+    <div class="sidebar-header">
+      <img src="favicon-96x96.png" alt="Logo">
+      <div>
+        <span>SIMPATICO <span class="tech">HR</span></span>
+        <span class="sidebar-badge">SUPER ADMIN</span>
+      </div>
+    </div>
+    <div class="sidebar-nav">
+      <div class="sidebar-section">Overview</div>
+      <div class="nav-item active" onclick="goTo('dashboard')"><i class="fa fa-chart-line"></i> Dashboard</div>
+
+      <div class="sidebar-section">Recruitment</div>
+      <div class="nav-item" onclick="goTo('jobs')"><i class="fa fa-briefcase"></i> All Jobs <span class="badge" id="navJobCount">0</span></div>
+      <div class="nav-item" onclick="goTo('candidates')"><i class="fa fa-users"></i> Candidates <span class="badge" id="navCandCount">0</span></div>
+      <div class="nav-item" onclick="goTo('interviews')"><i class="fa fa-microphone"></i> Interviews <span class="badge" id="navIntCount">0</span></div>
+
+      <div class="sidebar-section">Platform</div>
+      <div class="nav-item" onclick="goTo('companies')"><i class="fa fa-building"></i> Companies</div>
+      <div class="nav-item" onclick="goTo('users')"><i class="fa fa-user-shield"></i> Users</div>
+
+      <div class="sidebar-section">System</div>
+      <div class="nav-item" onclick="goTo('settings')"><i class="fa fa-gear"></i> Settings</div>
+      <div class="nav-item" onclick="goTo('audit')"><i class="fa fa-clock-rotate-left"></i> Audit Log</div>
+      <div class="nav-item" onclick="doLogout()" style="color:var(--red)"><i class="fa fa-right-from-bracket"></i> Logout</div>
+    </div>
+  </div>
+
+  <!-- MAIN CONTENT -->
+  <div class="main">
+    <div class="topbar">
+      <h1 id="pageTitle">📊 Dashboard</h1>
+      <div class="topbar-right">
+        <div class="user-pill">
+          <div class="user-avatar" id="userAvatar">SA</div>
+          <span id="userName">Super Admin</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══════════════════════════════════════ -->
+    <!-- DASHBOARD -->
+    <!-- ══════════════════════════════════════ -->
+    <div id="page-dashboard">
+      <div class="stat-grid">
+        <div class="stat-card">
+          <div class="stat-icon" style="background:rgba(99,102,241,0.12);color:var(--accent)">💼</div>
+          <div class="stat-num" id="statJobs">0</div>
+          <div class="stat-label">Total Jobs</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon" style="background:rgba(63,185,80,0.12);color:var(--green)">👥</div>
+          <div class="stat-num" id="statCands">0</div>
+          <div class="stat-label">Candidates</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon" style="background:rgba(188,140,255,0.12);color:var(--accent2)">🎤</div>
+          <div class="stat-num" id="statInts">0</div>
+          <div class="stat-label">Interviews</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon" style="background:rgba(210,153,34,0.12);color:var(--yellow)">🏢</div>
+          <div class="stat-num" id="statCompanies">0</div>
+          <div class="stat-label">Companies</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon" style="background:rgba(63,185,80,0.12);color:var(--green)">✅</div>
+          <div class="stat-num" id="statShortlisted">0</div>
+          <div class="stat-label">Shortlisted</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon" style="background:rgba(248,81,73,0.12);color:var(--red)">⏳</div>
+          <div class="stat-num" id="statPending">0</div>
+          <div class="stat-label">Pending Review</div>
+        </div>
+      </div>
+
+      <!-- Recent Activity -->
+      <div class="card">
+        <h2>📋 Recent Applications (Pending Review)</h2>
+        <div id="recentApps"><span class="loading"></span></div>
+      </div>
+
+      <div class="card">
+        <h2>🎤 Recent Interviews</h2>
+        <div id="recentInts"><span class="loading"></span></div>
+      </div>
+    </div>
+
+    <!-- ══════════════════════════════════════ -->
+    <!-- ALL JOBS -->
+    <!-- ══════════════════════════════════════ -->
+    <div id="page-jobs" class="hidden">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:8px">
+        <div class="tabs">
+          <button class="tab active" onclick="filterJobsTab('all',this)">All</button>
+          <button class="tab" onclick="filterJobsTab('active',this)">Active</button>
+          <button class="tab" onclick="filterJobsTab('inactive',this)">Inactive</button>
+        </div>
+        <button class="btn btn-primary" onclick="openPostJob()"><i class="fa fa-plus"></i> Post Job</button>
+      </div>
+      <div class="search-bar"><i class="fa fa-search"></i><input type="text" id="jobSearch" placeholder="Search jobs..." oninput="searchJobs()"></div>
+      <div class="card"><div class="table-wrap" id="jobsTable"><span class="loading"></span></div></div>
+    </div>
+
+    <!-- ══════════════════════════════════════ -->
+    <!-- CANDIDATES -->
+    <!-- ══════════════════════════════════════ -->
+    <div id="page-candidates" class="hidden">
+      <div class="tabs" style="margin-bottom:16px">
+        <button class="tab active" onclick="filterCandsTab('all',this)">All</button>
+        <button class="tab" onclick="filterCandsTab('applied',this)">Applied</button>
+        <button class="tab" onclick="filterCandsTab('shortlisted',this)">Shortlisted</button>
+        <button class="tab" onclick="filterCandsTab('interviewed',this)">Interviewed</button>
+        <button class="tab" onclick="filterCandsTab('rejected',this)">Rejected</button>
+      </div>
+      <div class="search-bar"><i class="fa fa-search"></i><input type="text" id="candSearch" placeholder="Search candidates..." oninput="searchCands()"></div>
+      <div class="card"><div class="table-wrap" id="candsTable"><span class="loading"></span></div></div>
+    </div>
+
+    <!-- ══════════════════════════════════════ -->
+    <!-- INTERVIEWS -->
+    <!-- ══════════════════════════════════════ -->
+    <div id="page-interviews" class="hidden">
+      <div class="tabs" style="margin-bottom:16px">
+        <button class="tab active" onclick="filterIntsTab('all',this)">All</button>
+        <button class="tab" onclick="filterIntsTab('pending',this)">Pending</button>
+        <button class="tab" onclick="filterIntsTab('in_progress',this)">In Progress</button>
+        <button class="tab" onclick="filterIntsTab('completed',this)">Completed</button>
+      </div>
+      <div class="card"><div class="table-wrap" id="intsTable"><span class="loading"></span></div></div>
+    </div>
+
+    <!-- ══════════════════════════════════════ -->
+    <!-- COMPANIES -->
+    <!-- ══════════════════════════════════════ -->
+    <div id="page-companies" class="hidden">
+      <div style="display:flex;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:8px">
+        <h2 style="font-size:1rem;">🏢 Client Companies</h2>
+        <button class="btn btn-primary" onclick="openAddCompany()"><i class="fa fa-plus"></i> Add Company</button>
+      </div>
+      <div class="card"><div id="companiesTable"><span class="loading"></span></div></div>
+    </div>
+
+    <!-- ══════════════════════════════════════ -->
+    <!-- USERS -->
+    <!-- ══════════════════════════════════════ -->
+    <div id="page-users" class="hidden">
+      <div style="display:flex;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:8px">
+        <h2 style="font-size:1rem;">👥 Platform Users</h2>
+        <button class="btn btn-primary" onclick="openAddUser()"><i class="fa fa-plus"></i> Add User</button>
+      </div>
+      <div class="card"><div id="usersTable"><span class="loading"></span></div></div>
+    </div>
+
+    <!-- ══════════════════════════════════════ -->
+    <!-- SETTINGS -->
+    <!-- ══════════════════════════════════════ -->
+    <div id="page-settings" class="hidden">
+      <div class="card">
+        <h2>⚙️ Platform Settings</h2>
+        <div class="setting-row">
+          <div class="setting-info">
+            <h4>🤖 Auto ATS Screening</h4>
+            <p>Automatically AI-screen all new applications</p>
+          </div>
+          <div class="toggle on" id="toggleATS" onclick="toggleSetting('autoATS',this)"></div>
+        </div>
+        <div class="setting-row">
+          <div class="setting-info">
+            <h4>📨 Auto Interview Invitation</h4>
+            <p>Auto-send interview token when ATS score meets threshold</p>
+          </div>
+          <div class="toggle on" id="toggleAutoInvite" onclick="toggleSetting('autoInvite',this)"></div>
+        </div>
+        <div class="setting-row">
+          <div class="setting-info">
+            <h4>✅ Auto Approve Interviews</h4>
+            <p>Skip manual approval — shortlisted candidates get instant interview access</p>
+          </div>
+          <div class="toggle" id="toggleAutoApprove" onclick="toggleSetting('autoApprove',this)"></div>
+        </div>
+        <div class="setting-row">
+          <div class="setting-info">
+            <h4>🔒 Require Admin Approval</h4>
+            <p>Admin must manually approve each interview before token is sent</p>
+          </div>
+          <div class="toggle on" id="toggleManualApprove" onclick="toggleSetting('manualApprove',this)"></div>
+        </div>
+        <div class="setting-row">
+          <div class="setting-info">
+            <h4>🎯 Default ATS Threshold</h4>
+            <p>Minimum score for auto-shortlisting</p>
+          </div>
+          <select style="width:100px;padding:6px;background:var(--card2);border:1px solid var(--border);border-radius:8px;color:var(--text)" id="atsThreshold" onchange="saveSetting('atsThreshold',this.value)">
+            <option value="50">50+</option>
+            <option value="60">60+</option>
+            <option value="70" selected>70+</option>
+            <option value="80">80+</option>
+            <option value="90">90+</option>
+          </select>
+        </div>
+        <div class="setting-row">
+          <div class="setting-info">
+            <h4>⏰ Interview Token Expiry</h4>
+            <p>Hours before interview token expires</p>
+          </div>
+          <select style="width:100px;padding:6px;background:var(--card2);border:1px solid var(--border);border-radius:8px;color:var(--text)" id="tokenExpiry" onchange="saveSetting('tokenExpiry',this.value)">
+            <option value="24">24 hrs</option>
+            <option value="48">48 hrs</option>
+            <option value="72" selected>72 hrs</option>
+            <option value="168">7 days</option>
+          </select>
+        </div>
+        <div class="setting-row">
+          <div class="setting-info">
+            <h4>🔢 Default Questions</h4>
+            <p>Number of interview questions</p>
+          </div>
+          <select style="width:100px;padding:6px;background:var(--card2);border:1px solid var(--border);border-radius:8px;color:var(--text)" id="defaultQuestions" onchange="saveSetting('defaultQuestions',this.value)">
+            <option value="5">5</option>
+            <option value="8">8</option>
+            <option value="10" selected>10</option>
+            <option value="15">15</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══════════════════════════════════════ -->
+    <!-- AUDIT LOG -->
+    <!-- ══════════════════════════════════════ -->
+    <div id="page-audit" class="hidden">
+      <div class="card">
+        <h2>📜 Audit Log</h2>
+        <div id="auditTable"><span class="loading"></span></div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════ -->
+<!-- MODALS -->
+<!-- ══════════════════════════════════════ -->
+
+<!-- Post Job Modal -->
+<div class="modal-overlay" id="postJobModal">
+  <div class="modal">
+    <h3>📢 Post New Job</h3>
+    <div class="form-group"><label>Title *</label><input type="text" id="jTitle" placeholder="e.g. Senior Frontend Developer"></div>
+    <div class="form-row">
+      <div class="form-group"><label>Category</label><select id="jCat"><option>IT/Software</option><option>Accounting</option><option>Sales/Marketing</option><option>Management</option><option>HR</option><option>Design</option><option>Other</option></select></div>
+      <div class="form-group"><label>Department</label><input type="text" id="jDept" placeholder="Engineering"></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>Company</label>
+        <select id="jCompany"><option value="">— Simpatico HR —</option></select>
+      </div>
+      <div class="form-group"><label>Location</label><input type="text" id="jLocation" placeholder="Kochi, Kerala"></div>
+    </div>
+    <div class="form-row3">
+      <div class="form-group"><label>Level</label><select id="jLevel"><option>Fresher</option><option>Junior</option><option selected>Mid-Level</option><option>Senior</option><option>Lead</option></select></div>
+      <div class="form-group"><label>Questions</label><select id="jQCount"><option>5</option><option>8</option><option selected>10</option><option>15</option></select></div>
+      <div class="form-group"><label>ATS Threshold</label><select id="jATS"><option value="0">Manual</option><option value="50">50+</option><option value="60">60+</option><option value="70" selected>70+</option><option value="80">80+</option></select></div>
+    </div>
+    <div class="form-group"><label>Description</label><textarea id="jDesc" rows="4" placeholder="Job description..."></textarea></div>
+    <div class="form-group"><label>Skills (comma separated)</label><input type="text" id="jSkills" placeholder="React, TypeScript, Node.js"></div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('postJobModal')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveJob()">📢 Post Job</button>
+    </div>
+  </div>
+</div>
+
+<!-- Add Company Modal -->
+<div class="modal-overlay" id="addCompanyModal">
+  <div class="modal">
+    <h3>🏢 Add Company</h3>
+    <div class="form-group"><label>Company Name *</label><input type="text" id="cName" placeholder="Acme Corp"></div>
+    <div class="form-group"><label>Contact Email</label><input type="email" id="cEmail" placeholder="hr@company.com"></div>
+    <div class="form-group"><label>Plan</label>
+      <select id="cPlan">
+        <option value="free">Free (2 jobs, 5 ATS, no interviews)</option>
+        <option value="starter">Starter ₹2,999/mo (10 jobs, 50 ATS, 10 interviews)</option>
+        <option value="pro" selected>Pro ₹9,999/mo (Unlimited jobs, 100 interviews)</option>
+        <option value="enterprise">Enterprise (Custom)</option>
+      </select>
+    </div>
+    <h4 style="margin:16px 0 8px;font-size:0.88rem;">Feature Access</h4>
+    <div class="form-row">
+      <div class="toggle-wrap"><div class="toggle on" id="cFeatJobs"></div> Post Jobs</div>
+      <div class="toggle-wrap"><div class="toggle on" id="cFeatATS"></div> ATS Screening</div>
+    </div>
+    <div class="form-row" style="margin-top:8px">
+      <div class="toggle-wrap"><div class="toggle" id="cFeatInterview"></div> AI Interviews</div>
+      <div class="toggle-wrap"><div class="toggle" id="cFeatReports"></div> Reports</div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('addCompanyModal')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveCompany()">🏢 Add Company</button>
+    </div>
+  </div>
+</div>
+
+<!-- Add User Modal -->
+<div class="modal-overlay" id="addUserModal">
+  <div class="modal">
+    <h3>👤 Add User</h3>
+    <div class="form-group"><label>Name *</label><input type="text" id="uName" placeholder="John Doe"></div>
+    <div class="form-group"><label>Email *</label><input type="email" id="uEmail" placeholder="john@company.com"></div>
+    <div class="form-group"><label>Password *</label><input type="text" id="uPass" placeholder="Set password"></div>
+    <div class="form-row">
+      <div class="form-group"><label>Role</label>
+        <select id="uRole">
+          <option value="hr">HR Recruiter</option>
+          <option value="admin">Company Admin</option>
+          <option value="superadmin">Super Admin</option>
+        </select>
+      </div>
+      <div class="form-group"><label>Company</label>
+        <select id="uCompany"><option value="">— Simpatico HR —</option></select>
+      </div>
+    </div>
+    <h4 style="margin:16px 0 8px;font-size:0.88rem;">Permissions</h4>
+    <div class="form-row">
+      <div class="toggle-wrap"><div class="toggle on" id="uPermJobs"></div> Post Jobs</div>
+      <div class="toggle-wrap"><div class="toggle on" id="uPermCands"></div> View Candidates</div>
+    </div>
+    <div class="form-row" style="margin-top:8px">
+      <div class="toggle-wrap"><div class="toggle on" id="uPermInts"></div> Manage Interviews</div>
+      <div class="toggle-wrap"><div class="toggle" id="uPermReports"></div> View Reports</div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('addUserModal')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveUser()">👤 Add User</button>
+    </div>
+  </div>
+</div>
+
+<!-- Candidate Detail Modal -->
+<div class="modal-overlay" id="candDetailModal">
+  <div class="modal" style="max-width:640px">
+    <h3>👤 Candidate Details</h3>
+    <div id="candDetailContent"></div>
+    <div class="modal-footer" id="candDetailActions"></div>
+  </div>
+</div>
+
+<!-- Interview Approve Modal -->
+<div class="modal-overlay" id="approveModal">
+  <div class="modal" style="max-width:400px;text-align:center">
+    <h3 style="justify-content:center">✅ Approve Interview?</h3>
+    <p style="color:var(--text2);margin-bottom:8px" id="approveInfo"></p>
+    <input type="hidden" id="approveAppId">
+    <input type="hidden" id="approveJobId">
+    <div class="modal-footer" style="justify-content:center">
+      <button class="btn btn-ghost" onclick="closeModal('approveModal')">Cancel</button>
+      <button class="btn btn-success" onclick="confirmApprove()">✅ Approve & Send Token</button>
+    </div>
+  </div>
+</div>
 
 <script>
-const supabase = supabase.createClient(
-  "https://cvkxtsvgnynxexmemfuy.supabase.co",
-  "YOUR_ANON_KEY"
-);
+// ═══════════════════════════════════════════════════════
+// CONFIG
+// ═══════════════════════════════════════════════════════
+const W="https://evalis-ai.simpaticohrconsultancy.workers.dev";
+let currentUser=null;
+let allJobs=[],allCands=[],allInts=[],allCompanies=[],allUsers=[];
+let settings={autoATS:true,autoInvite:true,autoApprove:false,manualApprove:true,atsThreshold:70,tokenExpiry:72,defaultQuestions:10};
 
-async function load() {
-  const { data } = await supabase
-    .from("candidates")
-    .select("id, full_name, email, status, resume_url, jobs(title)");
-
-  document.getElementById("list").innerHTML =
-    data.map(c => `
-      <div style="border:1px solid #ccc;padding:12px;margin-bottom:10px">
-        <b>${c.full_name}</b> — ${c.jobs.title}<br>
-        ${c.email}<br>
-        Status: ${c.status}<br>
-        <a href="${c.resume_url}" target="_blank">CV</a><br>
-        <button onclick="update('${c.id}','shortlisted')">Shortlist</button>
-        <button onclick="update('${c.id}','rejected')">Reject</button>
-      </div>
-    `).join("");
+// ═══════════════════════════════════════════════════════
+// DB HELPER
+// ═══════════════════════════════════════════════════════
+async function db(action,table,data=null,filters=null,select=null,order=null){
+  const r=await fetch(W+"/db",{method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({action,table,data,filters,select,order})});
+  return await r.json();
 }
 
-async function update(id, status) {
-  await supabase
-    .from("candidates")
-    .update({ status })
-    .eq("id", id);
-  load();
+function toast(m){const c=document.getElementById("toasts"),t=document.createElement("div");t.className="toast";t.textContent=m;c.appendChild(t);setTimeout(()=>t.remove(),3200)}
+
+// ═══════════════════════════════════════════════════════
+// AUTH
+// ═══════════════════════════════════════════════════════
+async function doLogin(){
+  const email=document.getElementById('loginEmail').value.trim();
+  const pass=document.getElementById('loginPass').value.trim();
+  if(!email||!pass){toast('❌ Enter email & password');return}
+
+  try{
+    const users=await db('select','users',null,{email});
+    const u=Array.isArray(users)?users[0]:users;
+    if(!u||u.error){document.getElementById('loginError').style.display='block';document.getElementById('loginError').textContent='User not found';return}
+    if(u.password_hash!==pass){document.getElementById('loginError').style.display='block';document.getElementById('loginError').textContent='Wrong password';return}
+    if(u.role!=='superadmin'&&u.role!=='admin'){document.getElementById('loginError').style.display='block';document.getElementById('loginError').textContent='Access denied — admin only';return}
+
+    currentUser=u;
+    localStorage.setItem('adminUser',JSON.stringify(u));
+    document.getElementById('loginPage').classList.add('hidden');
+    document.getElementById('appMain').classList.remove('hidden');
+    document.getElementById('userName').textContent=u.name||u.email;
+    document.getElementById('userAvatar').textContent=(u.name||'A')[0].toUpperCase();
+
+    await logAudit('login','Admin logged in');
+    loadDashboard();
+  }catch(e){toast('❌ '+e.message)}
 }
 
-load();
+function doLogout(){
+  currentUser=null;localStorage.removeItem('adminUser');
+  document.getElementById('appMain').classList.add('hidden');
+  document.getElementById('loginPage').classList.remove('hidden');
+  document.getElementById('loginPass').value='';
+}
+
+function checkSavedLogin(){
+  const saved=localStorage.getItem('adminUser');
+  if(saved){
+    try{
+      currentUser=JSON.parse(saved);
+      document.getElementById('loginPage').classList.add('hidden');
+      document.getElementById('appMain').classList.remove('hidden');
+      document.getElementById('userName').textContent=currentUser.name||currentUser.email;
+      document.getElementById('userAvatar').textContent=(currentUser.name||'A')[0].toUpperCase();
+      loadDashboard();
+    }catch(e){localStorage.removeItem('adminUser')}
+  }
+}
+
+// ═══════════════════════════════════════════════════════
+// NAVIGATION
+// ═══════════════════════════════════════════════════════
+function goTo(page){
+  const pages=['dashboard','jobs','candidates','interviews','companies','users','settings','audit'];
+  pages.forEach(p=>document.getElementById('page-'+p)?.classList.add('hidden'));
+  document.getElementById('page-'+page)?.classList.remove('hidden');
+
+  document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
+  event?.target?.closest?.('.nav-item')?.classList.add('active');
+
+  const titles={dashboard:'📊 Dashboard',jobs:'💼 All Jobs',candidates:'👥 Candidates',interviews:'🎤 Interviews',companies:'🏢 Companies',users:'👤 Users',settings:'⚙️ Settings',audit:'📜 Audit Log'};
+  document.getElementById('pageTitle').textContent=titles[page]||page;
+
+  if(page==='dashboard')loadDashboard();
+  if(page==='jobs')loadAllJobs();
+  if(page==='candidates')loadAllCands();
+  if(page==='interviews')loadAllInts();
+  if(page==='companies')loadCompanies();
+  if(page==='users')loadUsers();
+  if(page==='audit')loadAudit();
+}
+
+// ═══════════════════════════════════════════════════════
+// DASHBOARD
+// ═══════════════════════════════════════════════════════
+async function loadDashboard(){
+  try{
+    const [jobs,cands,ints,companies]=await Promise.all([
+      db('select','jobs'),db('select','applications',null,null,null,'created_at.desc'),
+      db('select','interviews',null,null,null,'created_at.desc'),db('select','companies')
+    ]);
+    allJobs=Array.isArray(jobs)?jobs:[];
+    allCands=Array.isArray(cands)?cands:[];
+    allInts=Array.isArray(ints)?ints:[];
+    allCompanies=Array.isArray(companies)?companies:[];
+
+    document.getElementById('statJobs').textContent=allJobs.length;
+    document.getElementById('statCands').textContent=allCands.length;
+    document.getElementById('statInts').textContent=allInts.length;
+    document.getElementById('statCompanies').textContent=allCompanies.length;
+    document.getElementById('statShortlisted').textContent=allCands.filter(c=>c.status==='shortlisted').length;
+    document.getElementById('statPending').textContent=allCands.filter(c=>c.status==='applied').length;
+
+    document.getElementById('navJobCount').textContent=allJobs.length;
+    document.getElementById('navCandCount').textContent=allCands.length;
+    document.getElementById('navIntCount').textContent=allInts.length;
+
+    // Recent pending apps
+    const pending=allCands.filter(c=>c.status==='applied').slice(0,5);
+    const ra=document.getElementById('recentApps');
+    if(!pending.length){ra.innerHTML='<p style="color:var(--text2);text-align:center;padding:16px;">No pending applications</p>';
+    }else{
+      ra.innerHTML=`<table><thead><tr><th>Name</th><th>Email</th><th>ATS</th><th>Status</th><th>Actions</th></tr></thead><tbody>${
+        pending.map(c=>{
+          const sc=c.ats_score||0;const scCol=sc>=70?'green':sc>=50?'yellow':'red';
+          return`<tr>
+            <td><strong>${c.name||'—'}</strong></td>
+            <td style="color:var(--text2)">${c.email||''}</td>
+            <td><span class="pill pill-${scCol}">${sc}</span></td>
+            <td><span class="pill pill-yellow">${c.status}</span></td>
+            <td><div class="btn-group">
+              <button class="btn btn-sm btn-success" onclick="quickShortlist('${c.id}')">✅ Shortlist</button>
+              <button class="btn btn-sm btn-primary" onclick="openApproveInterview('${c.id}','${c.job_id||''}','${(c.name||'').replace(/'/g,"\\'")}')">🎤 Approve</button>
+              <button class="btn btn-sm btn-danger" onclick="quickReject('${c.id}')">❌</button>
+              <button class="btn btn-sm btn-ghost" onclick="viewCandidate('${c.id}')">👁</button>
+            </div></td></tr>`;
+        }).join('')}</tbody></table>`;
+    }
+
+    // Recent interviews
+    const recent=allInts.slice(0,5);
+    const ri=document.getElementById('recentInts');
+    if(!recent.length){ri.innerHTML='<p style="color:var(--text2);text-align:center;padding:16px;">No interviews yet</p>';
+    }else{
+      ri.innerHTML=`<table><thead><tr><th>Role</th><th>Score</th><th>Grade</th><th>Status</th><th>Date</th></tr></thead><tbody>${
+        recent.map(i=>{
+          const sc=i.overall_score||0;const scCol=sc>=70?'green':sc>=50?'yellow':'red';
+          const stCol={pending:'yellow',in_progress:'blue',completed:'green'}[i.status]||'red';
+          return`<tr>
+            <td><strong>${i.interview_role||'—'}</strong><br><span style="font-size:0.72rem;color:var(--text2)">${i.interview_level||''}</span></td>
+            <td><span class="pill pill-${scCol}">${sc||'—'}</span></td>
+            <td>${i.grade||'—'}</td>
+            <td><span class="pill pill-${stCol}">${i.status}</span></td>
+            <td style="color:var(--text2);font-size:0.78rem">${i.created_at?new Date(i.created_at).toLocaleDateString():''}</td></tr>`;
+        }).join('')}</tbody></table>`;
+    }
+  }catch(e){toast('❌ '+e.message)}
+}
+
+// ═══════════════════════════════════════════════════════
+// ALL JOBS
+// ═══════════════════════════════════════════════════════
+let jobFilter='all';
+async function loadAllJobs(){
+  const el=document.getElementById('jobsTable');
+  el.innerHTML='<span class="loading"></span>';
+  try{
+    allJobs=await db('select','jobs',null,null,null,'created_at.desc');
+    if(!Array.isArray(allJobs))allJobs=[];
+    renderJobs(allJobs);
+  }catch(e){el.innerHTML='<p style="color:var(--red)">'+e.message+'</p>'}
+}
+
+function renderJobs(jobs){
+  let filtered=jobs;
+  if(jobFilter==='active')filtered=jobs.filter(j=>j.is_active);
+  if(jobFilter==='inactive')filtered=jobs.filter(j=>!j.is_active);
+  const q=document.getElementById('jobSearch')?.value?.toLowerCase()||'';
+  if(q)filtered=filtered.filter(j=>[j.title,j.department,j.location,j.level].filter(Boolean).join(' ').toLowerCase().includes(q));
+
+  const el=document.getElementById('jobsTable');
+  if(!filtered.length){el.innerHTML='<p style="color:var(--text2);text-align:center;padding:20px">No jobs found</p>';return}
+  el.innerHTML=`<table><thead><tr><th>Title</th><th>Dept</th><th>Location</th><th>Level</th><th>ATS</th><th>Status</th><th>Actions</th></tr></thead><tbody>${
+    filtered.map(j=>`<tr>
+      <td><strong>${j.title||''}</strong><br><span style="font-size:0.72rem;color:var(--text2)">${j.category||''}</span></td>
+      <td>${j.department||'—'}</td><td>${j.location||'—'}</td><td><span class="pill pill-blue">${j.level||'—'}</span></td>
+      <td>${j.ats_threshold>0?j.ats_threshold+'+':'Manual'}</td>
+      <td><span class="pill ${j.is_active?'pill-green':'pill-red'}">${j.is_active?'Active':'Inactive'}</span></td>
+      <td><div class="btn-group">
+        <button class="btn btn-sm btn-ghost" onclick="toggleJobActive('${j.id}',${!j.is_active})">${j.is_active?'⏸':'▶'}</button>
+        <button class="btn btn-sm btn-danger" onclick="deleteJob('${j.id}')">🗑</button>
+      </div></td></tr>`).join('')}</tbody></table>`;
+}
+
+function filterJobsTab(f,btn){jobFilter=f;document.querySelectorAll('#page-jobs .tab').forEach(t=>t.classList.remove('active'));btn.classList.add('active');renderJobs(allJobs)}
+function searchJobs(){renderJobs(allJobs)}
+
+async function toggleJobActive(id,val){
+  await db('update','jobs',{is_active:val},{id});toast(val?'✅ Activated':'⏸ Deactivated');loadAllJobs();logAudit('job_toggle','Job '+id+' → '+(val?'active':'inactive'))}
+async function deleteJob(id){if(!confirm('Delete this job?'))return;await db('delete','jobs',null,{id});toast('🗑 Deleted');loadAllJobs();logAudit('job_delete','Deleted job '+id)}
+
+// ═══════════════════════════════════════════════════════
+// POST JOB
+// ═══════════════════════════════════════════════════════
+function openPostJob(){
+  // Populate company dropdown
+  const sel=document.getElementById('jCompany');
+  sel.innerHTML='<option value="">— Simpatico HR —</option>'+allCompanies.map(c=>`<option value="${c.id}">${c.name}</option>`).join('');
+  openModal('postJobModal');
+}
+
+async function saveJob(){
+  const title=document.getElementById('jTitle').value.trim();
+  if(!title){toast('❌ Title required');return}
+  const compId=document.getElementById('jCompany').value||null;
+  const comp=compId?allCompanies.find(c=>c.id===compId):null;
+
+  await db('insert','jobs',{
+    title,category:document.getElementById('jCat').value,
+    department:document.getElementById('jDept').value.trim(),
+    company_id:compId,company_name:comp?comp.name:'Simpatico HR Consultancy',
+    location:document.getElementById('jLocation').value.trim(),
+    level:document.getElementById('jLevel').value,
+    description:document.getElementById('jDesc').value.trim(),
+    skills:document.getElementById('jSkills').value.split(',').map(s=>s.trim()).filter(Boolean),
+    question_count:parseInt(document.getElementById('jQCount').value),
+    ats_threshold:parseInt(document.getElementById('jATS').value),
+    is_active:true,status:'active'
+  });
+  toast('✅ Job posted!');closeModal('postJobModal');
+  document.getElementById('jTitle').value='';document.getElementById('jDesc').value='';document.getElementById('jSkills').value='';
+  loadAllJobs();loadDashboard();logAudit('job_post','Posted: '+title);
+}
+
+// ═══════════════════════════════════════════════════════
+// CANDIDATES
+// ═══════════════════════════════════════════════════════
+let candFilter='all';
+async function loadAllCands(){
+  const el=document.getElementById('candsTable');el.innerHTML='<span class="loading"></span>';
+  try{
+    allCands=await db('select','applications',null,null,null,'created_at.desc');
+    if(!Array.isArray(allCands))allCands=[];
+    renderCands(allCands);
+  }catch(e){el.innerHTML='<p style="color:var(--red)">'+e.message+'</p>'}
+}
+
+function renderCands(cands){
+  let filtered=cands;
+  if(candFilter!=='all')filtered=cands.filter(c=>c.status===candFilter);
+  const q=document.getElementById('candSearch')?.value?.toLowerCase()||'';
+  if(q)filtered=filtered.filter(c=>[c.name,c.email].filter(Boolean).join(' ').toLowerCase().includes(q));
+
+  const el=document.getElementById('candsTable');
+  if(!filtered.length){el.innerHTML='<p style="color:var(--text2);text-align:center;padding:20px">No candidates found</p>';return}
+  el.innerHTML=`<table><thead><tr><th>Name</th><th>Email</th><th>ATS Score</th><th>Status</th><th>Applied</th><th>Actions</th></tr></thead><tbody>${
+    filtered.map(c=>{
+      const sc=c.ats_score||0;const scCol=sc>=70?'green':sc>=50?'yellow':'red';
+      const stCol={applied:'yellow',shortlisted:'green',interviewed:'blue',rejected:'red'}[c.status]||'yellow';
+      return`<tr>
+        <td><strong>${c.name||'—'}</strong></td>
+        <td style="color:var(--text2)">${c.email||''}</td>
+        <td><span class="pill pill-${scCol}">${sc||'—'}</span></td>
+        <td><span class="pill pill-${stCol}">${c.status||'applied'}</span></td>
+        <td style="color:var(--text2);font-size:0.78rem">${c.created_at?new Date(c.created_at).toLocaleDateString():''}</td>
+        <td><div class="btn-group">
+          ${c.status==='applied'?`<button class="btn btn-sm btn-success" onclick="quickShortlist('${c.id}')">✅</button>`:''}
+          ${c.status==='shortlisted'?`<button class="btn btn-sm btn-primary" onclick="openApproveInterview('${c.id}','${c.job_id||''}','${(c.name||'').replace(/'/g,"\\'")}')">🎤</button>`:''}
+          ${c.status!=='rejected'?`<button class="btn btn-sm btn-danger" onclick="quickReject('${c.id}')">❌</button>`:''}
+          <button class="btn btn-sm btn-ghost" onclick="viewCandidate('${c.id}')">👁</button>
+          ${c.resume_url?`<a href="${c.resume_url}" target="_blank" class="btn btn-sm btn-ghost">📄</a>`:''}
+        </div></td></tr>`;
+    }).join('')}</tbody></table>`;
+}
+
+function filterCandsTab(f,btn){candFilter=f;document.querySelectorAll('#page-candidates .tab').forEach(t=>t.classList.remove('active'));btn.classList.add('active');renderCands(allCands)}
+function searchCands(){renderCands(allCands)}
+
+async function quickShortlist(id){await db('update','applications',{status:'shortlisted'},{id});toast('✅ Shortlisted');loadAllCands();loadDashboard();logAudit('shortlist','Shortlisted '+id)}
+async function quickReject(id){await db('update','applications',{status:'rejected'},{id});toast('❌ Rejected');loadAllCands();loadDashboard();logAudit('reject','Rejected '+id)}
+
+function viewCandidate(id){
+  const c=allCands.find(x=>x.id===id);if(!c)return;
+  const sc=c.ats_score||0;const scCol=sc>=70?'green':sc>=50?'yellow':'red';
+  document.getElementById('candDetailContent').innerHTML=`
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;font-size:0.88rem;">
+      <div><span style="color:var(--text2)">Name:</span> <strong>${c.name||'—'}</strong></div>
+      <div><span style="color:var(--text2)">Email:</span> <strong>${c.email||'—'}</strong></div>
+      <div><span style="color:var(--text2)">Phone:</span> ${c.phone||'—'}</div>
+      <div><span style="color:var(--text2)">Status:</span> <span class="pill pill-${scCol}">${c.status}</span></div>
+      <div><span style="color:var(--text2)">ATS Score:</span> <span class="pill pill-${scCol}">${sc}</span></div>
+      <div><span style="color:var(--text2)">Applied:</span> ${c.created_at?new Date(c.created_at).toLocaleString():''}</div>
+    </div>
+    ${c.ats_summary?`<div style="margin-top:12px;padding:12px;background:var(--card2);border-radius:10px"><strong>ATS Summary:</strong><br><span style="color:var(--text2);font-size:0.85rem">${c.ats_summary}</span></div>`:''}
+    ${c.ats_matched_skills?.length?`<div style="margin-top:8px"><strong style="font-size:0.82rem">Matched:</strong> ${c.ats_matched_skills.map(s=>'<span class="pill pill-green" style="margin:2px">'+s+'</span>').join('')}</div>`:''}
+    ${c.ats_missing_skills?.length?`<div style="margin-top:8px"><strong style="font-size:0.82rem">Missing:</strong> ${c.ats_missing_skills.map(s=>'<span class="pill pill-red" style="margin:2px">'+s+'</span>').join('')}</div>`:''}
+    ${c.resume_url?`<div style="margin-top:12px"><a href="${c.resume_url}" target="_blank" class="btn btn-sm btn-ghost">📄 View Resume</a></div>`:''}`;
+  document.getElementById('candDetailActions').innerHTML=`
+    <button class="btn btn-ghost" onclick="closeModal('candDetailModal')">Close</button>
+    ${c.status==='applied'?`<button class="btn btn-success" onclick="quickShortlist('${c.id}');closeModal('candDetailModal')">✅ Shortlist</button>`:''}
+    ${c.status==='shortlisted'?`<button class="btn btn-primary" onclick="closeModal('candDetailModal');openApproveInterview('${c.id}','${c.job_id||''}','${(c.name||'').replace(/'/g,"\\'")}')">🎤 Approve Interview</button>`:''}`;
+  openModal('candDetailModal');
+}
+
+// ═══════════════════════════════════════════════════════
+// INTERVIEW APPROVAL
+// ═══════════════════════════════════════════════════════
+function openApproveInterview(appId,jobId,name){
+  document.getElementById('approveAppId').value=appId;
+  document.getElementById('approveJobId').value=jobId;
+  document.getElementById('approveInfo').textContent=`Send interview token to ${name}?`;
+  openModal('approveModal');
+}
+
+async function confirmApprove(){
+  const appId=document.getElementById('approveAppId').value;
+  const jobId=document.getElementById('approveJobId').value;
+
+  try{
+    const token=crypto.randomUUID?crypto.randomUUID():Date.now().toString(36)+Math.random().toString(36);
+    let jobRole='',jobLevel='Mid-Level',qCount=settings.defaultQuestions;
+
+    if(jobId){
+      const job=await db('select','jobs',null,{id:jobId});
+      const j=Array.isArray(job)?job[0]:job;
+      if(j){jobRole=j.title||'';jobLevel=j.level||'Mid-Level';qCount=j.question_count||10}
+    }
+
+    await db('insert','interviews',{
+      application_id:appId,job_id:jobId||null,token,
+      interview_type:'real',status:'pending',
+      interview_role:jobRole,interview_level:jobLevel,
+      question_count:qCount,interview_language:'en',
+      expires_at:new Date(Date.now()+settings.tokenExpiry*3600000).toISOString()
+    });
+
+    await db('update','applications',{status:'shortlisted'},{id:appId});
+
+    const url=`${location.origin}/evalis-interview.html?token=${token}`;
+    try{await navigator.clipboard.writeText(url)}catch(e){}
+
+    toast('✅ Interview approved! Link copied.');
+    alert(`📧 Interview Link:\n\n${url}\n\n(Copied to clipboard)`);
+    closeModal('approveModal');loadDashboard();loadAllCands();
+    logAudit('interview_approve','Approved interview for app '+appId);
+  }catch(e){toast('❌ '+e.message)}
+}
+
+// ═══════════════════════════════════════════════════════
+// INTERVIEWS
+// ═══════════════════════════════════════════════════════
+let intFilter='all';
+async function loadAllInts(){
+  const el=document.getElementById('intsTable');el.innerHTML='<span class="loading"></span>';
+  try{
+    allInts=await db('select','interviews',null,null,null,'created_at.desc');
+    if(!Array.isArray(allInts))allInts=[];
+    renderInts(allInts);
+  }catch(e){el.innerHTML='<p style="color:var(--red)">'+e.message+'</p>'}
+}
+
+function renderInts(ints){
+  let filtered=ints;
+  if(intFilter!=='all')filtered=ints.filter(i=>i.status===intFilter);
+
+  const el=document.getElementById('intsTable');
+  if(!filtered.length){el.innerHTML='<p style="color:var(--text2);text-align:center;padding:20px">No interviews found</p>';return}
+  el.innerHTML=`<table><thead><tr><th>Role</th><th>Level</th><th>Score</th><th>Grade</th><th>Rec</th><th>Violations</th><th>Status</th><th>Date</th><th>Actions</th></tr></thead><tbody>${
+    filtered.map(i=>{
+      const sc=i.overall_score||0;const scCol=sc>=70?'green':sc>=50?'yellow':'red';
+      const stCol={pending:'yellow',in_progress:'blue',completed:'green'}[i.status]||'red';
+      const viol=i.violation_count||0;const vCol=viol>0?'pill-red':'pill-green';
+      return`<tr>
+        <td><strong>${i.interview_role||'—'}</strong></td>
+        <td><span class="pill pill-blue">${i.interview_level||''}</span></td>
+        <td><span class="pill pill-${scCol}">${sc||'—'}</span></td>
+        <td>${i.grade||'—'}</td>
+        <td style="font-size:0.78rem">${i.recommendation||'—'}</td>
+        <td><span class="pill ${vCol}">${viol}</span></td>
+        <td><span class="pill pill-${stCol}">${i.status}</span></td>
+        <td style="color:var(--text2);font-size:0.78rem">${i.created_at?new Date(i.created_at).toLocaleDateString():''}</td>
+        <td><div class="btn-group">
+          ${i.token?`<button class="btn btn-sm btn-ghost" onclick="copyToken('${i.token}')">🔗</button>`:''}
+          <button class="btn btn-sm btn-danger" onclick="deleteInterview('${i.id}')">🗑</button>
+        </div></td></tr>`;
+    }).join('')}</tbody></table>`;
+}
+
+function filterIntsTab(f,btn){intFilter=f;document.querySelectorAll('#page-interviews .tab').forEach(t=>t.classList.remove('active'));btn.classList.add('active');renderInts(allInts)}
+
+function copyToken(token){
+  const url=`${location.origin}/evalis-interview.html?token=${token}`;
+  navigator.clipboard.writeText(url).then(()=>toast('📋 Link copied!')).catch(()=>toast('Token: '+token));
+}
+async function deleteInterview(id){if(!confirm('Delete?'))return;await db('delete','interviews',null,{id});toast('🗑 Deleted');loadAllInts();logAudit('interview_delete','Deleted '+id)}
+
+// ═══════════════════════════════════════════════════════
+// COMPANIES
+// ═══════════════════════════════════════════════════════
+async function loadCompanies(){
+  const el=document.getElementById('companiesTable');el.innerHTML='<span class="loading"></span>';
+  try{
+    allCompanies=await db('select','companies',null,null,null,'created_at.desc');
+    if(!Array.isArray(allCompanies))allCompanies=[];
+    if(!allCompanies.length){el.innerHTML='<p style="color:var(--text2);text-align:center;padding:20px">No companies</p>';return}
+    el.innerHTML=`<table><thead><tr><th>Company</th><th>Plan</th><th>Features</th><th>Status</th><th>Actions</th></tr></thead><tbody>${
+      allCompanies.map(c=>{
+        const f=c.features||{};
+        return`<tr>
+          <td><strong>${c.name}</strong><br><span style="font-size:0.72rem;color:var(--text2)">${c.email||''}</span></td>
+          <td><span class="pill pill-purple">${c.plan||'free'}</span></td>
+          <td style="font-size:0.75rem">
+            ${f.post_jobs?'✅':'❌'} Jobs
+            ${f.ats_screening?'✅':'❌'} ATS
+            ${f.interviews?'✅':'❌'} Interviews
+            ${f.reports?'✅':'❌'} Reports
+          </td>
+          <td><span class="pill ${c.is_active?'pill-green':'pill-red'}">${c.is_active?'Active':'Inactive'}</span></td>
+          <td><div class="btn-group">
+            <button class="btn btn-sm btn-ghost" onclick="toggleCompany('${c.id}',${!c.is_active})">${c.is_active?'⏸':'▶'}</button>
+            <button class="btn btn-sm btn-danger" onclick="deleteCompany('${c.id}')">🗑</button>
+          </div></td></tr>`;
+      }).join('')}</tbody></table>`;
+  }catch(e){el.innerHTML='<p style="color:var(--red)">'+e.message+'</p>'}
+}
+
+function openAddCompany(){openModal('addCompanyModal')}
+
+async function saveCompany(){
+  const name=document.getElementById('cName').value.trim();
+  if(!name){toast('❌ Name required');return}
+  const plan=document.getElementById('cPlan').value;
+  const features={
+    post_jobs:document.getElementById('cFeatJobs').classList.contains('on'),
+    ats_screening:document.getElementById('cFeatATS').classList.contains('on'),
+    interviews:document.getElementById('cFeatInterview').classList.contains('on'),
+    reports:document.getElementById('cFeatReports').classList.contains('on'),
+    max_jobs:plan==='free'?2:plan==='starter'?10:999,
+    max_interviews:plan==='free'?0:plan==='starter'?10:plan==='pro'?100:9999
+  };
+  await db('insert','companies',{name,email:document.getElementById('cEmail').value.trim(),plan,features,is_active:true});
+  toast('✅ Company added!');closeModal('addCompanyModal');document.getElementById('cName').value='';
+  loadCompanies();loadDashboard();logAudit('company_add','Added: '+name);
+}
+
+async function toggleCompany(id,val){await db('update','companies',{is_active:val},{id});toast(val?'✅ Activated':'⏸ Deactivated');loadCompanies();logAudit('company_toggle',id)}
+async function deleteCompany(id){if(!confirm('Delete company?'))return;await db('delete','companies',null,{id});toast('🗑 Deleted');loadCompanies();logAudit('company_delete',id)}
+
+// ═══════════════════════════════════════════════════════
+// USERS
+// ═══════════════════════════════════════════════════════
+async function loadUsers(){
+  const el=document.getElementById('usersTable');el.innerHTML='<span class="loading"></span>';
+  try{
+    allUsers=await db('select','users',null,null,null,'created_at.desc');
+    if(!Array.isArray(allUsers))allUsers=[];
+    if(!allUsers.length){el.innerHTML='<p style="color:var(--text2);text-align:center;padding:20px">No users</p>';return}
+    el.innerHTML=`<table><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Status</th><th>Actions</th></tr></thead><tbody>${
+      allUsers.map(u=>{
+        const rCol={superadmin:'pill-red',admin:'pill-purple',hr:'pill-blue'}[u.role]||'pill-yellow';
+        return`<tr>
+          <td><strong>${u.name||'—'}</strong></td>
+          <td style="color:var(--text2)">${u.email}</td>
+          <td><span class="pill ${rCol}">${u.role}</span></td>
+          <td><span class="pill ${u.is_active?'pill-green':'pill-red'}">${u.is_active?'Active':'Inactive'}</span></td>
+          <td><div class="btn-group">
+            <button class="btn btn-sm btn-ghost" onclick="toggleUser('${u.id}',${!u.is_active})">${u.is_active?'⏸':'▶'}</button>
+            ${u.role!=='superadmin'?`<button class="btn btn-sm btn-danger" onclick="deleteUser('${u.id}')">🗑</button>`:''}
+          </div></td></tr>`;
+      }).join('')}</tbody></table>`;
+  }catch(e){el.innerHTML='<p style="color:var(--red)">'+e.message+'</p>'}
+}
+
+function openAddUser(){
+  const sel=document.getElementById('uCompany');
+  sel.innerHTML='<option value="">— Simpatico HR —</option>'+allCompanies.map(c=>`<option value="${c.id}">${c.name}</option>`).join('');
+  openModal('addUserModal');
+}
+
+async function saveUser(){
+  const name=document.getElementById('uName').value.trim();
+  const email=document.getElementById('uEmail').value.trim();
+  const pass=document.getElementById('uPass').value.trim();
+  if(!name||!email||!pass){toast('❌ All fields required');return}
+
+  const permissions={
+    post_jobs:document.getElementById('uPermJobs').classList.contains('on'),
+    view_candidates:document.getElementById('uPermCands').classList.contains('on'),
+    manage_interviews:document.getElementById('uPermInts').classList.contains('on'),
+    view_reports:document.getElementById('uPermReports').classList.contains('on')
+  };
+  await db('insert','users',{name,email,password_hash:pass,role:document.getElementById('uRole').value,company_id:document.getElementById('uCompany').value||null,permissions,is_active:true});
+  toast('✅ User added!');closeModal('addUserModal');
+  document.getElementById('uName').value='';document.getElementById('uEmail').value='';document.getElementById('uPass').value='';
+  loadUsers();logAudit('user_add','Added: '+email);
+}
+
+async function toggleUser(id,val){await db('update','users',{is_active:val},{id});toast(val?'✅':'⏸');loadUsers();logAudit('user_toggle',id)}
+async function deleteUser(id){if(!confirm('Delete user?'))return;await db('delete','users',null,{id});toast('🗑');loadUsers();logAudit('user_delete',id)}
+
+// ═══════════════════════════════════════════════════════
+// SETTINGS
+// ═══════════════════════════════════════════════════════
+function toggleSetting(key,el){
+  el.classList.toggle('on');
+  settings[key]=el.classList.contains('on');
+  localStorage.setItem('adminSettings',JSON.stringify(settings));
+
+  // Handle mutual exclusivity
+  if(key==='autoApprove'&&settings.autoApprove){
+    settings.manualApprove=false;
+    document.getElementById('toggleManualApprove').classList.remove('on');
+  }
+  if(key==='manualApprove'&&settings.manualApprove){
+    settings.autoApprove=false;
+    document.getElementById('toggleAutoApprove').classList.remove('on');
+  }
+  toast('✅ Setting updated');
+}
+
+function saveSetting(key,val){settings[key]=isNaN(val)?val:parseInt(val);localStorage.setItem('adminSettings',JSON.stringify(settings));toast('✅ Saved')}
+
+function loadSettings(){
+  const saved=localStorage.getItem('adminSettings');
+  if(saved){try{settings=JSON.parse(saved)}catch(e){}}
+  document.getElementById('toggleATS').classList.toggle('on',settings.autoATS);
+  document.getElementById('toggleAutoInvite').classList.toggle('on',settings.autoInvite);
+  document.getElementById('toggleAutoApprove').classList.toggle('on',settings.autoApprove);
+  document.getElementById('toggleManualApprove').classList.toggle('on',settings.manualApprove);
+  document.getElementById('atsThreshold').value=settings.atsThreshold;
+  document.getElementById('tokenExpiry').value=settings.tokenExpiry;
+  document.getElementById('defaultQuestions').value=settings.defaultQuestions;
+}
+
+// ═══════════════════════════════════════════════════════
+// AUDIT LOG
+// ═══════════════════════════════════════════════════════
+async function logAudit(action,details){
+  try{await db('insert','audit_log',{user_id:currentUser?.id||null,action,details:{text:details,user:currentUser?.email||'system'}})}catch(e){console.error('[AUDIT]',e)}
+}
+
+async function loadAudit(){
+  const el=document.getElementById('auditTable');el.innerHTML='<span class="loading"></span>';
+  try{
+    const data=await db('select','audit_log',null,null,null,'created_at.desc');
+    if(!Array.isArray(data)||!data.length){el.innerHTML='<p style="color:var(--text2);text-align:center;padding:20px">No logs</p>';return}
+    el.innerHTML=`<table><thead><tr><th>Action</th><th>Details</th><th>User</th><th>Time</th></tr></thead><tbody>${
+      data.slice(0,50).map(l=>`<tr>
+        <td><span class="pill pill-blue">${l.action||''}</span></td>
+        <td style="color:var(--text2);font-size:0.82rem">${l.details?.text||''}</td>
+        <td style="font-size:0.78rem">${l.details?.user||'—'}</td>
+        <td style="color:var(--text2);font-size:0.78rem">${l.created_at?new Date(l.created_at).toLocaleString():''}</td></tr>`).join('')}</tbody></table>`;
+  }catch(e){el.innerHTML='<p style="color:var(--red)">'+e.message+'</p>'}
+}
+
+// ═══════════════════════════════════════════════════════
+// MODAL HELPERS
+// ═══════════════════════════════════════════════════════
+function openModal(id){document.getElementById(id).classList.add('active')}
+function closeModal(id){document.getElementById(id).classList.remove('active')}
+
+// Close on overlay click
+document.querySelectorAll('.modal-overlay').forEach(m=>{
+  m.addEventListener('click',e=>{if(e.target===m)m.classList.remove('active')});
+});
+
+// Toggle clicks
+document.querySelectorAll('.toggle').forEach(t=>{
+  if(!t.id.startsWith('toggle'))t.addEventListener('click',()=>t.classList.toggle('on'));
+});
+
+// ESC to close
+document.addEventListener('keydown',e=>{
+  if(e.key==='Escape')document.querySelectorAll('.modal-overlay.active').forEach(m=>m.classList.remove('active'));
+});
+
+// Enter to login
+document.getElementById('loginPass').addEventListener('keydown',e=>{if(e.key==='Enter')doLogin()});
+document.getElementById('loginEmail').addEventListener('keydown',e=>{if(e.key==='Enter')document.getElementById('loginPass').focus()});
+
+// ═══════════════════════════════════════════════════════
+// INIT
+// ═══════════════════════════════════════════════════════
+loadSettings();
+checkSavedLogin();
 </script>
 </body>
 </html>
