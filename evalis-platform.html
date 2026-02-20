@@ -1575,6 +1575,272 @@ window.addEventListener('DOMContentLoaded',()=>{
 
   }catch(e){console.log('[AdminConfig]',e)}
 })();
+  // ═══════════════════════════════════════
+// 🔒 MOCK INTERVIEW PAYMENT SYSTEM
+// ═══════════════════════════════════════
+
+// Check if user has valid mock access
+function hasMockAccess(){
+  var data = localStorage.getItem("mockAccess");
+  if(!data) return false;
+  try{
+    var d = JSON.parse(data);
+    // Check if expired
+    if(d.expires && new Date(d.expires) < new Date()){
+      // EXPIRED — auto revoke
+      localStorage.removeItem("mockAccess");
+      console.log('[Mock] Access expired, revoked');
+      return false;
+    }
+    return true;
+  }catch(e){
+    localStorage.removeItem("mockAccess");
+    return false;
+  }
+}
+
+// Grant access after payment
+function grantMockAccess(type, days){
+  var expires = new Date();
+  expires.setDate(expires.getDate() + (days || 30));
+  localStorage.setItem("mockAccess", JSON.stringify({
+    type: type,        // "paid" or "code"
+    granted: new Date().toISOString(),
+    expires: expires.toISOString()
+  }));
+  console.log('[Mock] Access granted for ' + days + ' days');
+}
+
+// Check days remaining
+function getMockDaysLeft(){
+  try{
+    var d = JSON.parse(localStorage.getItem("mockAccess")||"{}");
+    if(!d.expires) return 0;
+    var left = Math.ceil((new Date(d.expires) - new Date()) / 86400000);
+    return Math.max(0, left);
+  }catch(e){ return 0; }
+}
+
+// Show paywall
+function showPaywall(){
+  // Create paywall overlay
+  var overlay = document.getElementById('paywallOverlay');
+  if(!overlay){
+    overlay = document.createElement('div');
+    overlay.id = 'paywallOverlay';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.85);backdrop-filter:blur(12px);z-index:10000;display:flex;align-items:center;justify-content:center;padding:20px;';
+    
+    var cfg = JSON.parse(localStorage.getItem("adminConfig")||"{}");
+    var price = cfg.mockPrice || 199;
+    var days = cfg.accessDays || 30;
+    
+    overlay.innerHTML = '<div style="background:rgba(15,23,42,.65);border:1px solid rgba(255,255,255,.08);border-radius:24px;padding:32px;max-width:420px;width:100%;text-align:center;color:#f8fafc;">' +
+      '<div style="font-size:3rem;margin-bottom:8px;">🎯</div>' +
+      '<h2 style="font-size:1.3rem;margin-bottom:8px;">Unlock Mock Interviews</h2>' +
+      '<p style="color:#94a3b8;font-size:0.88rem;margin-bottom:16px;">Practice unlimited AI interviews with feedback</p>' +
+      '<div style="font-size:2rem;font-weight:800;color:#6366f1;margin:16px 0;">₹' + price + ' <span style="font-size:0.8rem;color:#94a3b8;font-weight:500;">/ ' + days + ' days</span></div>' +
+      '<ul style="text-align:left;list-style:none;padding:0;margin:16px 0;color:#94a3b8;font-size:0.85rem;">' +
+      '<li style="padding:6px 0;border-bottom:1px solid rgba(255,255,255,.08);">✅ Unlimited mock interviews</li>' +
+      '<li style="padding:6px 0;border-bottom:1px solid rgba(255,255,255,.08);">✅ AI feedback & scoring</li>' +
+      '<li style="padding:6px 0;border-bottom:1px solid rgba(255,255,255,.08);">✅ Multi-language support</li>' +
+      '<li style="padding:6px 0;">✅ Resume-based questions</li></ul>' +
+      '<button onclick="startRazorpay()" style="width:100%;padding:14px;font-size:1rem;background:linear-gradient(135deg,#10b981,#059669);border:none;border-radius:14px;color:#fff;font-weight:800;cursor:pointer;margin-top:8px;">💳 Pay ₹' + price + '</button>' +
+      '<div style="margin-top:16px;padding-top:16px;border-top:1px solid rgba(255,255,255,.08);">' +
+      '<p style="font-size:0.8rem;color:#94a3b8;margin-bottom:8px;">Have an access code?</p>' +
+      '<div style="display:flex;gap:8px;">' +
+      '<input type="text" id="mockAccessCode" placeholder="Enter code" style="flex:1;padding:10px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);border-radius:10px;color:#f8fafc;font-size:0.9rem;outline:none;">' +
+      '<button onclick="useAccessCode()" style="padding:10px 16px;background:#6366f1;border:none;border-radius:10px;color:#fff;font-weight:700;cursor:pointer;">Unlock</button>' +
+      '</div></div>' +
+      '<button onclick="closePaywall()" style="width:100%;padding:12px;margin-top:8px;background:transparent;border:1px solid rgba(255,255,255,.08);border-radius:12px;color:#94a3b8;font-size:0.88rem;cursor:pointer;font-weight:600;">← Back</button>' +
+      '</div>';
+    document.body.appendChild(overlay);
+  }
+  overlay.style.display = 'flex';
+}
+
+function closePaywall(){
+  var o = document.getElementById('paywallOverlay');
+  if(o) o.style.display = 'none';
+}
+
+// Razorpay Payment
+function startRazorpay(){
+  var cfg = JSON.parse(localStorage.getItem("adminConfig")||"{}");
+  var key = cfg.razorpayKey || '';
+  var price = parseInt(cfg.mockPrice) || 199;
+  var days = parseInt(cfg.accessDays) || 30;
+  
+  if(!key){
+    // No Razorpay key — show UPI fallback
+    var upi = cfg.upiId || '';
+    alert('💳 Pay ₹' + price + ' via UPI:\n\n' +
+      'UPI ID: ' + (upi || 'Not configured') + '\n\n' +
+      'After payment, ask admin for access code.');
+    return;
+  }
+  
+  // Load Razorpay if not loaded
+  if(typeof Razorpay === 'undefined'){
+    var s = document.createElement('script');
+    s.src = 'https://checkout.razorpay.com/v1/checkout.js';
+    s.onload = function(){ openRazorpayCheckout(key, price, days); };
+    s.onerror = function(){ 
+      alert('Payment service unavailable. Contact admin.');
+    };
+    document.head.appendChild(s);
+    return;
+  }
+  
+  openRazorpayCheckout(key, price, days);
+}
+
+function openRazorpayCheckout(key, price, days){
+  var options = {
+    key: key,
+    amount: price * 100,  // paise
+    currency: "INR",
+    name: "Simpatico HR",
+    description: "Mock Interview Access - " + days + " Days",
+    handler: function(response){
+      // ✅ PAYMENT SUCCESS
+      console.log("Payment ID:", response.razorpay_payment_id);
+      
+      // Grant access
+      grantMockAccess("paid", days);
+      
+      // Close paywall
+      closePaywall();
+      
+      // Show success
+      toast('✅ Payment successful! ' + days + ' days access granted.');
+      
+      // Save to DB
+      try{
+        db('insert','payments',{
+          payment_id: response.razorpay_payment_id,
+          amount: price,
+          currency: 'INR',
+          type: 'razorpay',
+          status: 'completed',
+          days_granted: days,
+          created_at: new Date().toISOString()
+        });
+      }catch(e){}
+      
+      // Start mock interview
+      startMode('mock');
+    },
+    theme: { color: "#6366f1" },
+    modal: {
+      ondismiss: function(){
+        toast("Payment cancelled");
+      }
+    }
+  };
+  
+  var rzp = new Razorpay(options);
+  rzp.open();
+}
+
+// Access Code
+function useAccessCode(){
+  var code = document.getElementById('mockAccessCode').value.trim().toUpperCase();
+  if(!code){ toast('❌ Enter code'); return; }
+  
+  // Check hardcoded codes
+  var validCodes = ["SIMPATICO2025", "EVALIS-PRO", "MOCK-FREE-TRIAL"];
+  if(validCodes.includes(code)){
+    var cfg = JSON.parse(localStorage.getItem("adminConfig")||"{}");
+    var days = parseInt(cfg.accessDays) || 30;
+    grantMockAccess("code", days);
+    closePaywall();
+    toast("✅ Code accepted! " + days + " days access.");
+    startMode('mock');
+    return;
+  }
+  
+  // Check DB codes
+  db('select','access_codes',null,{code: code, is_active: true})
+    .then(function(data){
+      var r = Array.isArray(data) ? data[0] : data;
+      if(!r || r.error){ toast('❌ Invalid code'); return; }
+      if(r.max_uses && r.used >= r.max_uses){ toast('❌ Code fully used'); return; }
+      if(r.expires_at && new Date(r.expires_at) < new Date()){ toast('❌ Code expired'); return; }
+      
+      var days = r.days || 30;
+      grantMockAccess("code", days);
+      
+      // Update usage
+      db('update','access_codes',{used:(r.used||0)+1},{id:r.id});
+      
+      closePaywall();
+      toast("✅ Access granted for " + days + " days!");
+      startMode('mock');
+    })
+    .catch(function(){ toast('❌ Invalid code'); });
+}
+
+// ═══════════════════════════════════════
+// OVERRIDE MOCK INTERVIEW CLICK
+// ═══════════════════════════════════════
+// Save original startMode
+var _originalStartMode = typeof startMode === 'function' ? startMode : null;
+
+// Override the mock card click
+function tryMockInterview(){
+  var cfg = JSON.parse(localStorage.getItem("adminConfig")||"{}");
+  
+  // Check if admin enabled payment
+  if(cfg.mockPaid){
+    // Mock is PAID — check access
+    if(hasMockAccess()){
+      // Has valid access
+      var days = getMockDaysLeft();
+      toast('🎯 ' + days + ' days remaining');
+      if(_originalStartMode) _originalStartMode('mock');
+      else startMode('mock');
+    }else{
+      // No access — show paywall
+      showPaywall();
+    }
+  }else{
+    // Mock is FREE — just start
+    if(_originalStartMode) _originalStartMode('mock');
+    else startMode('mock');
+  }
+}
+
+// Update the mock card to use new function
+window.addEventListener('DOMContentLoaded', function(){
+  var cards = document.querySelectorAll('.mode-card');
+  if(cards[1]){
+    // Replace onclick of mock card (2nd card)
+    cards[1].onclick = function(){ tryMockInterview(); };
+    
+    // Update badge based on admin setting
+    var cfg = JSON.parse(localStorage.getItem("adminConfig")||"{}");
+    var badge = cards[1].querySelector('.mode-badge');
+    if(badge){
+      if(cfg.mockPaid){
+        badge.textContent = '🔒 ₹' + (cfg.mockPrice || 199);
+        badge.style.background = 'rgba(245,158,11,.15)';
+        badge.style.color = '#f59e0b';
+        
+        // If user has access, show days left
+        if(hasMockAccess()){
+          var left = getMockDaysLeft();
+          badge.textContent = '✅ ' + left + ' days left';
+          badge.style.background = 'rgba(16,185,129,.15)';
+          badge.style.color = '#10b981';
+        }
+      }else{
+        badge.textContent = 'FREE';
+        badge.style.background = 'rgba(16,185,129,.15)';
+        badge.style.color = '#10b981';
+      }
+    }
+  }
+});
 </script>
 </body>
 </html>
