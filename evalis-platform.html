@@ -591,20 +591,187 @@ document.getElementById('cvFile').addEventListener('change',async e=>{
 // ═══════════════════════════════════════
 // AI CALL
 // ═══════════════════════════════════════
-async function callAI(messages){
-  const ctrl=new AbortController();
-  const tm=setTimeout(()=>ctrl.abort(),45000);
-  try{
-    const r=await fetch(W,{method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({messages}),signal:ctrl.signal});
-    clearTimeout(tm);
-    if(!r.ok)throw new Error('Error '+r.status);
-    const d=await r.json();
-    if(!d.response)throw new Error("Empty");
-    return d.response;
-  }catch(e){clearTimeout(tm);if(e.name==='AbortError')throw new Error("Timeout");throw e}
+// ═══════════════════════════════════════
+// 🤖 MULTI-API SYSTEM (Unlimited Free!)
+// Priority: Puter.js → Groq → Cloudflare
+// ═══════════════════════════════════════
+
+var _puterReady = false;
+var _puterLoading = false;
+var _groqKey = ''; // Add free key from groq.com if you want
+
+// Load Puter.js library
+function loadPuterJS() {
+  return new Promise(function(resolve, reject) {
+    if (_puterReady && window.puter) { resolve(); return; }
+    if (_puterLoading) {
+      // Already loading — wait for it
+      var check = setInterval(function() {
+        if (_puterReady && window.puter) { clearInterval(check); resolve(); }
+      }, 200);
+      setTimeout(function() { clearInterval(check); reject(new Error('Puter timeout')); }, 10000);
+      return;
+    }
+    _puterLoading = true;
+    var s = document.createElement('script');
+    s.src = 'https://js.puter.com/v2/';
+    s.onload = function() { _puterReady = true; _puterLoading = false; resolve(); };
+    s.onerror = function() { _puterLoading = false; reject(new Error('Puter load failed')); };
+    document.head.appendChild(s);
+  });
 }
 
+// ── PUTER.JS AI (FREE, UNLIMITED) ──
+async function callPuterAI(messages) {
+  await loadPuterJS();
+
+  // Convert messages to Puter format
+  var systemMsg = '';
+  var chatHistory = [];
+
+  for (var i = 0; i < messages.length; i++) {
+    if (messages[i].role === 'system') {
+      systemMsg = messages[i].content;
+    } else {
+      chatHistory.push({
+        role: messages[i].role,
+        content: messages[i].content
+      });
+    }
+  }
+
+  // Build the prompt
+  var fullPrompt = systemMsg ? systemMsg + '\n\n' : '';
+  
+  // Add last few messages for context
+  var recent = chatHistory.slice(-6);
+  for (var j = 0; j < recent.length; j++) {
+    var prefix = recent[j].role === 'user' ? 'User: ' : 'Assistant: ';
+    fullPrompt += prefix + recent[j].content + '\n\n';
+  }
+
+  try {
+    var response = await puter.ai.chat(fullPrompt, { model: 'gpt-4o-mini' });
+
+    var text = '';
+    if (response && response.message && response.message.content) {
+      text = response.message.content;
+    } else if (typeof response === 'string') {
+      text = response;
+    } else if (response && response.toString) {
+      text = response.toString();
+    }
+
+    if (!text || text.length < 5) throw new Error('Empty response');
+    
+    console.log('[AI] Puter.js ✅');
+    return text;
+  } catch (e) {
+    console.log('[AI] Puter.js failed:', e.message);
+    throw e;
+  }
+}
+
+// ── GROQ AI (FREE, 14,400/day) ──
+async function callGroqAI(messages) {
+  if (!_groqKey) throw new Error('No Groq key');
+
+  var ctrl = new AbortController();
+  var tm = setTimeout(function() { ctrl.abort(); }, 30000);
+
+  try {
+    var r = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + _groqKey
+      },
+      body: JSON.stringify({
+        model: 'llama-3.1-8b-instant',
+        messages: messages,
+        max_tokens: 1024,
+        temperature: 0.7
+      }),
+      signal: ctrl.signal
+    });
+
+    clearTimeout(tm);
+    if (!r.ok) throw new Error('Groq error ' + r.status);
+
+    var data = await r.json();
+    var text = data.choices && data.choices[0] && data.choices[0].message
+      ? data.choices[0].message.content : '';
+
+    if (!text || text.length < 5) throw new Error('Empty');
+
+    console.log('[AI] Groq ✅');
+    return text;
+  } catch (e) {
+    clearTimeout(tm);
+    console.log('[AI] Groq failed:', e.message);
+    throw e;
+  }
+}
+
+// ── CLOUDFLARE WORKER (YOUR EXISTING, BACKUP) ──
+async function callCloudflareAI(messages) {
+  var ctrl = new AbortController();
+  var tm = setTimeout(function() { ctrl.abort(); }, 45000);
+
+  try {
+    var r = await fetch(W, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ messages: messages }),
+      signal: ctrl.signal
+    });
+
+    clearTimeout(tm);
+    if (!r.ok) throw new Error('CF error ' + r.status);
+
+    var d = await r.json();
+    if (!d.response) throw new Error('Empty');
+
+    console.log('[AI] Cloudflare ✅');
+    return d.response;
+  } catch (e) {
+    clearTimeout(tm);
+    console.log('[AI] Cloudflare failed:', e.message);
+    throw e;
+  }
+}
+
+// ═══════════════════════════════════════
+// 🔄 MAIN AI FUNCTION (auto-fallback)
+// ═══════════════════════════════════════
+async function callAI(messages) {
+  var errors = [];
+
+  // ── TRY 1: Puter.js (FREE, UNLIMITED) ──
+  try {
+    return await callPuterAI(messages);
+  } catch (e) {
+    errors.push('Puter: ' + e.message);
+  }
+
+  // ── TRY 2: Groq (FREE, 14,400/day) ──
+  try {
+    return await callGroqAI(messages);
+  } catch (e) {
+    errors.push('Groq: ' + e.message);
+  }
+
+  // ── TRY 3: Cloudflare (YOUR WORKER) ──
+  try {
+    return await callCloudflareAI(messages);
+  } catch (e) {
+    errors.push('CF: ' + e.message);
+  }
+
+  // ── ALL FAILED ──
+  console.error('[AI] All providers failed:', errors);
+  throw new Error('All AI providers failed. Check internet connection.');
+}
 // ═══════════════════════════════════════
 // JSON PARSER
 // ═══════════════════════════════════════
