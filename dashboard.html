@@ -3,72 +3,210 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Employer Portal | Simpatico HR</title>
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <style>
-    body { font-family: sans-serif; background: #f4f7f9; padding: 20px; }
-    .dash-container { max-width: 900px; margin: auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
-    table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-    th, td { text-align: left; padding: 12px; border-bottom: 1px solid #eee; }
-    th { background: #007bff; color: white; }
-    .btn-view { background: #28a745; color: white; padding: 6px 12px; text-decoration: none; border-radius: 4px; font-size: 13px; }
-    .status-badge { padding: 4px 8px; border-radius: 12px; font-size: 11px; background: #e0e0e0; }
-  </style>
+  <title>Dashboard | Simpatico HR</title>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/shared.css">
 </head>
 <body>
-  <div class="dash-container">
-    <h2>Employer Dashboard</h2>
-    <p id="jobName">Loading candidates...</p>
-    <table id="candidateTable">
-      <thead>
-        <tr>
-          <th>Name</th>
-          <th>Email</th>
-          <th>Phone</th>
-          <th>Resume</th>
-        </tr>
-      </thead>
-      <tbody id="candidateList"></tbody>
-    </table>
+
+<nav class="top-nav">
+  <a class="top-logo" href="index.html">SIMPATICO <span>HR</span></a>
+  <div class="top-links">
+    <a class="top-link active" href="dashboard.html">📊 Dashboard</a>
+    <a class="top-link" href="pipeline.html">🔄 Pipeline</a>
+    <a class="top-link" href="analytics.html">📈 Analytics</a>
+    <a class="top-link" href="settings.html">⚙️ Settings</a>
+    <a class="top-link" href="#" onclick="API.logout();return false;">🚪 Logout</a>
+  </div>
+</nav>
+
+<div class="container">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;flex-wrap:wrap;gap:12px;">
+    <div>
+      <h1 style="font-size:1.6rem;font-weight:800;background:linear-gradient(135deg,#fff,#94a3b8);-webkit-background-clip:text;-webkit-text-fill-color:transparent;" id="welcomeTitle">Dashboard</h1>
+      <p style="color:var(--muted);font-size:0.88rem;" id="welcomeSub">Loading...</p>
+    </div>
+    <div style="display:flex;gap:8px;">
+      <button class="btn btn-primary" onclick="showPostJob()">+ Post Job</button>
+      <button class="btn btn-green" onclick="location.href='pipeline.html'">🔄 Pipeline</button>
+    </div>
   </div>
 
-  <script>
-    const SUPABASE_URL = "https://cvkxtsvgnynxexmemfuy.supabase.co";
-    const SUPABASE_ANON_KEY = "sb_publishable_DGT-x86M-BwI4zA7S_97CA_3v3O3b0A";
-    const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  <!-- Stats -->
+  <div class="stat-grid" id="statsGrid">
+    <div class="stat-card"><div class="stat-num" style="color:var(--blue);" id="sJobs">-</div><div class="stat-lbl">Active Jobs</div></div>
+    <div class="stat-card"><div class="stat-num" style="color:var(--accent);" id="sApps">-</div><div class="stat-lbl">Applications</div></div>
+    <div class="stat-card"><div class="stat-num" style="color:var(--yellow);" id="sNew">-</div><div class="stat-lbl">New This Week</div></div>
+    <div class="stat-card"><div class="stat-num" style="color:var(--green);" id="sShort">-</div><div class="stat-lbl">Shortlisted</div></div>
+    <div class="stat-card"><div class="stat-num" style="color:var(--red);" id="sInterviews">-</div><div class="stat-lbl">Interviews</div></div>
+    <div class="stat-card"><div class="stat-num" style="color:#10b981;" id="sHired">-</div><div class="stat-lbl">Hired</div></div>
+  </div>
 
-    async function loadDashboard() {
-      const urlParams = new URLSearchParams(window.location.search);
-      const jobId = urlParams.get('job_id');
+  <!-- Pipeline Summary -->
+  <div class="card">
+    <h3>🔄 Pipeline Summary</h3>
+    <div id="pipelineSummary" style="display:flex;gap:6px;flex-wrap:wrap;"></div>
+  </div>
 
-      if (!jobId) {
-        document.getElementById('jobName').textContent = "Error: No Job ID provided.";
-        return;
-      }
+  <!-- Recent Applications -->
+  <div class="card">
+    <h3>📝 Recent Applications</h3>
+    <div id="recentApps"><span class="loading"></span> Loading...</div>
+  </div>
 
-      // 1. Fetch Job Title
-      const { data: job } = await supabase.from('jobs').select('title').eq('id', jobId).single();
-      if(job) document.getElementById('jobName').textContent = "Candidates for: " + job.title;
+  <!-- Active Jobs -->
+  <div class="card">
+    <h3>💼 Active Jobs</h3>
+    <div id="activeJobs"><span class="loading"></span> Loading...</div>
+  </div>
 
-      // 2. Fetch Candidates
-      const { data: candidates, error } = await supabase
-        .from('candidates')
-        .select('*')
-        .eq('job_id', jobId)
-        .order('created_at', { ascending: false });
+  <!-- Post Job Modal -->
+  <div id="postJobModal" class="hidden" style="position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:1000;display:flex;align-items:center;justify-content:center;padding:20px;">
+    <div class="card" style="max-width:600px;width:100%;max-height:90vh;overflow-y:auto;">
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <h3>📢 Post New Job</h3>
+        <button class="btn btn-sm btn-red" onclick="hidePostJob()">✕</button>
+      </div>
+      <label>Title *</label>
+      <input type="text" id="jTitle" placeholder="e.g. Senior Frontend Developer">
+      <div class="row2">
+        <div><label>Type</label><select id="jType"><option value="full-time">Full Time</option><option value="part-time">Part Time</option><option value="contract">Contract</option><option value="internship">Internship</option><option value="remote">Remote</option></select></div>
+        <div><label>Location</label><input type="text" id="jLocation" placeholder="e.g. Kochi, Kerala"></div>
+      </div>
+      <div class="row2">
+        <div><label>Department</label><input type="text" id="jDept" placeholder="Engineering"></div>
+        <div><label>Level</label><select id="jLevel"><option value="Fresher">Fresher</option><option value="Junior">Junior</option><option value="Mid-Level" selected>Mid-Level</option><option value="Senior">Senior</option><option value="Lead">Lead</option></select></div>
+      </div>
+      <div class="row2">
+        <div><label>Min Salary (₹)</label><input type="number" id="jSalMin" placeholder="0"></div>
+        <div><label>Max Salary (₹)</label><input type="number" id="jSalMax" placeholder="0"></div>
+      </div>
+      <label>Skills (comma separated)</label>
+      <input type="text" id="jSkills" placeholder="React, Node.js, TypeScript">
+      <label>Description</label>
+      <textarea id="jDesc" placeholder="Job description..." style="min-height:120px;"></textarea>
+      <button class="btn btn-primary btn-full" onclick="submitJob()">📢 Publish Job</button>
+    </div>
+  </div>
+</div>
 
-      const list = document.getElementById('candidateList');
-      candidates.forEach(c => {
-        list.innerHTML += `
-          <tr>
-            <td>${c.full_name}</td>
-            <td>${c.email}</td>
-            <td>${c.phone}</td>
-            <td><a href="${c.resume_url}" target="_blank" class="btn-view">View PDF</a></td>
+<script src="js/api.js"></script>
+<script>
+  if (!requireAuth(["client_admin", "hr"])) throw "Unauthorized";
+
+  const user = API.user;
+  const client = API.client;
+
+  document.getElementById("welcomeTitle").textContent = `Welcome, ${user?.name || "User"}!`;
+  document.getElementById("welcomeSub").textContent = `${client?.company_name || "Company"} — ${user?.role === "client_admin" ? "Admin" : "HR"} Dashboard`;
+
+  async function loadDashboard() {
+    try {
+      const data = await API.clientStats();
+      const s = data.stats || data;
+
+      document.getElementById("sJobs").textContent = s.jobs?.active ?? s.activeJobs ?? 0;
+      document.getElementById("sApps").textContent = s.applications?.total ?? s.totalApps ?? 0;
+      document.getElementById("sNew").textContent = s.applications?.thisWeek ?? s.newApps ?? 0;
+      document.getElementById("sShort").textContent = s.applications?.byStatus?.shortlisted ?? s.shortlisted ?? 0;
+      document.getElementById("sInterviews").textContent = s.interviews?.total ?? 0;
+      document.getElementById("sHired").textContent = s.applications?.byStatus?.hired ?? s.hired ?? 0;
+
+      // Pipeline summary
+      const statuses = s.applications?.byStatus || s.byStatus || {};
+      const el = document.getElementById("pipelineSummary");
+      const labels = { applied: "📝 Applied", screened: "🔍 Screened", shortlisted: "⭐ Shortlisted",
+        interview_scheduled: "📅 Scheduled", interviewed: "🎤 Interviewed", offered: "📧 Offered",
+        hired: "✅ Hired", onboarding: "🎓 Onboarding", rejected: "❌ Rejected" };
+      el.innerHTML = Object.entries(labels).map(([k, v]) =>
+        `<span class="pill pill-${k === 'hired' ? 'green' : k === 'rejected' ? 'red' : k === 'shortlisted' ? 'blue' : 'yellow'}" style="padding:6px 14px;font-size:0.82rem;">${v}: <strong>${statuses[k] || 0}</strong></span>`
+      ).join("");
+
+    } catch (e) { toast("❌ " + e.message, "error"); }
+
+    // Recent apps
+    try {
+      const r = await API.clientApplications();
+      const apps = (r.applications || []).slice(0, 10);
+      const el = document.getElementById("recentApps");
+      if (!apps.length) { el.innerHTML = '<div class="empty"><div class="empty-icon">📭</div>No applications yet</div>'; return; }
+
+      el.innerHTML = `<table class="data-table"><thead><tr><th>Name</th><th>Job</th><th>ATS</th><th>Status</th><th>Date</th></tr></thead><tbody>${
+        apps.map(a => {
+          const sc = a.ats_score;
+          const scClass = sc >= 70 ? "score-high" : sc >= 50 ? "score-mid" : sc != null ? "score-low" : "";
+          const stClass = { applied:"pill-yellow", screened:"pill-blue", shortlisted:"pill-blue", interviewed:"pill-purple", hired:"pill-green", rejected:"pill-red" }[a.status] || "pill-gray";
+          return `<tr>
+            <td><strong>${a.candidate_name || "?"}</strong><br><span style="font-size:0.72rem;color:var(--muted);">${a.candidate_email || ""}</span></td>
+            <td style="font-size:0.82rem;">${a.job_title || "N/A"}</td>
+            <td>${sc != null ? `<span class="score ${scClass}">${sc}</span>` : "—"}</td>
+            <td><span class="pill ${stClass}">${a.status}</span></td>
+            <td style="font-size:0.78rem;color:var(--muted);">${a.created_at ? new Date(a.created_at).toLocaleDateString() : "?"}</td>
           </tr>`;
+        }).join("")
+      }</tbody></table>`;
+    } catch (e) { document.getElementById("recentApps").innerHTML = `<p style="color:var(--red);">${e.message}</p>`; }
+
+    // Active jobs
+    try {
+      const r = await API.clientJobs();
+      const jobs = (r.jobs || []).filter(j => j.is_active);
+      const el = document.getElementById("activeJobs");
+      if (!jobs.length) { el.innerHTML = '<div class="empty"><div class="empty-icon">💼</div>No active jobs. <a href="#" onclick="showPostJob()" style="color:var(--accent);">Post one!</a></div>'; return; }
+
+      el.innerHTML = jobs.map(j => `
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--border);flex-wrap:wrap;gap:8px;">
+          <div>
+            <strong style="color:var(--accent);">${j.title}</strong>
+            <div style="font-size:0.75rem;color:var(--muted);">${j.location || "Remote"} • ${j.job_type || "Full Time"} • ${j.level || ""}</div>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center;">
+            <span class="pill pill-blue">${j.app_count || 0} apps</span>
+            ${j.new_count ? `<span class="pill pill-yellow">${j.new_count} new</span>` : ""}
+            <button class="btn btn-sm btn-red" onclick="toggleJob('${j.id}',false)">Pause</button>
+          </div>
+        </div>
+      `).join("");
+    } catch (e) { document.getElementById("activeJobs").innerHTML = `<p style="color:var(--red);">${e.message}</p>`; }
+  }
+
+  function showPostJob() { document.getElementById("postJobModal").classList.remove("hidden"); }
+  function hidePostJob() { document.getElementById("postJobModal").classList.add("hidden"); }
+
+  async function submitJob() {
+    const title = document.getElementById("jTitle").value.trim();
+    if (!title) { toast("❌ Enter job title", "error"); return; }
+
+    try {
+      await API.createJob({
+        title,
+        job_type: document.getElementById("jType").value,
+        location: document.getElementById("jLocation").value.trim(),
+        department: document.getElementById("jDept").value.trim(),
+        level: document.getElementById("jLevel").value,
+        salary_min: parseInt(document.getElementById("jSalMin").value) || 0,
+        salary_max: parseInt(document.getElementById("jSalMax").value) || 0,
+        skills: document.getElementById("jSkills").value.trim(),
+        description: document.getElementById("jDesc").value.trim()
       });
-    }
-    loadDashboard();
-  </script>
+      toast("✅ Job published!", "success");
+      hidePostJob();
+      document.getElementById("jTitle").value = "";
+      document.getElementById("jDesc").value = "";
+      document.getElementById("jSkills").value = "";
+      loadDashboard();
+    } catch (e) { toast("❌ " + e.message, "error"); }
+  }
+
+  async function toggleJob(id, active) {
+    try {
+      await API.updateJob(id, { is_active: active });
+      toast(active ? "✅ Activated" : "⏸️ Paused", "success");
+      loadDashboard();
+    } catch (e) { toast("❌ " + e.message, "error"); }
+  }
+
+  loadDashboard();
+</script>
 </body>
 </html>
