@@ -1,174 +1,430 @@
-// js/api.js — Shared API client for all pages
-const API_BASE = "https://evalis-ai.simpaticohrconsultancy.workers.dev";
+// js/api.js — SimpaticoHR API Client v4.0
+// Matches Worker v4.0 endpoints exactly
 
-const API = {
-  token: localStorage.getItem("auth_token") || "",
-  user: JSON.parse(localStorage.getItem("auth_user") || "null"),
-  client: JSON.parse(localStorage.getItem("auth_client") || "null"),
-
-  setAuth(token, user, client) {
-    this.token = token;
-    this.user = user;
-    this.client = client;
-    localStorage.setItem("auth_token", token);
-    localStorage.setItem("auth_user", JSON.stringify(user));
-    localStorage.setItem("auth_client", JSON.stringify(client));
-  },
-
-  clearAuth() {
-    this.token = "";
-    this.user = null;
-    this.client = null;
-    localStorage.removeItem("auth_token");
-    localStorage.removeItem("auth_user");
-    localStorage.removeItem("auth_client");
-  },
-
-  isLoggedIn() {
-    if (!this.token) return false;
-    try {
-      const d = JSON.parse(atob(this.token));
-      return d.exp > Date.now();
-    } catch { return false; }
-  },
-
-  getRole() {
-    return this.user?.role || "";
-  },
-
-  async request(path, method = "GET", data = null) {
-    const opts = {
-      method,
-      headers: { "Content-Type": "application/json" }
+const API = (() => {
+    const CONFIG = {
+        // UPDATE THIS to your actual Worker URL
+        baseUrl: 'https://simpatico-hr-worker.YOUR_SUBDOMAIN.workers.dev',
+        tokenKey: 'sh_token',
+        userKey: 'sh_user',
+        clientKey: 'sh_client'
     };
-    if (this.token) opts.headers["Authorization"] = "Bearer " + this.token;
-    if (data && method !== "GET") opts.body = JSON.stringify(data);
 
-    const r = await fetch(API_BASE + path, opts);
-    const json = await r.json();
+    // State
+    let _token = localStorage.getItem(CONFIG.tokenKey);
+    let _user = null;
+    let _client = null;
 
-    if (r.status === 401) {
-      this.clearAuth();
-      if (!window.location.pathname.includes("login")) {
-        window.location.href = "login.html";
-      }
-      throw new Error(json.error || "Session expired");
+    try { _user = JSON.parse(localStorage.getItem(CONFIG.userKey)); } catch {}
+    try { _client = JSON.parse(localStorage.getItem(CONFIG.clientKey)); } catch {}
+
+    // ═══════════════════════════════════
+    // HTTP CLIENT
+    // ═══════════════════════════════════
+    async function request(path, options = {}) {
+        const url = `${CONFIG.baseUrl}${path}`;
+        const headers = { 'Content-Type': 'application/json' };
+
+        if (_token) headers['Authorization'] = `Bearer ${_token}`;
+
+        try {
+            const res = await fetch(url, {
+                method: options.method || 'GET',
+                headers,
+                body: options.body ? JSON.stringify(options.body) : undefined
+            });
+
+            const data = await res.json();
+
+            if (!res.ok) {
+                if (res.status === 401) {
+                    clearAuth();
+                    if (!window.location.pathname.includes('login')) {
+                        window.location.href = '/login.html?expired=true';
+                    }
+                }
+                throw new Error(data.error || `Request failed (${res.status})`);
+            }
+
+            return data;
+        } catch (err) {
+            if (err.message?.includes('Failed to fetch')) {
+                throw new Error('Network error. Please check your connection.');
+            }
+            throw err;
+        }
     }
-    if (!r.ok) throw new Error(json.error || "Request failed");
-    return json;
-  },
 
-  // Auth
-  async login(email, password) {
-    const r = await this.request("/auth/login", "POST", { email, password });
-    this.setAuth(r.token, r.user, r.client);
-    return r;
-  },
+    const get = (path, params) => {
+        const qs = params ? '?' + new URLSearchParams(
+            Object.fromEntries(Object.entries(params).filter(([_, v]) => v))
+        ).toString() : '';
+        return request(path + qs);
+    };
+    const post = (path, body) => request(path, { method: 'POST', body });
+    const patch = (path, body) => request(path, { method: 'PATCH', body });
+    const put = (path, body) => request(path, { method: 'PUT', body });
+    const del = (path) => request(path, { method: 'DELETE' });
 
-  async register(data) {
-    const r = await this.request("/auth/register", "POST", data);
-    this.setAuth(r.token, r.user, r.client);
-    return r;
-  },
+    // ═══════════════════════════════════
+    // AUTH
+    // ═══════════════════════════════════
+    function setAuth(token, user, client) {
+        _token = token;
+        _user = user;
+        _client = client;
+        localStorage.setItem(CONFIG.tokenKey, token);
+        localStorage.setItem(CONFIG.userKey, JSON.stringify(user));
+        if (client) localStorage.setItem(CONFIG.clientKey, JSON.stringify(client));
+    }
 
-  logout() {
-    this.clearAuth();
-    window.location.href = "login.html";
-  },
+    function clearAuth() {
+        _token = null; _user = null; _client = null;
+        localStorage.removeItem(CONFIG.tokenKey);
+        localStorage.removeItem(CONFIG.userKey);
+        localStorage.removeItem(CONFIG.clientKey);
+    }
 
-  async me() { return this.request("/auth/me"); },
-  async changePassword(current, password) { return this.request("/auth/password", "POST", { current, password }); },
+    const auth = {
+        async login(email, password) {
+            const data = await post('/auth/login', { email, password });
+            if (data.token) setAuth(data.token, data.user, data.client);
+            return data;
+        },
 
-  // SuperAdmin
-  async adminStats() { return this.request("/admin/stats"); },
-  async adminClients() { return this.request("/admin/clients"); },
-  async adminCreateClient(data) { return this.request("/admin/clients", "POST", data); },
-  async adminToggleClient(id) { return this.request(`/admin/clients/${id}/toggle`, "POST"); },
-  async adminUpdateClient(id, data) { return this.request(`/admin/clients/${id}`, "PATCH", data); },
-  async adminResetPassword(id) { return this.request(`/admin/clients/${id}/reset-password`, "POST"); },
-  async adminDeleteClient(id) { return this.request(`/admin/clients/${id}`, "DELETE"); },
-  async adminUsers() { return this.request("/admin/users"); },
+        async register(params) {
+            const data = await post('/auth/register', params);
+            if (data.token) setAuth(data.token, data.user, data.client);
+            return data;
+        },
 
-  // Client Dashboard
-  async clientStats() { return this.request("/client/stats"); },
-  async clientAnalytics() { return this.request("/client/analytics"); },
-  async clientAudit() { return this.request("/client/audit"); },
+        async me() {
+            const data = await get('/auth/me');
+            if (data.user) {
+                _user = data.user;
+                _client = data.client;
+                localStorage.setItem(CONFIG.userKey, JSON.stringify(_user));
+                if (_client) localStorage.setItem(CONFIG.clientKey, JSON.stringify(_client));
+            }
+            return data;
+        },
 
-  // HR Users
-  async listHR() { return this.request("/client/hr"); },
-  async createHR(data) { return this.request("/client/hr", "POST", data); },
-  async toggleHR(id) { return this.request(`/client/hr/${id}/toggle`, "POST"); },
-  async deleteHR(id) { return this.request(`/client/hr/${id}`, "DELETE"); },
+        async changePassword(current, password) {
+            return post('/auth/password', { current, password });
+        },
 
-  // Jobs
-  async publicJobs(params = {}) {
-    const q = new URLSearchParams(params).toString();
-    return this.request("/jobs" + (q ? "?" + q : ""));
-  },
-  async clientJobs() { return this.request("/client/jobs"); },
-  async createJob(data) { return this.request("/client/jobs", "POST", data); },
-  async updateJob(id, data) { return this.request(`/client/jobs/${id}`, "PATCH", data); },
-  async deleteJob(id) { return this.request(`/client/jobs/${id}`, "DELETE"); },
+        async updateProfile(data) {
+            return patch('/auth/profile', data);
+        },
 
-  // Applications
-  async applyJob(jobId, data) { return this.request(`/jobs/${jobId}/apply`, "POST", data); },
-  async clientApplications(params = {}) {
-    const q = new URLSearchParams(params).toString();
-    return this.request("/client/applications" + (q ? "?" + q : ""));
-  },
-  async getApplication(id) { return this.request(`/client/applications/${id}`); },
-  async updateAppStatus(id, status, note = "") { return this.request(`/client/applications/${id}/status`, "POST", { status, note }); },
-  async bulkStatus(ids, status) { return this.request("/client/applications/bulk-status", "POST", { ids, status }); },
-  async deleteApplication(id) { return this.request(`/client/applications/${id}`, "DELETE"); },
-  async runATS(id) { return this.request(`/client/applications/${id}/ats`, "POST"); },
+        logout() {
+            clearAuth();
+            window.location.href = '/login.html';
+        },
 
-  // Notes
-  async getNotes(appId) { return this.request(`/client/applications/${appId}/notes`); },
-  async addNote(appId, note, type = "general") { return this.request(`/client/applications/${appId}/notes`, "POST", { note, type }); },
+        get isAuthenticated() { return !!_token && !!_user; },
+        get user() { return _user; },
+        get client() { return _client; },
+        get token() { return _token; },
 
-  // Interviews
-  async createInterview(data) { return this.request("/client/interviews/create", "POST", data); },
-  async listInterviews(status = "") {
-    return this.request("/client/interviews" + (status ? "?status=" + status : ""));
-  },
+        get isSuperAdmin() { return _user?.role === 'superadmin'; },
+        get isClientAdmin() { return _user?.role === 'client_admin'; },
+        get isHR() { return _user?.role === 'hr'; },
+        get isStaff() { return ['client_admin', 'hr'].includes(_user?.role); },
 
-  // Onboarding
-  async submitOnboarding(clientId, data) { return this.request(`/onboarding/${clientId}`, "POST", data); },
-  async listOnboarding() { return this.request("/client/onboarding"); },
-  async updateOnboardingStatus(id, status) { return this.request(`/client/onboarding/${id}/status`, "POST", { status }); },
+        hasRole(...roles) { return roles.includes(_user?.role); }
+    };
 
-  // Templates
-  async listTemplates() { return this.request("/client/templates"); },
-  async createTemplate(data) { return this.request("/client/templates", "POST", data); },
+    // ═══════════════════════════════════
+    // DASHBOARD
+    // ═══════════════════════════════════
+    const dashboard = {
+        stats: () => get('/client/stats'),
+        pipeline: (jobId) => get('/client/pipeline', { job_id: jobId }),
+        analytics: () => get('/client/analytics'),
+        audit: (params) => get('/client/audit', params)
+    };
 
-  // Public
-  async publicCompanies() { return this.request("/public/companies"); },
+    // ═══════════════════════════════════
+    // JOBS
+    // ═══════════════════════════════════
+    const jobs = {
+        // Public
+        list: (params) => get('/jobs', params),
+        getById: (id) => get(`/jobs/${id}`),
+        apply: (jobId, data) => post(`/jobs/${jobId}/apply`, data),
 
-  // Legacy
-  async db(action, table, data = null, filters = null, select = null, order = null) {
-    return this.request("/db", "POST", { action, table, data, filters, select, order });
-  }
-};
+        // Client management
+        managed: () => get('/client/jobs'),
+        create: (data) => post('/client/jobs', data),
+        update: (id, data) => patch(`/client/jobs/${id}`, data),
+        remove: (id) => del(`/client/jobs/${id}`),
+        generateJD: (data) => post('/client/jobs/generate-jd', data)
+    };
 
-// Auth guard utility
-function requireAuth(roles = []) {
-  if (!API.isLoggedIn()) { window.location.href = "login.html"; return false; }
-  if (roles.length && !roles.includes(API.getRole())) { window.location.href = "login.html"; return false; }
-  return true;
-}
+    // ═══════════════════════════════════
+    // PIPELINE / APPLICATIONS
+    // ═══════════════════════════════════
+    const pipeline = {
+        board: (jobId) => get('/client/pipeline', { job_id: jobId }),
+        list: (params) => get('/client/applications', params),
+        getById: (id) => get(`/client/applications/${id}`),
+        moveStatus: (id, status, note) => post(`/client/applications/${id}/status`, { status, note }),
+        bulkStatus: (ids, status) => post('/client/applications/bulk-status', { ids, status }),
+        remove: (id) => del(`/client/applications/${id}`),
+        runATS: (id) => post(`/client/applications/${id}/ats`),
+        bulkATS: (ids) => post('/client/applications/bulk-ats', { ids }),
+        getNotes: (id) => get(`/client/applications/${id}/notes`),
+        addNote: (id, note, type) => post(`/client/applications/${id}/notes`, { note, type })
+    };
 
-function toast(msg, type = "info") {
-  const c = document.getElementById("toasts") || (() => {
-    const d = document.createElement("div");
-    d.id = "toasts";
-    d.style.cssText = "position:fixed;top:16px;right:16px;z-index:9999;display:flex;flex-direction:column;gap:8px;";
-    document.body.appendChild(d);
-    return d;
-  })();
-  const t = document.createElement("div");
-  const colors = { info: "#3b82f6", success: "#10b981", error: "#ef4444", warning: "#f59e0b" };
-  t.style.cssText = `background:${colors[type] || colors.info};color:#fff;padding:12px 20px;border-radius:12px;font-size:0.88rem;font-weight:600;box-shadow:0 8px 24px rgba(0,0,0,.2);animation:tIn .3s ease;font-family:system-ui;`;
-  t.textContent = msg;
-  c.appendChild(t);
-  setTimeout(() => { t.style.animation = "tOut .3s ease forwards"; setTimeout(() => t.remove(), 300); }, 3000);
-}
+    // ═══════════════════════════════════
+    // INTERVIEWS
+    // ═══════════════════════════════════
+    const interviews = {
+        list: (params) => get('/client/interviews', params),
+        create: (data) => post('/client/interviews/create', data),
+        validate: (token) => post('/interviews/validate', { token }),
+        submit: (data) => post('/interviews/submit', data)
+    };
+
+    // ═══════════════════════════════════
+    // HR TEAM
+    // ═══════════════════════════════════
+    const team = {
+        list: () => get('/client/hr'),
+        add: (data) => post('/client/hr', data),
+        toggle: (id) => post(`/client/hr/${id}/toggle`),
+        remove: (id) => del(`/client/hr/${id}`)
+    };
+
+    // ═══════════════════════════════════
+    // AUTOMATION
+    // ═══════════════════════════════════
+    const automation = {
+        rules: () => get('/client/automation/rules'),
+        createRule: (data) => post('/client/automation/rules', data),
+        updateRule: (id, data) => patch(`/client/automation/rules/${id}`, data),
+        toggleRule: (id) => post(`/client/automation/rules/${id}/toggle`),
+        deleteRule: (id) => del(`/client/automation/rules/${id}`),
+        logs: () => get('/client/automation/logs')
+    };
+
+    // ═══════════════════════════════════
+    // NOTIFICATIONS
+    // ═══════════════════════════════════
+    const notifications = {
+        list: (params) => get('/notifications', params),
+        unread: () => get('/notifications', { unread: 'true' }),
+        markRead: (ids) => post('/notifications/mark-read', { ids })
+    };
+
+    // ═══════════════════════════════════
+    // SETTINGS
+    // ═══════════════════════════════════
+    const settings = {
+        get: () => get('/client/settings'),
+        update: (data) => patch('/client/settings', data),
+        emailTemplates: () => get('/client/email-templates'),
+        saveEmailTemplate: (data) => post('/client/email-templates', data)
+    };
+
+    // ═══════════════════════════════════
+    // ONBOARDING
+    // ═══════════════════════════════════
+    const onboarding = {
+        submit: (clientId, data) => post(`/onboarding/${clientId}`, data),
+        list: () => get('/client/onboarding'),
+        updateStatus: (id, status) => post(`/client/onboarding/${id}/status`, { status })
+    };
+
+    // ═══════════════════════════════════
+    // SUPERADMIN
+    // ═══════════════════════════════════
+    const admin = {
+        stats: () => get('/admin/stats'),
+        clients: (params) => get('/admin/clients', params),
+        createClient: (data) => post('/admin/clients', data),
+        updateClient: (id, data) => patch(`/admin/clients/${id}`, data),
+        toggleClient: (id) => post(`/admin/clients/${id}/toggle`),
+        deleteClient: (id) => del(`/admin/clients/${id}`),
+        resetPassword: (id) => post(`/admin/clients/${id}/reset-password`),
+        users: (params) => get('/admin/users', params),
+        createUser: (data) => post('/admin/users', data),
+        audit: () => get('/admin/audit')
+    };
+
+    // ═══════════════════════════════════
+    // CANDIDATE SELF-SERVICE
+    // ═══════════════════════════════════
+    const candidate = {
+        track: (email) => post('/candidate/track', { email })
+    };
+
+    // ═══════════════════════════════════
+    // AI
+    // ═══════════════════════════════════
+    const ai = {
+        chat: (messages) => post('/ai', { messages })
+    };
+
+    // ═══════════════════════════════════
+    // PUBLIC
+    // ═══════════════════════════════════
+    const pub = {
+        companies: () => get('/public/companies'),
+        contact: (data) => post('/contact', data)
+    };
+
+    // ═══════════════════════════════════
+    // UPLOAD
+    // ═══════════════════════════════════
+    async function upload(file, fileName) {
+        const fd = new FormData();
+        fd.append('file', file);
+        fd.append('fileName', fileName || `${Date.now()}_${file.name}`);
+
+        const res = await fetch(`${CONFIG.baseUrl}/upload`, {
+            method: 'POST',
+            headers: _token ? { 'Authorization': `Bearer ${_token}` } : {},
+            body: fd
+        });
+
+        return res.json();
+    }
+
+    // ═══════════════════════════════════
+    // UI UTILITIES
+    // ═══════════════════════════════════
+    const toast = {
+        _container: null,
+        _getContainer() {
+            if (!this._container) {
+                this._container = document.createElement('div');
+                this._container.className = 'toast-container';
+                document.body.appendChild(this._container);
+            }
+            return this._container;
+        },
+        show(type, title, message, duration = 4000) {
+            const container = this._getContainer();
+            const icons = { success: '✓', error: '✕', warning: '⚠', info: 'ℹ' };
+            const el = document.createElement('div');
+            el.className = `toast toast-${type}`;
+            el.innerHTML = `
+                <span class="toast-icon">${icons[type] || 'ℹ'}</span>
+                <div class="toast-content">
+                    <div class="toast-title">${title}</div>
+                    ${message ? `<div class="toast-message">${message}</div>` : ''}
+                </div>
+                <button class="toast-close" onclick="this.closest('.toast').remove()">✕</button>
+            `;
+            container.appendChild(el);
+            if (duration > 0) {
+                setTimeout(() => {
+                    el.classList.add('removing');
+                    setTimeout(() => el.remove(), 300);
+                }, duration);
+            }
+        },
+        success(title, msg) { this.show('success', title, msg); },
+        error(title, msg) { this.show('error', title, msg); },
+        warning(title, msg) { this.show('warning', title, msg); },
+        info(title, msg) { this.show('info', title, msg); }
+    };
+
+    // Auth guard
+    function requireAuth(redirectTo = '/login.html') {
+        if (!auth.isAuthenticated) {
+            window.location.href = `${redirectTo}?redirect=${encodeURIComponent(window.location.pathname)}`;
+            return false;
+        }
+        return true;
+    }
+
+    function requireRole(...roles) {
+        if (!requireAuth()) return false;
+        if (!roles.includes(_user?.role)) {
+            toast.error('Access Denied', 'You do not have permission.');
+            setTimeout(() => window.location.href = '/login.html', 1500);
+            return false;
+        }
+        return true;
+    }
+
+    // Format helpers
+    const fmt = {
+        date(d, style = 'medium') {
+            if (!d) return '—';
+            const opts = {
+                short: { month: 'short', day: 'numeric' },
+                medium: { month: 'short', day: 'numeric', year: 'numeric' },
+                long: { month: 'long', day: 'numeric', year: 'numeric' },
+                datetime: { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }
+            };
+            return new Date(d).toLocaleDateString('en-IN', opts[style] || opts.medium);
+        },
+        relative(d) {
+            if (!d) return '—';
+            const diff = Math.floor((Date.now() - new Date(d)) / 1000);
+            if (diff < 60) return 'just now';
+            if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+            if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+            if (diff < 604800) return `${Math.floor(diff / 86400)}d ago`;
+            return new Date(d).toLocaleDateString('en-IN', { month: 'short', day: 'numeric' });
+        },
+        salary(min, max) {
+            if (!min && !max) return 'Not disclosed';
+            const f = n => {
+                if (n >= 10000000) return `₹${(n / 10000000).toFixed(1)}Cr`;
+                if (n >= 100000) return `₹${(n / 100000).toFixed(1)}L`;
+                return `₹${n.toLocaleString('en-IN')}`;
+            };
+            if (min && max) return `${f(min)} - ${f(max)}`;
+            return min ? `From ${f(min)}` : `Up to ${f(max)}`;
+        },
+        initials(name) {
+            return (name || '?').split(' ').map(w => w[0]).slice(0, 2).join('').toUpperCase();
+        },
+        scoreClass(score) {
+            if (score >= 75) return 'high';
+            if (score >= 50) return 'medium';
+            return 'low';
+        },
+        scoreColor(score) {
+            if (score >= 75) return 'var(--secondary)';
+            if (score >= 50) return 'var(--warning)';
+            return 'var(--accent)';
+        },
+        statusBadge(status) {
+            const colors = {
+                applied: 'primary', screened: 'info', shortlisted: 'warning',
+                interview_scheduled: 'warning', interviewed: 'info',
+                offered: 'success', hired: 'success',
+                onboarding: 'success', rejected: 'danger', withdrawn: 'neutral'
+            };
+            const color = colors[status] || 'neutral';
+            const label = (status || '').replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+            return `<span class="badge badge-${color} badge-dot">${label}</span>`;
+        },
+        number(n) {
+            if (!n && n !== 0) return '0';
+            if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
+            if (n >= 1000) return (n / 1000).toFixed(1) + 'K';
+            return n.toString();
+        }
+    };
+
+    // ═══════════════════════════════════
+    // PUBLIC API
+    // ═══════════════════════════════════
+    return {
+        auth, dashboard, jobs, pipeline, interviews, team,
+        automation, notifications, settings, onboarding,
+        admin, candidate, ai, pub, upload, toast,
+        requireAuth, requireRole, fmt, config: CONFIG
+    };
+})();
+
+// Global shortcut
+window.API = API;
