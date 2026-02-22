@@ -383,23 +383,21 @@
   <div class="proctor-cam hidden" id="proctorCam"><video id="proctorVideo" autoplay muted playsinline></video><div class="cam-label">🔴 REC</div></div>
 
 <script>
-// ═══════════════════════════════════════════════════════════════
-// CORE CONFIG
-// ═══════════════════════════════════════════════════════════════
-const W = localStorage.getItem('workerUrl') || "https://evalis-ai.simpaticohrconsultancy.workers.dev";
+// ═══════════════════════════════════════════════════════
+// CONFIG — FIXED
+// ═══════════════════════════════════════════════════════
+const W = "https://api.simpaticohr.in";
 const SILENCE_TIMEOUT = 3.0, MIN_ANS = 10, MAX_RETRIES = 3, MAX_VIOLATIONS = 3;
 
-let mode = "mock", cv = "", lang = "en", role = "", level = "", totalQ = 10;
+// STATE (keep same)
+let cv = "", lang = "en", role = "", level = "", totalQ = 10;
 let mainQ = 0, isFollowUp = false, chat = [], answers = [];
 let rec = null, transcript = "", timerInt = null, secs = 0;
 let listening = false, silTimer = null, lastSpeech = 0;
 let speaking = false, processing = false, ansStart = 0;
 let evalRetry = 0, violations = [], screenStr = null, camStr = null;
-let curJobId = null, curAppId = null, _resumeFile = null;
-
-// HR Auth State
-let HR_TOKEN = null;
-let HR_USER = null;
+let curJobId = null, curAppId = null, curToken = null, curInterview = null;
+let interviewStartTime = null;
 
 const L = {
   en:{s:"en-US",t:"en-US",n:"English"},hi:{s:"hi-IN",t:"hi-IN",n:"Hindi"},
@@ -410,47 +408,50 @@ const L = {
   de:{s:"de-DE",t:"de-DE",n:"German"},ur:{s:"ur-PK",t:"ur-PK",n:"Urdu"}
 };
 
-// ═══════════════════════════════════════════════════════════════
-// API HELPERS
-// ═══════════════════════════════════════════════════════════════
-async function api(method, path, body = null, auth = false) {
-  const opts = { method, headers: { 'Content-Type': 'application/json' } };
-  if (auth && HR_TOKEN) opts.headers['Authorization'] = 'Bearer ' + HR_TOKEN;
+// ═══════════════════════════════════════════════════════
+// API HELPERS — FIXED (use proper endpoints)
+// ═══════════════════════════════════════════════════════
+async function apiCall(method, path, body = null) {
+  const opts = {
+    method,
+    headers: { "Content-Type": "application/json" }
+  };
   if (body) opts.body = JSON.stringify(body);
+
   const r = await fetch(W + path, opts);
   const d = await r.json();
-  if (!r.ok) throw new Error(d.error || 'HTTP ' + r.status);
+  if (d.error) throw new Error(d.error);
   return d;
-}
-
-// Legacy DB proxy (for interviews, backward compat)
-async function db(a, t, d = null, f = null, s = null, o = null) {
-  return api('POST', '/db', { action: a, table: t, data: d, filters: f, select: s, order: o });
 }
 
 async function callAI(messages) {
   const ctrl = new AbortController();
   const tm = setTimeout(() => ctrl.abort(), 45000);
   try {
-    const r = await fetch(W, { method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ messages }), signal: ctrl.signal });
+    const r = await fetch(W + "/ai", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ messages }),
+      signal: ctrl.signal
+    });
     clearTimeout(tm);
-    if (!r.ok) throw new Error('Error ' + r.status);
+    if (!r.ok) throw new Error("Error " + r.status);
     const d = await r.json();
-    if (!d.response) throw new Error("Empty");
+    if (!d.response) throw new Error("Empty AI response");
     return d.response;
-  } catch (e) { clearTimeout(tm); throw e; }
-}
-
-async function uploadFile(file, fn) {
-  const fd = new FormData(); fd.append("file", file); fd.append("fileName", fn);
-  const r = await fetch(W + "/upload", { method: "POST", body: fd });
-  return await r.json();
+  } catch (e) {
+    clearTimeout(tm);
+    if (e.name === "AbortError") throw new Error("AI Timeout");
+    throw e;
+  }
 }
 
 function toast(m) {
-  const c = document.getElementById("toasts"), t = document.createElement("div");
-  t.className = "toast"; t.textContent = m; c.appendChild(t);
+  const c = document.getElementById("toasts");
+  const t = document.createElement("div");
+  t.className = "toast";
+  t.textContent = m;
+  c.appendChild(t);
   setTimeout(() => t.remove(), 3200);
 }
 
@@ -459,451 +460,282 @@ function showError(m) {
   if (b) { b.textContent = m; b.classList.add("show"); setTimeout(() => b.classList.remove("show"), 8000); }
 }
 
-// ═══════════════════════════════════════════════════════════════
-// NAVIGATION
-// ═══════════════════════════════════════════════════════════════
-function nav(p) {
-  const pages = ['home', 'jobs', 'apply', 'setup', 'live', 'results', 'hr'];
-  pages.forEach(x => document.getElementById('page-' + x)?.classList.add('hidden'));
-  document.getElementById('page-' + p)?.classList.remove('hidden');
-  document.querySelectorAll('#mainNav .nav-btn').forEach(b => b.classList.remove('active'));
-  const map = { home: 0, jobs: 1, apply: 2, setup: 3, live: 3, results: 3, hr: 4 };
-  document.querySelectorAll('#mainNav .nav-btn')[map[p] || 0]?.classList.add('active');
-  if (p === 'jobs') loadJobs();
-  if (p === 'hr') initHR();
-}
-
-// ═══════════════════════════════════════════════════════════════
-// JOBS (PUBLIC — GET /jobs)
-// ═══════════════════════════════════════════════════════════════
-let _allJobs = [];
-
-async function loadJobs() {
-  const el = document.getElementById('jobsList');
-  el.innerHTML = '<span class="loading"></span> Loading...';
-  try {
-    const data = await api('GET', '/jobs');
-    _allJobs = data.jobs || [];
-    renderJobs(_allJobs);
-  } catch (e) {
-    el.innerHTML = '<p style="color:var(--red);">❌ ' + e.message + '</p>';
+function safeJSON(raw) {
+  let c = raw.replace(/```json\s*/gi, "").replace(/```\s*/g, "").trim();
+  const m = c.match(/\{[\s\S]*\}/);
+  if (!m) throw new Error("No JSON");
+  c = m[0].replace(/,\s*([}\]])/g, "$1");
+  try { return JSON.parse(c); }
+  catch {
+    c = c.replace(/[\x00-\x1F\x7F]/g, " ");
+    try { return JSON.parse(c); }
+    catch { return exFields(raw); }
   }
 }
 
-function searchJobs() {
-  const q = document.getElementById('jobSearch').value.toLowerCase();
-  const filtered = _allJobs.filter(j =>
-    (j.title || '').toLowerCase().includes(q) ||
-    (j.company_name || '').toLowerCase().includes(q) ||
-    (j.skills || '').toLowerCase().includes(q) ||
-    (j.location || '').toLowerCase().includes(q)
-  );
-  renderJobs(filtered);
-}
-
-function renderJobs(jobs) {
-  const el = document.getElementById('jobsList');
-  if (!jobs.length) { el.innerHTML = '<p style="color:var(--muted);text-align:center;padding:20px;">No jobs found.</p>'; return; }
-  el.innerHTML = jobs.map(j => `<div class="job-card">
-    <h3>${j.title || ''}</h3>
-    <div class="job-meta">
-      <span>🏢 ${j.company_name || j.department || ''}</span>
-      <span>📍 ${j.location || 'Remote'}</span>
-      <span>💼 ${j.job_type || ''}</span>
-      ${j.salary_max ? '<span>💰 ' + (j.salary_min ? j.salary_min + '–' : '') + j.salary_max + '</span>' : ''}
-    </div>
-    <p style="font-size:.82rem;color:var(--muted);margin:6px 0;">${(j.description || '').substring(0, 200)}</p>
-    ${j.skills ? '<div>' + j.skills.split(',').map(s => '<span class="skill-tag">' + s.trim() + '</span>').join('') + '</div>' : ''}
-    <button class="btn btn-go" style="margin-top:10px;padding:10px;" onclick="applyTo('${j.id}','${(j.title || '').replace(/'/g, "\\'")}')">📝 Apply</button>
-  </div>`).join('');
-}
-
-function applyTo(id, title) {
-  curJobId = id;
-  document.getElementById('applyJobInfo').textContent = 'Applying for: ' + title;
-  nav('apply');
-}
-
-// ═══════════════════════════════════════════════════════════════
-// APPLICATIONS (PUBLIC — POST /jobs/:id/apply)
-// ═══════════════════════════════════════════════════════════════
-document.getElementById('applyFile').addEventListener('change', async e => {
-  const file = e.target.files[0]; if (!file) return;
-  document.getElementById('applyFileName').textContent = '⏳ Processing...';
-  try {
-    cv = await exFile(file);
-    if (cv.length < 30) { document.getElementById('applyFileName').textContent = '⚠️ Try TXT'; cv = ''; return; }
-    document.getElementById('applyFileName').textContent = '✅ ' + file.name;
-    document.getElementById('applyUpload').classList.add('ok');
-    _resumeFile = file;
-  } catch { document.getElementById('applyFileName').textContent = '❌ Error'; cv = ''; }
-});
-
-async function submitApplication() {
-  const name = document.getElementById('applyName').value.trim();
-  const email = document.getElementById('applyEmail').value.trim();
-  if (!name || !email) { toast('❌ Name & Email required'); return; }
-  if (!curJobId) { toast('❌ Select a job first'); return; }
-
-  const btn = document.getElementById('applyBtn');
-  btn.disabled = true; btn.textContent = '⏳ Submitting...';
-  const st = document.getElementById('applyStatus'); st.textContent = '';
-
-  try {
-    // Use the proper API endpoint
-    const result = await api('POST', '/jobs/' + curJobId + '/apply', {
-      candidate_name: name,
-      candidate_email: email,
-      candidate_phone: document.getElementById('applyPhone').value.trim(),
-      cover_letter: document.getElementById('applyCover').value.trim(),
-      notification_preference: document.getElementById('applyContactPref').value
-    });
-
-    if (result.success) {
-      st.innerHTML = '<span style="color:var(--green);">✅ ' + result.message + '</span>';
-      toast('✅ Applied!');
-      ['applyName', 'applyEmail', 'applyPhone', 'applyCover'].forEach(k => document.getElementById(k).value = '');
-      document.getElementById('applyFileName').textContent = 'No file';
-      document.getElementById('applyUpload').classList.remove('ok');
-      cv = ''; _resumeFile = null;
-    } else {
-      throw new Error(result.error || 'Failed');
-    }
-  } catch (err) {
-    st.innerHTML = '<span style="color:var(--red);">❌ ' + err.message + '</span>';
+function exFields(raw) {
+  const gn = k => { const m = raw.match(new RegExp(`"${k}"\\s*:\\s*(\\d+)`)); return m ? parseInt(m[1]) : 0; };
+  const gs = k => { const m = raw.match(new RegExp(`"${k}"\\s*:\\s*"([^"]*?)"`)); return m ? m[1] : ""; };
+  const ga = k => { const m = raw.match(new RegExp(`"${k}"\\s*:\\s*\\[([^\\]]*?)\\]`, "s")); if (!m) return []; const i = m[1].match(/"([^"]*?)"/g); return i ? i.map(s => s.replace(/"/g, "")) : []; };
+  const fb = [];
+  for (const m of raw.matchAll(/"question"\s*:\s*"([^"]*?)"[^}]*?"score"\s*:\s*(\d+)[^}]*?"comment"\s*:\s*"([^"]*?)"/gs)) {
+    fb.push({ question: m[1].substring(0, 100), score: parseInt(m[2]), comment: m[3], type: "main" });
   }
-  btn.disabled = false; btn.textContent = '📨 Submit Application';
+  return {
+    overallScore: gn("overallScore") || 50,
+    grade: gs("grade") || "C",
+    recommendation: gs("recommendation") || "Pending",
+    summary: gs("summary") || "Evaluation complete.",
+    strengths: ga("strengths"),
+    improvements: ga("improvements"),
+    feedback: fb.length ? fb : answers.map(a => ({
+      question: a.question.substring(0, 80),
+      score: a.skipped ? 0 : 5,
+      comment: a.skipped ? "Skipped" : "Recorded",
+      type: a.type
+    }))
+  };
 }
 
-// ═══════════════════════════════════════════════════════════════
-// HR AUTH (uses POST /auth/login)
-// ═══════════════════════════════════════════════════════════════
-function initHR() {
-  // Check if already logged in
-  const savedToken = localStorage.getItem('hr_token');
-  const savedUser = localStorage.getItem('hr_user');
-  if (savedToken && savedUser) {
-    try {
-      const decoded = JSON.parse(atob(savedToken));
-      if (decoded.exp && decoded.exp > Date.now()) {
-        HR_TOKEN = savedToken;
-        HR_USER = JSON.parse(savedUser);
-        showHRDashboard();
-        return;
-      }
-    } catch {}
-  }
-  // Show login
-  document.getElementById('hrLoginSection').classList.remove('hidden');
-  document.getElementById('hrDashSection').classList.add('hidden');
+// ═══════════════════════════════════════════════════════
+// FILE EXTRACTORS (keep same)
+// ═══════════════════════════════════════════════════════
+async function extractFile(f) {
+  const ext = f.name.split(".").pop().toLowerCase();
+  let text = "";
+  if (ext === "txt") text = await f.text();
+  else if (ext === "pdf") text = await extractPDF(f);
+  else text = await f.text();
+  return text.replace(/\s+/g, " ").replace(/[^\x20-\x7E\n]/g, "").trim().substring(0, 5000);
 }
 
-async function hrLogin() {
-  const email = document.getElementById('hrLoginEmail').value.trim();
-  const pass = document.getElementById('hrLoginPass').value.trim();
-  if (!email || !pass) { toast('❌ Enter credentials'); return; }
-
-  const btn = document.getElementById('hrLoginBtn');
-  btn.disabled = true; btn.textContent = '⏳ Logging in...';
-  document.getElementById('hrLoginError').style.display = 'none';
-
-  try {
-    const data = await api('POST', '/auth/login', { email, password: pass });
-    if (!data.success || !data.token) throw new Error(data.error || 'Login failed');
-
-    // Must be client_admin or hr
-    if (!['client_admin', 'hr'].includes(data.user.role)) {
-      throw new Error('HR or Admin role required');
-    }
-
-    HR_TOKEN = data.token;
-    HR_USER = data.user;
-    localStorage.setItem('hr_token', HR_TOKEN);
-    localStorage.setItem('hr_user', JSON.stringify(HR_USER));
-
-    showHRDashboard();
-    toast('✅ Welcome, ' + (data.user.name || 'HR') + '!');
-  } catch (e) {
-    document.getElementById('hrLoginError').textContent = '❌ ' + e.message;
-    document.getElementById('hrLoginError').style.display = 'block';
-  }
-  btn.disabled = false; btn.textContent = '🔓 Login';
-}
-
-function showHRDashboard() {
-  document.getElementById('hrLoginSection').classList.add('hidden');
-  document.getElementById('hrDashSection').classList.remove('hidden');
-  document.getElementById('hrAuthStatus').style.display = '';
-  document.getElementById('hrUserName').textContent = HR_USER?.name || 'HR User';
-  document.getElementById('hrUserMeta').textContent = (HR_USER?.email || '') + ' • ' + (HR_USER?.role || '');
-  loadHRStats();
-  loadHRJobs();
-  loadHRApps('');
-}
-
-function hrLogout() {
-  HR_TOKEN = null; HR_USER = null;
-  localStorage.removeItem('hr_token');
-  localStorage.removeItem('hr_user');
-  document.getElementById('hrLoginSection').classList.remove('hidden');
-  document.getElementById('hrDashSection').classList.add('hidden');
-  document.getElementById('hrAuthStatus').style.display = 'none';
-  document.getElementById('hrLoginPass').value = '';
-  toast('🚪 Logged out');
-}
-
-// ═══════════════════════════════════════════════════════════════
-// HR DASHBOARD (TENANT-ISOLATED via API)
-// ═══════════════════════════════════════════════════════════════
-async function loadHRStats() {
-  try {
-    const data = await api('GET', '/client/stats', null, true);
-    if (data.success) {
-      document.getElementById('statJobs').textContent = data.stats.totalJobs || 0;
-      document.getElementById('statApps').textContent = data.stats.totalApps || 0;
-      document.getElementById('statShort').textContent = data.stats.shortlisted || 0;
-      document.getElementById('statInt').textContent = data.stats.hired || 0;
-    }
-  } catch (e) { console.error('[Stats]', e); }
-}
-
-async function loadHRJobs() {
-  const el = document.getElementById('hrJobsList');
-  el.innerHTML = '<span class="loading"></span>';
-  try {
-    const data = await api('GET', '/client/jobs', null, true);
-    const jobs = data.jobs || [];
-    if (!jobs.length) { el.innerHTML = '<p style="color:var(--muted);text-align:center;">No jobs yet.</p>'; return; }
-    el.innerHTML = jobs.map(j => `<div class="job-card">
-      <div style="display:flex;justify-content:space-between;">
-        <h3>${j.title}</h3>
-        <span class="status-pill" style="background:${j.is_active ? 'rgba(16,185,129,.15)' : 'rgba(239,68,68,.15)'};color:${j.is_active ? '#10b981' : '#ef4444'};">${j.is_active ? 'Active' : 'Off'}</span>
-      </div>
-      <div class="job-meta">
-        <span>📍 ${j.location || ''}</span><span>💼 ${j.job_type || ''}</span><span>📝 ${j.applications_count || 0} apps</span>
-      </div>
-      <div style="display:flex;gap:6px;margin-top:8px;">
-        <button class="btn btn-sm btn-danger" onclick="deleteJob('${j.id}')">🗑️</button>
-      </div>
-    </div>`).join('');
-  } catch (e) { el.innerHTML = '<p style="color:var(--red);">❌ ' + e.message + '</p>'; }
-}
-
-async function postJob() {
-  const title = document.getElementById('hrTitle').value.trim();
-  if (!title) { toast('❌ Enter title'); return; }
-
-  const btn = document.getElementById('postJobBtn');
-  btn.disabled = true; btn.textContent = '⏳...';
-
-  try {
-    await api('POST', '/client/jobs', {
-      title,
-      job_type: document.getElementById('hrJobType').value,
-      department: document.getElementById('hrDept').value.trim(),
-      location: document.getElementById('hrLocation').value.trim(),
-      description: document.getElementById('hrJD').value.trim(),
-      skills: document.getElementById('hrSkills').value.trim(),
-      salary_min: parseInt(document.getElementById('hrSalaryMin').value) || 0,
-      salary_max: parseInt(document.getElementById('hrSalaryMax').value) || 0
-    }, true);
-    toast('✅ Posted!');
-    ['hrTitle', 'hrJD', 'hrSkills', 'hrDept', 'hrLocation', 'hrSalaryMin', 'hrSalaryMax'].forEach(k => document.getElementById(k).value = '');
-    loadHRJobs(); loadHRStats();
-  } catch (e) { toast('❌ ' + e.message); }
-  btn.disabled = false; btn.textContent = '📢 Post Job';
-}
-
-async function deleteJob(id) {
-  if (!confirm('Delete this job?')) return;
-  try { await api('DELETE', '/client/jobs/' + id, null, true); toast('🗑️ Deleted'); loadHRJobs(); }
-  catch (e) { toast('❌ ' + e.message); }
-}
-
-async function loadHRApps(status) {
-  const el = document.getElementById('hrCandList');
-  el.innerHTML = '<span class="loading"></span>';
-  try {
-    const query = status ? '?status=' + status : '';
-    const data = await api('GET', '/client/applications' + query, null, true);
-    const apps = data.applications || [];
-    if (!apps.length) { el.innerHTML = '<p style="color:var(--muted);text-align:center;">No applications.</p>'; return; }
-    el.innerHTML = apps.map(c => {
-      const name = c.candidate_name || '?';
-      const email = c.candidate_email || '';
-      const stc = { applied: '#f59e0b', shortlisted: '#3b82f6', interviewed: '#8b5cf6', hired: '#10b981', rejected: '#ef4444' }[c.status] || '#94a3b8';
-      return `<div class="cand-row">
-        <div style="display:flex;align-items:center;gap:8px;flex:1;">
-          <div class="cand-avatar">${name[0].toUpperCase()}</div>
-          <div><div style="font-weight:700;font-size:.88rem;">${name}</div><div style="font-size:.72rem;color:var(--muted);">${email} • ${c.job_title || ''}</div></div>
-        </div>
-        <div style="display:flex;gap:4px;align-items:center;flex-wrap:wrap;">
-          <span class="status-pill" style="color:${stc};">${c.status}</span>
-          ${c.status === 'applied' ? `<button class="btn btn-sm btn-success" onclick="updateAppStatus('${c.id}','shortlisted')">⭐</button>` : ''}
-          ${c.status === 'shortlisted' ? `<button class="btn btn-sm" style="background:var(--accent);color:#fff;" onclick="updateAppStatus('${c.id}','hired')">✅ Hire</button>` : ''}
-          ${!['rejected', 'hired'].includes(c.status) ? `<button class="btn btn-sm btn-danger" onclick="updateAppStatus('${c.id}','rejected')">❌</button>` : ''}
-        </div>
-      </div>`;
-    }).join('');
-  } catch (e) { el.innerHTML = '<p style="color:var(--red);">❌ ' + e.message + '</p>'; }
-}
-
-async function updateAppStatus(id, status) {
-  try {
-    await api('POST', '/client/applications/' + id + '/status', { status }, true);
-    toast('✅ Updated to ' + status);
-    loadHRApps(''); loadHRStats();
-  } catch (e) { toast('❌ ' + e.message); }
-}
-
-// ═══════════════════════════════════════════════════════════════
-// FILE EXTRACTORS
-// ═══════════════════════════════════════════════════════════════
-async function exFile(f) {
-  const ext = f.name.split('.').pop().toLowerCase(); let t = '';
-  if (ext === 'txt') t = await f.text();
-  else if (ext === 'pdf') t = await exPDF(f);
-  else t = await f.text();
-  return t.replace(/\s+/g, ' ').replace(/[^\x20-\x7E\n]/g, '').trim().substring(0, 5000);
-}
-async function exPDF(f) {
+async function extractPDF(f) {
   if (!window.pdfjsLib) return await f.text();
   try {
-    const b = await f.arrayBuffer(), p = await pdfjsLib.getDocument({ data: b }).promise;
-    let t = '';
-    for (let i = 1; i <= p.numPages; i++) { const pg = await p.getPage(i), c = await pg.getTextContent(); t += c.items.map(x => x.str).join(' ') + '\n'; }
+    const b = await f.arrayBuffer();
+    const p = await pdfjsLib.getDocument({ data: b }).promise;
+    let t = "";
+    for (let i = 1; i <= p.numPages; i++) {
+      const pg = await p.getPage(i);
+      const c = await pg.getTextContent();
+      t += c.items.map(x => x.str).join(" ") + "\n";
+    }
     return t;
   } catch { return await f.text(); }
 }
 
-document.getElementById('cvFile').addEventListener('change', async e => {
-  const file = e.target.files[0]; if (!file) return;
-  document.getElementById('cvFileName').textContent = '⏳...';
+document.getElementById("cvFile").addEventListener("change", async e => {
+  const file = e.target.files[0];
+  if (!file) return;
+  document.getElementById("cvFileName").textContent = "⏳ Processing...";
   try {
-    cv = await exFile(file);
-    if (cv.length < 30) { document.getElementById('cvFileName').textContent = '⚠️ Try TXT'; cv = ''; return; }
-    document.getElementById('cvFileName').textContent = '✅ ' + file.name;
-    document.getElementById('cvUpArea').classList.add('ok');
-  } catch { document.getElementById('cvFileName').textContent = '❌ Error'; cv = ''; }
+    cv = await extractFile(file);
+    if (cv.length < 30) {
+      document.getElementById("cvFileName").textContent = "⚠️ Could not read file";
+      cv = "";
+      return;
+    }
+    document.getElementById("cvFileName").textContent = "✅ " + file.name;
+    document.getElementById("cvUpArea").classList.add("ok");
+    toast("✅ Resume loaded!");
+  } catch {
+    document.getElementById("cvFileName").textContent = "❌ Error reading file";
+    cv = "";
+  }
 });
 
-// ═══════════════════════════════════════════════════════════════
-// JSON PARSER
-// ═══════════════════════════════════════════════════════════════
-function safeJSON(raw) {
-  let c = raw.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
-  const m = c.match(/\{[\s\S]*\}/); if (!m) throw new Error('No JSON');
-  c = m[0].replace(/,\s*([}\]])/g, '$1');
-  try { return JSON.parse(c); }
-  catch {
-    c = c.replace(/[\x00-\x1F\x7F]/g, ' ');
-    try { return JSON.parse(c); } catch { return exFields(raw); }
+// ═══════════════════════════════════════════════════════
+// TOKEN VALIDATION — FIXED (use /interviews/validate)
+// ═══════════════════════════════════════════════════════
+async function validateToken() {
+  const token = document.getElementById("tokenInput").value.trim();
+  if (!token) { toast("❌ Paste your token"); return; }
+  await loadInterview(token);
+}
+
+async function loadInterview(token) {
+  toast("🔍 Validating token...");
+  try {
+    // ★ Use the proper /interviews/validate endpoint
+    const data = await apiCall("POST", "/interviews/validate", { token });
+
+    if (!data.interview) {
+      toast("❌ Invalid or expired token");
+      return;
+    }
+
+    const d = data.interview;
+    curToken = token;
+    curInterview = d;
+    curAppId = d.application_id || null;
+    curJobId = d.job_id || null;
+
+    role = d.role || d.interview_role || "";
+    level = d.level || d.interview_level || "Mid-Level";
+    totalQ = d.questions || d.question_count || 10;
+
+    if (d.language || d.interview_language) {
+      document.getElementById("langSel").value = d.language || d.interview_language;
+    }
+
+    // Load resume from application if available
+    if (d.resume_text && d.resume_text.length > 50) {
+      cv = d.resume_text;
+      document.getElementById("cvFileName").textContent = "✅ Resume loaded from application";
+      document.getElementById("cvUpArea").classList.add("ok");
+    }
+
+    // Show interview info
+    document.getElementById("interviewInfo").innerHTML = `
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:0.85rem;">
+        <div><span style="color:var(--text2);">👤 Candidate:</span> <strong>${d.candidate_name || "—"}</strong></div>
+        <div><span style="color:var(--text2);">💼 Role:</span> <strong style="color:var(--accent);">${role || "—"}</strong></div>
+        <div><span style="color:var(--text2);">📊 Level:</span> <strong>${level}</strong></div>
+        <div><span style="color:var(--text2);">🔢 Questions:</span> <strong>${totalQ}</strong></div>
+        <div><span style="color:var(--text2);">🔒 Type:</span> <strong style="color:var(--red);">${d.type === "real" ? "Proctored" : "Practice"}</strong></div>
+      </div>`;
+
+    // Show setup page
+    document.getElementById("page-landing").classList.add("hidden");
+    document.getElementById("page-setup").classList.remove("hidden");
+    toast("✅ Token valid! Review settings and start.");
+
+  } catch (e) {
+    toast("❌ " + e.message);
   }
 }
-function exFields(raw) {
-  const gn = k => { const m = raw.match(new RegExp(`"${k}"\\s*:\\s*(\\d+)`)); return m ? parseInt(m[1]) : 0 };
-  const gs = k => { const m = raw.match(new RegExp(`"${k}"\\s*:\\s*"([^"]*?)"`)); return m ? m[1] : '' };
-  const ga = k => { const m = raw.match(new RegExp(`"${k}"\\s*:\\s*\\[([^\\]]*?)\\]`, 's')); if (!m) return []; const i = m[1].match(/"([^"]*?)"/g); return i ? i.map(s => s.replace(/"/g, '')) : [] };
-  return {
-    overallScore: gn('overallScore') || 50, grade: gs('grade') || 'C',
-    recommendation: gs('recommendation') || 'Pending', summary: gs('summary') || 'Done.',
-    strengths: ga('strengths'), improvements: ga('improvements'),
-    feedback: answers.map(a => ({ question: a.question.substring(0, 80), score: a.skipped ? 0 : 5, comment: a.skipped ? 'Skipped' : 'Recorded', type: a.type }))
-  };
+
+// ═══════════════════════════════════════════════════════
+// NAVIGATION
+// ═══════════════════════════════════════════════════════
+function showPage(p) {
+  ["landing", "setup", "live", "results"].forEach(x =>
+    document.getElementById("page-" + x)?.classList.add("hidden")
+  );
+  document.getElementById("page-" + p)?.classList.remove("hidden");
 }
 
-// ═══════════════════════════════════════════════════════════════
-// INTERVIEW SETUP
-// ═══════════════════════════════════════════════════════════════
-document.getElementById("roleSel").addEventListener("change", e => {
-  document.getElementById("customWrap").classList.toggle("hidden", e.target.value !== "custom");
-});
-
-function startMode(m) {
-  mode = m; nav('setup');
-  const ind = document.getElementById('modeIndicator');
-  if (m === 'real') {
-    ind.innerHTML = '<span class="mode-badge" style="background:rgba(239,68,68,.15);color:var(--red);font-size:.85rem;padding:6px 16px;">🔒 PROCTORED</span>';
-    document.getElementById('realInfoCard').classList.remove('hidden');
-    document.getElementById('proctorReqCard').classList.remove('hidden');
-  } else {
-    ind.innerHTML = '<span class="mode-badge" style="background:rgba(16,185,129,.15);color:var(--green);font-size:.85rem;padding:6px 16px;">🎯 MOCK</span>';
-    document.getElementById('realInfoCard').classList.add('hidden');
-    document.getElementById('proctorReqCard').classList.add('hidden');
-  }
-}
-
-// ═══════════════════════════════════════════════════════════════
-// ORB + PROGRESS
-// ═══════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════
+// ORB / TTS / STT / SILENCE / TIMER (keep same logic)
+// ═══════════════════════════════════════════════════════
 function setOrb(s) {
-  const o = document.getElementById('orb'), l = document.getElementById('orbLabel');
-  if (!o) return; o.className = 'orb';
+  const o = document.getElementById("orb"), l = document.getElementById("orbLabel");
+  if (!o) return;
+  o.className = "orb";
   switch (s) {
-    case 'speaking': o.classList.add('speaking'); l.textContent = 'Speaking...'; break;
-    case 'listening': o.classList.add('listening'); l.textContent = 'Listening...'; break;
-    case 'thinking': o.classList.add('thinking'); l.textContent = 'Thinking...'; break;
-    case 'processing': o.classList.add('processing'); l.textContent = 'Processing...'; break;
-    default: l.textContent = 'Ready';
+    case "speaking": o.classList.add("speaking"); l.textContent = "Speaking..."; break;
+    case "listening": o.classList.add("listening"); l.textContent = "Listening..."; break;
+    case "thinking": o.classList.add("thinking"); l.textContent = "Thinking..."; break;
+    case "processing": o.classList.add("processing"); l.textContent = "Processing..."; break;
+    default: l.textContent = "Ready";
   }
 }
+
 function updateProg() {
   const p = Math.round((mainQ / totalQ) * 100);
-  document.getElementById('progBar').style.width = p + '%';
-  document.getElementById('progText').textContent = isFollowUp ? `Follow-up Q${mainQ}/${totalQ}` : `Q ${mainQ}/${totalQ}`;
-  document.getElementById('qTag').textContent = isFollowUp ? `Q${mainQ}↩` : `Q${mainQ}`;
-  document.getElementById('qTag').className = isFollowUp ? 'followup-tag' : 'q-tag';
+  document.getElementById("progBar").style.width = p + "%";
+  if (isFollowUp) {
+    document.getElementById("progText").textContent = `Follow-up Q${mainQ}/${totalQ}`;
+    document.getElementById("qTag").textContent = `Q${mainQ}↩`;
+    document.getElementById("qTag").className = "followup-tag";
+  } else {
+    document.getElementById("progText").textContent = `Question ${mainQ}/${totalQ} — ${p}%`;
+    document.getElementById("qTag").textContent = `Q${mainQ}`;
+    document.getElementById("qTag").className = "q-tag";
+  }
 }
 
-// ═══════════════════════════════════════════════════════════════
-// TTS (Text-to-Speech)
-// ═══════════════════════════════════════════════════════════════
+if ("speechSynthesis" in window) {
+  speechSynthesis.getVoices();
+  speechSynthesis.onvoiceschanged = () => {};
+}
+
 function speak(text) {
   return new Promise(resolve => {
-    if (!('speechSynthesis' in window)) { resolve(); return; }
-    speechSynthesis.cancel(); speaking = true; setOrb('speaking');
-    const u = new SpeechSynthesisUtterance(text);
-    u.lang = L[lang]?.t || 'en-US'; u.rate = 0.92;
-    const voices = speechSynthesis.getVoices();
-    const tl = (L[lang]?.t || 'en-US').split('-')[0];
-    const match = voices.find(v => v.lang.startsWith(tl) && !v.localService) || voices.find(v => v.lang.startsWith(tl));
-    if (match) u.voice = match;
-    const ka = setInterval(() => { if (!speaking) { clearInterval(ka); return; } speechSynthesis.pause(); speechSynthesis.resume(); }, 10000);
-    u.onend = () => { clearInterval(ka); speaking = false; resolve(); };
-    u.onerror = () => { clearInterval(ka); speaking = false; resolve(); };
-    setTimeout(() => speechSynthesis.speak(u), 150);
+    if (!("speechSynthesis" in window)) { resolve(); return; }
+    speechSynthesis.cancel();
+    speaking = true;
+    setOrb("speaking");
+    setTimeout(() => {
+      const u = new SpeechSynthesisUtterance(text);
+      u.lang = L[lang]?.t || "en-US";
+      u.rate = 0.92;
+      u.pitch = 1;
+      u.volume = 1;
+      const voices = speechSynthesis.getVoices();
+      const tl = (L[lang]?.t || "en-US").split("-")[0];
+      const v = voices.find(v => v.lang.startsWith(tl));
+      if (v) u.voice = v;
+      // Keep-alive for long utterances
+      const ka = setInterval(() => {
+        if (!speaking) { clearInterval(ka); return; }
+        speechSynthesis.pause();
+        speechSynthesis.resume();
+      }, 10000);
+      u.onend = () => { clearInterval(ka); speaking = false; resolve(); };
+      u.onerror = () => { clearInterval(ka); speaking = false; resolve(); };
+      speechSynthesis.speak(u);
+    }, 100);
   });
 }
 
-// ═══════════════════════════════════════════════════════════════
-// STT (Speech-to-Text)
-// ═══════════════════════════════════════════════════════════════
 function initSTT() {
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!SR) { toast('⚠️ Use Chrome'); return; }
-  rec = new SR(); rec.lang = L[lang]?.s || 'en-US'; rec.interimResults = true; rec.continuous = true;
+  if (!SR) { toast("⚠️ Use Chrome for speech recognition"); return; }
+  rec = new SR();
+  rec.lang = L[lang]?.s || "en-US";
+  rec.interimResults = true;
+  rec.continuous = true;
   rec.onresult = e => {
-    let f = '';
-    for (let i = e.resultIndex; i < e.results.length; i++) { if (e.results[i].isFinal) f += e.results[i][0].transcript + ' '; }
-    if (f) { transcript += f; lastSpeech = Date.now(); resetSil(); startSil(); }
+    let f = "";
+    for (let i = e.resultIndex; i < e.results.length; i++) {
+      if (e.results[i].isFinal) f += e.results[i][0].transcript + " ";
+    }
+    if (f) {
+      transcript += f;
+      lastSpeech = Date.now();
+      resetSil();
+      startSil();
+    }
   };
-  rec.onerror = () => {};
-  rec.onend = () => { if (listening && !processing && !speaking) try { rec.start() } catch {} };
-}
-function startListen() {
-  if (!rec || listening) return;
-  listening = true; transcript = ''; lastSpeech = Date.now(); ansStart = Date.now();
-  try { rec.start() } catch { setTimeout(() => { try { rec.start() } catch {} }, 200) }
-  setOrb('listening'); document.getElementById('waveWrap').classList.add('active');
-  document.getElementById('hfInfo').textContent = '🎤 Listening...';
-  startTimer(); startSil();
-}
-function stopListen() {
-  listening = false; resetSil(); try { rec?.stop() } catch {}
-  document.getElementById('waveWrap')?.classList.remove('active'); stopTimer();
+  rec.onerror = e => {
+    if (e.error !== "no-speech" && e.error !== "aborted") {
+      console.error("[STT]", e.error);
+    }
+  };
+  rec.onend = () => {
+    if (listening && !processing && !speaking) {
+      try { rec.start(); } catch {}
+    }
+  };
 }
 
-// Silence detection
+function startListen() {
+  if (!rec || listening) return;
+  listening = true;
+  transcript = "";
+  lastSpeech = Date.now();
+  ansStart = Date.now();
+  try { rec.start(); }
+  catch {
+    try { rec.stop(); } catch {}
+    setTimeout(() => { try { rec.start(); } catch {} }, 200);
+  }
+  setOrb("listening");
+  document.getElementById("waveWrap").classList.add("active");
+  document.getElementById("hfInfo").textContent = "🎤 Listening... speak naturally";
+  startTimer();
+  startSil();
+}
+
+function stopListen() {
+  listening = false;
+  resetSil();
+  try { rec?.stop(); } catch {}
+  document.getElementById("waveWrap")?.classList.remove("active");
+  stopTimer();
+}
+
 function startSil() {
   resetSil();
   silTimer = setInterval(() => {
@@ -911,309 +743,470 @@ function startSil() {
     const sf = (Date.now() - lastSpeech) / 1000;
     if (transcript.trim().length >= MIN_ANS && sf >= 1) {
       const rem = Math.max(0, SILENCE_TIMEOUT - sf);
-      document.getElementById('silenceWrap').classList.add('show');
-      document.getElementById('silenceFill').style.width = (rem / SILENCE_TIMEOUT * 100) + '%';
-      document.getElementById('silenceText').textContent = rem > 0 ? `Auto-submit ${rem.toFixed(1)}s...` : 'Submitting...';
+      document.getElementById("silenceWrap").classList.add("show");
+      document.getElementById("silenceFill").style.width = (rem / SILENCE_TIMEOUT * 100) + "%";
+      document.getElementById("silenceText").textContent = rem > 0 ? `Auto-submit ${rem.toFixed(1)}s...` : "Submitting...";
       if (sf >= SILENCE_TIMEOUT) autoSubmit();
-    } else { document.getElementById('silenceWrap').classList.remove('show'); }
+    } else {
+      document.getElementById("silenceWrap").classList.remove("show");
+    }
   }, 200);
 }
-function resetSil() { clearInterval(silTimer); document.getElementById('silenceWrap')?.classList.remove('show'); }
 
-// Timer
-function startTimer() { secs = 0; showTime(); timerInt = setInterval(() => { secs++; showTime() }, 1000) }
-function stopTimer() { clearInterval(timerInt) }
-function showTime() { const el = document.getElementById('timer'); if (el) el.textContent = `${Math.floor(secs / 60).toString().padStart(2, '0')}:${(secs % 60).toString().padStart(2, '0')}`; }
+function resetSil() {
+  clearInterval(silTimer);
+  silTimer = null;
+  document.getElementById("silenceWrap")?.classList.remove("show");
+}
+
+function startTimer() {
+  secs = 0;
+  showTime();
+  timerInt = setInterval(() => { secs++; showTime(); }, 1000);
+}
+
+function stopTimer() { clearInterval(timerInt); }
+
+function showTime() {
+  const el = document.getElementById("timer");
+  if (el) {
+    el.textContent = `${Math.floor(secs / 60).toString().padStart(2, "0")}:${(secs % 60).toString().padStart(2, "0")}`;
+  }
+}
+
 function showThink(s) {
-  document.getElementById('thinkBox')?.classList.toggle('hidden', !s);
-  if (document.getElementById('waveWrap')) document.getElementById('waveWrap').style.display = s ? 'none' : 'flex';
-  if (document.getElementById('hfInfo')) document.getElementById('hfInfo').style.display = s ? 'none' : 'block';
-  document.getElementById('silenceWrap')?.classList.remove('show');
-  if (s) document.getElementById('questionBox').textContent = '';
+  document.getElementById("thinkBox")?.classList.toggle("hidden", !s);
+  const w = document.getElementById("waveWrap");
+  if (w) w.style.display = s ? "none" : "flex";
+  const h = document.getElementById("hfInfo");
+  if (h) h.style.display = s ? "none" : "block";
+  document.getElementById("silenceWrap")?.classList.remove("show");
+  if (s) document.getElementById("questionBox").textContent = "";
 }
 
-// ═══════════════════════════════════════════════════════════════
-// PROCTORING
-// ═══════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════
+// PROCTORING (keep same)
+// ═══════════════════════════════════════════════════════
 function addViolation(type, detail) {
-  if (mode !== 'real') return;
   violations.push({ type, detail, time: new Date().toLocaleTimeString(), qNum: mainQ });
-  document.getElementById('violationCount').textContent = violations.length;
-  toast('⚠️ ' + detail);
-  if (violations.length >= MAX_VIOLATIONS) { toast('🚫 Terminated!'); endEarly(); }
+  document.getElementById("violationCount").textContent = violations.length;
+  toast("⚠️ " + detail);
+  if (violations.length >= MAX_VIOLATIONS) {
+    toast("🚫 Too many violations — terminated!");
+    endEarly();
+  }
 }
+
 function startProctor() {
-  if (mode !== 'real') return;
-  document.getElementById('proctorBar').style.display = 'flex'; violations = [];
-  document.addEventListener('visibilitychange', onVis);
-  window.addEventListener('blur', onBlur);
-  ['copy', 'paste', 'cut'].forEach(e => document.addEventListener(e, onClip));
-  document.addEventListener('contextmenu', onCtx);
-  document.addEventListener('keydown', onKey);
+  document.getElementById("proctorBar").style.display = "flex";
+  violations = [];
+  document.addEventListener("visibilitychange", onVis);
+  window.addEventListener("blur", onBlur);
+  document.addEventListener("copy", onClip);
+  document.addEventListener("paste", onClip);
+  document.addEventListener("cut", onClip);
+  document.addEventListener("contextmenu", onCtx);
+  document.addEventListener("keydown", onKey);
   startCam();
 }
+
 function stopProctor() {
-  document.removeEventListener('visibilitychange', onVis); window.removeEventListener('blur', onBlur);
-  ['copy', 'paste', 'cut'].forEach(e => document.removeEventListener(e, onClip));
-  document.removeEventListener('contextmenu', onCtx); document.removeEventListener('keydown', onKey);
+  document.removeEventListener("visibilitychange", onVis);
+  window.removeEventListener("blur", onBlur);
+  document.removeEventListener("copy", onClip);
+  document.removeEventListener("paste", onClip);
+  document.removeEventListener("cut", onClip);
+  document.removeEventListener("contextmenu", onCtx);
+  document.removeEventListener("keydown", onKey);
   if (screenStr) { screenStr.getTracks().forEach(t => t.stop()); screenStr = null; }
   if (camStr) { camStr.getTracks().forEach(t => t.stop()); camStr = null; }
-  document.getElementById('proctorCam')?.classList.add('hidden');
-  document.getElementById('proctorBar').style.display = 'none';
+  document.getElementById("proctorCam")?.classList.add("hidden");
+  document.getElementById("proctorBar").style.display = "none";
 }
-function onVis() { if (document.hidden && mode === 'real') addViolation('tab', 'Tab switch'); }
-function onBlur() { if (mode === 'real' && !document.hidden) addViolation('blur', 'Window blur'); }
-function onClip(e) { if (mode === 'real') { e.preventDefault(); addViolation('clip', e.type); } }
-function onCtx(e) { if (mode === 'real') e.preventDefault(); }
+
+function onVis() { if (document.hidden) addViolation("tab", "Switched tab"); }
+function onBlur() { if (!document.hidden) addViolation("blur", "Window lost focus"); }
+function onClip(e) { e.preventDefault(); addViolation("clip", "Attempted " + e.type); }
+function onCtx(e) { e.preventDefault(); }
 function onKey(e) {
-  if (mode !== 'real') return;
-  if ((e.ctrlKey || e.metaKey) && ['c', 'v', 'u', 's', 'a', 'p'].includes(e.key.toLowerCase())) { e.preventDefault(); addViolation('key', 'Ctrl+' + e.key.toUpperCase()); }
-  if (e.key === 'F12' || (e.ctrlKey && e.shiftKey)) { e.preventDefault(); addViolation('dev', 'DevTools'); }
+  if ((e.ctrlKey || e.metaKey) && ["c", "v", "u", "s", "a", "p"].includes(e.key.toLowerCase())) {
+    e.preventDefault();
+    addViolation("key", "Ctrl+" + e.key.toUpperCase());
+  }
+  if (e.key === "F12" || (e.ctrlKey && e.shiftKey && ["i", "j", "c"].includes(e.key.toLowerCase()))) {
+    e.preventDefault();
+    addViolation("dev", "DevTools attempt");
+  }
 }
+
 async function startCam() {
-  try { camStr = await navigator.mediaDevices.getUserMedia({ video: true }); document.getElementById('proctorVideo').srcObject = camStr; document.getElementById('proctorCam').classList.remove('hidden'); }
-  catch { addViolation('cam', 'Camera denied'); }
+  try {
+    camStr = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+    document.getElementById("proctorVideo").srcObject = camStr;
+    document.getElementById("proctorCam").classList.remove("hidden");
+  } catch {
+    addViolation("cam", "Camera access denied");
+  }
 }
+
 async function requestScreenShare() {
   try {
-    screenStr = await navigator.mediaDevices.getDisplayMedia({ video: { displaySurface: 'monitor' } });
-    screenStr.getVideoTracks()[0].onended = () => { if (mode === 'real') addViolation('screen', 'Share stopped'); };
-    document.getElementById('screenShareOverlay').classList.add('hidden');
+    screenStr = await navigator.mediaDevices.getDisplayMedia({ video: { displaySurface: "monitor" } });
+    screenStr.getVideoTracks()[0].onended = () => {
+      addViolation("screen", "Screen share stopped");
+    };
+    document.getElementById("screenShareOverlay").classList.add("hidden");
+    toast("✅ Screen sharing active");
     actuallyStart();
-  } catch { toast('❌ Screen share required'); }
+  } catch {
+    toast("❌ Screen share is required for proctored interviews");
+  }
 }
 
-// ═══════════════════════════════════════════════════════════════
-// START INTERVIEW
-// ═══════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════
+// START INTERVIEW — FIXED
+// ═══════════════════════════════════════════════════════
 async function startInterview() {
-  const rs = document.getElementById('roleSel').value;
-  if (!rs) { toast('❌ Select role'); return; }
-  role = rs === 'custom' ? document.getElementById('customRole').value.trim() : rs;
-  if (!role) { toast('❌ Enter role'); return; }
-  lang = document.getElementById('langSel').value;
-  level = document.getElementById('levelSel').value;
-  totalQ = parseInt(document.getElementById('qCount').value);
-  mainQ = 0; isFollowUp = false; answers = []; chat = []; evalRetry = 0; violations = [];
-
-  if (mode === 'real') {
-    const n = document.getElementById('candName').value.trim();
-    const e = document.getElementById('candEmail').value.trim();
-    const token = document.getElementById('candToken').value.trim();
-    if (!n || !e) { toast('❌ Name & Email'); return; }
-    if (!token) { toast('❌ Token required'); alert('You need a valid interview token from HR.'); return; }
-    try {
-      toast('🔍 Validating...');
-      const data = await db('select', 'interviews', null, { token });
-      const d = Array.isArray(data) ? data[0] : data;
-      if (!d) { toast('❌ Invalid token'); return; }
-      if (d.status === 'completed') { toast('❌ Already done'); return; }
-      if (d.expires_at && new Date(d.expires_at) < new Date()) { toast('❌ Expired'); return; }
-      curAppId = d.application_id; curJobId = d.job_id;
-      await db('update', 'interviews', { status: 'in_progress', started_at: new Date().toISOString() }, { token });
-      toast('✅ Verified!');
-    } catch (err) { toast('❌ ' + err.message); return; }
-    document.getElementById('screenShareOverlay').classList.remove('hidden');
+  if (!curInterview || !curToken) {
+    toast("❌ No valid interview token");
     return;
   }
+  lang = document.getElementById("langSel").value;
+  mainQ = 0;
+  isFollowUp = false;
+  answers = [];
+  chat = [];
+  evalRetry = 0;
+  violations = [];
+  interviewStartTime = new Date().toISOString();
 
-  const btn = document.getElementById('startBtn');
-  btn.disabled = true; btn.textContent = '⏳...';
-  try { await fetch(W, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ messages: [{ role: 'user', content: 'OK' }] }) }); }
-  catch (e) { toast('❌ ' + e.message); btn.disabled = false; btn.textContent = '🚀 Start'; return; }
-  btn.disabled = false; btn.textContent = '🚀 Start Interview';
-  actuallyStart();
+  // Show screen share overlay for proctored
+  document.getElementById("screenShareOverlay").classList.remove("hidden");
 }
 
 async function actuallyStart() {
-  document.getElementById('screenShareOverlay').classList.add('hidden');
+  document.getElementById("screenShareOverlay").classList.add("hidden");
+
   const sys = `You are an expert AI interviewer for a ${level}-level "${role}" position.
-LANGUAGE: ${L[lang]?.n || 'English'} only.
-${cv ? '\nRESUME:\n' + cv + '\n' : ''}
+LANGUAGE: ${L[lang]?.n || "English"} only.
+${cv ? "\nRESUME:\n" + cv + "\n" : ""}
 RULES:
 1. Ask ${totalQ} MAIN questions. Mix behavioral, technical, situational.
-2. For vague answers, ask follow-ups.
-3. Follow-ups don't count toward ${totalQ}.
-4. Be conversational.
-FORMAT: [NEXT] question | [FOLLOWUP] question | [DONE] message
-Start with [NEXT].`;
-  chat = [{ role: 'system', content: sys }];
-  nav('live');
-  if (mode === 'real') startProctor();
-  setOrb('thinking'); showThink(true);
+2. For vague answers, ask C.L.A.I.M. follow-ups.
+3. Follow-ups don't count toward ${totalQ} total.
+4. Be conversational, professional. Adapt to ${level} level.
+FORMAT: [NEXT] new question | [FOLLOWUP] follow-up | [DONE] end message
+Start with [NEXT] and first question.`;
+
+  chat = [{ role: "system", content: sys }];
+  showPage("live");
+  startProctor();
+  setOrb("thinking");
+  showThink(true);
+
   try {
     const fq = await callAI(chat);
-    chat.push({ role: 'assistant', content: fq });
-    const cl = fq.replace(/\[NEXT\]\s*/i, '').replace(/\[FOLLOWUP\]\s*/i, '').trim();
-    mainQ = 1; isFollowUp = false;
+    chat.push({ role: "assistant", content: fq });
+    const cl = fq.replace(/\[NEXT\]\s*/i, "").replace(/\[FOLLOWUP\]\s*/i, "").trim();
+    mainQ = 1;
+    isFollowUp = false;
     showThink(false);
-    document.getElementById('questionBox').textContent = cl;
-    updateProg(); initSTT();
+    document.getElementById("questionBox").textContent = cl;
+    updateProg();
+    initSTT();
     await speak(cl);
     startListen();
-  } catch (e) { showError('❌ ' + e.message); showThink(false); }
+    toast("🎯 Interview started!");
+  } catch (e) {
+    showError("❌ Could not start: " + e.message);
+    showThink(false);
+    setOrb("idle");
+  }
 }
 
-// ═══════════════════════════════════════════════════════════════
-// AUTO SUBMIT + NEXT
-// ═══════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════
+// AUTO SUBMIT + NEXT QUESTION
+// ═══════════════════════════════════════════════════════
 async function autoSubmit() {
-  if (processing) return; processing = true; stopListen(); setOrb('processing');
+  if (processing) return;
+  processing = true;
+  stopListen();
+  setOrb("processing");
+
   const ans = transcript.trim();
-  if (!ans || ans.length < MIN_ANS) { processing = false; setTimeout(() => startListen(), 500); return; }
-  const q = document.getElementById('questionBox').textContent;
+  if (!ans || ans.length < MIN_ANS) {
+    processing = false;
+    toast("🎤 Still listening...");
+    setTimeout(() => startListen(), 500);
+    return;
+  }
+
+  const q = document.getElementById("questionBox").textContent;
   const dur = Math.round((Date.now() - ansStart) / 1000);
-  answers.push({ question: q, answer: ans, type: isFollowUp ? 'followup' : 'main', mainQNum: mainQ, duration: dur, skipped: false });
-  transcript = '';
+  answers.push({
+    question: q,
+    answer: ans,
+    type: isFollowUp ? "followup" : "main",
+    mainQNum: mainQ,
+    duration: dur,
+    skipped: false
+  });
+  transcript = "";
   await getNext(ans);
   processing = false;
 }
 
 async function getNext(ans) {
-  showThink(true); setOrb('thinking');
-  const p = `Candidate: "${ans}"\nMain: ${mainQ}/${totalQ}.\n- Vague → [FOLLOWUP]\n- Good → [NEXT]\n${mainQ >= totalQ ? '- All done → [DONE]' : ''}\nOnly tag+question. ${L[lang]?.n}.`;
-  chat.push({ role: 'user', content: p });
+  showThink(true);
+  setOrb("thinking");
+
+  const p = `Candidate answered: "${ans}"
+Main asked: ${mainQ}/${totalQ}.
+- Vague → [FOLLOWUP] probe
+- Good → [NEXT] new question
+${mainQ >= totalQ && !isFollowUp ? "- All done → [DONE] brief thanks" : ""}
+Output ONLY tag + question. Stay in ${L[lang]?.n || "English"}.`;
+
+  chat.push({ role: "user", content: p });
+
   try {
-    const r = await callAI(chat); chat.push({ role: 'assistant', content: r });
+    const r = await callAI(chat);
+    chat.push({ role: "assistant", content: r });
     showThink(false);
+
     const u = r.toUpperCase();
-    const cl = r.replace(/\[FOLLOWUP\]\s*/i, '').replace(/\[NEXT\]\s*/i, '').replace(/\[DONE\]\s*/i, '').trim();
-    if (u.includes('[DONE]')) { document.getElementById('questionBox').textContent = cl; await speak(cl); setTimeout(showResults, 2000); return; }
-    if (u.includes('[NEXT]')) { mainQ++; isFollowUp = false; }
-    if (u.includes('[FOLLOWUP]')) isFollowUp = true;
-    document.getElementById('questionBox').textContent = cl;
-    updateProg(); await speak(cl); startListen();
-  } catch (e) { showError('❌ ' + e.message); showThink(false); }
+    const cl = r.replace(/\[FOLLOWUP\]\s*/i, "").replace(/\[NEXT\]\s*/i, "").replace(/\[DONE\]\s*/i, "").trim();
+
+    if (u.includes("[DONE]")) {
+      document.getElementById("questionBox").textContent = cl;
+      mainQ = totalQ;
+      updateProg();
+      await speak(cl);
+      setTimeout(() => showResults(), 2000);
+      return;
+    }
+    if (u.includes("[NEXT]")) { mainQ++; isFollowUp = false; if (mainQ > totalQ) mainQ = totalQ; }
+    if (u.includes("[FOLLOWUP]")) isFollowUp = true;
+
+    document.getElementById("questionBox").textContent = cl;
+    updateProg();
+    await speak(cl);
+    startListen();
+  } catch (e) {
+    showError("❌ " + e.message);
+    showThink(false);
+    setOrb("idle");
+  }
 }
 
 function endEarly() {
-  if (answers.length < 1) { toast('⚠️ Answer at least 1'); return; }
-  stopListen(); speechSynthesis?.cancel(); showResults();
+  if (answers.length < 1) { toast("⚠️ Answer at least 1 question"); return; }
+  stopListen();
+  speechSynthesis?.cancel();
+  showResults();
 }
 
-// ═══════════════════════════════════════════════════════════════
-// RESULTS
-// ═══════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════
+// RESULTS — FIXED (use /interviews/submit)
+// ═══════════════════════════════════════════════════════
 async function showResults() {
-  stopListen(); speechSynthesis?.cancel(); stopProctor();
-  nav('results'); toast('📊 Evaluating...');
+  stopListen();
+  speechSynthesis?.cancel();
+  stopProctor();
+  showPage("results");
+  toast("📊 Evaluating your performance...");
   await genEval();
 }
 
 async function genEval() {
-  const qa = answers.map(a => `[${a.type === 'followup' ? 'FOLLOWUP' : 'MAIN Q' + a.mainQNum}] (${a.duration || 0}s)\nQ: ${a.question.substring(0, 200)}\nA: ${a.skipped ? 'SKIPPED' : a.answer.substring(0, 300)}`).join('\n\n');
+  const qa = answers.map(a => {
+    const t = a.type === "followup" ? "FOLLOW-UP" : "MAIN Q" + a.mainQNum;
+    return `[${t}] (${a.duration || 0}s)\nQ: ${a.question.replace(/["\n\r\t\\]/g, " ").substring(0, 200)}\nA: ${a.skipped ? "SKIPPED" : a.answer.replace(/["\n\r\t\\]/g, " ").substring(0, 300)}`;
+  }).join("\n\n");
+
+  const em = [
+    { role: "system", content: "You are a hiring evaluator. Return ONLY valid JSON. No markdown." },
+    {
+      role: "user", content: `Evaluate this ${level} interview for ${role}.
+${violations.length ? "VIOLATIONS: " + violations.length + "\n" : ""}Transcript:\n${qa}\n
+Return ONLY: {"overallScore":65,"grade":"B","recommendation":"Lean Hire","summary":"Brief.","strengths":["s1"],"improvements":["i1"],"feedback":[{"question":"q","score":7,"comment":"c","type":"main"}]}
+Keep strings short. ONLY JSON.`
+    }
+  ];
+
   try {
-    const raw = await callAI([
-      { role: 'system', content: 'Evaluator. Return ONLY valid JSON.' },
-      { role: 'user', content: `Evaluate ${level} ${role} interview.\n${violations.length ? 'Violations: ' + violations.length + '\n' : ''}${qa}\nReturn: {"overallScore":65,"grade":"B","recommendation":"Lean Hire","summary":"Brief.","strengths":["s1"],"improvements":["i1"],"feedback":[{"question":"q","score":7,"comment":"c","type":"main"}]}` }
-    ]);
+    const raw = await callAI(em);
     const r = safeJSON(raw);
-    if (violations.length) { r.overallScore = Math.max(0, (r.overallScore || 50) - violations.length * 5); }
+
+    if (typeof r.overallScore !== "number" || r.overallScore < 0 || r.overallScore > 100) {
+      r.overallScore = 50;
+    }
+    if (violations.length) {
+      r.overallScore = Math.max(0, r.overallScore - violations.length * 5);
+      r.summary += " (" + violations.length + " violations, -" + violations.length * 5 + "pts)";
+    }
+
     renderRes(r);
     await saveResults(r);
-    toast('🏆 Done!');
+    toast("🏆 Evaluation complete!");
+    document.getElementById("retryWrap").style.display = "none";
   } catch (e) {
+    console.error("[EVAL]", e);
     evalRetry++;
-    if (evalRetry < MAX_RETRIES) { await genEval(); }
-    else { renderFallback(); document.getElementById('retryWrap').style.display = 'block'; }
+    if (evalRetry < MAX_RETRIES) {
+      toast("⚠️ Retry " + evalRetry + "/" + MAX_RETRIES);
+      await genEval();
+    } else {
+      toast("⚠️ Using local evaluation");
+      renderFallback();
+      document.getElementById("retryWrap").style.display = "block";
+    }
   }
 }
 
 async function saveResults(r) {
+  if (!curToken) return;
+
   try {
-    if (!curAppId) return;
-    const token = crypto.randomUUID?.() || Date.now().toString(36);
-    await db('insert', 'interviews', {
-      application_id: curAppId, job_id: curJobId, token,
-      interview_type: mode, status: 'completed',
-      interview_role: role, interview_level: level, interview_language: lang,
-      question_count: totalQ, duration_seconds: secs,
-      overall_score: r.overallScore, grade: r.grade, recommendation: r.recommendation,
-      summary: r.summary, strengths: r.strengths, improvements: r.improvements,
-      feedback: r.feedback, answers, violation_log: violations, violation_count: violations.length,
-      started_at: new Date(Date.now() - secs * 1000).toISOString(), completed_at: new Date().toISOString()
+    // ★ Use the proper /interviews/submit endpoint
+    await apiCall("POST", "/interviews/submit", {
+      token: curToken,
+      score: r.overallScore,
+      grade: r.grade,
+      recommendation: r.recommendation,
+      summary: r.summary,
+      strengths: r.strengths || [],
+      improvements: r.improvements || [],
+      feedback: r.feedback || [],
+      answers: answers,
+      violations: violations.length,
+      violation_log: violations,
+      duration: secs,
+      started_at: interviewStartTime
     });
-  } catch (e) { console.error('[DB]', e); }
+    console.log("[SUBMIT] Results saved successfully");
+  } catch (e) {
+    console.error("[SUBMIT]", e.message);
+    toast("⚠️ Could not save results to server");
+  }
 }
 
-async function retryEvaluation() { evalRetry = 0; document.getElementById('retryWrap').style.display = 'none'; await genEval(); }
+async function retryEvaluation() {
+  evalRetry = 0;
+  toast("🔄 Retrying evaluation...");
+  document.getElementById("scoreNum").textContent = "0";
+  document.getElementById("gradeBadge").textContent = "—";
+  document.getElementById("fbList").innerHTML = "";
+  document.getElementById("strengthsCard").style.display = "none";
+  document.getElementById("hireBadge").style.display = "none";
+  document.getElementById("retryWrap").style.display = "none";
+  await genEval();
+}
 
 function renderFallback() {
-  const ma = answers.filter(a => a.type === 'main' && !a.skipped).length;
-  const sc = Math.max(0, Math.round((ma / Math.max(totalQ, 1)) * 70));
-  renderRes({ overallScore: sc, grade: sc >= 70 ? 'B' : 'C', recommendation: 'Pending', summary: `${ma}/${totalQ} answered.`, strengths: [], improvements: [], feedback: answers.map(a => ({ question: a.question.substring(0, 80), score: 5, comment: 'Recorded', type: a.type })) });
+  const ma = answers.filter(a => a.type === "main" && !a.skipped).length;
+  const sc = Math.max(0, Math.round((ma / Math.max(totalQ, 1)) * 70) - violations.length * 5);
+  renderRes({
+    overallScore: sc,
+    grade: sc >= 70 ? "B" : sc >= 50 ? "C" : "D",
+    recommendation: sc >= 60 ? "Lean Hire" : "Lean No Hire",
+    summary: `Answered ${ma}/${totalQ}.${violations.length ? " " + violations.length + " violations." : ""}`,
+    strengths: ma > 0 ? ["Participated in interview"] : [],
+    improvements: ["Provide more detailed answers"],
+    feedback: answers.map(a => ({
+      question: a.question.substring(0, 80),
+      score: a.skipped ? 0 : 5,
+      comment: a.skipped ? "Skipped" : "Answer recorded",
+      type: a.type
+    }))
+  });
 }
 
 function renderRes(r) {
-  const sc = r.overallScore || 0, gr = r.grade || '?';
+  const sc = r.overallScore || 0;
+  const gr = r.grade || "?";
   const ok = sc >= 80, mid = sc >= 60;
-  const col = ok ? '#10b981' : mid ? '#f59e0b' : '#ef4444';
-  const bg = ok ? 'rgba(16,185,129,.15)' : mid ? 'rgba(245,158,11,.15)' : 'rgba(239,68,68,.15)';
-  document.getElementById('scoreRing').style.background = `conic-gradient(${col} ${sc * 3.6}deg, rgba(255,255,255,.05) 0deg)`;
-  const b = document.getElementById('gradeBadge'); b.textContent = 'Grade: ' + gr; b.style.background = bg; b.style.color = col;
-  if (r.recommendation) { const h = document.getElementById('hireBadge'); h.style.display = 'inline-block'; h.textContent = r.recommendation; const hire = r.recommendation.toLowerCase().includes('hire') && !r.recommendation.toLowerCase().includes('no'); h.style.background = hire ? 'rgba(16,185,129,.15)' : 'rgba(239,68,68,.15)'; h.style.color = hire ? '#10b981' : '#ef4444'; }
-  document.getElementById('scoreSummary').textContent = r.summary || '';
-  if (r.strengths?.length || r.improvements?.length) {
-    document.getElementById('strengthsCard').style.display = 'block';
-    document.getElementById('strengthsList').innerHTML = (r.strengths || []).map(s => '<li><span>✅</span> ' + s + '</li>').join('');
-    document.getElementById('improveList').innerHTML = (r.improvements || []).map(s => '<li><span>📈</span> ' + s + '</li>').join('');
+  const col = ok ? "#3fb950" : mid ? "#d29922" : "#f85149";
+  const bg = ok ? "rgba(63,185,80,0.15)" : mid ? "rgba(210,153,34,0.15)" : "rgba(248,81,73,0.15)";
+
+  document.getElementById("scoreRing").style.background =
+    `conic-gradient(${col} ${sc * 3.6}deg, rgba(255,255,255,0.05) 0deg)`;
+
+  const b = document.getElementById("gradeBadge");
+  b.textContent = "Grade: " + gr;
+  b.style.background = bg;
+  b.style.color = col;
+
+  if (r.recommendation) {
+    const h = document.getElementById("hireBadge");
+    h.style.display = "inline-block";
+    h.textContent = r.recommendation;
+    const hire = r.recommendation.toLowerCase().includes("hire") && !r.recommendation.toLowerCase().includes("no");
+    h.style.background = hire ? "rgba(63,185,80,0.15)" : "rgba(248,81,73,0.15)";
+    h.style.color = hire ? "#3fb950" : "#f85149";
   }
-  if (violations.length) { document.getElementById('violationsCard').style.display = 'block'; document.getElementById('violationsList').innerHTML = violations.map(v => `<div class="violation-item">${v.time} ⚠️ ${v.detail}</div>`).join(''); }
-  const list = document.getElementById('fbList'); list.innerHTML = '';
+
+  document.getElementById("scoreSummary").textContent = r.summary || "";
+
+  if (r.strengths?.length || r.improvements?.length) {
+    document.getElementById("strengthsCard").style.display = "block";
+    document.getElementById("strengthsList").innerHTML =
+      (r.strengths || []).map(s => "<li><span>✅</span> " + s + "</li>").join("");
+    document.getElementById("improveList").innerHTML =
+      (r.improvements || []).map(s => "<li><span>📈</span> " + s + "</li>").join("");
+  }
+
+  if (violations.length) {
+    document.getElementById("violationsCard").style.display = "block";
+    document.getElementById("violationsList").innerHTML =
+      violations.map(v => '<div class="violation-item"><span style="font-size:0.7rem;color:var(--text2);">' + v.time + '</span> ⚠️ ' + v.detail + "</div>").join("");
+  }
+
+  const list = document.getElementById("fbList");
+  list.innerHTML = "";
   (r.feedback || []).forEach((fb, i) => {
-    const s = fb.score || 0; const c = s >= 7 ? '#10b981' : s >= 5 ? '#f59e0b' : '#ef4444';
-    const ma = answers[i]; const pv = ma ? (ma.skipped ? '[Skipped]' : ma.answer.substring(0, 120)) : '';
-    list.innerHTML += `<div class="fb-item"><div class="fb-q">${fb.question}<span class="fb-type" style="background:rgba(99,102,241,.15);color:#818cf8;">${fb.type}</span></div>${pv ? `<div class="fb-a">"${pv}"</div>` : ''}<span class="fb-score" style="background:${c === '#10b981' ? 'rgba(16,185,129,.15)' : c === '#f59e0b' ? 'rgba(245,158,11,.15)' : 'rgba(239,68,68,.15)'};color:${c};">${s}/10</span><div class="fb-text">${fb.comment}</div></div>`;
+    const s = fb.score || 0;
+    const c = s >= 7 ? "#3fb950" : s >= 5 ? "#d29922" : "#f85149";
+    const bg2 = s >= 7 ? "rgba(63,185,80,0.15)" : s >= 5 ? "rgba(210,153,34,0.15)" : "rgba(248,81,73,0.15)";
+    const tc = fb.type === "followup" ? "rgba(188,140,255,0.15)" : "rgba(99,102,241,0.15)";
+    const tt = fb.type === "followup" ? "#bc8cff" : "#6366f1";
+    const tl = fb.type === "followup" ? "Follow-up" : "Main";
+    const ma = answers[i];
+    const pv = ma ? (ma.skipped ? "[Skipped]" : ma.answer.substring(0, 120) + (ma.answer.length > 120 ? "..." : "")) : "";
+
+    const d = document.createElement("div");
+    d.className = "fb-item";
+    d.innerHTML = `
+      <div class="fb-q">${fb.question}<span class="fb-type" style="background:${tc};color:${tt};">${tl}</span></div>
+      ${pv ? `<div class="fb-a">"${pv}"</div>` : ""}
+      <span class="fb-score" style="background:${bg2};color:${c};">${s}/10</span>
+      <div class="fb-text">${fb.comment}</div>`;
+    list.appendChild(d);
   });
-  let cur = 0; const el = document.getElementById('scoreNum');
-  const iv = setInterval(() => { cur += Math.ceil(sc / 30); if (cur >= sc) { cur = sc; clearInterval(iv); } el.textContent = cur; }, 30);
+
+  // Animate score counter
+  let cur = 0;
+  const el = document.getElementById("scoreNum");
+  const iv = setInterval(() => {
+    cur += Math.ceil(sc / 30);
+    if (cur >= sc) { cur = sc; clearInterval(iv); }
+    el.textContent = cur;
+  }, 30);
 }
 
-// ═══════════════════════════════════════════════════════════════
-// TOKEN FROM URL
-// ═══════════════════════════════════════════════════════════════
-async function checkToken() {
-  const params = new URLSearchParams(location.search);
-  const token = params.get('token');
-  if (location.hash === '#hr') { nav('hr'); return; }
-  if (!token) return;
-  toast('🔒 Token detected...');
-  try {
-    const data = await db('select', 'interviews', null, { token });
-    const d = Array.isArray(data) ? data[0] : data;
-    if (!d) { toast('❌ Invalid'); return; }
-    if (d.status === 'completed') { toast('❌ Already done'); return; }
-    if (d.expires_at && new Date(d.expires_at) < new Date()) { toast('❌ Expired'); return; }
-    mode = 'real'; curAppId = d.application_id; curJobId = d.job_id;
-    startMode('real');
-    if (d.interview_role) { document.getElementById('roleSel').value = d.interview_role; role = d.interview_role; }
-    if (d.interview_level) document.getElementById('levelSel').value = d.interview_level;
-    if (d.question_count) document.getElementById('qCount').value = d.question_count;
-    if (d.interview_language) document.getElementById('langSel').value = d.interview_language;
-    if (d.application_id) {
-      const apps = await db('select', 'applications', null, { id: d.application_id });
-      const a = Array.isArray(apps) ? apps[0] : apps;
-      if (a) {
-        document.getElementById('candName').value = a.candidate_name || a.name || '';
-        document.getElementById('candEmail').value = a.candidate_email || a.email || '';
-        if (a.resume_text) { cv = a.resume_text; document.getElementById('cvFileName').textContent = '✅ Loaded'; }
-      }
-    }
-    document.getElementById('candToken').value = token;
-    toast('✅ Ready! Click Start.');
-  } catch (e) { toast('❌ ' + e.message); }
-}
-
-// ═══════════════════════════════════════════════════════════════
-// INIT
-// ═══════════════════════════════════════════════════════════════
-window.addEventListener('DOMContentLoaded', () => {
-  if (window.pdfjsLib) console.log('✅ PDF.js');
-  speechSynthesis?.getVoices();
-  checkToken();
-  const m = new URLSearchParams(location.search).get('mode');
-  if (m === 'real') startMode('real');
-  else if (m === 'mock') startMode('mock');
+// ═══════════════════════════════════════════════════════
+// AUTO-CHECK TOKEN FROM URL
+// ═══════════════════════════════════════════════════════
+window.addEventListener("DOMContentLoaded", () => {
+  if (window.pdfjsLib) console.log("✅ PDF.js loaded");
+  if (!window.SpeechRecognition && !window.webkitSpeechRecognition) {
+    console.warn("⚠️ Use Chrome for speech recognition");
+  }
+  const token = new URLSearchParams(location.search).get("token");
+  if (token) {
+    document.getElementById("tokenInput").value = token;
+    loadInterview(token);
+  }
 });
 </script>
 </body>
