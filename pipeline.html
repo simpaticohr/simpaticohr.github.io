@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Pipeline | Simpatico HR</title>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/shared.css">
+  <style>
+    .pipeline-board { display:flex; gap:12px; overflow-x:auto; padding-bottom:12px; min-height:500px; }
+    .pipeline-col { min-width:250px; flex:1; background:rgba(255,255,255,.02); border:1px solid var(--border); border-radius:14px; padding:12px; }
+    .pipeline-col-header { font-size:0.82rem; font-weight:700; padding:8px 0; margin-bottom:8px; border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:center; }
+    .pipeline-col-count { font-size:0.72rem; background:rgba(255,255,255,.08); padding:2px 8px; border-radius:8px; color:var(--muted); }
+    .cand-card { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:12px; margin-bottom:8px; cursor:pointer; transition:all 0.2s; }
+    .cand-card:hover { border-color:rgba(99,102,241,.3); transform:translateY(-2px); }
+    .cand-name { font-weight:700; font-size:0.88rem; margin-bottom:2px; }
+    .cand-meta { font-size:0.72rem; color:var(--muted); }
+    .cand-actions { display:flex; gap:4px; margin-top:8px; flex-wrap:wrap; }
+    .filter-bar { display:flex; gap:8px; margin-bottom:16px; flex-wrap:wrap; align-items:center; }
+    .search-input { padding:8px 14px; background:rgba(255,255,255,.04); border:1px solid var(--border); border-radius:10px; color:var(--text); font-size:0.88rem; outline:none; font-family:inherit; min-width:200px; }
+    .search-input:focus { border-color:rgba(99,102,241,.4); }
+    .detail-overlay { position:fixed; inset:0; background:rgba(0,0,0,.7); z-index:1000; display:flex; align-items:center; justify-content:center; padding:20px; }
+    .detail-panel { max-width:700px; width:100%; max-height:90vh; overflow-y:auto; }
+  </style>
+</head>
+<body>
+
+<nav class="top-nav">
+  <a class="top-logo" href="index.html">SIMPATICO <span>HR</span></a>
+  <div class="top-links">
+    <a class="top-link" href="dashboard.html">📊 Dashboard</a>
+    <a class="top-link active" href="pipeline.html">🔄 Pipeline</a>
+    <a class="top-link" href="analytics.html">📈 Analytics</a>
+    <a class="top-link" href="settings.html">⚙️ Settings</a>
+    <a class="top-link" href="#" onclick="API.logout();return false;">🚪</a>
+  </div>
+</nav>
+
+<div class="container" style="max-width:1400px;">
+  <h1 style="font-size:1.4rem;font-weight:800;margin-bottom:16px;background:linear-gradient(135deg,#fff,#94a3b8);-webkit-background-clip:text;-webkit-text-fill-color:transparent;">🔄 Candidate Pipeline</h1>
+
+  <div class="filter-bar">
+    <input type="text" class="search-input" id="searchInput" placeholder="🔍 Search candidates..." oninput="filterCandidates()">
+    <select id="jobFilter" style="padding:8px 12px;background:rgba(255,255,255,.04);border:1px solid var(--border);border-radius:10px;color:var(--text);font-size:0.85rem;" onchange="loadPipeline()">
+      <option value="">All Jobs</option>
+    </select>
+    <button class="btn btn-sm btn-primary" onclick="loadPipeline()">🔄 Refresh</button>
+  </div>
+
+  <div class="pipeline-board" id="board">
+    <div style="text-align:center;width:100%;padding:60px;"><span class="loading"></span> Loading pipeline...</div>
+  </div>
+</div>
+
+<!-- Candidate Detail Modal -->
+<div id="detailOverlay" class="detail-overlay hidden" onclick="if(event.target===this)closeDetail()">
+  <div class="detail-panel">
+    <div class="card" id="detailContent">Loading...</div>
+  </div>
+</div>
+
+<script src="js/api.js"></script>
+<script>
+  if (!requireAuth(["client_admin", "hr"])) throw "Unauthorized";
+
+  const STAGES = [
+    { key: "applied", label: "📝 Applied", color: "var(--yellow)" },
+    { key: "screened", label: "🔍 Screened", color: "var(--blue)" },
+    { key: "shortlisted", label: "⭐ Shortlisted", color: "var(--accent)" },
+    { key: "interview_scheduled", label: "📅 Interview", color: "var(--accent2)" },
+    { key: "interviewed", label: "🎤 Interviewed", color: "#8b5cf6" },
+    { key: "offered", label: "📧 Offered", color: "var(--green)" },
+    { key: "hired", label: "✅ Hired", color: "#059669" },
+    { key: "rejected", label: "❌ Rejected", color: "var(--red)" }
+  ];
+
+  let allApps = [];
+
+  async function loadPipeline() {
+    const jobId = document.getElementById("jobFilter").value;
+    const params = {};
+    if (jobId) params.job_id = jobId;
+
+    try {
+      const [appData, jobData] = await Promise.all([
+        API.clientApplications(params),
+        API.clientJobs()
+      ]);
+
+      allApps = appData.applications || [];
+
+      // Populate job filter
+      const jf = document.getElementById("jobFilter");
+      const currentVal = jf.value;
+      jf.innerHTML = '<option value="">All Jobs</option>';
+      (jobData.jobs || []).forEach(j => {
+        jf.innerHTML += `<option value="${j.id}" ${j.id === currentVal ? "selected" : ""}>${j.title}</option>`;
+      });
+
+      renderBoard();
+    } catch (e) {
+      toast("❌ " + e.message, "error");
+    }
+  }
+
+  function filterCandidates() {
+    renderBoard();
+  }
+
+  function renderBoard() {
+    const search = (document.getElementById("searchInput").value || "").toLowerCase();
+    let filtered = allApps;
+    if (search) {
+      filtered = filtered.filter(a =>
+        `${a.candidate_name} ${a.candidate_email} ${a.job_title}`.toLowerCase().includes(search)
+      );
+    }
+
+    const grouped = {};
+    STAGES.forEach(s => grouped[s.key] = []);
+    filtered.forEach(a => {
+      const stage = grouped[a.status] !== undefined ? a.status : "applied";
+      if (grouped[stage]) grouped[stage].push(a);
+    });
+
+    const board = document.getElementById("board");
+    board.innerHTML = STAGES.map(s => `
+      <div class="pipeline-col">
+        <div class="pipeline-col-header" style="color:${s.color};">
+          ${s.label}
+          <span class="pipeline-col-count">${grouped[s.key].length}</span>
+        </div>
+        <div id="col-${s.key}">
+          ${grouped[s.key].length === 0 ? '<div style="text-align:center;padding:20px;font-size:0.78rem;color:var(--muted);">No candidates</div>' :
+            grouped[s.key].map(a => renderCard(a, s.key)).join("")}
+        </div>
+      </div>
+    `).join("");
+  }
+
+  function renderCard(a, currentStage) {
+    const sc = a.ats_score;
+    const scClass = sc >= 70 ? "score-high" : sc >= 50 ? "score-mid" : sc != null ? "score-low" : "";
+    const nextStage = getNextStage(currentStage);
+    const prevStage = getPrevStage(currentStage);
+
+    return `<div class="cand-card" onclick="openDetail('${a.id}')">
+      <div class="cand-name">${a.candidate_name || "?"}</div>
+      <div class="cand-meta">${a.job_title || "N/A"} ${sc != null ? ` • ATS: <span class="score ${scClass}">${sc}</span>` : ""}</div>
+      <div class="cand-meta">${a.candidate_email || ""}</div>
+      <div class="cand-actions">
+        ${nextStage && currentStage !== "rejected" ? `<button class="btn btn-sm btn-green" onclick="event.stopPropagation();moveApp('${a.id}','${nextStage}')">→ ${nextStage}</button>` : ""}
+        ${currentStage !== "rejected" && currentStage !== "hired" ? `<button class="btn btn-sm btn-red" onclick="event.stopPropagation();moveApp('${a.id}','rejected')">✕</button>` : ""}
+        ${!sc && a.resume_text ? `<button class="btn btn-sm btn-blue" onclick="event.stopPropagation();runATS('${a.id}')">🤖 ATS</button>` : ""}
+      </div>
+    </div>`;
+  }
+
+  function getNextStage(current) {
+    const order = STAGES.filter(s => s.key !== "rejected").map(s => s.key);
+    const idx = order.indexOf(current);
+    return idx >= 0 && idx < order.length - 1 ? order[idx + 1] : null;
+  }
+
+  function getPrevStage(current) {
+    const order = STAGES.filter(s => s.key !== "rejected").map(s => s.key);
+    const idx = order.indexOf(current);
+    return idx > 0 ? order[idx - 1] : null;
+  }
+
+  async function moveApp(id, status) {
+    try {
+      await API.updateAppStatus(id, status);
+      toast(`✅ Moved to ${status}`, "success");
+      // Update local data
+      const app = allApps.find(a => a.id === id);
+      if (app) app.status = status;
+      renderBoard();
+    } catch (e) { toast("❌ " + e.message, "error"); }
+  }
+
+  async function runATS(id) {
+    toast("🤖 Running ATS screening...", "info");
+    try {
+      const r = await API.runATS(id);
+      toast(`✅ ATS Score: ${r.ats?.score || "?"}`, "success");
+      loadPipeline();
+    } catch (e) { toast("❌ " + e.message, "error"); }
+  }
+
+  async function openDetail(id) {
+    document.getElementById("detailOverlay").classList.remove("hidden");
+    const el = document.getElementById("detailContent");
+    el.innerHTML = '<div style="text-align:center;padding:40px;"><span class="loading"></span> Loading...</div>';
+
+    try {
+      const data = await API.getApplication(id);
+      const a = data.application;
+      const notes = data.notes || [];
+      const interviews = data.interviews || [];
+
+      el.innerHTML = `
+        <div style="display:flex;justify-content:space-between;align-items:start;flex-wrap:wrap;gap:12px;">
+          <div>
+            <h2 style="margin-bottom:4px;">${a.candidate_name || "?"}</h2>
+            <p style="color:var(--muted);font-size:0.85rem;">${a.candidate_email} ${a.candidate_phone ? "• " + a.candidate_phone : ""}</p>
+            <p style="color:var(--accent);font-size:0.88rem;font-weight:600;">Applied for: ${a.job_title || "N/A"}</p>
+          </div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            <span class="pill pill-${a.status === 'hired' ? 'green' : a.status === 'rejected' ? 'red' : 'blue'}" style="padding:6px 14px;font-size:0.85rem;">${a.status}</span>
+            ${a.ats_score != null ? `<span class="score ${a.ats_score >= 70 ? 'score-high' : a.ats_score >= 50 ? 'score-mid' : 'score-low'}" style="padding:6px 14px;font-size:0.85rem;">ATS: ${a.ats_score}</span>` : ""}
+            <button class="btn btn-sm btn-red" onclick="closeDetail()">✕ Close</button>
+          </div>
+        </div>
+
+        ${a.ats_summary ? `<div style="margin-top:12px;padding:12px;background:rgba(99,102,241,.05);border-radius:10px;font-size:0.85rem;color:var(--muted);"><strong>ATS Summary:</strong> ${a.ats_summary}</div>` : ""}
+
+        <div style="margin-top:16px;">
+          <h3>📋 Actions</h3>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;">
+            ${STAGES.filter(s => s.key !== a.status && s.key !== "rejected").map(s =>
+              `<button class="btn btn-sm btn-outline" onclick="moveAndClose('${a.id}','${s.key}')">${s.label}</button>`
+            ).join("")}
+            ${a.status !== "rejected" ? `<button class="btn btn-sm btn-red" onclick="moveAndClose('${a.id}','rejected')">❌ Reject</button>` : ""}
+            <button class="btn btn-sm btn-blue" onclick="scheduleInterview('${a.id}','${(a.candidate_name||"").replace(/'/g,"\\'")}','${a.candidate_email||""}')">🎤 Schedule Interview</button>
+            ${!a.ats_score && a.resume_text ? `<button class="btn btn-sm btn-yellow" onclick="runATSFromDetail('${a.id}')">🤖 Run ATS</button>` : ""}
+          </div>
+        </div>
+
+        ${a.cover_letter ? `<div style="margin-top:16px;"><h3>📝 Cover Letter</h3><p style="color:var(--muted);font-size:0.85rem;margin-top:8px;line-height:1.7;">${a.cover_letter}</p></div>` : ""}
+
+        <div style="margin-top:16px;">
+          <h3>💬 Notes (${notes.length})</h3>
+          <div style="display:flex;gap:8px;margin-top:8px;">
+            <input type="text" id="noteInput" placeholder="Add a note..." style="flex:1;padding:8px 12px;background:rgba(255,255,255,.04);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:0.85rem;">
+            <button class="btn btn-sm btn-primary" onclick="addNote('${a.id}')">Add</button>
+          </div>
+          <div style="margin-top:8px;max-height:200px;overflow-y:auto;">
+            ${notes.map(n => `
+              <div style="padding:8px 0;border-bottom:1px solid var(--border);font-size:0.82rem;">
+                <strong style="color:var(--accent);">${n.user_name || "?"}</strong>
+                <span style="color:var(--muted);font-size:0.7rem;margin-left:8px;">${n.created_at ? new Date(n.created_at).toLocaleString() : ""}</span>
+                <div style="color:var(--muted);margin-top:2px;">${n.note}</div>
+              </div>
+            `).join("") || '<div style="padding:12px;color:var(--muted);font-size:0.82rem;">No notes yet</div>'}
+          </div>
+        </div>
+
+        ${interviews.length ? `
+          <div style="margin-top:16px;">
+            <h3>🎤 Interviews (${interviews.length})</h3>
+            ${interviews.map(i => `
+              <div style="padding:8px 0;border-bottom:1px solid var(--border);font-size:0.82rem;">
+                <strong>${i.interview_role || "?"}</strong> — <span class="pill pill-${i.status === 'completed' ? 'green' : 'yellow'}">${i.status}</span>
+                ${i.overall_score ? ` <span class="score ${i.overall_score >= 70 ? 'score-high' : 'score-mid'}">${i.overall_score}/100</span>` : ""}
+              </div>
+            `).join("")}
+          </div>
+        ` : ""}
+
+        <div style="margin-top:16px;padding-top:12px;border-top:1px solid var(--border);font-size:0.75rem;color:var(--muted);">
+          Applied: ${a.created_at ? new Date(a.created_at).toLocaleString() : "?"} • Source: ${a.source || "website"}
+          ${a.resume_url ? ` • <a href="${a.resume_url}" target="_blank" style="color:var(--accent);">📄 Resume</a>` : ""}
+        </div>
+      `;
+    } catch (e) {
+      el.innerHTML = `<p style="color:var(--red);">❌ ${e.message}</p><button class="btn btn-sm btn-outline" onclick="closeDetail()">Close</button>`;
+    }
+  }
+
+  function closeDetail() { document.getElementById("detailOverlay").classList.add("hidden"); }
+
+  async function moveAndClose(id, status) {
+    await moveApp(id, status);
+    closeDetail();
+  }
+
+  async function addNote(appId) {
+    const input = document.getElementById("noteInput");
+    const note = input.value.trim();
+    if (!note) return;
+    try {
+      await API.addNote(appId, note);
+      toast("💬 Note added", "success");
+      input.value = "";
+      openDetail(appId);
+    } catch (e) { toast("❌ " + e.message, "error"); }
+  }
+
+  async function runATSFromDetail(id) {
+    toast("🤖 Running ATS...", "info");
+    try {
+      const r = await API.runATS(id);
+      toast(`✅ ATS Score: ${r.ats?.score}`, "success");
+      openDetail(id);
+      loadPipeline();
+    } catch (e) { toast("❌ " + e.message, "error"); }
+  }
+
+  async function scheduleInterview(appId, name, email) {
+    const role = prompt("Interview Role:", "");
+    if (!role) return;
+    try {
+      const r = await API.createInterview({
+        application_id: appId,
+        candidate_name: name,
+        candidate_email: email,
+        role,
+        level: "Mid-Level",
+        questions: 10,
+        type: "real"
+      });
+      const msg = `🎤 Interview for ${name}\n\nLink: ${r.url}\nToken: ${r.token}\n\nExpires in 72 hours.`;
+      try { navigator.clipboard.writeText(r.url); } catch {}
+      alert(msg);
+      toast("✅ Interview link created & copied!", "success");
+      loadPipeline();
+    } catch (e) { toast("❌ " + e.message, "error"); }
+  }
+
+  loadPipeline();
+</script>
+</body>
+</html>
