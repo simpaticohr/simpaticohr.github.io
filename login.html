@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Login | Simpatico HR</title>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/shared.css">
+  <style>
+    .login-wrap { display:flex; align-items:center; justify-content:center; min-height:calc(100vh - 60px); padding:20px; }
+    .login-card { max-width:420px; width:100%; background:var(--card); backdrop-filter:blur(22px); border:1px solid var(--border); border-radius:24px; padding:40px; text-align:center; }
+    .login-card h1 { font-size:1.5rem; margin-bottom:8px; background:linear-gradient(135deg,#fff,#94a3b8); -webkit-background-clip:text; -webkit-text-fill-color:transparent; }
+    .login-card p { color:var(--muted); font-size:0.88rem; margin-bottom:24px; }
+    .login-tabs { display:flex; gap:0; background:rgba(255,255,255,.03); border-radius:12px; padding:3px; margin-bottom:24px; border:1px solid var(--border); }
+    .login-tab { flex:1; padding:10px; border:none; background:transparent; color:var(--muted); font-size:0.85rem; font-weight:700; cursor:pointer; border-radius:10px; font-family:inherit; transition:all 0.2s; }
+    .login-tab.active { background:var(--accent); color:#fff; }
+    .error-msg { color:var(--red); font-size:0.85rem; margin-top:12px; display:none; }
+    .divider { display:flex; align-items:center; gap:12px; margin:20px 0; color:var(--muted); font-size:0.8rem; }
+    .divider::before, .divider::after { content:''; flex:1; height:1px; background:var(--border); }
+    .role-info { background:rgba(99,102,241,.05); border:1px solid rgba(99,102,241,.15); border-radius:10px; padding:12px; margin-top:16px; text-align:left; font-size:0.78rem; color:var(--muted); }
+    .role-info strong { color:var(--accent); }
+  </style>
+</head>
+<body>
+
+<nav class="top-nav">
+  <a class="top-logo" href="index.html">SIMPATICO <span>HR</span></a>
+  <div class="top-links">
+    <a class="top-link" href="jobs.html">💼 Jobs</a>
+    <a class="top-link" href="career-lab.html">🧠 Career Lab</a>
+    <a class="top-link" href="index.html">Home</a>
+  </div>
+</nav>
+
+<div class="login-wrap">
+  <div class="login-card">
+    <div style="font-size:3rem;margin-bottom:12px;">🔐</div>
+    <h1>Welcome Back</h1>
+    <p>Login to your dashboard</p>
+
+    <div class="login-tabs">
+      <button class="login-tab active" onclick="showMode('login')">Login</button>
+      <button class="login-tab" onclick="showMode('register')">Register</button>
+    </div>
+
+    <!-- LOGIN -->
+    <div id="loginForm">
+      <label>Email</label>
+      <input type="email" id="loginEmail" placeholder="you@company.com">
+      <label>Password</label>
+      <input type="password" id="loginPass" placeholder="••••••••" onkeydown="if(event.key==='Enter')doLogin()">
+      <button class="btn btn-primary btn-full" onclick="doLogin()">🔓 Login</button>
+    </div>
+
+    <!-- REGISTER -->
+    <div id="registerForm" class="hidden">
+      <label>Company Name</label>
+      <input type="text" id="regCompany" placeholder="Your Company Ltd">
+      <label>Your Name</label>
+      <input type="text" id="regName" placeholder="John Doe">
+      <label>Email</label>
+      <input type="email" id="regEmail" placeholder="you@company.com">
+      <label>Password</label>
+      <input type="password" id="regPass" placeholder="Min 6 characters">
+      <label>Phone</label>
+      <input type="tel" id="regPhone" placeholder="+91 XXXXX XXXXX">
+      <label>Industry</label>
+      <select id="regIndustry">
+        <option value="">Select...</option>
+        <option value="IT/Software">IT / Software</option>
+        <option value="Healthcare">Healthcare</option>
+        <option value="Finance">Finance</option>
+        <option value="Manufacturing">Manufacturing</option>
+        <option value="Retail">Retail</option>
+        <option value="Education">Education</option>
+        <option value="Hospitality">Hospitality</option>
+        <option value="Construction">Construction</option>
+        <option value="Other">Other</option>
+      </select>
+      <button class="btn btn-green btn-full" onclick="doRegister()">🚀 Create Account</button>
+    </div>
+
+    <div class="error-msg" id="errorMsg"></div>
+
+    <div class="role-info">
+      <strong>Login as:</strong><br>
+      🏢 <strong>Client Admin</strong> — Manage jobs, candidates, HR team<br>
+      👤 <strong>HR</strong> — Post jobs, screen applicants, schedule interviews<br>
+      🔐 <strong>Super Admin</strong> — Platform management
+    </div>
+  </div>
+</div>
+
+<script src="js/api.js"></script>
+<script>
+  // If already logged in, redirect
+  if (API.isLoggedIn()) {
+    const r = API.getRole();
+    if (r === "superadmin") window.location.href = "super-admin.html";
+    else window.location.href = "dashboard.html";
+  }
+
+  function showMode(mode) {
+    document.getElementById("loginForm").classList.toggle("hidden", mode !== "login");
+    document.getElementById("registerForm").classList.toggle("hidden", mode !== "register");
+    document.querySelectorAll(".login-tab").forEach((t, i) => t.classList.toggle("active", i === (mode === "login" ? 0 : 1)));
+    document.getElementById("errorMsg").style.display = "none";
+  }
+
+  function showError(msg) {
+    const el = document.getElementById("errorMsg");
+    el.textContent = msg;
+    el.style.display = "block";
+  }
+
+  async function doLogin() {
+    const email = document.getElementById("loginEmail").value.trim();
+    const password = document.getElementById("loginPass").value;
+    if (!email || !password) { showError("Enter email and password"); return; }
+
+    try {
+      const r = await API.login(email, password);
+      toast("✅ Welcome, " + r.user.name + "!", "success");
+      setTimeout(() => {
+        if (r.user.role === "superadmin") window.location.href = "super-admin.html";
+        else window.location.href = "dashboard.html";
+      }, 500);
+    } catch (e) {
+      showError("❌ " + e.message);
+    }
+  }
+
+  async function doRegister() {
+    const company_name = document.getElementById("regCompany").value.trim();
+    const name = document.getElementById("regName").value.trim();
+    const email = document.getElementById("regEmail").value.trim();
+    const password = document.getElementById("regPass").value;
+    const phone = document.getElementById("regPhone").value.trim();
+    const industry = document.getElementById("regIndustry").value;
+
+    if (!company_name || !name || !email || !password) { showError("All fields required"); return; }
+    if (password.length < 6) { showError("Password min 6 characters"); return; }
+
+    try {
+      await API.register({ company_name, name, email, password, phone, industry });
+      toast("🎉 Account created!", "success");
+      setTimeout(() => window.location.href = "dashboard.html", 500);
+    } catch (e) {
+      showError("❌ " + e.message);
+    }
+  }
+</script>
+</body>
+</html>
