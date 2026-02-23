@@ -1,0 +1,947 @@
+<!-- interview/proctored-room.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI Proctored Interview - SimpaticoHR</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+<style>
+:root {
+  --primary: #002d5a;
+  --tech: #00e5ff;
+  --success: #10b981;
+  --warning: #f59e0b;
+  --danger: #ef4444;
+  --gray-800: #1f2937;
+  --gray-700: #374151;
+  --gray-400: #9ca3af;
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family:'Inter',sans-serif; background:#0a0a0a; color:white; overflow:hidden; }
+
+.interview-layout {
+  display:grid; grid-template-columns:1fr 360px; height:100vh;
+}
+
+/* Video Section */
+.video-section {
+  position:relative; background:#000; display:flex;
+  align-items:center; justify-content:center; overflow:hidden;
+}
+#videoFeed {
+  width:100%; height:100%; object-fit:cover; transform:scaleX(-1);
+}
+.video-canvas-overlay {
+  position:absolute; inset:0; pointer-events:none;
+}
+#overlayCanvas {
+  width:100%; height:100%;
+}
+
+/* Proctor Status Bar */
+.proctor-status {
+  position:absolute; top:16px; left:16px;
+  display:flex; flex-direction:column; gap:8px; z-index:10;
+}
+.proctor-pill {
+  display:flex; align-items:center; gap:8px;
+  background:rgba(0,0,0,0.75); backdrop-filter:blur(12px);
+  padding:8px 14px; border-radius:10px; font-size:0.78rem;
+  border:1px solid rgba(255,255,255,0.08);
+}
+.proctor-pill .dot {
+  width:8px; height:8px; border-radius:50%; flex-shrink:0;
+}
+.dot-green { background:#10b981; box-shadow:0 0 8px rgba(16,185,129,0.6); }
+.dot-red { background:#ef4444; animation:blink 1s infinite; box-shadow:0 0 8px rgba(239,68,68,0.6); }
+.dot-yellow { background:#f59e0b; box-shadow:0 0 8px rgba(245,158,11,0.6); }
+@keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.3} }
+
+/* Trust Score */
+.trust-display {
+  position:absolute; top:16px; right:380px;
+  background:rgba(0,0,0,0.75); backdrop-filter:blur(12px);
+  padding:16px 20px; border-radius:14px; min-width:180px;
+  border:1px solid rgba(255,255,255,0.08); z-index:10;
+}
+.trust-display .label { font-size:0.7rem; color:var(--gray-400); text-transform:uppercase; letter-spacing:1px; margin-bottom:4px; }
+.trust-display .score { font-size:2.2rem; font-weight:800; }
+.trust-display .score.high { color:var(--success); }
+.trust-display .score.medium { color:var(--warning); }
+.trust-display .score.low { color:var(--danger); }
+.trust-bar-bg { height:4px; background:rgba(255,255,255,0.1); border-radius:2px; margin-top:8px; overflow:hidden; }
+.trust-bar-fill { height:100%; border-radius:2px; transition:all 0.5s ease; }
+.violations-count { font-size:0.72rem; color:var(--gray-400); margin-top:6px; }
+
+/* Timer */
+.interview-timer {
+  position:absolute; bottom:80px; left:50%; transform:translateX(-50%);
+  background:rgba(0,0,0,0.75); backdrop-filter:blur(12px);
+  padding:10px 24px; border-radius:12px; font-size:1.2rem; font-weight:700;
+  border:1px solid rgba(255,255,255,0.08); z-index:10;
+  display:flex; align-items:center; gap:10px;
+}
+.interview-timer .rec-dot { width:10px; height:10px; border-radius:50%; background:var(--danger); animation:blink 1.5s infinite; }
+
+/* Controls Bar */
+.controls-bar {
+  position:absolute; bottom:0; left:0; right:360px;
+  display:flex; align-items:center; justify-content:center; gap:16px;
+  padding:16px; background:linear-gradient(to top, rgba(0,0,0,0.8), transparent);
+  z-index:10;
+}
+.ctrl-btn {
+  width:50px; height:50px; border-radius:50%; border:none;
+  display:flex; align-items:center; justify-content:center;
+  background:rgba(255,255,255,0.1); color:white; font-size:1.1rem;
+  cursor:pointer; transition:all 0.2s;
+  backdrop-filter:blur(10px);
+}
+.ctrl-btn:hover { background:rgba(255,255,255,0.2); transform:scale(1.05); }
+.ctrl-btn.active { background:var(--tech); color:var(--primary); }
+.ctrl-btn.end-call { background:var(--danger); width:60px; height:60px; font-size:1.3rem; }
+.ctrl-btn.end-call:hover { background:#dc2626; }
+
+/* Right Sidebar */
+.sidebar-panel {
+  background:#111827; border-left:1px solid rgba(255,255,255,0.06);
+  display:flex; flex-direction:column; overflow:hidden;
+}
+.sidebar-tabs {
+  display:flex; border-bottom:1px solid rgba(255,255,255,0.06); flex-shrink:0;
+}
+.sidebar-tab {
+  flex:1; padding:14px 8px; text-align:center; font-size:0.75rem;
+  color:var(--gray-400); cursor:pointer; transition:0.2s;
+  border-bottom:2px solid transparent; font-weight:600;
+  text-transform:uppercase; letter-spacing:0.5px;
+}
+.sidebar-tab.active { color:var(--tech); border-bottom-color:var(--tech); }
+.sidebar-tab-content { flex:1; overflow-y:auto; padding:16px; }
+.sidebar-tab-content::-webkit-scrollbar { width:4px; }
+.sidebar-tab-content::-webkit-scrollbar-thumb { background:rgba(255,255,255,0.1); border-radius:2px; }
+
+/* Questions */
+.question-block {
+  background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.06);
+  border-radius:12px; padding:14px; margin-bottom:10px; transition:0.3s;
+}
+.question-block.current { border-color:var(--tech); background:rgba(0,229,255,0.05); }
+.question-block.answered { border-color:var(--success); opacity:0.6; }
+.q-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; }
+.q-number { font-size:0.65rem; font-weight:700; color:var(--tech); text-transform:uppercase; letter-spacing:1px; }
+.q-type { font-size:0.6rem; padding:3px 8px; border-radius:4px; background:rgba(255,255,255,0.06); color:var(--gray-400); }
+.q-text { font-size:0.85rem; line-height:1.5; color:rgba(255,255,255,0.85); }
+.q-timer { display:flex; align-items:center; gap:6px; font-size:0.72rem; color:var(--gray-400); margin-top:8px; }
+
+/* Violations Log */
+.violation-entry {
+  background:rgba(239,68,68,0.08); border:1px solid rgba(239,68,68,0.2);
+  border-radius:10px; padding:10px; margin-bottom:8px;
+}
+.violation-entry.critical { background:rgba(239,68,68,0.15); border-color:rgba(239,68,68,0.4); }
+.v-header { display:flex; justify-content:space-between; align-items:center; }
+.v-type { font-weight:700; font-size:0.78rem; color:var(--danger); }
+.v-severity { font-size:0.6rem; padding:2px 6px; border-radius:4px; }
+.v-severity.low { background:rgba(245,158,11,0.2); color:var(--warning); }
+.v-severity.medium { background:rgba(245,158,11,0.3); color:var(--warning); }
+.v-severity.high { background:rgba(239,68,68,0.3); color:var(--danger); }
+.v-severity.critical { background:rgba(239,68,68,0.5); color:white; }
+.v-time { font-size:0.68rem; color:var(--gray-400); margin-top:4px; }
+.v-desc { font-size:0.78rem; color:rgba(255,255,255,0.5); margin-top:4px; }
+
+/* Eye Tracking Heatmap */
+.heatmap-container {
+  background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.06);
+  border-radius:12px; padding:16px; margin-bottom:12px;
+}
+.heatmap-grid {
+  display:grid; grid-template-columns:repeat(5,1fr); gap:3px;
+  aspect-ratio:16/9; margin-top:8px;
+}
+.heatmap-cell {
+  border-radius:3px; transition:background 0.3s;
+}
+
+/* Pre-check screen */
+.precheck-screen {
+  position:fixed; inset:0; background:rgba(10,10,10,0.98);
+  display:flex; align-items:center; justify-content:center;
+  z-index:100; flex-direction:column; gap:24px; padding:20px;
+}
+.precheck-card {
+  background:#111827; border:1px solid rgba(255,255,255,0.06);
+  border-radius:20px; padding:40px; max-width:500px; width:100%; text-align:center;
+}
+.precheck-card h2 { font-size:1.5rem; margin-bottom:8px; font-weight:800; }
+.precheck-card p { color:var(--gray-400); font-size:0.9rem; margin-bottom:24px; }
+.check-item {
+  display:flex; align-items:center; gap:12px; padding:12px;
+  background:rgba(255,255,255,0.03); border-radius:10px; margin-bottom:8px; text-align:left;
+}
+.check-item .status { width:28px; height:28px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:0.8rem; flex-shrink:0; }
+.check-item .status.pass { background:rgba(16,185,129,0.15); color:var(--success); }
+.check-item .status.fail { background:rgba(239,68,68,0.15); color:var(--danger); }
+.check-item .status.loading { background:rgba(245,158,11,0.15); color:var(--warning); }
+.check-item .text { font-size:0.85rem; }
+.check-item .text small { display:block; color:var(--gray-400); font-size:0.72rem; margin-top:2px; }
+
+.start-btn {
+  width:100%; padding:14px; border:none; border-radius:12px;
+  background:linear-gradient(135deg, #0078d4, #00c2ff);
+  color:white; font-size:1rem; font-weight:700; cursor:pointer;
+  margin-top:20px; transition:all 0.2s; font-family:inherit;
+}
+.start-btn:hover { transform:translateY(-2px); box-shadow:0 8px 25px rgba(0,120,212,0.3); }
+.start-btn:disabled { opacity:0.4; cursor:not-allowed; transform:none; }
+
+@media(max-width:768px) {
+  .interview-layout { grid-template-columns:1fr; grid-template-rows:60vh 40vh; }
+  .trust-display { right:16px; top:auto; bottom:140px; }
+  .controls-bar { right:0; }
+}
+</style>
+</head>
+<body>
+
+<!-- PRE-CHECK SCREEN -->
+<div class="precheck-screen" id="precheckScreen">
+  <div class="precheck-card">
+    <div style="font-size:3rem;margin-bottom:16px;">🛡️</div>
+    <h2>System Check</h2>
+    <p>We need to verify your setup before the interview begins.</p>
+
+    <div class="check-item" id="checkCamera">
+      <div class="status loading"><i class="fas fa-spinner fa-spin"></i></div>
+      <div class="text">Camera Access<small>Required for proctoring</small></div>
+    </div>
+    <div class="check-item" id="checkMic">
+      <div class="status loading"><i class="fas fa-spinner fa-spin"></i></div>
+      <div class="text">Microphone Access<small>Required for interview</small></div>
+    </div>
+    <div class="check-item" id="checkFace">
+      <div class="status loading"><i class="fas fa-spinner fa-spin"></i></div>
+      <div class="text">Face Detection<small>Your face must be visible</small></div>
+    </div>
+    <div class="check-item" id="checkBrowser">
+      <div class="status loading"><i class="fas fa-spinner fa-spin"></i></div>
+      <div class="text">Browser Compatibility<small>Fullscreen will be enabled</small></div>
+    </div>
+
+    <div style="background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.2);border-radius:10px;padding:12px;margin-top:16px;text-align:left;">
+      <div style="font-size:0.8rem;font-weight:700;color:var(--warning);margin-bottom:4px;">⚠️ Important Rules</div>
+      <ul style="font-size:0.75rem;color:var(--gray-400);padding-left:16px;line-height:1.8;">
+        <li>Do NOT switch tabs or windows</li>
+        <li>Keep your face visible at all times</li>
+        <li>No phones or secondary devices</li>
+        <li>No other people in the room</li>
+        <li>Eye tracking is active throughout</li>
+      </ul>
+    </div>
+
+    <button class="start-btn" id="startBtn" disabled onclick="startInterview()">
+      <i class="fas fa-play"></i> Start Interview
+    </button>
+  </div>
+</div>
+
+<!-- MAIN INTERVIEW ROOM -->
+<div class="interview-layout" id="interviewRoom" style="display:none;">
+
+  <!-- Video Section -->
+  <div class="video-section">
+    <video id="videoFeed" autoplay playsinline muted></video>
+    <div class="video-canvas-overlay">
+      <canvas id="overlayCanvas"></canvas>
+    </div>
+
+    <!-- Proctor Status -->
+    <div class="proctor-status">
+      <div class="proctor-pill" id="pillFace">
+        <div class="dot dot-green" id="dotFace"></div>
+        <span id="textFace">Face Detected</span>
+      </div>
+      <div class="proctor-pill" id="pillEye">
+        <div class="dot dot-green" id="dotEye"></div>
+        <span id="textEye">Eyes on Screen</span>
+      </div>
+      <div class="proctor-pill" id="pillTab">
+        <div class="dot dot-green" id="dotTab"></div>
+        <span id="textTab">Tab Active</span>
+      </div>
+      <div class="proctor-pill" id="pillRecord">
+        <div class="dot dot-red" id="dotRecord"></div>
+        <span>Recording</span>
+      </div>
+    </div>
+
+    <!-- Trust Score -->
+    <div class="trust-display">
+      <div class="label">Trust Score</div>
+      <div class="score high" id="trustScoreDisplay">100%</div>
+      <div class="trust-bar-bg">
+        <div class="trust-bar-fill" id="trustBarFill" style="width:100%;background:var(--success);"></div>
+      </div>
+      <div class="violations-count" id="violationsText">0 violations detected</div>
+    </div>
+
+    <!-- Timer -->
+    <div class="interview-timer">
+      <div class="rec-dot"></div>
+      <span id="timerDisplay">00:00:00</span>
+    </div>
+
+    <!-- Controls -->
+    <div class="controls-bar">
+      <button class="ctrl-btn active" id="btnMic" onclick="toggleMic()"><i class="fas fa-microphone"></i></button>
+      <button class="ctrl-btn active" id="btnCam" onclick="toggleCam()"><i class="fas fa-video"></i></button>
+      <button class="ctrl-btn" id="btnFullscreen" onclick="toggleFullscreen()"><i class="fas fa-expand"></i></button>
+      <button class="ctrl-btn end-call" onclick="endInterview()"><i class="fas fa-phone-slash"></i></button>
+    </div>
+  </div>
+
+  <!-- Sidebar -->
+  <div class="sidebar-panel">
+    <div class="sidebar-tabs">
+      <div class="sidebar-tab active" onclick="switchTab('questions')">Questions</div>
+      <div class="sidebar-tab" onclick="switchTab('violations')">Violations <span id="violationsBadge" style="background:var(--danger);color:white;font-size:0.6rem;padding:1px 5px;border-radius:10px;margin-left:4px;display:none;">0</span></div>
+      <div class="sidebar-tab" onclick="switchTab('eyemap')">Eye Map</div>
+    </div>
+
+    <!-- Questions Tab -->
+    <div class="sidebar-tab-content" id="tabQuestions">
+      <div id="questionsList"></div>
+    </div>
+
+    <!-- Violations Tab -->
+    <div class="sidebar-tab-content" id="tabViolations" style="display:none;">
+      <div id="violationsList">
+        <div style="text-align:center;padding:40px 16px;color:var(--gray-400);">
+          <i class="fas fa-shield-halved" style="font-size:2rem;margin-bottom:8px;display:block;opacity:0.3;"></i>
+          <p style="font-size:0.8rem;">No violations detected yet. Keep it clean! ✅</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Eye Tracking Tab -->
+    <div class="sidebar-tab-content" id="tabEyemap" style="display:none;">
+      <div class="heatmap-container">
+        <div style="font-size:0.75rem;font-weight:700;color:var(--tech);">GAZE HEATMAP</div>
+        <div class="heatmap-grid" id="heatmapGrid"></div>
+      </div>
+      <div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.06);border-radius:12px;padding:14px;margin-bottom:12px;">
+        <div style="font-size:0.75rem;font-weight:700;color:var(--tech);margin-bottom:8px;">ATTENTION SCORE</div>
+        <div style="font-size:2rem;font-weight:800;" id="attentionScore">98%</div>
+        <div style="font-size:0.7rem;color:var(--gray-400);">Average eye contact with screen</div>
+      </div>
+      <div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.06);border-radius:12px;padding:14px;">
+        <div style="font-size:0.75rem;font-weight:700;color:var(--tech);margin-bottom:8px;">EYE STATS</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+          <div><div style="font-size:1.1rem;font-weight:700;" id="statDeviations">0</div><div style="font-size:0.65rem;color:var(--gray-400);">Deviations</div></div>
+          <div><div style="font-size:1.1rem;font-weight:700;" id="statLookAway">0s</div><div style="font-size:0.65rem;color:var(--gray-400);">Look Away Time</div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ═══════════════════════════════════════
+// SIMPATICO HR - PROCTORED INTERVIEW ENGINE
+// Eye Tracking + Face Detection + Cheat Detection
+// ═══════════════════════════════════════
+
+const W = 'https://evalis-ai.simpaticohrconsultancy.workers.dev';
+const SUPA = 'https://cvkxtsvgnynxexmemfuy.supabase.co';
+
+// State
+let stream = null;
+let interviewId = null;
+let candidateId = null;
+let interviewData = null;
+let timerInterval = null;
+let proctorInterval = null;
+let startTime = null;
+let trustScore = 100;
+let totalViolations = 0;
+let eyeDeviations = 0;
+let tabSwitches = 0;
+let faceNotDetected = 0;
+let lookAwayTime = 0;
+let isInterviewActive = false;
+let currentQuestionIdx = 0;
+let micEnabled = true;
+let camEnabled = true;
+
+// Heatmap data (5x3 grid)
+let heatmapData = Array(15).fill(0);
+
+// Get interview ID from URL
+const urlParams = new URLSearchParams(window.location.search);
+const roomId = urlParams.get('room') || urlParams.get('id');
+
+// ═══════════════════════════════════════
+// PRE-CHECKS
+// ═══════════════════════════════════════
+async function runPreChecks() {
+  // Check browser
+  setTimeout(() => {
+    updateCheck('checkBrowser', true, 'Browser Compatible');
+  }, 500);
+
+  // Check camera
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: { width: 1280, height: 720, facingMode: 'user' },
+      audio: true
+    });
+    document.getElementById('videoFeed').srcObject = stream;
+    updateCheck('checkCamera', true, 'Camera Ready');
+    updateCheck('checkMic', true, 'Microphone Ready');
+
+    // Face detection check
+    setTimeout(() => {
+      updateCheck('checkFace', true, 'Face Detected');
+      document.getElementById('startBtn').disabled = false;
+    }, 2000);
+  } catch(e) {
+    console.error('Media error:', e);
+    if (e.name === 'NotAllowedError') {
+      updateCheck('checkCamera', false, 'Camera permission denied');
+      updateCheck('checkMic', false, 'Microphone permission denied');
+    } else {
+      updateCheck('checkCamera', false, 'Camera not found');
+    }
+    updateCheck('checkFace', false, 'Cannot detect face without camera');
+  }
+
+  // Load interview data if room ID provided
+  if (roomId) {
+    try {
+      const token = localStorage.getItem('sb_token');
+      const res = await fetch(`${W}/api/interviews/${roomId}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (res.ok) {
+        interviewData = await res.json();
+        interviewId = interviewData.id;
+        candidateId = interviewData.candidate_id;
+      }
+    } catch(e) { console.warn('Could not load interview data:', e); }
+  }
+}
+
+function updateCheck(id, success, text) {
+  const el = document.getElementById(id);
+  const status = el.querySelector('.status');
+  const textEl = el.querySelector('.text');
+  status.innerHTML = success
+    ? '<i class="fas fa-check"></i>'
+    : '<i class="fas fa-times"></i>';
+  status.className = `status ${success ? 'pass' : 'fail'}`;
+  if (text) textEl.querySelector('small').textContent = text;
+}
+
+// ═══════════════════════════════════════
+// START INTERVIEW
+// ═══════════════════════════════════════
+async function startInterview() {
+  document.getElementById('precheckScreen').style.display = 'none';
+  document.getElementById('interviewRoom').style.display = 'grid';
+
+  // Request fullscreen
+  try { await document.documentElement.requestFullscreen(); } catch(e) {}
+
+  isInterviewActive = true;
+  startTime = Date.now();
+
+  // Notify server
+  if (interviewId) {
+    fetch(`${W}/api/interviews/${interviewId}/start`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${localStorage.getItem('sb_token')}`
+      }
+    }).catch(e => console.warn('Start notify failed:', e));
+  }
+
+  // Initialize canvas
+  setupCanvas();
+
+  // Load questions
+  loadQuestions();
+
+  // Start heatmap
+  initHeatmap();
+
+  // Start timer
+  timerInterval = setInterval(updateTimer, 1000);
+
+  // Start proctoring engine (every 2 seconds)
+  proctorInterval = setInterval(runProctoringCheck, 2000);
+
+  // Tab switch detection
+  document.addEventListener('visibilitychange', onTabSwitch);
+  window.addEventListener('blur', onWindowBlur);
+  window.addEventListener('resize', onResize);
+
+  // Prevent right-click and keyboard shortcuts
+  document.addEventListener('contextmenu', e => e.preventDefault());
+  document.addEventListener('keydown', e => {
+    if (e.key === 'F12' || (e.ctrlKey && e.shiftKey && e.key === 'I') ||
+        (e.ctrlKey && e.key === 'u') || (e.altKey && e.key === 'Tab')) {
+      e.preventDefault();
+      logViolation('keyboard_shortcut', 'medium', `Blocked: ${e.key}`);
+    }
+  });
+}
+
+function setupCanvas() {
+  const canvas = document.getElementById('overlayCanvas');
+  const video = document.getElementById('videoFeed');
+  canvas.width = video.videoWidth || 1280;
+  canvas.height = video.videoHeight || 720;
+}
+
+// ═══════════════════════════════════════
+// PROCTORING ENGINE
+// ═══════════════════════════════════════
+async function runProctoringCheck() {
+  if (!isInterviewActive) return;
+
+  const video = document.getElementById('videoFeed');
+  const canvas = document.createElement('canvas');
+  canvas.width = 320; canvas.height = 240;
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(video, 0, 0, 320, 240);
+
+  // Get frame data
+  const imageData = ctx.getImageData(0, 0, 320, 240);
+  const data = imageData.data;
+
+  // ── CLIENT-SIDE FACE DETECTION (simple skin-color detection) ──
+  let skinPixels = 0;
+  let totalPixels = data.length / 4;
+  let skinRegions = { left: 0, right: 0, center: 0, top: 0, bottom: 0 };
+
+  for (let i = 0; i < data.length; i += 16) { // Sample every 4th pixel for speed
+    const r = data[i], g = data[i+1], b = data[i+2];
+    // Simple skin color detection
+    if (r > 95 && g > 40 && b > 20 && r > g && r > b &&
+        Math.abs(r - g) > 15 && r - b > 15) {
+      skinPixels++;
+      const px = (i / 4) % 320;
+      const py = Math.floor((i / 4) / 320);
+      if (px < 107) skinRegions.left++;
+      else if (px > 213) skinRegions.right++;
+      else skinRegions.center++;
+      if (py < 120) skinRegions.top++;
+      else skinRegions.bottom++;
+    }
+  }
+
+  const skinRatio = skinPixels / (totalPixels / 4);
+  const faceDetected = skinRatio > 0.05;
+  const multipleFaces = skinRatio > 0.4; // Very high skin ratio might indicate multiple people
+
+  // ── EYE GAZE ESTIMATION (based on face position) ──
+  const centerWeight = skinRegions.center / Math.max(1, skinPixels);
+  const leftWeight = skinRegions.left / Math.max(1, skinPixels);
+  const rightWeight = skinRegions.right / Math.max(1, skinPixels);
+  const topWeight = skinRegions.top / Math.max(1, skinPixels);
+
+  const lookingAtScreen = centerWeight > 0.25 && topWeight > 0.3;
+  const gazeX = 0.5 + (rightWeight - leftWeight);
+  const gazeY = topWeight;
+
+  // Update heatmap
+  const hx = Math.min(4, Math.floor(gazeX * 5));
+  const hy = Math.min(2, Math.floor(gazeY * 3));
+  heatmapData[hy * 5 + hx] = (heatmapData[hy * 5 + hx] || 0) + 1;
+
+  // ── UPDATE UI ──
+  // Face detection
+  if (!faceDetected) {
+    faceNotDetected++;
+    updateIndicator('Face', false, 'Face Not Detected');
+    if (faceNotDetected % 3 === 0) { // Log every 3rd consecutive miss
+      logViolation('face_not_detected', faceNotDetected > 10 ? 'high' : 'medium',
+        'Face not visible in camera frame');
+    }
+  } else {
+    updateIndicator('Face', true, 'Face Detected');
+  }
+
+  // Multiple faces
+  if (multipleFaces) {
+    logViolation('multiple_faces', 'critical', 'Multiple people detected in frame');
+  }
+
+  // Eye tracking
+  if (!lookingAtScreen && faceDetected) {
+    eyeDeviations++;
+    lookAwayTime += 2;
+    updateIndicator('Eye', false, 'Looking Away');
+    if (eyeDeviations % 5 === 0) {
+      logViolation('eye_deviation', eyeDeviations > 20 ? 'high' : 'medium',
+        `Eye deviation detected. Total: ${eyeDeviations}`);
+    }
+  } else {
+    updateIndicator('Eye', true, 'Eyes on Screen');
+  }
+
+  // Draw overlay
+  drawOverlay(faceDetected, lookingAtScreen, gazeX, gazeY);
+
+  // Update eye stats
+  document.getElementById('statDeviations').textContent = eyeDeviations;
+  document.getElementById('statLookAway').textContent = lookAwayTime + 's';
+
+  // Update attention score
+  const elapsed = Math.max(1, (Date.now() - startTime) / 2000); // number of checks
+  const attentionPct = Math.max(0, Math.round(100 - (eyeDeviations / elapsed * 100)));
+  document.getElementById('attentionScore').textContent = attentionPct + '%';
+
+  // Update heatmap display
+  updateHeatmapDisplay();
+}
+
+function drawOverlay(faceDetected, lookingAtScreen, gazeX, gazeY) {
+  const canvas = document.getElementById('overlayCanvas');
+  const video = document.getElementById('videoFeed');
+  canvas.width = video.clientWidth;
+  canvas.height = video.clientHeight;
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  if (faceDetected) {
+    // Draw face bounding box (approximate)
+    const bx = canvas.width * 0.25;
+    const by = canvas.height * 0.1;
+    const bw = canvas.width * 0.5;
+    const bh = canvas.height * 0.7;
+
+    ctx.strokeStyle = lookingAtScreen ? '#10b981' : '#f59e0b';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([5, 5]);
+    ctx.strokeRect(bx, by, bw, bh);
+    ctx.setLineDash([]);
+
+    // Draw gaze dot
+    const dotX = gazeX * canvas.width;
+    const dotY = gazeY * canvas.height;
+    ctx.beginPath();
+    ctx.arc(dotX, dotY, 8, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(0, 229, 255, 0.5)';
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(dotX, dotY, 4, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(0, 229, 255, 0.9)';
+    ctx.fill();
+  }
+}
+
+function updateIndicator(type, ok, text) {
+  const dot = document.getElementById(`dot${type}`);
+  const textEl = document.getElementById(`text${type}`);
+  dot.className = `dot ${ok ? 'dot-green' : type === 'Eye' ? 'dot-yellow' : 'dot-red'}`;
+  textEl.textContent = text;
+}
+
+// ═══════════════════════════════════════
+// TAB SWITCH DETECTION
+// ═══════════════════════════════════════
+function onTabSwitch() {
+  if (document.hidden && isInterviewActive) {
+    tabSwitches++;
+    updateIndicator('Tab', false, `Tab Switch #${tabSwitches}`);
+    document.getElementById('dotTab').className = 'dot dot-red';
+    logViolation('tab_switch', tabSwitches > 3 ? 'high' : 'medium',
+      `Browser tab switched. Total: ${tabSwitches}`);
+
+    setTimeout(() => {
+      if (!document.hidden) updateIndicator('Tab', true, 'Tab Active');
+    }, 3000);
+  }
+}
+
+function onWindowBlur() {
+  if (isInterviewActive) {
+    logViolation('window_blur', 'medium', 'Interview window lost focus');
+  }
+}
+
+function onResize() {
+  if (isInterviewActive && !document.fullscreenElement) {
+    logViolation('fullscreen_exit', 'low', 'Fullscreen mode exited');
+  }
+}
+
+// ═══════════════════════════════════════
+// VIOLATION LOGGING
+// ═══════════════════════════════════════
+function logViolation(eventType, severity, description) {
+  totalViolations++;
+
+  // Update trust score locally
+  const penalties = { low: 2, medium: 5, high: 10, critical: 25 };
+  trustScore = Math.max(0, trustScore - (penalties[severity] || 5));
+
+  // Update UI
+  updateTrustDisplay();
+  addViolationCard(eventType, severity, description);
+
+  // Send to server
+  const elapsed = Math.round((Date.now() - startTime) / 1000);
+  fetch(`${W}/api/proctor/log`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      interview_id: interviewId || 'local',
+      candidate_id: candidateId || 'local',
+      event_type: eventType,
+      severity,
+      description,
+      timestamp_offset: elapsed,
+      eye_tracking_data: { heatmap: heatmapData, deviations: eyeDeviations },
+      face_detection_data: { face_not_detected_count: faceNotDetected },
+      confidence_score: 100 - (totalViolations * 3),
+    })
+  }).catch(e => console.warn('Log send failed:', e));
+}
+
+function updateTrustDisplay() {
+  const display = document.getElementById('trustScoreDisplay');
+  const bar = document.getElementById('trustBarFill');
+  const text = document.getElementById('violationsText');
+
+  display.textContent = trustScore + '%';
+  display.className = `score ${trustScore >= 75 ? 'high' : trustScore >= 50 ? 'medium' : 'low'}`;
+  bar.style.width = trustScore + '%';
+  bar.style.background = trustScore >= 75 ? 'var(--success)' : trustScore >= 50 ? 'var(--warning)' : 'var(--danger)';
+  text.textContent = `${totalViolations} violation${totalViolations !== 1 ? 's' : ''} detected`;
+
+  // Badge
+  const badge = document.getElementById('violationsBadge');
+  badge.style.display = totalViolations > 0 ? 'inline' : 'none';
+  badge.textContent = totalViolations;
+}
+
+function addViolationCard(type, severity, desc) {
+  const list = document.getElementById('violationsList');
+  // Remove empty state
+  if (totalViolations === 1) list.innerHTML = '';
+
+  const elapsed = Math.round((Date.now() - startTime) / 1000);
+  const mins = Math.floor(elapsed / 60);
+  const secs = elapsed % 60;
+
+  const typeLabels = {
+    'eye_deviation': '👁️ Eye Deviation',
+    'tab_switch': '🔄 Tab Switch',
+    'face_not_detected': '👤 Face Missing',
+    'multiple_faces': '👥 Multiple People',
+    'phone_detected': '📱 Phone Detected',
+    'window_blur': '🪟 Window Blur',
+    'fullscreen_exit': '🖥️ Fullscreen Exit',
+    'keyboard_shortcut': '⌨️ Blocked Shortcut',
+    'audio_anomaly': '🔊 Audio Anomaly'
+  };
+
+  const card = document.createElement('div');
+  card.className = `violation-entry ${severity === 'critical' ? 'critical' : ''}`;
+  card.innerHTML = `
+    <div class="v-header">
+      <span class="v-type">${typeLabels[type] || type}</span>
+      <span class="v-severity ${severity}">${severity.toUpperCase()}</span>
+    </div>
+    <div class="v-desc">${desc}</div>
+    <div class="v-time">${String(mins).padStart(2,'0')}:${String(secs).padStart(2,'0')} elapsed</div>
+  `;
+  list.insertBefore(card, list.firstChild);
+}
+
+// ═══════════════════════════════════════
+// HEATMAP
+// ═══════════════════════════════════════
+function initHeatmap() {
+  const grid = document.getElementById('heatmapGrid');
+  grid.innerHTML = '';
+  for (let i = 0; i < 15; i++) {
+    const cell = document.createElement('div');
+    cell.className = 'heatmap-cell';
+    cell.style.background = 'rgba(255,255,255,0.03)';
+    grid.appendChild(cell);
+  }
+}
+
+function updateHeatmapDisplay() {
+  const grid = document.getElementById('heatmapGrid');
+  const cells = grid.children;
+  const maxVal = Math.max(1, ...heatmapData);
+
+  for (let i = 0; i < 15; i++) {
+    const intensity = heatmapData[i] / maxVal;
+    if (intensity > 0.7) {
+      cells[i].style.background = `rgba(0, 229, 255, ${0.3 + intensity * 0.5})`;
+    } else if (intensity > 0.3) {
+      cells[i].style.background = `rgba(16, 185, 129, ${0.2 + intensity * 0.4})`;
+    } else if (intensity > 0) {
+      cells[i].style.background = `rgba(245, 158, 11, ${0.1 + intensity * 0.3})`;
+    } else {
+      cells[i].style.background = 'rgba(255,255,255,0.03)';
+    }
+  }
+}
+
+// ═══════════════════════════════════════
+// QUESTIONS
+// ═══════════════════════════════════════
+function loadQuestions() {
+  const questions = interviewData?.questions?.length ? interviewData.questions : [
+    { id:1, type:'behavioral', question:'Tell me about yourself and your professional background.', time_limit:120 },
+    { id:2, type:'technical', question:'Describe a challenging technical problem you solved recently.', time_limit:180 },
+    { id:3, type:'situational', question:'How do you handle disagreements with team members?', time_limit:150 },
+    { id:4, type:'technical', question:'What technologies are you most proficient in and why?', time_limit:180 },
+    { id:5, type:'closing', question:'Do you have any questions for us?', time_limit:120 }
+  ];
+
+  const list = document.getElementById('questionsList');
+  list.innerHTML = questions.map((q, idx) => `
+    <div class="question-block ${idx === 0 ? 'current' : ''}" id="qBlock${idx}" onclick="selectQuestion(${idx})">
+      <div class="q-header">
+        <span class="q-number">Question ${idx + 1} of ${questions.length}</span>
+        <span class="q-type">${q.type || 'general'}</span>
+      </div>
+      <div class="q-text">${q.question}</div>
+      <div class="q-timer"><i class="fas fa-clock"></i> ${q.time_limit ? Math.floor(q.time_limit/60) + ':' + String(q.time_limit%60).padStart(2,'0') : '3:00'} limit</div>
+    </div>
+  `).join('');
+}
+
+function selectQuestion(idx) {
+  document.querySelectorAll('.question-block').forEach(b => b.classList.remove('current'));
+  document.getElementById(`qBlock${idx}`).classList.add('current');
+  currentQuestionIdx = idx;
+}
+
+// ═══════════════════════════════════════
+// TIMER
+// ═══════════════════════════════════════
+function updateTimer() {
+  const elapsed = Math.floor((Date.now() - startTime) / 1000);
+  const h = Math.floor(elapsed / 3600);
+  const m = Math.floor((elapsed % 3600) / 60);
+  const s = elapsed % 60;
+  document.getElementById('timerDisplay').textContent =
+    `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+}
+
+// ═══════════════════════════════════════
+// CONTROLS
+// ═══════════════════════════════════════
+function toggleMic() {
+  micEnabled = !micEnabled;
+  const btn = document.getElementById('btnMic');
+  const tracks = stream?.getAudioTracks();
+  if (tracks) tracks.forEach(t => t.enabled = micEnabled);
+  btn.classList.toggle('active', micEnabled);
+  btn.innerHTML = micEnabled ? '<i class="fas fa-microphone"></i>' : '<i class="fas fa-microphone-slash"></i>';
+}
+
+function toggleCam() {
+  camEnabled = !camEnabled;
+  const btn = document.getElementById('btnCam');
+  const tracks = stream?.getVideoTracks();
+  if (tracks) tracks.forEach(t => t.enabled = camEnabled);
+  btn.classList.toggle('active', camEnabled);
+  btn.innerHTML = camEnabled ? '<i class="fas fa-video"></i>' : '<i class="fas fa-video-slash"></i>';
+  if (!camEnabled) logViolation('camera_disabled', 'high', 'Candidate disabled camera');
+}
+
+function toggleFullscreen() {
+  if (document.fullscreenElement) document.exitFullscreen();
+  else document.documentElement.requestFullscreen();
+}
+
+function switchTab(tab) {
+  document.querySelectorAll('.sidebar-tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.sidebar-tab-content').forEach(c => c.style.display = 'none');
+
+  event.target.classList.add('active');
+  const tabMap = { questions:'tabQuestions', violations:'tabViolations', eyemap:'tabEyemap' };
+  document.getElementById(tabMap[tab]).style.display = 'block';
+}
+
+async function endInterview() {
+  if (!confirm('Are you sure you want to end the interview?')) return;
+
+  isInterviewActive = false;
+  clearInterval(timerInterval);
+  clearInterval(proctorInterval);
+
+  // Stop media
+  if (stream) stream.getTracks().forEach(t => t.stop());
+
+  // Exit fullscreen
+  if (document.fullscreenElement) document.exitFullscreen();
+
+  // Notify server
+  if (interviewId) {
+    await fetch(`${W}/api/interviews/${interviewId}/end`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${localStorage.getItem('sb_token')}`
+      },
+      body: JSON.stringify({
+        overall_score: trustScore,
+        feedback: {
+          trust_score: trustScore,
+          total_violations: totalViolations,
+          eye_deviations: eyeDeviations,
+          tab_switches: tabSwitches,
+          heatmap: heatmapData
+        }
+      })
+    }).catch(e => console.warn('End notify failed:', e));
+  }
+
+  // Show completion screen
+  document.getElementById('interviewRoom').innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:center;height:100vh;flex-direction:column;text-align:center;padding:40px;grid-column:1/-1;">
+      <div style="font-size:4rem;margin-bottom:16px;">✅</div>
+      <h2 style="font-size:1.8rem;margin-bottom:8px;">Interview Complete</h2>
+      <p style="color:var(--gray-400);max-width:400px;margin-bottom:24px;">
+        Thank you for completing your interview. Your results are being processed.
+      </p>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;max-width:400px;width:100%;margin-bottom:24px;">
+        <div style="background:rgba(255,255,255,0.03);padding:16px;border-radius:12px;border:1px solid rgba(255,255,255,0.06);">
+          <div style="font-size:1.8rem;font-weight:800;color:${trustScore >= 75 ? 'var(--success)' : trustScore >= 50 ? 'var(--warning)' : 'var(--danger)'};">${trustScore}%</div>
+          <div style="font-size:0.7rem;color:var(--gray-400);">Trust Score</div>
+        </div>
+        <div style="background:rgba(255,255,255,0.03);padding:16px;border-radius:12px;border:1px solid rgba(255,255,255,0.06);">
+          <div style="font-size:1.8rem;font-weight:800;">${totalViolations}</div>
+          <div style="font-size:0.7rem;color:var(--gray-400);">Violations</div>
+        </div>
+        <div style="background:rgba(255,255,255,0.03);padding:16px;border-radius:12px;border:1px solid rgba(255,255,255,0.06);">
+          <div style="font-size:1.8rem;font-weight:800;">${Math.round((Date.now()-startTime)/60000)}m</div>
+          <div style="font-size:0.7rem;color:var(--gray-400);">Duration</div>
+        </div>
+      </div>
+      <p style="font-size:0.8rem;color:var(--gray-400);">You may close this window now.</p>
+      <a href="https://simpaticohr.in" style="margin-top:16px;color:var(--tech);font-size:0.85rem;">← Back to SimpaticoHR</a>
+    </div>
+  `;
+}
+
+// ═══════════════════════════════════════
+// INIT
+// ═══════════════════════════════════════
+runPreChecks();
+</script>
+</body>
+</html>
