@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Interviewer Panel - SimpaticoHR</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+    <style>
+        * { margin:0; padding:0; box-sizing:border-box; }
+        body { font-family:'Inter',sans-serif; background:#F3F4F6; }
+        .sidebar { position:fixed; left:0; top:0; bottom:0; width:260px; background:linear-gradient(180deg,#1E1B4B,#312E81); color:#fff; z-index:100; overflow-y:auto; }
+        .sidebar-header { padding:24px 20px 16px; border-bottom:1px solid rgba(255,255,255,.1); }
+        .sidebar-logo { font-size:22px; font-weight:800; }
+        .sidebar-logo span { color:#FCD34D; }
+        .sidebar-role { font-size:11px; color:rgba(255,255,255,.5); text-transform:uppercase; letter-spacing:1px; margin-top:4px; }
+        .sidebar-nav { padding:16px 12px; }
+        .nav-item { display:flex; align-items:center; gap:12px; padding:11px 14px; border-radius:10px; color:rgba(255,255,255,.7); text-decoration:none; font-size:14px; font-weight:500; margin-bottom:2px; cursor:pointer; transition:all .2s; }
+        .nav-item:hover { background:rgba(255,255,255,.1); color:#fff; }
+        .nav-item.active { background:rgba(79,70,229,.4); color:#fff; }
+        .nav-item i { width:20px; text-align:center; }
+        .main { margin-left:260px; }
+        .topbar { background:#fff; padding:16px 30px; display:flex; align-items:center; justify-content:space-between; border-bottom:1px solid #E5E7EB; }
+        .page-title { font-size:20px; font-weight:700; }
+        .content { padding:24px 30px; }
+        .panel { background:#fff; border-radius:14px; padding:24px; box-shadow:0 1px 3px rgba(0,0,0,.06); margin-bottom:24px; }
+        .panel-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:18px; padding-bottom:14px; border-bottom:1px solid #F3F4F6; }
+        .panel-title { font-size:16px; font-weight:700; }
+        .interview-card { border:1px solid #E5E7EB; border-radius:12px; padding:18px; margin-bottom:12px; }
+        .badge { display:inline-block; padding:3px 10px; border-radius:6px; font-size:11px; font-weight:600; }
+        .badge-scheduled { background:#DBEAFE; color:#2563EB; }
+        .badge-completed { background:#D1FAE5; color:#059669; }
+        .btn-join { padding:8px 20px; background:linear-gradient(135deg,#10B981,#059669); color:#fff; border:none; border-radius:8px; font-size:13px; font-weight:600; cursor:pointer; text-decoration:none; }
+        .btn-report { padding:8px 16px; background:#EEF2FF; color:#4F46E5; border:none; border-radius:8px; font-size:13px; font-weight:500; cursor:pointer; text-decoration:none; }
+        .empty-state { text-align:center; padding:50px; color:#9CA3AF; }
+        .empty-state i { font-size:48px; margin-bottom:16px; color:#D1D5DB; }
+        .loader { text-align:center; padding:40px; }
+        .loader .spin { width:30px; height:30px; border:3px solid #E5E7EB; border-top-color:#4F46E5; border-radius:50%; animation:spin .7s linear infinite; margin:0 auto 12px; }
+        @keyframes spin { to { transform:rotate(360deg); } }
+        @media(max-width:768px) { .sidebar { display:none; } .main { margin-left:0; } .content { padding:16px; } }
+    </style>
+</head>
+<body>
+<aside class="sidebar">
+    <div class="sidebar-header">
+        <div class="sidebar-logo">Simpatico<span>HR</span></div>
+        <div class="sidebar-role">Interviewer</div>
+    </div>
+    <nav class="sidebar-nav">
+        <a class="nav-item active"><i class="fas fa-video"></i> My Interviews</a>
+        <a class="nav-item" onclick="localStorage.clear(); window.location.href='../auth/login.html'" style="color:rgba(255,100,100,.8)"><i class="fas fa-sign-out-alt"></i> Sign Out</a>
+    </nav>
+</aside>
+<div class="main">
+    <div class="topbar">
+        <div class="page-title">Interviewer Panel</div>
+        <div style="display:flex; align-items:center; gap:10px;">
+            <div style="width:36px; height:36px; border-radius:10px; background:linear-gradient(135deg,#4F46E5,#7C3AED); display:flex; align-items:center; justify-content:center; color:#fff; font-weight:700; font-size:14px;" id="uAvatar">I</div>
+            <div><div style="font-size:13px;font-weight:600" id="uName">Interviewer</div><div style="font-size:11px;color:#9CA3AF">Interviewer</div></div>
+        </div>
+    </div>
+    <div class="content">
+        <div class="panel">
+            <div class="panel-header"><div class="panel-title">Upcoming Interviews</div></div>
+            <div id="interviewList"><div class="loader"><div class="spin"></div>Loading...</div></div>
+        </div>
+        <div class="panel">
+            <div class="panel-header"><div class="panel-title">Completed Interviews</div></div>
+            <div id="completedList"><div class="loader"><div class="spin"></div>Loading...</div></div>
+        </div>
+    </div>
+</div>
+<script>
+    const API = 'https://evalis-ai.simpaticohrconsultancy.workers.dev';
+    const token = localStorage.getItem('simpatico_token');
+    let user; try { user = JSON.parse(localStorage.getItem('simpatico_user')); } catch(e) {}
+    if (!token) window.location.href = '../auth/login.html';
+    if (user) { document.getElementById('uName').textContent = user.full_name || 'Interviewer'; document.getElementById('uAvatar').textContent = (user.full_name||'I')[0]; }
+
+    async function load() {
+        try {
+            const res = await fetch(${API}/api/interviews, { headers: { 'Authorization':Bearer ${token}, 'Content-Type':'application/json' } });
+            const interviews = await res.json();
+            const upcoming = (interviews||[]).filter(i => i.status === 'scheduled');
+            const completed = (interviews||[]).filter(i => i.status === 'completed');
+
+            document.getElementById('interviewList').innerHTML = upcoming.length ? upcoming.map(i => `
+                <div class="interview-card">
+                    <div style="display:flex;justify-content:space-between;align-items:start">
+                        <div>
+                            <div style="font-weight:600;font-size:15px">${i.candidate?.full_name||'Candidate'}</div>
+                            <div style="font-size:13px;color:#6B7280">${i.job?.title||''} · ${i.interview_type||''}</div>
+                            <div style="font-size:13px;color:#6B7280;margin-top:4px"><i class="fas fa-clock" style="color:#4F46E5"></i> ${new Date(i.scheduled_at).toLocaleString('en-IN')}</div>
+                        </div>
+                        <div style="display:flex;gap:8px;align-items:center">
+                            <span class="badge badge-scheduled">${i.status}</span>
+                            ${i.meeting_url ? <a href="${i.meeting_url}" target="_blank" class="btn-join"><i class="fas fa-video"></i> Join</a> : ''}
+                        </div>
+                    </div>
+                </div>
+            `).join('') : '<div class="empty-state"><i class="fas fa-calendar"></i><h3>No upcoming interviews</h3></div>';
+
+            document.getElementById('completedList').innerHTML = completed.length ? completed.map(i => `
+                <div class="interview-card">
+                    <div style="display:flex;justify-content:space-between;align-items:center">
+                        <div>
+                            <div style="font-weight:600">${i.candidate?.full_name||'Candidate'}</div>
+                            <div style="font-size:13px;color:#6B7280">${i.job?.title||''} · ${new Date(i.scheduled_at).toLocaleDateString('en-IN')}</div>
+                        </div>
+                        <div style="display:flex;gap:8px;align-items:center">
+                            ${i.overall_score ? <span style="font-weight:700;color:#059669">${i.overall_score}%</span> : ''}
+                            <a href="../interview/results.html?id=${i.id}" class="btn-report">View Report</a>
+                        </div>
+                    </div>
+                </div>
+            `).join('') : '<div class="empty-state"><i class="fas fa-check-circle"></i><h3>No completed interviews</h3></div>';
+        } catch(e) { console.error(e); }
+    }
+    load();
+</script>
+</body>
+</html>
