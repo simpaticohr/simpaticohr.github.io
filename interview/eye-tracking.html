@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Eye Tracking Module - SimpaticoHR</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+    <style>
+        *{margin:0;padding:0;box-sizing:border-box}
+        body{font-family:'Inter',sans-serif;background:#0F172A;color:#E2E8F0;min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:30px}
+        .module-card{background:#1E293B;border-radius:16px;padding:30px;max-width:700px;width:100%;border:1px solid #334155}
+        h1{font-size:22px;font-weight:800;margin-bottom:6px;display:flex;align-items:center;gap:10px}
+        h1 i{color:#4F46E5}
+        .subtitle{color:#64748B;font-size:14px;margin-bottom:24px}
+        .camera-area{position:relative;width:100%;height:400px;background:#000;border-radius:12px;overflow:hidden;margin-bottom:20px}
+        .camera-area video{width:100%;height:100%;object-fit:cover}
+        .gaze-dot{position:absolute;width:20px;height:20px;background:rgba(79,70,229,.7);border:2px solid #818CF8;border-radius:50%;transform:translate(-50%,-50%);transition:all .15s;z-index:10;pointer-events:none;box-shadow:0 0 15px rgba(79,70,229,.5)}
+        .eye-boxes{position:absolute;inset:0;pointer-events:none}
+        .face-outline{position:absolute;border:2px solid #10B981;border-radius:8px;transition:all .2s}
+        .eye-region{position:absolute;border:1px solid #FCD34D;border-radius:4px;transition:all .2s}
+        .stats-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:20px}
+        .stat-item{background:#0F172A;border-radius:10px;padding:14px;text-align:center;border:1px solid #334155}
+        .stat-val{font-size:24px;font-weight:800}
+        .stat-lbl{font-size:11px;color:#64748B;margin-top:4px;text-transform:uppercase;letter-spacing:.5px}
+        .heatmap-area{width:100%;height:200px;background:#0F172A;border-radius:10px;border:1px solid #334155;position:relative;overflow:hidden;margin-bottom:16px}
+        .heatmap-area canvas{width:100%;height:100%}
+        .log-area{max-height:200px;overflow-y:auto;background:#0F172A;border-radius:10px;padding:12px;border:1px solid #334155;font-size:12px}
+        .log-entry{padding:4px 0;border-bottom:1px solid #1E293B;display:flex;gap:8px}
+        .log-time{color:#475569;min-width:55px}
+        .log-msg{color:#94A3B8}
+        .log-msg.warning{color:#F59E0B}
+        .log-msg.error{color:#EF4444}
+        .controls{display:flex;gap:10px;margin-bottom:20px}
+        .ctrl-btn{padding:10px 20px;border-radius:10px;border:none;font-size:13px;font-weight:600;cursor:pointer;font-family:'Inter',sans-serif;display:flex;align-items:center;gap:6px}
+        .ctrl-start{background:#4F46E5;color:#fff}
+        .ctrl-stop{background:#DC2626;color:#fff}
+        .ctrl-cal{background:#334155;color:#E2E8F0}
+    </style>
+</head>
+<body>
+    <div class="module-card">
+        <h1><i class="fas fa-eye"></i> Eye Tracking Module</h1>
+        <p class="subtitle">Real-time gaze tracking and attention monitoring for proctored interviews</p>
+
+        <div class="camera-area" id="cameraArea">
+            <video id="trackVideo" autoplay muted playsinline></video>
+            <div class="gaze-dot" id="gazeDot" style="display:none"></div>
+            <div class="eye-boxes" id="eyeBoxes"></div>
+        </div>
+
+        <div class="controls">
+            <button class="ctrl-btn ctrl-start" id="btnStartTrack" onclick="startTracking()"><i class="fas fa-play"></i> Start Tracking</button>
+            <button class="ctrl-btn ctrl-stop" id="btnStopTrack" onclick="stopTracking()" style="display:none"><i class="fas fa-stop"></i> Stop</button>
+            <button class="ctrl-btn ctrl-cal" onclick="calibrate()"><i class="fas fa-crosshairs"></i> Calibrate</button>
+        </div>
+
+        <div class="stats-grid">
+            <div class="stat-item"><div class="stat-val" id="attScore" style="color:#10B981">100%</div><div class="stat-lbl">Attention Score</div></div>
+            <div class="stat-item"><div class="stat-val" id="gazeDeviations" style="color:#F59E0B">0</div><div class="stat-lbl">Gaze Deviations</div></div>
+            <div class="stat-item"><div class="stat-val" id="lookAway" style="color:#EF4444">0</div><div class="stat-lbl">Looked Away</div></div>
+        </div>
+
+        <h3 style="font-size:14px;margin-bottom:10px;display:flex;align-items:center;gap:6px"><i class="fas fa-fire" style="color:#F59E0B"></i> Gaze Heatmap</h3>
+        <div class="heatmap-area"><canvas id="heatmapCanvas"></canvas></div>
+
+        <h3 style="font-size:14px;margin-bottom:10px;display:flex;align-items:center;gap:6px"><i class="fas fa-list" style="color:#3B82F6"></i> Tracking Log</h3>
+        <div class="log-area" id="trackLog"></div>
+    </div>
+
+    <script>
+        let videoStream = null;
+        let tracking = false;
+        let trackInterval = null;
+        let attentionScore = 100;
+        let deviations = 0;
+        let lookAwayCount = 0;
+        let gazePoints = [];
+        let heatmapCtx = null;
+        let logEntries = [];
+
+        // Setup canvas
+        const canvas = document.getElementById('heatmapCanvas');
+        canvas.width = canvas.parentElement.offsetWidth;
+        canvas.height = 200;
+        heatmapCtx = canvas.getContext('2d');
+        heatmapCtx.fillStyle = '#0F172A';
+        heatmapCtx.fillRect(0, 0, canvas.width, canvas.height);
+
+        async function startTracking() {
+            try {
+                videoStream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480, facingMode: 'user' } });
+                document.getElementById('trackVideo').srcObject = videoStream;
+                document.getElementById('btnStartTrack').style.display = 'none';
+                document.getElementById('btnStopTrack').style.display = 'flex';
+                document.getElementById('gazeDot').style.display = 'block';
+                tracking = true;
+                addLog('info', 'Eye tracking started');
+
+                // Simulate tracking (in production, use TensorFlow.js face-landmarks-detection)
+                trackInterval = setInterval(simulateTracking, 200);
+            } catch (e) {
+                alert('Camera required for eye tracking');
+            }
+        }
+
+        function stopTracking() {
+            tracking = false;
+            clearInterval(trackInterval);
+            if (videoStream) videoStream.getTracks().forEach(t => t.stop());
+            document.getElementById('btnStartTrack').style.display = 'flex';
+            document.getElementById('btnStopTrack').style.display = 'none';
+            document.getElementById('gazeDot').style.display = 'none';
+            addLog('info', 'Eye tracking stopped');
+        }
+
+        function calibrate() {
+            addLog('info', 'Calibration started - look at each corner of the screen');
+            attentionScore = 100;
+            deviations = 0;
+            lookAwayCount = 0;
+            updateStats();
+            alert('Look at the center of your screen for 3 seconds...\n\nCalibration will complete automatically.');
+            setTimeout(() => addLog('info', 'Calibration complete'), 3000);
+        }
+
+        function simulateTracking() {
+            if (!tracking) return;
+
+            const area = document.getElementById('cameraArea');
+            const w = area.offsetWidth;
+            const h = area.offsetHeight;
+
+            // Simulate gaze point (center-biased with noise)
+            const gazeX = w / 2 + (Math.random() - 0.5) * w * 0.4;
+            const gazeY = h / 2 + (Math.random() - 0.5) * h * 0.4;
+
+            // Move gaze dot
+            const dot = document.getElementById('gazeDot');
+            dot.style.left = gazeX + 'px';
+            dot.style.top = gazeY + 'px';
+
+            // Check if gaze is within acceptable bounds
+            const centerX = w / 2, centerY = h / 2;
+            const dist = Math.sqrt((gazeX - centerX) ** 2 + (gazeY - centerY) ** 2);
+            const maxDist = Math.min(w, h) * 0.35;
+            const isLookingAtScreen = dist < maxDist;
+
+            if (!isLookingAtScreen) {
+                const rng = Math.random();
+                if (rng < 0.3) {
+                    deviations++;
+                    attentionScore = Math.max(0, attentionScore - 1);
+                    addLog('warning', 'Gaze deviation - looking away from screen center');
+                }
+                if (rng < 0.1) {
+                    lookAwayCount++;
+                    attentionScore = Math.max(0, attentionScore - 3);
+                    addLog('error', 'Candidate looked away from screen!');
+                    dot.style.background = 'rgba(239,68,68,.7)';
+                    dot.style.borderColor = '#F87171';
+                } else {
+                    dot.style.background = 'rgba(79,70,229,.7)';
+                    dot.style.borderColor = '#818CF8';
+                }
+            } else {
+                dot.style.background = 'rgba(16,185,129,.7)';
+                dot.style.borderColor = '#34D399';
+            }
+
+            // Add to heatmap
+            gazePoints.push({ x: gazeX / w, y: gazeY / h });
+            drawHeatmapPoint(gazeX / w * canvas.width, gazeY / h * canvas.height);
+
+            updateStats();
+        }
+
+        function drawHeatmapPoint(x, y) {
+            const gradient = heatmapCtx.createRadialGradient(x, y, 0, x, y, 20);
+            gradient.addColorStop(0, 'rgba(79, 70, 229, 0.15)');
+            gradient.addColorStop(1, 'rgba(79, 70, 229, 0)');
+            heatmapCtx.fillStyle = gradient;
+            heatmapCtx.fillRect(x - 20, y - 20, 40, 40);
+        }
+
+        function updateStats() {
+            document.getElementById('attScore').textContent = attentionScore + '%';
+            document.getElementById('attScore').style.color = attentionScore >= 70 ? '#10B981' : attentionScore >= 40 ? '#F59E0B' : '#EF4444';
+            document.getElementById('gazeDeviations').textContent = deviations;
+            document.getElementById('lookAway').textContent = lookAwayCount;
+        }
+
+        function addLog(level, msg) {
+            const time = new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+            logEntries.unshift({ time, level, msg });
+            const el = document.getElementById('trackLog');
+            el.innerHTML = logEntries.slice(0, 30).map(l =>
+                `<div class="log-entry"><span class="log-time">${l.time}</span><span class="log-msg ${l.level === 'warning' ? 'warning' : l.level === 'error' ? 'error' : ''}">${l.msg}</span></div>`
+            ).join('');
+        }
+
+        addLog('info', 'Eye tracking module ready. Click "Start Tracking" to begin.');
+    </script>
+</body>
+</html>
