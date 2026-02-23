@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Interview Report - SimpaticoHR</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+    <style>
+        *{margin:0;padding:0;box-sizing:border-box}
+        body{font-family:'Inter',sans-serif;background:#F3F4F6;color:#1F2937}
+        .header{background:#fff;padding:20px 30px;border-bottom:1px solid #E5E7EB;display:flex;align-items:center;justify-content:space-between}
+        .logo{font-size:20px;font-weight:800;color:#4F46E5}
+        .logo span{color:#F59E0B}
+        .back-btn{padding:8px 16px;background:#F3F4F6;border:none;border-radius:8px;font-size:13px;cursor:pointer;font-family:'Inter',sans-serif;color:#374151;text-decoration:none;display:inline-flex;align-items:center;gap:6px}
+        .content{max-width:1000px;margin:30px auto;padding:0 20px}
+        .report-title{font-size:24px;font-weight:800;margin-bottom:6px}
+        .report-sub{color:#6B7280;font-size:14px;margin-bottom:24px}
+        .score-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:14px;margin-bottom:24px}
+        .score-card{background:#fff;border-radius:14px;padding:20px;text-align:center;box-shadow:0 1px 3px rgba(0,0,0,.06)}
+        .sc-val{font-size:32px;font-weight:800}
+        .sc-label{font-size:13px;color:#6B7280;margin-top:4px}
+        .panel{background:#fff;border-radius:14px;padding:24px;box-shadow:0 1px 3px rgba(0,0,0,.06);margin-bottom:20px}
+        .panel h3{font-size:16px;font-weight:700;margin-bottom:16px;padding-bottom:10px;border-bottom:1px solid #F3F4F6;display:flex;align-items:center;gap:8px}
+        .violation-item{display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid #F3F4F6}
+        .vi-icon{width:32px;height:32px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:14px}
+        .vi-critical{background:#FEE2E2;color:#DC2626}
+        .vi-high{background:#FEF3C7;color:#D97706}
+        .vi-medium{background:#DBEAFE;color:#2563EB}
+        .vi-low{background:#F3F4F6;color:#6B7280}
+        .vi-info{flex:1}
+        .vi-label{font-size:14px;font-weight:600}
+        .vi-desc{font-size:12px;color:#6B7280}
+        .vi-count{font-size:20px;font-weight:800}
+        .q-result{padding:14px;border:1px solid #E5E7EB;border-radius:10px;margin-bottom:10px}
+        .qr-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px}
+        .qr-cat{font-size:13px;font-weight:600}
+        .qr-score{font-size:14px;font-weight:700}
+        .qr-question{font-size:13px;color:#6B7280;margin-bottom:6px}
+        .qr-answer{font-size:13px;color:#374151;padding:8px 10px;background:#F9FAFB;border-radius:6px;margin-bottom:6px}
+        .qr-feedback{font-size:12px;color:#6B7280;font-style:italic}
+        .badge-fu{display:inline-block;padding:2px 8px;background:#FCE7F3;color:#DB2777;border-radius:4px;font-size:10px;font-weight:600;margin-left:6px}
+        .status-bar{width:100%;height:10px;background:#E5E7EB;border-radius:5px;overflow:hidden;margin:6px 0}
+        .status-fill{height:100%;border-radius:5px}
+        .loader{text-align:center;padding:60px;color:#6B7280}
+        .loader .spin{width:36px;height:36px;border:3px solid #E5E7EB;border-top-color:#4F46E5;border-radius:50%;animation:spin .7s linear infinite;margin:0 auto 12px}
+        @keyframes spin{to{transform:rotate(360deg)}}
+        .print-btn{padding:8px 16px;background:#4F46E5;color:#fff;border:none;border-radius:8px;font-size:13px;cursor:pointer;font-family:'Inter',sans-serif}
+        @media print{.header,.back-btn,.print-btn{display:none!important}.content{margin:0;max-width:100%}}
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="logo">Simpatico<span>HR</span> <span style="font-size:14px;color:#6B7280;font-weight:400;margin-left:8px">Interview Report</span></div>
+        <div style="display:flex;gap:10px">
+            <button class="print-btn" onclick="window.print()"><i class="fas fa-print" style="margin-right:4px"></i> Print</button>
+            <a class="back-btn" href="javascript:history.back()"><i class="fas fa-arrow-left"></i> Back</a>
+        </div>
+    </div>
+
+    <div class="content" id="reportContent">
+        <div class="loader"><div class="spin"></div>Loading interview report...</div>
+    </div>
+
+    <script>
+        const API = 'https://evalis-ai.simpaticohrconsultancy.workers.dev';
+        const token = localStorage.getItem('simpatico_token');
+        const params = new URLSearchParams(window.location.search);
+        const interviewId = params.get('id');
+
+        async function loadReport() {
+            const el = document.getElementById('reportContent');
+            if (!interviewId) {
+                el.innerHTML = '<div style="text-align:center;padding:60px;color:#EF4444"><h2>No interview ID provided</h2></div>';
+                return;
+            }
+
+            try {
+                const [interview, procReport] = await Promise.all([
+                    fetch(`${API}/api/interviews/${interviewId}`, { headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' } }).then(r => r.json()),
+                    fetch(`${API}/api/proctor/report/${interviewId}`, { headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' } }).then(r => r.json())
+                ]);
+
+                const fb = interview.feedback || {};
+                const summary = procReport.summary || {};
+                const logs = procReport.logs || [];
+                const qScores = fb.question_scores || [];
+                const overallScore = interview.overall_score || fb.average_score || 0;
+
+                el.innerHTML = `
+                    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px">
+                        <div>
+                            <h1 class="report-title">${interview.candidate?.full_name || 'Candidate'} — Interview Report</h1>
+                            <p class="report-sub">
+                                ${interview.job?.title || 'Job'} ·
+                                ${interview.interview_type?.replace(/_/g, ' ') || 'Interview'} ·
+                                ${interview.scheduled_at ? new Date(interview.scheduled_at).toLocaleDateString('en-IN', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }) : ''}
+                                ${fb.job_title ? ` · Role: ${fb.job_title}` : ''}
+                            </p>
+                        </div>
+                    </div>
+
+                    <!-- Score Cards -->
+                    <div class="score-cards">
+                        <div class="score-card">
+                            <div class="sc-val" style="color:${overallScore >= 70 ? '#059669' : overallScore >= 40 ? '#D97706' : '#DC2626'}">${overallScore}%</div>
+                            <div class="sc-label">Overall Score</div>
+                        </div>
+                        <div class="score-card">
+                            <div class="sc-val" style="color:${summary.trust_score >= 70 ? '#059669' : summary.trust_score >= 40 ? '#D97706' : '#DC2626'}">${summary.trust_score || 100}%</div>
+                            <div class="sc-label">Trust Score</div>
+                        </div>
+                        <div class="score-card">
+                            <div class="sc-val" style="color:#4F46E5">${fb.answered || qScores.length || 0}/${fb.total_questions || '?'}</div>
+                            <div class="sc-label">Answered</div>
+                        </div>
+                        <div class="score-card">
+                            <div class="sc-val" style="color:#EC4899">${qScores.filter(q => q.type === 'followup').length}</div>
+                            <div class="sc-label">Follow-ups</div>
+                        </div>
+                        <div class="score-card">
+                            <div class="sc-val" style="color:${summary.total_violations > 5 ? '#DC2626' : summary.total_violations > 0 ? '#D97706' : '#059669'}">${summary.total_violations || 0}</div>
+                            <div class="sc-label">Violations</div>
+                        </div>
+                    </div>
+
+                    <!-- Proctoring Summary -->
+                    <div class="panel">
+                        <h3><i class="fas fa-shield-alt" style="color:#4F46E5"></i> Proctoring Summary</h3>
+                        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px">
+                            ${[
+                                { icon: 'fa-eye-slash', label: 'Eye Deviations', count: summary.eye_deviation_count || 0, cls: 'vi-medium' },
+                                { icon: 'fa-window-restore', label: 'Tab Switches', count: summary.tab_switch_count || (fb.tab_switches || 0), cls: 'vi-high' },
+                                { icon: 'fa-user-slash', label: 'Face Not Detected', count: summary.face_not_detected_count || 0, cls: 'vi-high' },
+                                { icon: 'fa-users', label: 'Multiple Faces', count: summary.multiple_faces_count || 0, cls: 'vi-critical' },
+                                { icon: 'fa-mobile-alt', label: 'Phone Detected', count: summary.phone_detected_count || 0, cls: 'vi-critical' },
+                                { icon: 'fa-clipboard', label: 'Copy/Paste Attempts', count: summary.copy_paste_count || 0, cls: 'vi-medium' }
+                            ].map(v => `
+                                <div class="violation-item" style="border:1px solid #F3F4F6;border-radius:10px;padding:12px">
+                                    <div class="vi-icon ${v.cls}"><i class="fas ${v.icon}"></i></div>
+                                    <div class="vi-info"><div class="vi-label">${v.label}</div></div>
+                                    <div class="vi-count" style="color:${v.count > 0 ? '#DC2626' : '#059669'}">${v.count}</div>
+                                </div>
+                            `).join('')}
+                        </div>
+                        <div style="margin-top:16px">
+                            <div style="display:flex;align-items:center;justify-content:space-between;font-size:13px;margin-bottom:4px">
+                                <span>Trust Score: ${summary.trust_score || 100}%</span>
+                                <span style="font-weight:700;color:${(summary.trust_score || 100) >= 70 ? '#059669' : '#DC2626'}">${summary.status || 'clean'}</span>
+                            </div>
+                            <div class="status-bar"><div class="status-fill" style="width:${summary.trust_score || 100}%;background:${(summary.trust_score || 100) >= 70 ? '#10B981' : (summary.trust_score || 100) >= 40 ? '#F59E0B' : '#EF4444'}"></div></div>
+                        </div>
+                    </div>
+
+                    <!-- Question-wise Results -->
+                    ${qScores.length ? `
+                    <div class="panel">
+                        <h3><i class="fas fa-clipboard-list" style="color:#7C3AED"></i> Question-wise Performance ${fb.skills_tested?.length ? `<span style="font-size:12px;color:#6B7280;font-weight:400">Skills tested: ${fb.skills_tested.join(', ')}</span>` : ''}</h3>
+                        ${qScores.map((q, i) => `
+                            <div class="q-result">
+                                <div class="qr-header">
+                                    <div class="qr-cat">
+                                        ${q.category || q.type}
+                                        ${q.type === 'followup' ? '<span class="badge-fu">FOLLOW-UP</span>' : ''}
+                                        ${q.skill ? `<span style="margin-left:6px;padding:2px 8px;background:#D1FAE5;color:#047857;border-radius:4px;font-size:10px">${q.skill}</span>` : ''}
+                                    </div>
+                                    <div class="qr-score" style="color:${q.score >= 70 ? '#059669' : q.score >= 40 ? '#D97706' : '#DC2626'}">${q.score}/100</div>
+                                </div>
+                                <div class="qr-question">${q.question}</div>
+                                ${q.answer ? `<div class="qr-answer">${q.answer.substring(0, 300)}${q.answer.length > 300 ? '...' : ''}</div>` : ''}
+                                ${q.feedback ? `<div class="qr-feedback">💡 ${q.feedback}</div>` : ''}
+                                <div class="status-bar" style="height:6px"><div class="status-fill" style="width:${q.score}%;background:${q.score >= 70 ? '#10B981' : q.score >= 40 ? '#F59E0B' : '#EF4444'}"></div></div>
+                            </div>
+                        `).join('')}
+                    </div>` : ''}
+
+                    <!-- Proctoring Timeline -->
+                    ${logs.length ? `
+                    <div class="panel">
+                        <h3><i class="fas fa-history" style="color:#3B82F6"></i> Proctoring Timeline (${logs.length} events)</h3>
+                        <div style="max-height:400px;overflow-y:auto">
+                            ${logs.slice(0, 50).map(l => `
+                                <div class="violation-item">
+                                    <div class="vi-icon vi-${l.severity || 'low'}"><i class="fas fa-${l.severity === 'critical' ? 'exclamation-circle' : l.severity === 'high' ? 'exclamation-triangle' : 'info-circle'}"></i></div>
+                                    <div class="vi-info">
+                                        <div class="vi-label">${(l.event_type || '').replace(/_/g, ' ')}</div>
+                                        <div class="vi-desc">${l.description || ''} · ${new Date(l.created_at).toLocaleTimeString('en-IN')}</div>
+                                    </div>
+                                    <span style="font-size:11px;padding:3px 8px;border-radius:4px;background:${l.severity === 'critical' ? '#FEE2E2' : l.severity === 'high' ? '#FEF3C7' : '#F3F4F6'};color:${l.severity === 'critical' ? '#DC2626' : l.severity === 'high' ? '#D97706' : '#6B7280'};text-transform:uppercase;font-weight:600">${l.severity}</span>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>` : ''}
+
+                    <!-- Recommendation -->
+                    <div class="panel" style="border:2px solid ${overallScore >= 70 && (summary.trust_score || 100) >= 60 ? '#D1FAE5' : overallScore >= 40 ? '#FEF3C7' : '#FEE2E2'}">
+                        <h3><i class="fas fa-lightbulb" style="color:#F59E0B"></i> AI Recommendation</h3>
+                        <div style="font-size:15px;font-weight:600;color:${overallScore >= 70 && (summary.trust_score || 100) >= 60 ? '#059669' : overallScore >= 40 ? '#D97706' : '#DC2626'};margin-bottom:8px">
+                            ${overallScore >= 70 && (summary.trust_score || 100) >= 60 ? '✅ RECOMMENDED — Strong candidate for next round'
+                                : overallScore >= 50 ? '⚠️ CONSIDER — May need additional evaluation'
+                                : '❌ NOT RECOMMENDED — Below threshold'}
+                        </div>
+                        <p style="font-size:13px;color:#6B7280;line-height:1.7">
+                            The candidate scored ${overallScore}% overall with a ${summary.trust_score || 100}% trust score.
+                            ${qScores.filter(q => q.type === 'followup').length > 0 ? `${qScores.filter(q => q.type === 'followup').length} follow-up question(s) were generated to probe deeper into their answers.` : ''}
+                            ${summary.total_violations > 0 ? ` There were ${summary.total_violations} proctoring violation(s) during the interview.` : ' No proctoring violations were detected.'}
+                            ${fb.skills_tested?.length ? ` Skills assessed: ${fb.skills_tested.join(', ')}.` : ''}
+                        </p>
+                    </div>
+                `;
+
+            } catch (err) {
+                el.innerHTML = `<div style="text-align:center;padding:60px;color:#DC2626"><i class="fas fa-exclamation-triangle" style="font-size:40px;margin-bottom:12px"></i><h2>Error Loading Report</h2><p>${err.message}</p></div>`;
+            }
+        }
+
+        loadReport();
+    </script>
+</body>
+</html>
