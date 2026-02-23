@@ -4,7 +4,7 @@
 const API = (() => {
     const CONFIG = {
         // UPDATE THIS to your actual Worker URL
-        baseUrl: 'https://simpatico-hr-worker.YOUR_SUBDOMAIN.workers.dev',
+        baseUrl: 'https://evalis-ai.simpaticohrconsultancy.workers.dev',
         tokenKey: 'sh_token',
         userKey: 'sh_user',
         clientKey: 'sh_client'
