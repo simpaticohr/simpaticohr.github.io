@@ -156,61 +156,8 @@
   <!-- Toast Container -->
   <div class="toast-container" id="toastContainer"></div>
 
-<script>
-async function handleLogin(e) {
-  e.preventDefault();
-
-  const email = document.getElementById('loginEmail').value.trim();
-  const password = document.getElementById('loginPassword').value.trim();
-
-  const btn = document.getElementById('loginBtn');
-  btn.disabled = true;
-  btn.innerHTML = "Signing in...";
-
-  try {
-    const res = await fetch(
-      "https://evalis-ai.simpaticohrconsultancy.workers.dev/api/auth/login",
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password })
-      }
-    );
-
-    const data = await res.json();
-
-    if (!res.ok || data.error) {
-      alert(data.error || "Login failed");
-      btn.disabled = false;
-      btn.innerHTML = "Sign In";
-      return;
-    }
-
-    // Store worker JWT
-    localStorage.setItem("simpatico_token", data.token);
-    localStorage.setItem("simpatico_user", JSON.stringify(data.user));
-
-   // Redirect based on role (MATCHES YOUR REAL STRUCTURE)
-if (data.user.role === "super_admin") {
-  window.location.href = "/platform/super-admin.html";
-}
-} else if (data.user.role === "company_admin") {
-  window.location.href = "/dashboard/hr.html";
-} else if (data.user.role === "candidate") {
-  window.location.href = "/dashboard/candidate.html";
-} else {
-  alert("Unknown role");
-}
-  } catch (err) {
-    alert("Network error");
-  }
-
-  btn.disabled = false;
-  btn.innerHTML = "Sign In";
-}
-</script>
   <script>
-    // Role Tabs
+    // Role Tabs — defined first so selectedRole is available to handleLogin
     let selectedRole = 'hr';
     document.querySelectorAll('.role-tab').forEach(tab => {
       tab.addEventListener('click', () => {
@@ -219,6 +166,60 @@ if (data.user.role === "super_admin") {
         selectedRole = tab.dataset.role;
       });
     });
+
+    async function handleLogin(e) {
+      e.preventDefault();
+
+      const email = document.getElementById('loginEmail').value.trim();
+      const password = document.getElementById('loginPassword').value.trim();
+
+      const btn = document.getElementById('loginBtn');
+      btn.disabled = true;
+      btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Signing in...';
+
+      try {
+        const res = await fetch(
+          "https://evalis-ai.simpaticohrconsultancy.workers.dev/api/auth/login",
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            // FIX 1: send role so the worker doesn't crash on undefined
+            body: JSON.stringify({ email, password, role: selectedRole })
+          }
+        );
+
+        const data = await res.json();
+
+        if (!res.ok || data.error) {
+          alert(data.error || "Login failed");
+          btn.disabled = false;
+          btn.innerHTML = '<i class="fas fa-sign-in-alt"></i> Sign In';
+          return;
+        }
+
+        // Store worker JWT
+        localStorage.setItem("simpatico_token", data.token);
+        localStorage.setItem("simpatico_user", JSON.stringify(data.user));
+
+        // FIX 2: corrected if/else chain (removed stray closing brace that broke the block)
+        if (data.user.role === "super_admin") {
+          window.location.href = "/platform/super-admin.html";
+        } else if (data.user.role === "company_admin") {
+          window.location.href = "/dashboard/hr.html";
+        } else if (data.user.role === "candidate") {
+          window.location.href = "/dashboard/candidate.html";
+        } else {
+          alert("Unknown role: " + data.user.role);
+          btn.disabled = false;
+          btn.innerHTML = '<i class="fas fa-sign-in-alt"></i> Sign In';
+        }
+
+      } catch (err) {
+        alert("Network error: " + err.message);
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fas fa-sign-in-alt"></i> Sign In';
+      }
+    }
   </script>
 </body>
 </html>
