@@ -83,7 +83,7 @@
         }
 
         /* Form */
-        .form-group { margin-bottom: 1rem; }
+        .form-group { margin-bottom: 1rem; position: relative; }
         .form-label {
             display: flex; justify-content: space-between; align-items: center;
             font-size: 13px; font-weight: 600; color: #374151; margin-bottom: 6px;
@@ -102,7 +102,19 @@
             border-color: #3B82F6; background: #fff;
             box-shadow: 0 0 0 3px rgba(59,130,246,0.08);
         }
+        .form-input.error-field { border-color: #EF4444; background: #FFF5F5; }
         .form-input::placeholder { color: #9CA3AF; }
+
+        /* Password toggle */
+        .password-wrapper { position: relative; }
+        .password-wrapper .form-input { padding-right: 44px; }
+        .password-toggle {
+            position: absolute; right: 12px; top: 50%; transform: translateY(-50%);
+            background: none; border: none; cursor: pointer;
+            color: #9CA3AF; font-size: 15px; padding: 2px;
+            transition: color 0.2s;
+        }
+        .password-toggle:hover { color: #374151; }
 
         /* Submit */
         .submit-btn {
@@ -142,15 +154,18 @@
         }
         .back-link:hover { color: #3B82F6; }
 
-        /* Error display */
-        .error-box {
-            background: #FEF2F2; border: 1px solid #FECACA;
+        /* Error / Success display */
+        .alert-box {
             border-radius: 10px; padding: 12px 16px;
             margin-bottom: 1rem; display: none;
         }
-        .error-box.show { display: block; animation: shakeX 0.4s; }
-        .error-box p { color: #DC2626; font-size: 13px; font-weight: 500; margin: 0; }
-        .error-box .error-detail {
+        .alert-box.show { display: block; animation: shakeX 0.4s; }
+        .alert-box.error   { background: #FEF2F2; border: 1px solid #FECACA; }
+        .alert-box.success { background: #F0FDF4; border: 1px solid #BBF7D0; }
+        .alert-box p { font-size: 13px; font-weight: 500; margin: 0; }
+        .alert-box.error p   { color: #DC2626; }
+        .alert-box.success p { color: #059669; }
+        .alert-box .alert-detail {
             color: #9CA3AF; font-size: 11px; margin-top: 4px;
             word-break: break-all;
         }
@@ -203,11 +218,11 @@
         <p>AI-Powered Hybrid Recruitment Platform with proctored interviews, eye tracking, automated ATS, and multi-tenant data isolation.</p>
         <ul class="feature-list">
             <li><i class="fas fa-eye"></i> AI Proctored Interviews with Eye Tracking</li>
-            <li><i class="fas fa-robot"></i> Automated Sourcing, Screening & Shortlisting</li>
+            <li><i class="fas fa-robot"></i> Automated Sourcing, Screening &amp; Shortlisting</li>
             <li><i class="fas fa-shield-alt"></i> 99.2% Cheat Detection Accuracy</li>
             <li><i class="fas fa-server"></i> Multi-Client Data Isolation (SaaS)</li>
             <li><i class="fab fa-whatsapp"></i> WhatsApp + Email Automation</li>
-            <li><i class="fas fa-wand-magic-sparkles"></i> AI JD Generation & Resume Matching</li>
+            <li><i class="fas fa-wand-magic-sparkles"></i> AI JD Generation &amp; Resume Matching</li>
         </ul>
     </div>
 </div>
@@ -225,10 +240,10 @@
         <h2>Sign In</h2>
         <p class="subtitle">Access your recruitment dashboard</p>
 
-        <!-- Error Box -->
-        <div class="error-box" id="errorBox">
-            <p id="errorMsg">Login failed</p>
-            <div class="error-detail" id="errorDetail"></div>
+        <!-- Alert Box -->
+        <div class="alert-box error" id="alertBox">
+            <p id="alertMsg">Login failed</p>
+            <div class="alert-detail" id="alertDetail"></div>
         </div>
 
         <!-- Role Tabs -->
@@ -252,8 +267,14 @@
                     Password
                     <a href="forgot-password.html">Forgot?</a>
                 </label>
-                <input type="password" class="form-input" id="password"
-                       placeholder="••••••••" required autocomplete="current-password">
+                <div class="password-wrapper">
+                    <input type="password" class="form-input" id="password"
+                           placeholder="••••••••" required autocomplete="current-password">
+                    <button type="button" class="password-toggle" onclick="togglePassword()" id="pwToggle"
+                            title="Show/hide password" aria-label="Toggle password visibility">
+                        <i class="fas fa-eye" id="pwToggleIcon"></i>
+                    </button>
+                </div>
             </div>
             <button type="submit" class="submit-btn" id="submitBtn">
                 <span class="spinner" id="spinner"></span>
@@ -272,226 +293,370 @@
     </div>
 </div>
 
-<!-- Debug Panel (hidden by default) -->
+<!-- Debug Panel (Ctrl+Shift+D to toggle) -->
 <div class="debug-panel" id="debugPanel"></div>
 
 <script>
-// ═══════════════════════════════════════
-// CONFIGURATION
-// ═══════════════════════════════════════
-const API = 'https://evalis-ai.simpaticohrconsultancy.workers.dev';
+// ═══════════════════════════════════════════════════════════════════
+// CONFIGURATION — fill these in from Supabase Dashboard → Settings → API
+// ═══════════════════════════════════════════════════════════════════
+const SUPABASE_URL  = "https://YOUR_PROJECT_REF.supabase.co";
+const SUPABASE_ANON_KEY = "YOUR_SUPABASE_ANON_KEY";
+
+// Worker is used as fallback only
+const WORKER_URL = 'https://evalis-ai.simpaticohrconsultancy.workers.dev/api/auth/login';
+
+// Role → redirect routes
+const ROLE_ROUTES = {
+    'super_admin':   'super-admin.html',
+    'company_admin': '../dashboard/company.html',
+    'hr':            '../dashboard/hr.html',
+    'hr_manager':    '../dashboard/hr.html',
+    'interviewer':   '../dashboard/interviewer.html',
+    'candidate':     '../dashboard/candidate.html',
+};
+
+// ═══════════════════════════════════════════════════════════════════
+// STATE
+// ═══════════════════════════════════════════════════════════════════
 let selectedRole = 'hr';
 
-// ═══════════════════════════════════════
-// CHECK URL PARAMS
-// ═══════════════════════════════════════
-const urlParams = new URLSearchParams(window.location.search);
-if (urlParams.get('role') === 'super_admin') {
-    selectedRole = 'super_admin';
-    document.querySelectorAll('.role-tab').forEach(t => t.classList.remove('active'));
-    document.querySelector('[data-role="super_admin"]').classList.add('active');
-}
-if (urlParams.get('role') === 'candidate') {
-    selectedRole = 'candidate';
-    document.querySelectorAll('.role-tab').forEach(t => t.classList.remove('active'));
-    document.querySelector('[data-role="candidate"]').classList.add('active');
-}
-
-// ═══════════════════════════════════════
-// CHECK IF ALREADY LOGGED IN
-// ═══════════════════════════════════════
-(function checkExistingSession() {
-    const token = localStorage.getItem('simpatico_token');
-    const user = JSON.parse(localStorage.getItem('simpatico_user') || '{}');
-    if (token && user.role) {
-        // Verify token is still valid
-        fetch(`${API}/api/auth/me`, {
-            headers: { 'Authorization': `Bearer ${token}` }
-        })
-        .then(r => r.json())
-        .then(data => {
-            if (data.user && !data.error) {
-                redirectByRole(data.user.role);
-            } else {
-                // Token expired — clear
-                localStorage.removeItem('simpatico_token');
-                localStorage.removeItem('simpatico_user');
-            }
-        })
-        .catch(() => {
-            // Network error — don't redirect but don't clear either
-        });
+// ═══════════════════════════════════════════════════════════════════
+// URL PARAMS — pre-select role from ?role=
+// ═══════════════════════════════════════════════════════════════════
+(function applyUrlRole() {
+    const urlRole = new URLSearchParams(window.location.search).get('role');
+    if (urlRole && ['hr', 'candidate', 'super_admin'].includes(urlRole)) {
+        selectedRole = urlRole;
+        document.querySelectorAll('.role-tab').forEach(t => t.classList.remove('active'));
+        const tab = document.querySelector(`[data-role="${urlRole}"]`);
+        if (tab) tab.classList.add('active');
     }
 })();
 
-// ═══════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════
+// AUTO-LOGIN — if valid session token exists, skip login screen
+// ═══════════════════════════════════════════════════════════════════
+(function checkExistingSession() {
+    const token = localStorage.getItem('simpatico_token') || sessionStorage.getItem('simpatico_token');
+    const user  = JSON.parse(localStorage.getItem('simpatico_user') || sessionStorage.getItem('simpatico_user') || '{}');
+    if (!token || !user.role) return;
+
+    // Verify token is still valid via Supabase
+    const supabaseReady = SUPABASE_URL !== "https://YOUR_PROJECT_REF.supabase.co";
+    if (supabaseReady) {
+        fetch(`${SUPABASE_URL}/auth/v1/user`, {
+            headers: {
+                'apikey': SUPABASE_ANON_KEY,
+                'Authorization': `Bearer ${token}`
+            }
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data?.id && !data?.error) {
+                debug(`Existing session valid for ${user.email} — redirecting`);
+                redirectByRole(user.role);
+            } else {
+                // Token expired — clear
+                ['simpatico_token','simpatico_user','simpatico_refresh'].forEach(k => {
+                    localStorage.removeItem(k);
+                    sessionStorage.removeItem(k);
+                });
+            }
+        })
+        .catch(() => { /* Network error — stay on login */ });
+    }
+})();
+
+// ═══════════════════════════════════════════════════════════════════
 // ROLE TABS
-// ═══════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════
 function switchRole(el) {
     document.querySelectorAll('.role-tab').forEach(t => t.classList.remove('active'));
     el.classList.add('active');
     selectedRole = el.dataset.role;
-    hideError();
+    hideAlert();
 }
 
-// ═══════════════════════════════════════
-// LOGIN HANDLER
-// ═══════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════
+// PASSWORD TOGGLE
+// ═══════════════════════════════════════════════════════════════════
+function togglePassword() {
+    const input = document.getElementById('password');
+    const icon  = document.getElementById('pwToggleIcon');
+    if (input.type === 'password') {
+        input.type = 'text';
+        icon.className = 'fas fa-eye-slash';
+    } else {
+        input.type = 'password';
+        icon.className = 'fas fa-eye';
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// SUPABASE DIRECT AUTH
+// ═══════════════════════════════════════════════════════════════════
+async function loginWithSupabase(email, password) {
+    // Step 1: Authenticate
+    const authRes = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=password`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'apikey': SUPABASE_ANON_KEY,
+            'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
+        },
+        body: JSON.stringify({ email, password })
+    });
+
+    const authData = await authRes.json();
+
+    if (!authRes.ok) {
+        const msg = authData?.error_description || authData?.msg || authData?.message || 'Invalid email or password.';
+        throw new Error(msg);
+    }
+
+    // Step 2: Fetch user profile
+    const profileRes = await fetch(
+        `${SUPABASE_URL}/rest/v1/users?auth_id=eq.${authData.user.id}&select=*,companies(*)&limit=1`,
+        {
+            headers: {
+                'apikey': SUPABASE_ANON_KEY,
+                'Authorization': `Bearer ${authData.access_token}`,
+                'Content-Type': 'application/json'
+            }
+        }
+    );
+
+    const profiles = await profileRes.json();
+    const profile  = profiles?.[0] ?? null;
+
+    if (!profile) {
+        throw new Error('User profile not found. Please contact your administrator.');
+    }
+
+    // Step 3: Update last_login (best-effort, non-blocking)
+    fetch(`${SUPABASE_URL}/rest/v1/users?auth_id=eq.${authData.user.id}`, {
+        method: 'PATCH',
+        headers: {
+            'apikey': SUPABASE_ANON_KEY,
+            'Authorization': `Bearer ${authData.access_token}`,
+            'Content-Type': 'application/json',
+            'Prefer': 'return=minimal'
+        },
+        body: JSON.stringify({ last_login: new Date().toISOString() })
+    }).catch(() => {});
+
+    return {
+        token:        authData.access_token,
+        refreshToken: authData.refresh_token,
+        user: {
+            id:    authData.user.id,
+            email: authData.user.email,
+            role:  profile.role
+        },
+        profile
+    };
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// WORKER FALLBACK AUTH
+// ═══════════════════════════════════════════════════════════════════
+async function loginWithWorker(email, password) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000);
+
+    let res;
+    try {
+        res = await fetch(WORKER_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email, password, role: selectedRole }),
+            signal: controller.signal
+        });
+    } finally {
+        clearTimeout(timeout);
+    }
+
+    let data;
+    try   { data = await res.json(); }
+    catch { throw new Error('Server returned an unexpected response. Please try again.'); }
+
+    if (!res.ok || data?.error) {
+        throw new Error(data?.error?.message || data?.error || data?.message || `Server error (${res.status}). Please try again.`);
+    }
+
+    if (!data.token) throw new Error('No token received from server.');
+
+    return {
+        token:        data.token,
+        refreshToken: data.refresh_token || null,
+        user:         data.user || { email, role: selectedRole }
+    };
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// PERSIST SESSION
+// ═══════════════════════════════════════════════════════════════════
+function persistSession(authData) {
+    localStorage.setItem('simpatico_token', authData.token);
+    localStorage.setItem('simpatico_user',  JSON.stringify(authData.user));
+    if (authData.refreshToken) {
+        localStorage.setItem('simpatico_refresh', authData.refreshToken);
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// MAIN LOGIN HANDLER
+// ═══════════════════════════════════════════════════════════════════
 async function handleLogin(e) {
     e.preventDefault();
 
-    const email = document.getElementById('email').value.trim();
+    const email    = document.getElementById('email').value.trim();
     const password = document.getElementById('password').value;
-    const btn = document.getElementById('submitBtn');
-    const spinner = document.getElementById('spinner');
-    const btnIcon = document.getElementById('btnIcon');
-    const btnText = document.getElementById('btnText');
+    const btn      = document.getElementById('submitBtn');
+    const spinner  = document.getElementById('spinner');
+    const btnIcon  = document.getElementById('btnIcon');
+    const btnText  = document.getElementById('btnText');
 
-    if (!email || !password) {
-        showError('Please fill in all fields');
+    // Clear field errors
+    document.querySelectorAll('.form-input').forEach(i => i.classList.remove('error-field'));
+    hideAlert();
+
+    if (!email) {
+        showAlert('Please enter your email address.');
+        document.getElementById('email').classList.add('error-field');
+        return;
+    }
+    if (!password) {
+        showAlert('Please enter your password.');
+        document.getElementById('password').classList.add('error-field');
         return;
     }
 
-    // UI: loading state
+    // Loading state
     btn.disabled = true;
     spinner.style.display = 'inline-block';
     btnIcon.style.display = 'none';
     btnText.textContent = 'Signing in...';
-    hideError();
 
-    debug(`Calling ${API}/api/auth/login`);
-    debug(`Email: ${email}, Role: ${selectedRole}`);
+    debug(`Attempting login for: ${email} (role: ${selectedRole})`);
 
-    try {
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 15000); // 15s timeout
+    let authData = null;
 
-        const res = await fetch(`${API}/api/auth/login`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ 
-    email, 
-    password, 
-    role: selectedRole 
-}),
-            signal: controller.signal
-        });
+    // ① Try Supabase directly (bypasses the broken Worker)
+    const supabaseConfigured =
+        SUPABASE_URL     !== 'https://YOUR_PROJECT_REF.supabase.co' &&
+        SUPABASE_ANON_KEY !== 'YOUR_SUPABASE_ANON_KEY';
 
-        clearTimeout(timeout);
-
-        debug(`Response status: ${res.status}`);
-
-        const data = await res.json();
-
-        debug(`Response: ${JSON.stringify(data).substring(0, 200)}`);
-
-        if (!res.ok || data.error) {
-            const errorMsg = data.error?.message || data.error || data.message || 'Login failed';
-            throw new Error(errorMsg);
+    if (supabaseConfigured) {
+        try {
+            authData = await loginWithSupabase(email, password);
+            debug(`Supabase auth success. Role: ${authData.user?.role}`);
+        } catch (err) {
+            debug(`Supabase error: ${err.message}`);
+            // Credential errors — no point trying Worker
+            const credErrors = [
+                'invalid login credentials', 'invalid email', 'invalid password',
+                'email not confirmed', 'user not found', 'profile not found'
+            ];
+            const isCredErr = credErrors.some(s => err.message.toLowerCase().includes(s));
+            if (isCredErr) {
+                showAlert(mapError(err.message));
+                resetBtn(btn, spinner, btnIcon, btnText);
+                return;
+            }
+            // Non-credential error — fall through to Worker
+            console.warn('[Login] Supabase direct auth failed, trying Worker:', err.message);
         }
-
-        if (!data.token) {
-            throw new Error('No token received from server');
-        }
-
-        // ═══ SUCCESS ═══
-
-        // Check role for super_admin
-        const userRole = data.user?.role || '';
-        if (selectedRole === 'super_admin' && userRole !== 'super_admin') {
-            throw new Error('This account does not have super admin privileges');
-        }
-
-        // Save auth data
-        localStorage.setItem('simpatico_token', data.token);
-        if (data.refresh_token) {
-            localStorage.setItem('simpatico_refresh_token', data.refresh_token);
-        }
-        localStorage.setItem('simpatico_user', JSON.stringify(data.user || {
-            email: email,
-            role: userRole || selectedRole
-        }));
-
-        toast('Login successful! Redirecting...', 'success');
-
-        debug(`Login success. Role: ${userRole}. Redirecting...`);
-
-        // Redirect
-        const role = userRole || selectedRole;
-        setTimeout(() => redirectByRole(role), 800);
-
-    } catch (err) {
-        console.error('Login error:', err);
-
-        let errorMsg = err.message || 'Login failed';
-        let errorDetail = '';
-
-        // Handle specific error types
-        if (err.name === 'AbortError') {
-            errorMsg = 'Request timed out';
-            errorDetail = 'The server took too long to respond. Please try again.';
-        } else if (err.message === 'Failed to fetch') {
-            errorMsg = 'Cannot connect to server';
-            errorDetail = `Make sure ${API} is reachable. Check your internet connection.`;
-        } else if (err.message.includes('Invalid login credentials')) {
-            errorMsg = 'Invalid email or password';
-            errorDetail = 'Please check your credentials and try again.';
-        } else if (err.message.includes('Email not confirmed')) {
-            errorMsg = 'Email not verified';
-            errorDetail = 'Please check your email and click the verification link.';
-        } else if (err.message.includes('User not found')) {
-            errorMsg = 'Account not found';
-            errorDetail = 'No user record found for this email. Please register first.';
-        }
-
-        showError(errorMsg, errorDetail);
-        debug(`Error: ${errorMsg} — ${errorDetail}`);
-
-    } finally {
-        btn.disabled = false;
-        spinner.style.display = 'none';
-        btnIcon.style.display = 'inline';
-        btnText.textContent = 'Sign In';
+    } else {
+        debug('Supabase not configured — going straight to Worker');
     }
+
+    // ② Fall back to Cloudflare Worker
+    if (!authData) {
+        try {
+            authData = await loginWithWorker(email, password);
+            debug(`Worker auth success. Role: ${authData.user?.role}`);
+        } catch (err) {
+            debug(`Worker error: ${err.message}`);
+            showAlert(mapError(err.message), err.name === 'AbortError'
+                ? 'The server took too long to respond. Please try again.'
+                : err.message.includes('Failed to fetch')
+                    ? `Cannot connect to the authentication server. Check your internet connection.`
+                    : '');
+            resetBtn(btn, spinner, btnIcon, btnText);
+            return;
+        }
+    }
+
+    // ③ Role check (only enforce if user selected Super Admin tab)
+    const userRole = authData.user?.role || '';
+    if (selectedRole === 'super_admin' && userRole !== 'super_admin') {
+        showAlert('This account does not have Super Admin privileges.');
+        resetBtn(btn, spinner, btnIcon, btnText);
+        return;
+    }
+
+    // ④ Success — persist and redirect
+    persistSession(authData);
+    toast('Login successful! Redirecting...', 'success');
+    btnText.textContent = 'Redirecting...';
+    debug(`Redirecting for role: ${userRole}`);
+
+    setTimeout(() => redirectByRole(userRole), 800);
 }
 
-// ═══════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════
 // REDIRECT BY ROLE
-// ═══════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════
 function redirectByRole(role) {
-    const routes = {
-        'super_admin':    'super-admin.html',
-        'company_admin':  '../dashboard/company.html',
-        'hr':             '../dashboard/hr.html',
-        'interviewer':    '../dashboard/interviewer.html',
-        'candidate':      '../dashboard/candidate.html',
-    };
-
-    const target = routes[role] || '../dashboard/hr.html';
-    debug(`Redirecting to: ${target}`);
+    const target = ROLE_ROUTES[role] || ROLE_ROUTES['hr'];
+    debug(`→ ${target}`);
     window.location.href = target;
 }
 
-// ═══════════════════════════════════════
-// ERROR DISPLAY
-// ═══════════════════════════════════════
-function showError(msg, detail) {
-    const box = document.getElementById('errorBox');
-    document.getElementById('errorMsg').textContent = msg;
-    document.getElementById('errorDetail').textContent = detail || '';
+// ═══════════════════════════════════════════════════════════════════
+// ERROR MAPPING
+// ═══════════════════════════════════════════════════════════════════
+function mapError(msg) {
+    const m = (msg || '').toLowerCase();
+    if (m.includes('invalid login credentials') || m.includes('invalid password') || m.includes('invalid email'))
+        return 'Invalid email or password.';
+    if (m.includes('email not confirmed'))
+        return 'Please verify your email address before signing in.';
+    if (m.includes('user not found') || m.includes('no user record'))
+        return 'No account found for this email. Please register first.';
+    if (m.includes('profile not found'))
+        return 'User profile not found. Please contact your administrator.';
+    if (m.includes('does not have super admin'))
+        return 'This account does not have Super Admin privileges.';
+    return msg || 'Login failed. Please try again.';
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// UI HELPERS
+// ═══════════════════════════════════════════════════════════════════
+function showAlert(msg, detail, type = 'error') {
+    const box = document.getElementById('alertBox');
+    box.className = `alert-box ${type}`;
+    document.getElementById('alertMsg').textContent = msg;
+    document.getElementById('alertDetail').textContent = detail || '';
     box.classList.remove('show');
-    // Force reflow for animation
-    void box.offsetWidth;
+    void box.offsetWidth; // force reflow for animation
     box.classList.add('show');
 }
 
-function hideError() {
-    document.getElementById('errorBox').classList.remove('show');
+function hideAlert() {
+    document.getElementById('alertBox').classList.remove('show');
 }
 
-// ═══════════════════════════════════════
-// TOAST
-// ═══════════════════════════════════════
+function resetBtn(btn, spinner, btnIcon, btnText) {
+    btn.disabled = false;
+    spinner.style.display = 'none';
+    btnIcon.style.display = 'inline';
+    btnText.textContent = 'Sign In';
+}
+
 function toast(msg, type = 'info') {
     document.querySelectorAll('.toast').forEach(t => t.remove());
     const t = document.createElement('div');
@@ -501,9 +666,9 @@ function toast(msg, type = 'info') {
     setTimeout(() => t.remove(), 4000);
 }
 
-// ═══════════════════════════════════════
-// DEBUG (press Ctrl+Shift+D to toggle)
-// ═══════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════
+// DEBUG (Ctrl+Shift+D to toggle)
+// ═══════════════════════════════════════════════════════════════════
 let debugLines = [];
 function debug(msg) {
     console.log('[Login]', msg);
@@ -519,15 +684,18 @@ document.addEventListener('keydown', function(e) {
     }
 });
 
-// ═══════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════
 // API HEALTH CHECK ON LOAD
-// ═══════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════
 (async function healthCheck() {
     try {
-        const res = await fetch(API + '/api/jobs/public', { method: 'GET' });
-        debug(`API health: ${res.status} ${res.ok ? '✅' : '❌'}`);
+        const res = await fetch(
+            'https://evalis-ai.simpaticohrconsultancy.workers.dev/api/jobs/public',
+            { method: 'GET' }
+        );
+        debug(`Worker health: ${res.status} ${res.ok ? '✅' : '❌'}`);
     } catch (e) {
-        debug(`API health: UNREACHABLE ❌ — ${e.message}`);
+        debug(`Worker health: UNREACHABLE ❌ — ${e.message}`);
     }
 })();
 </script>
