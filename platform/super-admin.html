@@ -100,10 +100,10 @@
             display:inline-flex; align-items:center; padding:3px 10px;
             border-radius:20px; font-size:11px; font-weight:700;
         }
-        .badge-active { background:rgba(16,185,129,.12); color:#059669; border:1px solid rgba(16,185,129,.2); }
-        .badge-trial { background:rgba(245,158,11,.12); color:#B45309; border:1px solid rgba(245,158,11,.2); }
+        .badge-active   { background:rgba(16,185,129,.12); color:#059669; border:1px solid rgba(16,185,129,.2); }
+        .badge-trial    { background:rgba(245,158,11,.12); color:#B45309; border:1px solid rgba(245,158,11,.2); }
         .badge-inactive { background:rgba(239,68,68,.1); color:#DC2626; border:1px solid rgba(239,68,68,.15); }
-        .badge-premium { background:rgba(99,102,241,.12); color:#4F46E5; border:1px solid rgba(99,102,241,.2); }
+        .badge-premium  { background:rgba(99,102,241,.12); color:#4F46E5; border:1px solid rgba(99,102,241,.2); }
 
         /* Action buttons */
         .btn-sm {
@@ -113,8 +113,6 @@
         }
         .btn-view { background:#EFF6FF; color:#2563EB; }
         .btn-view:hover { background:#DBEAFE; }
-        .btn-danger { background:#FEF2F2; color:#DC2626; }
-        .btn-danger:hover { background:#FEE2E2; }
         .btn-create {
             padding:8px 16px; border-radius:10px; font-size:13px;
             font-weight:700; cursor:pointer; border:none; font-family:inherit;
@@ -158,8 +156,8 @@
             animation:toastIn .3s ease;
         }
         .toast-success { background:#059669; }
-        .toast-error { background:#DC2626; }
-        .toast-info { background:#2563EB; }
+        .toast-error   { background:#DC2626; }
+        .toast-info    { background:#2563EB; }
         @keyframes toastIn { from{transform:translateX(100%);opacity:0} to{transform:translateX(0);opacity:1} }
 
         /* Mobile */
@@ -234,31 +232,36 @@
     </div>
 
     <div class="content" id="mainContent">
-        <!-- Filled by JavaScript -->
         <div class="loader"><div class="spin"></div><p>Loading dashboard...</p></div>
     </div>
 </div>
 
 <script>
-// ═══════════════════════════════════════
-// CONFIG
-// ═══════════════════════════════════════
-const API = 'https://evalis-ai.simpaticohrconsultancy.workers.dev';
-const token = localStorage.getItem('simpatico_token');
-const user = JSON.parse(localStorage.getItem('simpatico_user') || '{}');
-const headers = {
+// ═══════════════════════════════════════════════════════════════════
+// CONFIGURATION — same values as login.html
+// ═══════════════════════════════════════════════════════════════════
+const SUPABASE_URL      = "https://YOUR_PROJECT_REF.supabase.co";
+const SUPABASE_ANON_KEY = "YOUR_SUPABASE_ANON_KEY";
+
+// ═══════════════════════════════════════════════════════════════════
+// SESSION
+// ═══════════════════════════════════════════════════════════════════
+const token = localStorage.getItem('simpatico_token') || sessionStorage.getItem('simpatico_token');
+const user  = JSON.parse(localStorage.getItem('simpatico_user') || sessionStorage.getItem('simpatico_user') || '{}');
+
+// Supabase REST headers using the user's own JWT
+const sbHeaders = {
+    'apikey':        SUPABASE_ANON_KEY,
     'Authorization': `Bearer ${token}`,
-    'Content-Type': 'application/json'
+    'Content-Type':  'application/json'
 };
 
 // Cache
-let cachedStats = null;
 let cachedCompanies = null;
-let cachedUsers = null;
 
-// ═══════════════════════════════════════
-// AUTH CHECK — NO unconditional redirect!
-// ═══════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════
+// AUTH CHECK
+// ═══════════════════════════════════════════════════════════════════
 function checkAuth() {
     if (!token) {
         showAccessDenied('No authentication token found. Please log in first.');
@@ -282,38 +285,61 @@ function showAccessDenied(msg) {
     `;
 }
 
-// ═══════════════════════════════════════
-// SET ADMIN NAME
-// ═══════════════════════════════════════
+// Set admin name in topbar
 try {
-    const name = user.full_name || user.name || user.email || 'Super Admin';
-    document.getElementById('adminName').textContent = name;
+    document.getElementById('adminName').textContent =
+        user.full_name || user.name || user.email || 'Super Admin';
 } catch(e) {}
 
-// ═══════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════
+// SUPABASE QUERY HELPER
+// ═══════════════════════════════════════════════════════════════════
+async function sbQuery(table, params = '') {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}?${params}`, { headers: sbHeaders });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data?.message || data?.hint || `Failed to query ${table}`);
+    return data;
+}
+
+async function sbCount(table, filter = '') {
+    const res = await fetch(
+        `${SUPABASE_URL}/rest/v1/${table}?${filter}select=id`,
+        {
+            headers: {
+                ...sbHeaders,
+                'Prefer': 'count=exact',
+                'Range-Unit': 'items',
+                'Range': '0-0'
+            }
+        }
+    );
+    // Count is in the Content-Range header: "0-0/42"
+    const range = res.headers.get('Content-Range') || '';
+    const match = range.match(/\/(\d+)$/);
+    return match ? parseInt(match[1]) : 0;
+}
+
+// ═══════════════════════════════════════════════════════════════════
 // NAVIGATION
-// ═══════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════
 function showSection(section) {
-    // Update active nav
     document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
     const navMap = { dashboard:'navDash', companies:'navCompanies', users:'navUsers', jobs:'navJobs' };
     const navEl = document.getElementById(navMap[section]);
     if (navEl) navEl.classList.add('active');
-
-    // Close mobile sidebar
     document.getElementById('sidebar').classList.remove('open');
 
     switch(section) {
         case 'dashboard': loadDashboard(); break;
         case 'companies': loadCompanies(); break;
-        case 'users': loadUsers(); break;
-        case 'jobs': loadJobs(); break;
+        case 'users':     loadUsers();     break;
+        case 'jobs':      loadJobs();      break;
     }
 }
 
-// ═══════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════
 // DASHBOARD
-// ═══════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════
 async function loadDashboard() {
     document.getElementById('pageTitle').textContent = 'Super Admin Dashboard';
     document.getElementById('mainContent').innerHTML = '<div class="loader"><div class="spin"></div><p>Loading stats...</p></div>';
@@ -321,41 +347,40 @@ async function loadDashboard() {
     if (!checkAuth()) return;
 
     try {
-        const res = await fetch(`${API}/api/admin/stats`, { headers });
-        const stats = await res.json();
-
-        if (stats.error) {
-            showAccessDenied('API Error: ' + stats.error);
-            return;
-        }
-
-        cachedStats = stats;
+        // Fetch counts in parallel
+        const [companies, users, jobs, applications, interviews] = await Promise.all([
+            sbCount('companies'),
+            sbCount('users'),
+            sbCount('jobs'),
+            sbCount('applications').catch(() => 0),
+            sbCount('interviews').catch(() => 0)
+        ]);
 
         document.getElementById('mainContent').innerHTML = `
             <div class="stat-grid">
                 <div class="stat-card">
                     <div class="stat-icon" style="background:rgba(59,130,246,.1);color:#3B82F6"><i class="fas fa-building"></i></div>
-                    <div class="stat-value">${stats.total_companies || 0}</div>
+                    <div class="stat-value">${companies}</div>
                     <div class="stat-label">Companies</div>
                 </div>
                 <div class="stat-card">
                     <div class="stat-icon" style="background:rgba(16,185,129,.1);color:#10B981"><i class="fas fa-users"></i></div>
-                    <div class="stat-value">${stats.total_users || 0}</div>
+                    <div class="stat-value">${users}</div>
                     <div class="stat-label">Users</div>
                 </div>
                 <div class="stat-card">
                     <div class="stat-icon" style="background:rgba(245,158,11,.1);color:#F59E0B"><i class="fas fa-briefcase"></i></div>
-                    <div class="stat-value">${stats.total_jobs || 0}</div>
+                    <div class="stat-value">${jobs}</div>
                     <div class="stat-label">Jobs</div>
                 </div>
                 <div class="stat-card">
                     <div class="stat-icon" style="background:rgba(139,92,246,.1);color:#8B5CF6"><i class="fas fa-file-alt"></i></div>
-                    <div class="stat-value">${stats.total_applications || 0}</div>
+                    <div class="stat-value">${applications}</div>
                     <div class="stat-label">Applications</div>
                 </div>
                 <div class="stat-card">
                     <div class="stat-icon" style="background:rgba(239,68,68,.1);color:#EF4444"><i class="fas fa-video"></i></div>
-                    <div class="stat-value">${stats.total_interviews || 0}</div>
+                    <div class="stat-value">${interviews}</div>
                     <div class="stat-label">Interviews</div>
                 </div>
             </div>
@@ -369,7 +394,6 @@ async function loadDashboard() {
             </div>
         `;
 
-        // Load recent companies
         loadRecentCompanies();
 
     } catch(e) {
@@ -378,7 +402,7 @@ async function loadDashboard() {
             <div class="access-denied">
                 <div class="icon"><i class="fas fa-exclamation-triangle" style="color:#F59E0B"></i></div>
                 <h2>Connection Error</h2>
-                <p>Could not reach the API server. Please check your connection.</p>
+                <p>${e.message || 'Could not reach Supabase. Check your credentials or RLS policies.'}</p>
                 <a href="#" onclick="loadDashboard();return false;"><i class="fas fa-redo"></i> Retry</a>
             </div>
         `;
@@ -387,48 +411,20 @@ async function loadDashboard() {
 
 async function loadRecentCompanies() {
     try {
-        const res = await fetch(`${API}/api/admin/companies`, { headers });
-        const companies = await res.json();
+        const companies = await sbQuery('companies', 'select=*&order=created_at.desc&limit=5');
         cachedCompanies = companies;
-
         const container = document.getElementById('recentCompanies');
         if (!container) return;
-
-        if (Array.isArray(companies) && companies.length > 0) {
-            const recent = companies.slice(0, 5);
-            container.innerHTML = `
-                <div class="table-wrap">
-                    <table>
-                        <thead><tr>
-                            <th>Company</th><th>Industry</th><th>Plan</th><th>Registered</th><th>Actions</th>
-                        </tr></thead>
-                        <tbody>
-                            ${recent.map(c => `<tr>
-                                <td>
-                                    <strong>${esc(c.name)}</strong><br>
-                                    <span style="font-size:12px;color:#6B7280">${esc(c.contact_email || '')}</span>
-                                </td>
-                                <td>${esc(c.industry || '-')}</td>
-                                <td><span class="badge badge-${getPlanBadge(c.subscription_plan)}">${esc(c.subscription_plan || 'trial')}</span></td>
-                                <td style="font-size:13px;color:#6B7280">${formatDate(c.created_at)}</td>
-                                <td><button class="btn-sm btn-view" onclick="toast('Company details coming soon','info')"><i class="fas fa-eye"></i></button></td>
-                            </tr>`).join('')}
-                        </tbody>
-                    </table>
-                </div>
-            `;
-        } else {
-            container.innerHTML = '<p style="text-align:center;color:#9CA3AF;padding:30px">No companies registered yet</p>';
-        }
+        renderCompaniesTable(container, companies);
     } catch(e) {
         const container = document.getElementById('recentCompanies');
-        if (container) container.innerHTML = '<p style="text-align:center;color:#EF4444;padding:20px">Failed to load companies</p>';
+        if (container) container.innerHTML = `<p style="text-align:center;color:#EF4444;padding:20px">${e.message}</p>`;
     }
 }
 
-// ═══════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════
 // COMPANIES PAGE
-// ═══════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════
 async function loadCompanies() {
     document.getElementById('pageTitle').textContent = 'All Companies';
     document.getElementById('mainContent').innerHTML = '<div class="loader"><div class="spin"></div><p>Loading companies...</p></div>';
@@ -436,61 +432,57 @@ async function loadCompanies() {
     if (!checkAuth()) return;
 
     try {
-        let companies = cachedCompanies;
-        if (!companies) {
-            const res = await fetch(`${API}/api/admin/companies`, { headers });
-            companies = await res.json();
-            cachedCompanies = companies;
-        }
+        const companies = await sbQuery('companies', 'select=*&order=created_at.desc');
+        cachedCompanies = companies;
 
-        if (Array.isArray(companies) && companies.length > 0) {
-            document.getElementById('mainContent').innerHTML = `
-                <div class="panel">
-                    <div class="panel-header">
-                        <div class="panel-title"><i class="fas fa-building" style="color:#3B82F6;margin-right:8px"></i>Companies (${companies.length})</div>
-                        <span class="panel-badge">${companies.length} total</span>
-                    </div>
-                    <div class="table-wrap">
-                        <table>
-                            <thead><tr>
-                                <th>Company</th><th>Industry</th><th>Size</th><th>Plan</th><th>Valid Until</th><th>Registered</th><th>Actions</th>
-                            </tr></thead>
-                            <tbody>
-                                ${companies.map(c => `<tr>
-                                    <td>
-                                        <strong>${esc(c.name)}</strong><br>
-                                        <span style="font-size:12px;color:#6B7280">${esc(c.contact_email || '')}</span>
-                                    </td>
-                                    <td>${esc(c.industry || '-')}</td>
-                                    <td style="font-size:13px">${esc(c.company_size || '-')}</td>
-                                    <td><span class="badge badge-${getPlanBadge(c.subscription_plan)}">${esc(c.subscription_plan || 'trial')}</span></td>
-                                    <td style="font-size:13px">${esc(c.subscription_end || '-')}</td>
-                                    <td style="font-size:13px;color:#6B7280">${formatDate(c.created_at)}</td>
-                                    <td>
-                                        <button class="btn-sm btn-view" onclick="toast('View details coming soon','info')"><i class="fas fa-eye"></i></button>
-                                    </td>
-                                </tr>`).join('')}
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-            `;
-        } else {
-            document.getElementById('mainContent').innerHTML = `
-                <div class="panel">
-                    <div class="panel-header"><div class="panel-title">Companies</div></div>
-                    <p style="text-align:center;color:#9CA3AF;padding:40px">No companies registered yet</p>
-                </div>
-            `;
-        }
+        const wrap = document.createElement('div');
+        wrap.className = 'panel';
+        wrap.innerHTML = `
+            <div class="panel-header">
+                <div class="panel-title"><i class="fas fa-building" style="color:#3B82F6;margin-right:8px"></i>Companies (${companies.length})</div>
+                <span class="panel-badge">${companies.length} total</span>
+            </div>
+            <div id="companiesTableWrap"></div>
+        `;
+        document.getElementById('mainContent').innerHTML = '';
+        document.getElementById('mainContent').appendChild(wrap);
+        renderCompaniesTable(document.getElementById('companiesTableWrap'), companies);
     } catch(e) {
-        document.getElementById('mainContent').innerHTML = '<p style="text-align:center;color:#EF4444;padding:40px">Failed to load companies</p>';
+        document.getElementById('mainContent').innerHTML = `<p style="text-align:center;color:#EF4444;padding:40px">${e.message}</p>`;
     }
 }
 
-// ═══════════════════════════════════════
+function renderCompaniesTable(container, companies) {
+    if (!Array.isArray(companies) || companies.length === 0) {
+        container.innerHTML = '<p style="text-align:center;color:#9CA3AF;padding:30px">No companies registered yet</p>';
+        return;
+    }
+    container.innerHTML = `
+        <div class="table-wrap">
+            <table>
+                <thead><tr>
+                    <th>Company</th><th>Industry</th><th>Size</th><th>Plan</th><th>Registered</th>
+                </tr></thead>
+                <tbody>
+                    ${companies.map(c => `<tr>
+                        <td>
+                            <strong>${esc(c.name)}</strong><br>
+                            <span style="font-size:12px;color:#6B7280">${esc(c.contact_email || '')}</span>
+                        </td>
+                        <td>${esc(c.industry || '-')}</td>
+                        <td style="font-size:13px">${esc(c.company_size || '-')}</td>
+                        <td><span class="badge badge-${getPlanBadge(c.subscription_plan)}">${esc(c.subscription_plan || 'trial')}</span></td>
+                        <td style="font-size:13px;color:#6B7280">${formatDate(c.created_at)}</td>
+                    </tr>`).join('')}
+                </tbody>
+            </table>
+        </div>
+    `;
+}
+
+// ═══════════════════════════════════════════════════════════════════
 // USERS PAGE
-// ═══════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════
 async function loadUsers() {
     document.getElementById('pageTitle').textContent = 'All Users';
     document.getElementById('mainContent').innerHTML = '<div class="loader"><div class="spin"></div><p>Loading users...</p></div>';
@@ -498,23 +490,7 @@ async function loadUsers() {
     if (!checkAuth()) return;
 
     try {
-        const res = await fetch(`${API}/api/admin/users`, { headers });
-        const users = await res.json();
-
-        if (users.error) {
-            // If endpoint doesn't exist yet, show message
-            document.getElementById('mainContent').innerHTML = `
-                <div class="panel">
-                    <div class="panel-header"><div class="panel-title">All Users</div></div>
-                    <p style="text-align:center;color:#6B7280;padding:40px">
-                        <i class="fas fa-info-circle" style="color:#3B82F6"></i><br><br>
-                        Users endpoint not available yet.<br>
-                        Add <code>/api/admin/users</code> to your Cloudflare Worker.
-                    </p>
-                </div>
-            `;
-            return;
-        }
+        const users = await sbQuery('users', 'select=*&order=created_at.desc');
 
         if (Array.isArray(users) && users.length > 0) {
             document.getElementById('mainContent').innerHTML = `
@@ -533,7 +509,7 @@ async function loadUsers() {
                                     <td><strong>${esc(u.full_name || '-')}</strong></td>
                                     <td style="font-size:13px">${esc(u.email)}</td>
                                     <td><span class="badge badge-${getRoleBadge(u.role)}">${esc(u.role)}</span></td>
-                                    <td><span class="badge ${u.is_active ? 'badge-active' : 'badge-inactive'}">${u.is_active ? 'Active' : 'Inactive'}</span></td>
+                                    <td><span class="badge ${u.is_active !== false ? 'badge-active' : 'badge-inactive'}">${u.is_active !== false ? 'Active' : 'Inactive'}</span></td>
                                     <td style="font-size:13px;color:#6B7280">${formatDate(u.created_at)}</td>
                                 </tr>`).join('')}
                             </tbody>
@@ -550,13 +526,22 @@ async function loadUsers() {
             `;
         }
     } catch(e) {
-        document.getElementById('mainContent').innerHTML = '<p style="text-align:center;color:#EF4444;padding:40px">Failed to load users</p>';
+        document.getElementById('mainContent').innerHTML = `
+            <div class="panel">
+                <div class="panel-header"><div class="panel-title">All Users</div></div>
+                <p style="text-align:center;color:#EF4444;padding:40px">${e.message}</p>
+                <p style="text-align:center;color:#9CA3AF;padding-bottom:20px;font-size:13px">
+                    If this says "permission denied", add an RLS policy on the <code>users</code> table<br>
+                    allowing <code>super_admin</code> to read all rows.
+                </p>
+            </div>
+        `;
     }
 }
 
-// ═══════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════
 // JOBS PAGE
-// ═══════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════
 async function loadJobs() {
     document.getElementById('pageTitle').textContent = 'All Jobs';
     document.getElementById('mainContent').innerHTML = '<div class="loader"><div class="spin"></div><p>Loading jobs...</p></div>';
@@ -564,26 +549,9 @@ async function loadJobs() {
     if (!checkAuth()) return;
 
     try {
-        const res = await fetch(`${API}/api/admin/jobs`, { headers });
-        const data = await res.json();
+        const jobs = await sbQuery('jobs', 'select=*,companies(name)&order=created_at.desc');
 
-        if (data.error) {
-            document.getElementById('mainContent').innerHTML = `
-                <div class="panel">
-                    <div class="panel-header"><div class="panel-title">All Jobs</div></div>
-                    <p style="text-align:center;color:#6B7280;padding:40px">
-                        <i class="fas fa-info-circle" style="color:#3B82F6"></i><br><br>
-                        Jobs endpoint not available yet.<br>
-                        Add <code>/api/admin/jobs</code> to your Cloudflare Worker.
-                    </p>
-                </div>
-            `;
-            return;
-        }
-
-        const jobs = Array.isArray(data) ? data : (data.jobs || []);
-
-        if (jobs.length > 0) {
+        if (Array.isArray(jobs) && jobs.length > 0) {
             document.getElementById('mainContent').innerHTML = `
                 <div class="panel">
                     <div class="panel-header">
@@ -597,7 +565,7 @@ async function loadJobs() {
                             <tbody>
                                 ${jobs.map(j => `<tr>
                                     <td><strong>${esc(j.title || '-')}</strong></td>
-                                    <td style="font-size:13px">${esc(j.company_name || '-')}</td>
+                                    <td style="font-size:13px">${esc(j.companies?.name || j.company_name || '-')}</td>
                                     <td style="font-size:13px">${esc(j.location || '-')}</td>
                                     <td><span class="badge ${j.is_active ? 'badge-active' : 'badge-inactive'}">${j.is_active ? 'Active' : 'Closed'}</span></td>
                                     <td style="font-size:13px;color:#6B7280">${formatDate(j.created_at)}</td>
@@ -616,13 +584,13 @@ async function loadJobs() {
             `;
         }
     } catch(e) {
-        document.getElementById('mainContent').innerHTML = '<p style="text-align:center;color:#EF4444;padding:40px">Failed to load jobs</p>';
+        document.getElementById('mainContent').innerHTML = `<p style="text-align:center;color:#EF4444;padding:40px">${e.message}</p>`;
     }
 }
 
-// ═══════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════
 // UTILS
-// ═══════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════
 function esc(str) {
     return (str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
@@ -646,9 +614,10 @@ function getRoleBadge(role) {
 
 function signOut() {
     if (confirm('Sign out of super admin?')) {
-        localStorage.removeItem('simpatico_token');
-        localStorage.removeItem('simpatico_user');
-        localStorage.removeItem('simpatico_company');
+        ['simpatico_token','simpatico_user','simpatico_refresh','simpatico_company'].forEach(k => {
+            localStorage.removeItem(k);
+            sessionStorage.removeItem(k);
+        });
         window.location.href = 'login.html';
     }
 }
@@ -663,9 +632,9 @@ function toast(msg, type = 'info') {
     setTimeout(() => t.remove(), 4000);
 }
 
-// ═══════════════════════════════════════
-// INIT — Load dashboard on page load
-// ═══════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════
+// INIT
+// ═══════════════════════════════════════════════════════════════════
 loadDashboard();
 </script>
 </body>
