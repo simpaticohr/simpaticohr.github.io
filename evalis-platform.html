@@ -191,12 +191,12 @@
       <p>Intelligent • Adaptive • Proctored</p>
     </div>
 
-    <!-- NAV -->
+    <!-- NAV — FIX 1: Interview tab goes to home, not setup -->
     <div class="nav" id="mainNav">
       <button class="nav-btn active" onclick="nav('home')">🏠 Home</button>
       <button class="nav-btn" onclick="nav('jobs')">💼 Jobs</button>
       <button class="nav-btn" onclick="nav('apply')">📝 Apply</button>
-      <button class="nav-btn" onclick="nav('setup')">🎤 Interview</button>
+      <button class="nav-btn" onclick="nav('home')">🎤 Interview</button>
       <button class="nav-btn" onclick="nav('hr')">🏢 HR</button>
     </div>
 
@@ -341,11 +341,11 @@
   <div class="proctor-cam hidden" id="proctorCam"><video id="proctorVideo" autoplay muted playsinline></video><div class="cam-label">🔴 REC</div></div>
 
 <script>
-  const W="https://solitary-sound-11b9.simpaticohrconsultancy.workers.dev/";
+const W="https://solitary-sound-11b9.simpaticohrconsultancy.workers.dev/";
 const SILENCE_TIMEOUT=3.0,MIN_ANS=10,MAX_RETRIES=3,MAX_VIOLATIONS=3;
 const HR_PASSWORD="simpatico2025";
 let hrAuth=false;
-let mode="mock",cv="",lang="en",role="",level="",totalQ=10;
+let mode="",cv="",lang="en",role="",level="",totalQ=10;
 let mainQ=0,isFollowUp=false,chat=[],answers=[];
 let rec=null,transcript="",timerInt=null,secs=0;
 let listening=false,silTimer=null,lastSpeech=0;
@@ -398,9 +398,14 @@ function showError(m){
 }
 
 // ═══════════════════════════════════════
-// NAVIGATION (with HR password)
+// NAVIGATION
+// FIX 2: Block direct nav('setup') — must come via startMode() or checkToken()
 // ═══════════════════════════════════════
 function nav(p){
+  // Block direct access to setup without a valid mode set
+  if(p==='setup'&&mode==='mock'&&!hasMockAccess()){showPaywall();return;}
+  if(p==='setup'&&!mode){nav('home');return;}
+
   if(p==='hr'&&!hrAuth){
     const pwd=prompt("🔒 Enter HR Admin Password:");
     if(!pwd)return;
@@ -437,7 +442,7 @@ async function loadJobs(){
       </div>
       <p style="font-size:0.82rem;color:var(--muted);margin:6px 0;">${(j.description||'').substring(0,180)}</p>
       <div>${(j.skills||[]).map(s=>'<span class="skill-tag">'+s+'</span>').join('')}</div>
-      <button class="btn btn-go" style="margin-top:10px;padding:10px;" 
+      <button class="btn btn-go" style="margin-top:10px;padding:10px;"
         onclick="applyTo('${j.id}','${(j.title||'').replace(/'/g,"\\'")}')">📝 Apply</button>
     </div>`).join('');
   }catch(e){el.innerHTML='<p style="color:var(--red);">Error: '+e.message+'</p>'}
@@ -684,23 +689,19 @@ function updateProg(){
 }
 
 // ═══════════════════════════════════════
-// ★ FIXED TTS (Text-to-Speech)
+// TTS (Text-to-Speech)
 // ═══════════════════════════════════════
 let voicesLoaded=false;
 let cachedVoices=[];
 
 function loadVoices(){
   cachedVoices=speechSynthesis.getVoices();
-  if(cachedVoices.length>0){
-    voicesLoaded=true;
-    console.log('[TTS] Loaded',cachedVoices.length,'voices');
-  }
+  if(cachedVoices.length>0){voicesLoaded=true;}
 }
 
 if('speechSynthesis' in window){
   loadVoices();
   speechSynthesis.onvoiceschanged=()=>{loadVoices()};
-  // Force load on some browsers
   setTimeout(loadVoices,100);
   setTimeout(loadVoices,500);
   setTimeout(loadVoices,1000);
@@ -708,12 +709,7 @@ if('speechSynthesis' in window){
 
 function speak(text){
   return new Promise(resolve=>{
-    if(!('speechSynthesis' in window)){
-      console.warn('[TTS] Not supported');
-      resolve();return;
-    }
-
-    // Cancel any ongoing speech
+    if(!('speechSynthesis' in window)){resolve();return;}
     speechSynthesis.cancel();
     speaking=true;
     setOrb('speaking');
@@ -726,83 +722,32 @@ function speak(text){
         utterance.pitch=1;
         utterance.volume=1;
 
-        // Find best voice
         const targetLang=(L[lang]?.t||'en-US').split('-')[0];
         const voices=speechSynthesis.getVoices();
-
         if(voices.length>0){
-          // Prefer non-default voice for better quality
           const match=voices.find(v=>v.lang.startsWith(targetLang)&&!v.localService)
             ||voices.find(v=>v.lang.startsWith(targetLang))
             ||voices.find(v=>v.lang.startsWith('en'));
-          if(match){
-            utterance.voice=match;
-            console.log('[TTS] Using voice:',match.name,match.lang);
-          }
+          if(match)utterance.voice=match;
         }
 
-        utterance.onend=()=>{
-          speaking=false;
-          console.log('[TTS] Finished speaking');
-          resolve();
-        };
-
-        utterance.onerror=(e)=>{
-          console.error('[TTS] Error:',e.error||e);
-          speaking=false;
-          resolve();
-        };
-
-        // Chrome bug: long text gets cut off
-        // Workaround: keep speechSynthesis alive
         const keepAlive=setInterval(()=>{
           if(!speaking){clearInterval(keepAlive);return}
           speechSynthesis.pause();
           speechSynthesis.resume();
         },10000);
 
-        utterance.onend=()=>{
-          clearInterval(keepAlive);
-          speaking=false;
-          resolve();
-        };
-
-        utterance.onerror=(e)=>{
-          clearInterval(keepAlive);
-          console.error('[TTS] Error:',e.error||e);
-          speaking=false;
-          resolve();
-        };
-
+        utterance.onend=()=>{clearInterval(keepAlive);speaking=false;resolve()};
+        utterance.onerror=(e)=>{clearInterval(keepAlive);speaking=false;resolve()};
         speechSynthesis.speak(utterance);
-        console.log('[TTS] Speaking:',text.substring(0,50)+'...');
-
-      }catch(err){
-        console.error('[TTS] Exception:',err);
-        speaking=false;
-        resolve();
-      }
+      }catch(err){speaking=false;resolve()}
     }
 
-    // Wait for voices to be ready
     const voices=speechSynthesis.getVoices();
-    if(voices.length>0){
-      setTimeout(doSpeak,150);
-    }else{
-      console.log('[TTS] Waiting for voices...');
-      const handler=()=>{
-        speechSynthesis.onvoiceschanged=null;
-        setTimeout(doSpeak,150);
-      };
-      speechSynthesis.onvoiceschanged=handler;
-      // Fallback: try anyway after 1 second
-      setTimeout(()=>{
-        if(speaking&&!speechSynthesis.speaking){
-          console.log('[TTS] Fallback: speaking without voice match');
-          speechSynthesis.onvoiceschanged=null;
-          doSpeak();
-        }
-      },1000);
+    if(voices.length>0){setTimeout(doSpeak,150)}
+    else{
+      speechSynthesis.onvoiceschanged=()=>{speechSynthesis.onvoiceschanged=null;setTimeout(doSpeak,150)};
+      setTimeout(()=>{if(speaking&&!speechSynthesis.speaking){speechSynthesis.onvoiceschanged=null;doSpeak()}},1000);
     }
   });
 }
@@ -962,7 +907,7 @@ async function requestScreenShare(){
 }
 
 // ═══════════════════════════════════════
-// ★ START INTERVIEW (with token validation)
+// START INTERVIEW (with token + paywall check)
 // ═══════════════════════════════════════
 async function startInterview(){
   const rs=document.getElementById('roleSel').value;
@@ -981,7 +926,6 @@ async function startInterview(){
 
     if(!n||!e){toast('❌ Name & Email required');return}
 
-    // Validate token
     if(!token){
       toast('❌ Token required!');
       alert('🔒 You need a valid interview token.\n\nTokens are sent by HR after your application is shortlisted.\n\nTo practice, use Mock Interview instead.');
@@ -993,36 +937,24 @@ async function startInterview(){
       const data=await db('select','interviews',null,{token});
       const interview=Array.isArray(data)?data[0]:data;
 
-      if(!interview||interview.error){
-        toast('❌ Invalid token!');
-        alert('This token is not valid.');return;
-      }
-      if(interview.status==='completed'){
-        toast('❌ Already completed!');
-        alert('This interview was already completed.');return;
-      }
-      if(interview.expires_at&&new Date(interview.expires_at)<new Date()){
-        toast('❌ Token expired!');
-        alert('This token has expired. Contact HR.');return;
-      }
+      if(!interview||interview.error){toast('❌ Invalid token!');alert('This token is not valid.');return;}
+      if(interview.status==='completed'){toast('❌ Already completed!');alert('This interview was already completed.');return;}
+      if(interview.expires_at&&new Date(interview.expires_at)<new Date()){toast('❌ Token expired!');alert('This token has expired. Contact HR.');return;}
 
       curAppId=interview.application_id;
       curJobId=interview.job_id;
 
-      await db('update','interviews',{
-        status:'in_progress',started_at:new Date().toISOString()
-      },{token});
-
+      await db('update','interviews',{status:'in_progress',started_at:new Date().toISOString()},{token});
       toast('✅ Token verified!');
-    }catch(err){
-      toast('❌ Validation failed: '+err.message);return;
-    }
+    }catch(err){toast('❌ Validation failed: '+err.message);return;}
 
     document.getElementById('screenShareOverlay').classList.remove('hidden');
     return;
   }
 
-  // Mock mode
+  // ── FIX 3: Mock mode — enforce paywall before starting ──
+  if(!hasMockAccess()){showPaywall();return;}
+
   const btn=document.getElementById('startBtn');
   btn.disabled=true;btn.textContent='⏳ Connecting...';
   try{
@@ -1193,7 +1125,6 @@ async function saveResults(r){
       violation_log:violations,violation_count:violations.length
     });
     await db('update','applications',{status:'interviewed'},{id:curAppId});
-    console.log('[DB] Results saved!');
   }catch(e){console.error('[DB]',e)}
 }
 
@@ -1271,7 +1202,6 @@ function renderRes(r){
     list.appendChild(d);
   });
 
-  // Animated score counter
   let cur=0;
   const el=document.getElementById('scoreNum');
   const iv=setInterval(()=>{
@@ -1301,9 +1231,7 @@ async function loadHRJobs(){
   const el=document.getElementById('hrJobsList');
   try{
     const data=await db('select','jobs',null,null,null,'created_at.desc');
-    if(!data?.length||data.error){
-      el.innerHTML='<p style="color:var(--muted);text-align:center;">No jobs.</p>';return;
-    }
+    if(!data?.length||data.error){el.innerHTML='<p style="color:var(--muted);text-align:center;">No jobs.</p>';return;}
     el.innerHTML=data.map(j=>`<div class="job-card" onclick="loadCands('${j.id}','${(j.title||'').replace(/'/g,"\\'")}')">
       <div style="display:flex;justify-content:space-between;">
         <h3>${j.title}</h3>
@@ -1357,9 +1285,7 @@ async function loadCands(jobId,title){
   el.innerHTML='<span class="loading"></span>';
   try{
     const data=await db('select','applications',null,{job_id:jobId},null,'created_at.desc');
-    if(!data?.length||data.error){
-      el.innerHTML='<p style="color:var(--muted);text-align:center;padding:16px;">No candidates.</p>';return;
-    }
+    if(!data?.length||data.error){el.innerHTML='<p style="color:var(--muted);text-align:center;padding:16px;">No candidates.</p>';return;}
     el.innerHTML=data.map(c=>{
       const sc=c.ats_score||0;
       const col=sc>=70?'#10b981':sc>=50?'#f59e0b':'#ef4444';
@@ -1425,7 +1351,6 @@ async function checkToken(){
   const params=new URLSearchParams(location.search);
   const token=params.get('token');
 
-  // Handle #hr hash
   const hash=location.hash.replace('#','');
   if(hash==='hr'){nav('hr');return}
   if(hash&&!token){nav(hash);return}
@@ -1468,7 +1393,10 @@ function checkMode(){
   const params=new URLSearchParams(location.search);
   const m=params.get('mode');
   if(m==='real')startMode('real');
-  else if(m==='mock')startMode('mock');
+  else if(m==='mock'){
+    if(hasMockAccess())startMode('mock');
+    else showPaywall();
+  }
 }
 
 // ═══════════════════════════════════════
@@ -1477,16 +1405,15 @@ function checkMode(){
 window.addEventListener('DOMContentLoaded',()=>{
   if(window.pdfjsLib)console.log('✅ PDF.js loaded');
   if(!window.SpeechRecognition&&!window.webkitSpeechRecognition)console.warn('⚠️ Use Chrome for voice');
-  console.log('[TTS] Voices ready:',speechSynthesis.getVoices().length);
   checkToken();
   checkMode();
 });
-  // ═══════════════════════════════════════
-// 🔐 READ ADMIN CONFIG (add this only)
+
+// ═══════════════════════════════════════
+// ADMIN CONFIG
 // ═══════════════════════════════════════
 (function applyAdminConfig(){
   try{
-    // Maintenance Mode Check
     const cfg=JSON.parse(localStorage.getItem("adminConfig")||"{}");
     if(cfg.maintenance){
       document.querySelector('.container').innerHTML=`
@@ -1498,57 +1425,29 @@ window.addEventListener('DOMContentLoaded',()=>{
       return;
     }
 
-    // Apply Site Config (colors, text, etc)
     const site=JSON.parse(localStorage.getItem("siteConfig")||"{}");
-
-    // Colors
-    if(site.colorPrimary) document.documentElement.style.setProperty('--accent',site.colorPrimary);
-    if(site.colorSecondary) document.documentElement.style.setProperty('--accent2',site.colorSecondary);
-    if(site.colorSuccess) document.documentElement.style.setProperty('--green',site.colorSuccess);
-    if(site.colorDanger) document.documentElement.style.setProperty('--red',site.colorDanger);
-    if(site.colorBg) document.documentElement.style.setProperty('--bg',site.colorBg);
-
-    // Text
-    if(site.siteTitle){
-      const h=document.querySelector('.header h1');
-      if(h) h.textContent='🧠 '+site.siteTitle;
-    }
-    if(site.siteSubtitle){
-      const p=document.querySelector('.header p');
-      if(p) p.textContent=site.siteSubtitle;
-    }
-    if(site.companyName){
-      const logo=document.querySelector('.top-logo');
-      if(logo) logo.innerHTML=site.companyName.replace('HR','')+'<span>HR</span>';
-    }
-
-    // Font
-    if(site.font) document.body.style.fontFamily=site.font;
-
-    // Border Radius
-    if(site.radius){
-      document.querySelectorAll('.card,.mode-card').forEach(el=>{
-        el.style.borderRadius=site.radius+'px';
-      });
-    }
-
-    // Home Cards
+    if(site.colorPrimary)document.documentElement.style.setProperty('--accent',site.colorPrimary);
+    if(site.colorSecondary)document.documentElement.style.setProperty('--accent2',site.colorSecondary);
+    if(site.colorSuccess)document.documentElement.style.setProperty('--green',site.colorSuccess);
+    if(site.colorDanger)document.documentElement.style.setProperty('--red',site.colorDanger);
+    if(site.colorBg)document.documentElement.style.setProperty('--bg',site.colorBg);
+    if(site.siteTitle){const h=document.querySelector('.header h1');if(h)h.textContent='🧠 '+site.siteTitle;}
+    if(site.siteSubtitle){const p=document.querySelector('.header p');if(p)p.textContent=site.siteSubtitle;}
+    if(site.companyName){const logo=document.querySelector('.top-logo');if(logo)logo.innerHTML=site.companyName.replace('HR','')+'<span>HR</span>';}
+    if(site.font)document.body.style.fontFamily=site.font;
+    if(site.radius){document.querySelectorAll('.card,.mode-card').forEach(el=>{el.style.borderRadius=site.radius+'px'});}
     const cards=document.querySelectorAll('.mode-card');
-    if(site.card1 && cards[0]) cards[0].querySelector('h3').textContent=site.card1;
-    if(site.card2 && cards[1]) cards[1].querySelector('h3').textContent=site.card2;
-    if(site.card3 && cards[2]) cards[2].querySelector('h3').textContent=site.card3;
-    if(site.card4 && cards[3]) cards[3].querySelector('h3').textContent=site.card4;
-
-    // Nav Links
+    if(site.card1&&cards[0])cards[0].querySelector('h3').textContent=site.card1;
+    if(site.card2&&cards[1])cards[1].querySelector('h3').textContent=site.card2;
+    if(site.card3&&cards[2])cards[2].querySelector('h3').textContent=site.card3;
+    if(site.card4&&cards[3])cards[3].querySelector('h3').textContent=site.card4;
     const links=document.querySelectorAll('.top-link');
-    if(site.nav1 && links[0]) links[0].textContent=site.nav1;
-    if(site.nav1url && links[0]) links[0].href=site.nav1url;
-    if(site.nav2 && links[1]) links[1].textContent=site.nav2;
-    if(site.nav2url && links[1]) links[1].href=site.nav2url;
-    if(site.nav3 && links[2]) links[2].textContent=site.nav3;
-    if(site.nav3url && links[2]) links[2].href=site.nav3url;
-
-    // Banner
+    if(site.nav1&&links[0])links[0].textContent=site.nav1;
+    if(site.nav1url&&links[0])links[0].href=site.nav1url;
+    if(site.nav2&&links[1])links[1].textContent=site.nav2;
+    if(site.nav2url&&links[1])links[1].href=site.nav2url;
+    if(site.nav3&&links[2])links[2].textContent=site.nav3;
+    if(site.nav3url&&links[2])links[2].href=site.nav3url;
     if(site.bannerShow){
       const b=document.getElementById('announceBanner');
       if(!b){
@@ -1564,24 +1463,18 @@ window.addEventListener('DOMContentLoaded',()=>{
         b.textContent=site.bannerText||'';
       }
     }
-
-
   }catch(e){console.log('[AdminConfig]',e)}
 })();
 
 // ═══════════════════════════════════════
-// 🔒 MOCK INTERVIEW — ALWAYS PAID
+// MOCK ACCESS / PAYWALL
 // ═══════════════════════════════════════
-
 function hasMockAccess(){
   var data=localStorage.getItem('mockAccess');
   if(!data)return false;
   try{
     var d=JSON.parse(data);
-    if(d.expires&&new Date(d.expires)<new Date()){
-      localStorage.removeItem('mockAccess');
-      return false;
-    }
+    if(d.expires&&new Date(d.expires)<new Date()){localStorage.removeItem('mockAccess');return false;}
     return true;
   }catch(e){localStorage.removeItem('mockAccess');return false;}
 }
@@ -1657,7 +1550,6 @@ function startRazorpay(){
 
   if(!key){
     var upi=cfg.upiId||'';
-    // Show inline UPI info in paywall instead of alert
     var box=document.createElement('div');
     box.style.cssText='background:rgba(99,102,241,.1);border:1px solid rgba(99,102,241,.3);border-radius:12px;padding:16px;margin-top:12px;font-size:0.85rem;color:#a5b4fc;line-height:1.6;';
     box.innerHTML='<strong>Pay via UPI</strong><br>UPI ID: <span style="color:#f8fafc;font-family:monospace;">'+(upi||'Contact admin')+'</span><br><span style="color:#94a3b8;font-size:0.78rem;">After payment, request your access code from HR.</span>';
@@ -1706,7 +1598,6 @@ function useAccessCode(){
   var cfg=JSON.parse(localStorage.getItem('adminConfig')||'{}');
   var days=parseInt(cfg.accessDays)||30;
 
-  // Check DB codes first
   db('select','access_codes',null,{code:code,is_active:true})
     .then(function(data){
       var r=Array.isArray(data)?data[0]:data;
