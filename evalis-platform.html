@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
-<head> 
+<head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>AI Interview Platform | Simpatico HR</title>
@@ -204,7 +204,7 @@
     <div id="page-home">
       <div class="mode-cards">
         <div class="mode-card" onclick="nav('jobs')"><div class="mode-icon">💼</div><h3>Browse Jobs</h3><p>View openings & apply</p><span class="mode-badge" style="background:rgba(16,185,129,.15);color:var(--green);">APPLY</span></div>
-        <div class="mode-card" onclick="startMode('mock')"><div class="mode-icon">🎯</div><h3>Mock Interview</h3><p>Practice freely. No monitoring.</p><span class="mode-badge" style="background:rgba(99,102,241,.15);color:var(--accent);">FREE</span></div>
+        <div class="mode-card" onclick="tryMockInterview()"><div class="mode-icon">🎯</div><h3>Mock Interview</h3><p>Practice freely. No monitoring.</p><span class="mode-badge" style="background:rgba(245,158,11,.15);color:#f59e0b;">PAID</span></div>
         <div class="mode-card" onclick="startMode('real')"><div class="mode-icon">🔒</div><h3>Real Interview</h3><p>Proctored. Anti-cheat. One attempt.</p><span class="mode-badge" style="background:rgba(239,68,68,.15);color:var(--red);">PROCTORED</span></div>
         <div class="mode-card" onclick="nav('hr')"><div class="mode-icon">🏢</div><h3>HR Dashboard</h3><p>Post jobs, manage candidates</p><span class="mode-badge" style="background:rgba(245,158,11,.15);color:var(--yellow);">ADMIN</span></div>
       </div>
@@ -341,10 +341,10 @@
   <div class="proctor-cam hidden" id="proctorCam"><video id="proctorVideo" autoplay muted playsinline></video><div class="cam-label">🔴 REC</div></div>
 
 <script>
-  const W="https://solitary-sound-11b9.simpaticohrconsultancy.workers.dev";
+  const W="https://solitary-sound-11b9.simpaticohrconsultancy.workers.dev/";
 const SILENCE_TIMEOUT=3.0,MIN_ANS=10,MAX_RETRIES=3,MAX_VIOLATIONS=3;
+const HR_PASSWORD="simpatico2025";
 let hrAuth=false;
-let curToken=null; // stores token for real-mode interview update
 let mode="mock",cv="",lang="en",role="",level="",totalQ=10;
 let mainQ=0,isFollowUp=false,chat=[],answers=[];
 let rec=null,transcript="",timerInt=null,secs=0;
@@ -402,7 +402,10 @@ function showError(m){
 // ═══════════════════════════════════════
 function nav(p){
   if(p==='hr'&&!hrAuth){
-    showHRLogin();return;
+    const pwd=prompt("🔒 Enter HR Admin Password:");
+    if(!pwd)return;
+    if(pwd!==HR_PASSWORD){toast("❌ Wrong password!");return}
+    hrAuth=true;toast("✅ HR Access granted!");
   }
   const pages=['home','jobs','apply','setup','live','results','hr'];
   pages.forEach(x=>document.getElementById('page-'+x)?.classList.add('hidden'));
@@ -412,48 +415,6 @@ function nav(p){
   document.querySelectorAll('#mainNav .nav-btn')[map[p]||0]?.classList.add('active');
   if(p==='jobs')loadJobs();
   if(p==='hr')loadHR();
-}
-
-function showHRLogin(){
-  let modal=document.getElementById('hrLoginModal');
-  if(!modal){
-    modal=document.createElement('div');
-    modal.id='hrLoginModal';
-    modal.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.75);backdrop-filter:blur(10px);z-index:9000;display:flex;align-items:center;justify-content:center;padding:20px;';
-    modal.innerHTML=`<div style="background:rgba(15,23,42,.95);border:1px solid rgba(255,255,255,.1);border-radius:20px;padding:32px;width:100%;max-width:380px;text-align:center;">
-      <div style="font-size:2rem;margin-bottom:8px;">🔐</div>
-      <h3 style="margin-bottom:6px;color:#f8fafc;">HR Admin Access</h3>
-      <p style="color:#94a3b8;font-size:0.82rem;margin-bottom:20px;">Enter your HR admin password</p>
-      <input type="password" id="hrPwdInput" placeholder="Password" style="width:100%;padding:12px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:10px;color:#f8fafc;font-size:0.95rem;outline:none;font-family:inherit;margin-bottom:8px;"
-        onkeydown="if(event.key==='Enter')doHRLogin()">
-      <div id="hrLoginErr" style="color:#ef4444;font-size:0.8rem;margin-bottom:8px;display:none;"></div>
-      <button onclick="doHRLogin()" style="width:100%;padding:13px;background:linear-gradient(135deg,#6366f1,#8b5cf6);border:none;border-radius:12px;color:#fff;font-weight:700;cursor:pointer;font-size:0.95rem;font-family:inherit;margin-bottom:8px;">🔓 Login</button>
-      <button onclick="document.getElementById('hrLoginModal').style.display='none'" style="width:100%;padding:11px;background:transparent;border:1px solid rgba(255,255,255,.1);border-radius:12px;color:#94a3b8;font-weight:600;cursor:pointer;font-size:0.88rem;font-family:inherit;">Cancel</button>
-    </div>`;
-    document.body.appendChild(modal);
-    modal.addEventListener('click',e=>{if(e.target===modal)modal.style.display='none';});
-  }
-  modal.style.display='flex';
-  setTimeout(()=>document.getElementById('hrPwdInput').focus(),100);
-}
-
-function doHRLogin(){
-  const input=document.getElementById('hrPwdInput');
-  const err=document.getElementById('hrLoginErr');
-  const pwd=input.value.trim();
-  if(!pwd){err.textContent='Enter password';err.style.display='block';return;}
-  // Check against adminConfig (set by admin dashboard) or fallback default
-  const cfg=JSON.parse(localStorage.getItem('adminConfig')||'{}');
-  const correctPwd=cfg.hrPassword||'simpatico2025';
-  if(pwd!==correctPwd){
-    err.textContent='❌ Wrong password';err.style.display='block';
-    input.value='';input.focus();return;
-  }
-  hrAuth=true;
-  document.getElementById('hrLoginModal').style.display='none';
-  input.value='';err.style.display='none';
-  toast('✅ HR Access granted!');
-  nav('hr');
 }
 
 // ═══════════════════════════════════════
@@ -470,12 +431,12 @@ async function loadJobs(){
     el.innerHTML=data.map(j=>`<div class="job-card">
       <h3>${j.title||''}</h3>
       <div class="job-meta">
-        <span>🏢 ${j.company_name||j["Company Name"]||j.department||''}</span>
+        <span>🏢 ${j["Company Name"]||j.department||''}</span>
         <span>📍 ${j.location||''} ${j.Country?'('+j.Country+')':''}</span>
         <span>📊 ${j.level||'Mid-Level'}</span>
       </div>
       <p style="font-size:0.82rem;color:var(--muted);margin:6px 0;">${(j.description||'').substring(0,180)}</p>
-      <div>${(Array.isArray(j.skills)?j.skills:typeof j.skills==='string'&&j.skills?j.skills.split(',').map(s=>s.trim()).filter(Boolean):[]).map(s=>'<span class="skill-tag">'+s+'</span>').join('')}</div>
+      <div>${(j.skills||[]).map(s=>'<span class="skill-tag">'+s+'</span>').join('')}</div>
       <button class="btn btn-go" style="margin-top:10px;padding:10px;" 
         onclick="applyTo('${j.id}','${(j.title||'').replace(/'/g,"\\'")}')">📝 Apply</button>
     </div>`).join('');
@@ -580,7 +541,7 @@ async function exFile(f){
   else if(ext==='pdf')t=await exPDF(f);
   else if(ext==='doc'||ext==='docx')t=await exDOC(f);
   else t=await f.text();
-  return t.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g,'').replace(/\s+/g,' ').trim().substring(0,5000);
+  return t.replace(/\s+/g,' ').replace(/[^\x20-\x7E\n]/g,'').trim().substring(0,5000);
 }
 
 async function exPDF(f){
@@ -611,10 +572,8 @@ async function exDOC(f){
 async function exFB(f){
   const b=await f.arrayBuffer();
   const t=new TextDecoder('utf-8',{fatal:false}).decode(b);
-  // Only strip control characters, keep unicode (for Indian language CVs)
-  const clean=t.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g,'');
-  const r=clean.match(/[\w\u0900-\u097F\u0D00-\u0D7F\u0600-\u06FF\u0400-\u04FF@.,:;!?\-/()\s]{5,}/g);
-  return r?r.filter(s=>s.trim().length>5).join(' '):'';
+  const r=t.match(/[a-zA-Z0-9@.,:;!?\-/()\s]{5,}/g);
+  return r?r.filter(s=>(s.match(/[a-zA-Z]/g)||[]).length/s.length>0.5&&s.trim().length>5).join(' '):'';
 }
 
 document.getElementById('cvFile').addEventListener('change',async e=>{
@@ -636,7 +595,7 @@ async function callAI(messages){
   const ctrl=new AbortController();
   const tm=setTimeout(()=>ctrl.abort(),45000);
   try{
-    const r=await fetch(W+"/",{method:"POST",headers:{"Content-Type":"application/json"},
+    const r=await fetch(W,{method:"POST",headers:{"Content-Type":"application/json"},
       body:JSON.stringify({messages}),signal:ctrl.signal});
     clearTimeout(tm);
     if(!r.ok)throw new Error('Error '+r.status);
@@ -1049,7 +1008,6 @@ async function startInterview(){
 
       curAppId=interview.application_id;
       curJobId=interview.job_id;
-      curToken=token; // ✅ Store for saveResults() UPDATE
 
       await db('update','interviews',{
         status:'in_progress',started_at:new Date().toISOString()
@@ -1219,7 +1177,10 @@ Keep strings short. ONLY JSON.`}
 
 async function saveResults(r){
   try{
-    const resultData={
+    if(!curAppId)return;
+    const token=crypto.randomUUID?crypto.randomUUID():Date.now().toString(36);
+    await db('insert','interviews',{
+      application_id:curAppId,job_id:curJobId,token,
       interview_type:mode,status:'completed',
       interview_role:role,interview_level:level,interview_language:lang,
       question_count:totalQ,
@@ -1230,23 +1191,8 @@ async function saveResults(r){
       strengths:r.strengths||[],improvements:r.improvements||[],
       feedback:r.feedback||[],answers:answers,
       violation_log:violations,violation_count:violations.length
-    };
-
-    if(mode==='real'&&curToken){
-      // UPDATE the existing token-linked interview row (do NOT create duplicate)
-      await db('update','interviews',resultData,{token:curToken});
-    }else{
-      // Mock mode — insert a new result row if we have an app context, else skip
-      if(curAppId){
-        const newToken=crypto.randomUUID?crypto.randomUUID():Date.now().toString(36);
-        await db('insert','interviews',{
-          ...resultData,
-          application_id:curAppId,job_id:curJobId,token:newToken
-        });
-      }
-    }
-
-    if(curAppId)await db('update','applications',{status:'interviewed'},{id:curAppId});
+    });
+    await db('update','applications',{status:'interviewed'},{id:curAppId});
     console.log('[DB] Results saved!');
   }catch(e){console.error('[DB]',e)}
 }
@@ -1383,7 +1329,6 @@ async function postJob(){
       title,
       category:document.getElementById('hrCat').value,
       department:document.getElementById('hrDept').value.trim(),
-      company_name:document.getElementById('hrCompany').value.trim(),
       "Company Name":document.getElementById('hrCompany').value.trim(),
       location:document.getElementById('hrLocation').value.trim(),
       level:document.getElementById('hrLevel').value,
@@ -1391,7 +1336,7 @@ async function postJob(){
       skills:document.getElementById('hrSkills').value.split(',').map(s=>s.trim()).filter(Boolean),
       question_count:parseInt(document.getElementById('hrQCount').value),
       ats_threshold:parseInt(document.getElementById('hrATS').value),
-      is_active:true,status:'active',created_at:new Date().toISOString()
+      is_active:true,status:'active'
     });
     toast('✅ Posted!');
     document.getElementById('hrTitle').value='';
@@ -1466,45 +1411,11 @@ async function sendInvite(appId,email){
       expires_at:new Date(Date.now()+72*3600000).toISOString()
     });
     const url=`${location.origin}${location.pathname}?token=${token}`;
-
-    // Copy to clipboard
     try{await navigator.clipboard.writeText(url)}catch(e){}
-
-    // Show proper link modal instead of alert()
-    let lm=document.getElementById('inviteLinkModal');
-    if(!lm){
-      lm=document.createElement('div');
-      lm.id='inviteLinkModal';
-      lm.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.75);backdrop-filter:blur(8px);z-index:9000;display:flex;align-items:center;justify-content:center;padding:20px;';
-      lm.innerHTML=`<div style="background:rgba(15,23,42,.95);border:1px solid rgba(255,255,255,.1);border-radius:20px;padding:28px;width:100%;max-width:460px;">
-        <h3 style="margin-bottom:6px;color:#f8fafc;">📧 Interview Invitation Ready</h3>
-        <p id="inviteEmailLabel" style="color:#94a3b8;font-size:0.82rem;margin-bottom:16px;"></p>
-        <label style="display:block;font-size:0.75rem;color:#94a3b8;margin-bottom:6px;font-weight:600;">INTERVIEW LINK (send this to the candidate)</label>
-        <div style="display:flex;gap:8px;">
-          <input type="text" id="inviteLinkInput" readonly style="flex:1;padding:10px;background:rgba(99,102,241,.08);border:1px solid rgba(99,102,241,.3);border-radius:10px;color:#a5b4fc;font-size:0.82rem;outline:none;font-family:monospace;">
-          <button onclick="copyInviteLink()" id="inviteCopyBtn" style="padding:10px 16px;background:#6366f1;border:none;border-radius:10px;color:#fff;font-weight:700;cursor:pointer;font-family:inherit;white-space:nowrap;">📋 Copy</button>
-        </div>
-        <p style="margin-top:10px;font-size:0.75rem;color:#64748b;">⏰ Expires in 72 hours • Token is single-use</p>
-        <button onclick="document.getElementById('inviteLinkModal').style.display='none'" style="width:100%;padding:12px;margin-top:16px;background:transparent;border:1px solid rgba(255,255,255,.1);border-radius:12px;color:#94a3b8;font-weight:600;cursor:pointer;font-size:0.88rem;font-family:inherit;">Close</button>
-      </div>`;
-      document.body.appendChild(lm);
-      lm.addEventListener('click',e=>{if(e.target===lm)lm.style.display='none';});
-    }
-    document.getElementById('inviteEmailLabel').textContent='For: '+email;
-    document.getElementById('inviteLinkInput').value=url;
-    lm.style.display='flex';
-
-    toast('✅ Invite link ready & copied!');
+    toast('✅ Link created!');
+    alert(`📧 Send to ${email}:\n\n${url}\n\n(Copied to clipboard!)`);
     loadCands(selHRJob,'');
   }catch(e){toast('❌ '+e.message)}
-}
-
-function copyInviteLink(){
-  const input=document.getElementById('inviteLinkInput');
-  const btn=document.getElementById('inviteCopyBtn');
-  try{navigator.clipboard.writeText(input.value)}catch(e){input.select();document.execCommand('copy')}
-  btn.textContent='✅ Copied!';
-  setTimeout(()=>{btn.textContent='📋 Copy'},2000);
 }
 
 // ═══════════════════════════════════════
@@ -1654,278 +1565,181 @@ window.addEventListener('DOMContentLoaded',()=>{
       }
     }
 
-    // Mock Interview Lock
-    if(cfg.mockPaid){
-      // Override mock click to check payment
-      window._mockPaidEnabled=true;
-      window._mockPrice=cfg.mockPrice||199;
-      window._mockDays=cfg.accessDays||30;
-    }
 
   }catch(e){console.log('[AdminConfig]',e)}
 })();
-  // ═══════════════════════════════════════
-// 🔒 MOCK INTERVIEW PAYMENT SYSTEM
+
+// ═══════════════════════════════════════
+// 🔒 MOCK INTERVIEW — ALWAYS PAID
 // ═══════════════════════════════════════
 
-// Check if user has valid mock access
 function hasMockAccess(){
-  var data = localStorage.getItem("mockAccess");
-  if(!data) return false;
+  var data=localStorage.getItem('mockAccess');
+  if(!data)return false;
   try{
-    var d = JSON.parse(data);
-    // Check if expired
-    if(d.expires && new Date(d.expires) < new Date()){
-      // EXPIRED — auto revoke
-      localStorage.removeItem("mockAccess");
-      console.log('[Mock] Access expired, revoked');
+    var d=JSON.parse(data);
+    if(d.expires&&new Date(d.expires)<new Date()){
+      localStorage.removeItem('mockAccess');
       return false;
     }
     return true;
-  }catch(e){
-    localStorage.removeItem("mockAccess");
-    return false;
-  }
+  }catch(e){localStorage.removeItem('mockAccess');return false;}
 }
 
-// Grant access after payment
-function grantMockAccess(type, days){
-  var expires = new Date();
-  expires.setDate(expires.getDate() + (days || 30));
-  localStorage.setItem("mockAccess", JSON.stringify({
-    type: type,        // "paid" or "code"
-    granted: new Date().toISOString(),
-    expires: expires.toISOString()
+function grantMockAccess(type,days){
+  var expires=new Date();
+  expires.setDate(expires.getDate()+(days||30));
+  localStorage.setItem('mockAccess',JSON.stringify({
+    type:type,granted:new Date().toISOString(),expires:expires.toISOString()
   }));
-  console.log('[Mock] Access granted for ' + days + ' days');
 }
 
-// Check days remaining
 function getMockDaysLeft(){
   try{
-    var d = JSON.parse(localStorage.getItem("mockAccess")||"{}");
-    if(!d.expires) return 0;
-    var left = Math.ceil((new Date(d.expires) - new Date()) / 86400000);
-    return Math.max(0, left);
-  }catch(e){ return 0; }
+    var d=JSON.parse(localStorage.getItem('mockAccess')||'{}');
+    if(!d.expires)return 0;
+    return Math.max(0,Math.ceil((new Date(d.expires)-new Date())/86400000));
+  }catch(e){return 0;}
 }
 
-// Show paywall
+function tryMockInterview(){
+  if(hasMockAccess()){
+    toast('🎯 '+getMockDaysLeft()+' days remaining');
+    startMode('mock');
+  }else{
+    showPaywall();
+  }
+}
+
 function showPaywall(){
-  // Create paywall overlay
-  var overlay = document.getElementById('paywallOverlay');
+  var cfg=JSON.parse(localStorage.getItem('adminConfig')||'{}');
+  var price=cfg.mockPrice||199;
+  var days=cfg.accessDays||30;
+  var overlay=document.getElementById('paywallOverlay');
   if(!overlay){
-    overlay = document.createElement('div');
-    overlay.id = 'paywallOverlay';
-    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.85);backdrop-filter:blur(12px);z-index:10000;display:flex;align-items:center;justify-content:center;padding:20px;';
-    
-    var cfg = JSON.parse(localStorage.getItem("adminConfig")||"{}");
-    var price = cfg.mockPrice || 199;
-    var days = cfg.accessDays || 30;
-    
-    overlay.innerHTML = '<div style="background:rgba(15,23,42,.65);border:1px solid rgba(255,255,255,.08);border-radius:24px;padding:32px;max-width:420px;width:100%;text-align:center;color:#f8fafc;">' +
-      '<div style="font-size:3rem;margin-bottom:8px;">🎯</div>' +
-      '<h2 style="font-size:1.3rem;margin-bottom:8px;">Unlock Mock Interviews</h2>' +
-      '<p style="color:#94a3b8;font-size:0.88rem;margin-bottom:16px;">Practice unlimited AI interviews with feedback</p>' +
-      '<div style="font-size:2rem;font-weight:800;color:#6366f1;margin:16px 0;">₹' + price + ' <span style="font-size:0.8rem;color:#94a3b8;font-weight:500;">/ ' + days + ' days</span></div>' +
-      '<ul style="text-align:left;list-style:none;padding:0;margin:16px 0;color:#94a3b8;font-size:0.85rem;">' +
-      '<li style="padding:6px 0;border-bottom:1px solid rgba(255,255,255,.08);">✅ Unlimited mock interviews</li>' +
-      '<li style="padding:6px 0;border-bottom:1px solid rgba(255,255,255,.08);">✅ AI feedback & scoring</li>' +
-      '<li style="padding:6px 0;border-bottom:1px solid rgba(255,255,255,.08);">✅ Multi-language support</li>' +
-      '<li style="padding:6px 0;">✅ Resume-based questions</li></ul>' +
-      '<button onclick="startRazorpay()" style="width:100%;padding:14px;font-size:1rem;background:linear-gradient(135deg,#10b981,#059669);border:none;border-radius:14px;color:#fff;font-weight:800;cursor:pointer;margin-top:8px;">💳 Pay ₹' + price + '</button>' +
-      '<div style="margin-top:16px;padding-top:16px;border-top:1px solid rgba(255,255,255,.08);">' +
-      '<p style="font-size:0.8rem;color:#94a3b8;margin-bottom:8px;">Have an access code?</p>' +
-      '<div style="display:flex;gap:8px;">' +
-      '<input type="text" id="mockAccessCode" placeholder="Enter code" style="flex:1;padding:10px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);border-radius:10px;color:#f8fafc;font-size:0.9rem;outline:none;">' +
-      '<button onclick="useAccessCode()" style="padding:10px 16px;background:#6366f1;border:none;border-radius:10px;color:#fff;font-weight:700;cursor:pointer;">Unlock</button>' +
-      '</div></div>' +
-      '<button onclick="closePaywall()" style="width:100%;padding:12px;margin-top:8px;background:transparent;border:1px solid rgba(255,255,255,.08);border-radius:12px;color:#94a3b8;font-size:0.88rem;cursor:pointer;font-weight:600;">← Back</button>' +
-      '</div>';
+    overlay=document.createElement('div');
+    overlay.id='paywallOverlay';
+    overlay.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.85);backdrop-filter:blur(12px);z-index:10000;display:flex;align-items:center;justify-content:center;padding:20px;';
     document.body.appendChild(overlay);
   }
-  overlay.style.display = 'flex';
+  overlay.innerHTML='<div style="background:rgba(15,23,42,.95);border:1px solid rgba(255,255,255,.1);border-radius:24px;padding:32px;max-width:420px;width:100%;text-align:center;color:#f8fafc;">'
+    +'<div style="font-size:3rem;margin-bottom:8px;">🎯</div>'
+    +'<h2 style="font-size:1.3rem;margin-bottom:8px;">Unlock Mock Interviews</h2>'
+    +'<p style="color:#94a3b8;font-size:0.88rem;margin-bottom:16px;">Practice unlimited AI interviews with real-time feedback</p>'
+    +'<div style="font-size:2rem;font-weight:800;color:#6366f1;margin:16px 0;">₹'+price+' <span style="font-size:0.8rem;color:#94a3b8;font-weight:500;">/ '+days+' days</span></div>'
+    +'<ul style="text-align:left;list-style:none;padding:0;margin:16px 0;color:#94a3b8;font-size:0.85rem;">'
+    +'<li style="padding:6px 0;border-bottom:1px solid rgba(255,255,255,.06);">✅ Unlimited mock interviews</li>'
+    +'<li style="padding:6px 0;border-bottom:1px solid rgba(255,255,255,.06);">✅ AI feedback & scoring</li>'
+    +'<li style="padding:6px 0;border-bottom:1px solid rgba(255,255,255,.06);">✅ Multi-language support</li>'
+    +'<li style="padding:6px 0;">✅ Resume-based questions</li></ul>'
+    +'<button onclick="startRazorpay()" style="width:100%;padding:14px;font-size:1rem;background:linear-gradient(135deg,#6366f1,#8b5cf6);border:none;border-radius:14px;color:#fff;font-weight:800;cursor:pointer;font-family:inherit;margin-top:4px;">💳 Pay ₹'+price+'</button>'
+    +'<div style="margin-top:16px;padding-top:16px;border-top:1px solid rgba(255,255,255,.07);">'
+    +'<p style="font-size:0.8rem;color:#94a3b8;margin-bottom:8px;">Have an access code?</p>'
+    +'<div style="display:flex;gap:8px;">'
+    +'<input type="text" id="mockAccessCode" placeholder="Enter code" style="flex:1;padding:10px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);border-radius:10px;color:#f8fafc;font-size:0.9rem;outline:none;font-family:inherit;">'
+    +'<button onclick="useAccessCode()" style="padding:10px 16px;background:#6366f1;border:none;border-radius:10px;color:#fff;font-weight:700;cursor:pointer;font-family:inherit;">Apply</button>'
+    +'</div></div>'
+    +'<button onclick="closePaywall()" style="width:100%;padding:12px;margin-top:10px;background:transparent;border:1px solid rgba(255,255,255,.08);border-radius:12px;color:#94a3b8;font-size:0.88rem;cursor:pointer;font-weight:600;font-family:inherit;">← Back</button>'
+    +'</div>';
+  overlay.style.display='flex';
 }
 
 function closePaywall(){
-  var o = document.getElementById('paywallOverlay');
-  if(o) o.style.display = 'none';
+  var o=document.getElementById('paywallOverlay');
+  if(o)o.style.display='none';
 }
 
-// Razorpay Payment
 function startRazorpay(){
-  var cfg = JSON.parse(localStorage.getItem("adminConfig")||"{}");
-  var key = cfg.razorpayKey || '';
-  var price = parseInt(cfg.mockPrice) || 199;
-  var days = parseInt(cfg.accessDays) || 30;
-  
+  var cfg=JSON.parse(localStorage.getItem('adminConfig')||'{}');
+  var key=cfg.razorpayKey||'';
+  var price=parseInt(cfg.mockPrice)||199;
+  var days=parseInt(cfg.accessDays)||30;
+
   if(!key){
-    // No Razorpay key — show UPI fallback
-    var upi = cfg.upiId || '';
-    alert('💳 Pay ₹' + price + ' via UPI:\n\n' +
-      'UPI ID: ' + (upi || 'Not configured') + '\n\n' +
-      'After payment, ask admin for access code.');
+    var upi=cfg.upiId||'';
+    // Show inline UPI info in paywall instead of alert
+    var box=document.createElement('div');
+    box.style.cssText='background:rgba(99,102,241,.1);border:1px solid rgba(99,102,241,.3);border-radius:12px;padding:16px;margin-top:12px;font-size:0.85rem;color:#a5b4fc;line-height:1.6;';
+    box.innerHTML='<strong>Pay via UPI</strong><br>UPI ID: <span style="color:#f8fafc;font-family:monospace;">'+(upi||'Contact admin')+'</span><br><span style="color:#94a3b8;font-size:0.78rem;">After payment, request your access code from HR.</span>';
+    var btn=document.querySelector('#paywallOverlay button');
+    if(btn&&btn.parentNode)btn.parentNode.insertBefore(box,btn);
     return;
   }
-  
-  // Load Razorpay if not loaded
-  if(typeof Razorpay === 'undefined'){
-    var s = document.createElement('script');
-    s.src = 'https://checkout.razorpay.com/v1/checkout.js';
-    s.onload = function(){ openRazorpayCheckout(key, price, days); };
-    s.onerror = function(){ 
-      alert('Payment service unavailable. Contact admin.');
-    };
+
+  if(typeof Razorpay==='undefined'){
+    var s=document.createElement('script');
+    s.src='https://checkout.razorpay.com/v1/checkout.js';
+    s.onload=function(){openRazorpayCheckout(key,price,days)};
+    s.onerror=function(){toast('❌ Payment service unavailable')};
     document.head.appendChild(s);
     return;
   }
-  
-  openRazorpayCheckout(key, price, days);
+  openRazorpayCheckout(key,price,days);
 }
 
-function openRazorpayCheckout(key, price, days){
-  var options = {
-    key: key,
-    amount: price * 100,  // paise
-    currency: "INR",
-    name: "Simpatico HR",
-    description: "Mock Interview Access - " + days + " Days",
-    handler: function(response){
-      // ✅ PAYMENT SUCCESS
-      console.log("Payment ID:", response.razorpay_payment_id);
-      
-      // Grant access
-      grantMockAccess("paid", days);
-      
-      // Close paywall
+function openRazorpayCheckout(key,price,days){
+  var rzp=new Razorpay({
+    key:key,amount:price*100,currency:'INR',
+    name:'Simpatico HR',
+    description:'Mock Interview Access — '+days+' Days',
+    handler:function(response){
+      grantMockAccess('paid',days);
       closePaywall();
-      
-      // Show success
-      toast('✅ Payment successful! ' + days + ' days access granted.');
-      
-      // Save to DB
-      try{
-        db('insert','payments',{
-          payment_id: response.razorpay_payment_id,
-          amount: price,
-          currency: 'INR',
-          type: 'razorpay',
-          status: 'completed',
-          days_granted: days,
-          created_at: new Date().toISOString()
-        });
-      }catch(e){}
-      
-      // Start mock interview
+      toast('✅ Payment successful! '+days+' days access granted.');
+      try{db('insert','payments',{
+        payment_id:response.razorpay_payment_id,
+        amount:price,currency:'INR',type:'razorpay',
+        status:'completed',days_granted:days,
+        created_at:new Date().toISOString()
+      })}catch(e){}
       startMode('mock');
     },
-    theme: { color: "#6366f1" },
-    modal: {
-      ondismiss: function(){
-        toast("Payment cancelled");
-      }
-    }
-  };
-  
-  var rzp = new Razorpay(options);
+    theme:{color:'#6366f1'},
+    modal:{ondismiss:function(){toast('Payment cancelled')}}
+  });
   rzp.open();
 }
 
-// Access Code
 function useAccessCode(){
-  var code = document.getElementById('mockAccessCode').value.trim().toUpperCase();
-  if(!code){ toast('❌ Enter code'); return; }
-  
-  // Check hardcoded codes
-  var validCodes = ["SIMPATICO2025", "EVALIS-PRO", "MOCK-FREE-TRIAL"];
-  if(validCodes.includes(code)){
-    var cfg = JSON.parse(localStorage.getItem("adminConfig")||"{}");
-    var days = parseInt(cfg.accessDays) || 30;
-    grantMockAccess("code", days);
-    closePaywall();
-    toast("✅ Code accepted! " + days + " days access.");
-    startMode('mock');
-    return;
-  }
-  
-  // Check DB codes
-  db('select','access_codes',null,{code: code, is_active: true})
+  var code=(document.getElementById('mockAccessCode').value||'').trim().toUpperCase();
+  if(!code){toast('❌ Enter a code');return;}
+  var cfg=JSON.parse(localStorage.getItem('adminConfig')||'{}');
+  var days=parseInt(cfg.accessDays)||30;
+
+  // Check DB codes first
+  db('select','access_codes',null,{code:code,is_active:true})
     .then(function(data){
-      var r = Array.isArray(data) ? data[0] : data;
-      if(!r || r.error){ toast('❌ Invalid code'); return; }
-      if(r.max_uses && r.used >= r.max_uses){ toast('❌ Code fully used'); return; }
-      if(r.expires_at && new Date(r.expires_at) < new Date()){ toast('❌ Code expired'); return; }
-      
-      var days = r.days || 30;
-      grantMockAccess("code", days);
-      
-      // Update usage
+      var r=Array.isArray(data)?data[0]:data;
+      if(!r||r.error){toast('❌ Invalid code');return;}
+      if(r.max_uses&&r.used>=r.max_uses){toast('❌ Code fully used');return;}
+      if(r.expires_at&&new Date(r.expires_at)<new Date()){toast('❌ Code expired');return;}
+      var d=r.days||days;
+      grantMockAccess('code',d);
       db('update','access_codes',{used:(r.used||0)+1},{id:r.id});
-      
       closePaywall();
-      toast("✅ Access granted for " + days + " days!");
+      toast('✅ Access granted for '+d+' days!');
       startMode('mock');
     })
-    .catch(function(){ toast('❌ Invalid code'); });
+    .catch(function(){toast('❌ Invalid code');});
 }
 
-// ═══════════════════════════════════════
-// OVERRIDE MOCK INTERVIEW CLICK
-// ═══════════════════════════════════════
-// Save original startMode
-var _originalStartMode = typeof startMode === 'function' ? startMode : null;
-
-// Override the mock card click
-function tryMockInterview(){
-  var cfg = JSON.parse(localStorage.getItem("adminConfig")||"{}");
-  
-  // Check if admin enabled payment
-  if(cfg.mockPaid){
-    // Mock is PAID — check access
-    if(hasMockAccess()){
-      // Has valid access
-      var days = getMockDaysLeft();
-      toast('🎯 ' + days + ' days remaining');
-      if(_originalStartMode) _originalStartMode('mock');
-      else startMode('mock');
-    }else{
-      // No access — show paywall
-      showPaywall();
-    }
-  }else{
-    // Mock is FREE — just start
-    if(_originalStartMode) _originalStartMode('mock');
-    else startMode('mock');
-  }
-}
-
-// Update the mock card to use new function
-window.addEventListener('DOMContentLoaded', function(){
-  var cards = document.querySelectorAll('.mode-card');
+// Wire up mock card — always gated
+window.addEventListener('DOMContentLoaded',function(){
+  var cards=document.querySelectorAll('.mode-card');
   if(cards[1]){
-    // Replace onclick of mock card (2nd card)
-    cards[1].onclick = function(){ tryMockInterview(); };
-    
-    // Update badge based on admin setting
-    var cfg = JSON.parse(localStorage.getItem("adminConfig")||"{}");
-    var badge = cards[1].querySelector('.mode-badge');
+    cards[1].onclick=function(){tryMockInterview();};
+    var badge=cards[1].querySelector('.mode-badge');
     if(badge){
-      if(cfg.mockPaid){
-        badge.textContent = '🔒 ₹' + (cfg.mockPrice || 199);
-        badge.style.background = 'rgba(245,158,11,.15)';
-        badge.style.color = '#f59e0b';
-        
-        // If user has access, show days left
-        if(hasMockAccess()){
-          var left = getMockDaysLeft();
-          badge.textContent = '✅ ' + left + ' days left';
-          badge.style.background = 'rgba(16,185,129,.15)';
-          badge.style.color = '#10b981';
-        }
+      var cfg=JSON.parse(localStorage.getItem('adminConfig')||'{}');
+      var price=cfg.mockPrice||199;
+      if(hasMockAccess()){
+        badge.textContent='✅ '+getMockDaysLeft()+' days left';
+        badge.style.background='rgba(16,185,129,.15)';
+        badge.style.color='#10b981';
       }else{
-        badge.textContent = 'FREE';
-        badge.style.background = 'rgba(16,185,129,.15)';
-        badge.style.color = '#10b981';
+        badge.textContent='₹'+price;
+        badge.style.background='rgba(245,158,11,.15)';
+        badge.style.color='#f59e0b';
       }
     }
   }
