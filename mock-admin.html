@@ -120,6 +120,8 @@
       <div class="admin-tabs" id="adminTabs">
         <button class="admin-tab active" onclick="showTab('dashboard')">📊 Dash</button>
         <button class="admin-tab" onclick="showTab('tokens')">🎫 Tokens</button>
+        <button class="admin-tab" onclick="showTab('notify')">📣 Notify</button>
+        <button class="admin-tab" onclick="showTab('plans')">💎 Plans</button>
         <button class="admin-tab" onclick="showTab('editor')">🎨 Site</button>
         <button class="admin-tab" onclick="showTab('payments')">💳 Pay</button>
         <button class="admin-tab" onclick="showTab('access')">🔑 Codes</button>
@@ -162,6 +164,7 @@
             <div><label>Candidate Email *</label><input type="email" id="tk_email" placeholder="john@email.com"></div>
           </div>
           <div class="row2" style="margin-top:4px;">
+            <div><label>📱 WhatsApp Phone (with country code)</label><input type="text" id="tk_phone" placeholder="+919876543210"></div>
             <div><label>Job Role *</label>
               <select id="tk_role">
                 <option value="">— Select Role —</option>
@@ -235,6 +238,41 @@
             </div>
           </div>
 
+          <!-- Trial & Attempts -->
+          <div class="row3" style="margin-top:4px;">
+            <div>
+              <label>🎟️ Token Type</label>
+              <select id="tk_tokenType" onchange="onTokenTypeChange()">
+                <option value="single">Single Use</option>
+                <option value="trial">Free Trial</option>
+                <option value="multi">Multi-Attempt</option>
+              </select>
+            </div>
+            <div id="tk_maxAttemptsWrap">
+              <label>Max Attempts</label>
+              <input type="number" id="tk_maxAttempts" value="1" min="1" max="99" placeholder="1">
+            </div>
+            <div id="tk_trialDaysWrap" class="hidden">
+              <label>Trial Days</label>
+              <input type="number" id="tk_trialDays" value="3" min="1" max="30" placeholder="3">
+            </div>
+          </div>
+
+          <!-- Auto Notify -->
+          <div style="background:rgba(99,102,241,.05);border:1px solid rgba(99,102,241,.15);border-radius:12px;padding:12px;margin-top:10px;">
+            <div style="font-size:0.82rem;font-weight:700;color:#a5b4fc;margin-bottom:10px;">⚡ Auto Notify After Generation</div>
+            <div class="row2">
+              <label style="display:flex;align-items:center;gap:10px;cursor:pointer;margin:0;">
+                <input type="checkbox" id="tk_sendEmail" style="width:16px;height:16px;cursor:pointer;" checked>
+                <span style="font-size:0.82rem;color:var(--muted);">📧 Open Email Client</span>
+              </label>
+              <label style="display:flex;align-items:center;gap:10px;cursor:pointer;margin:0;">
+                <input type="checkbox" id="tk_sendWA" style="width:16px;height:16px;cursor:pointer;" checked>
+                <span style="font-size:0.82rem;color:var(--muted);">💬 Open WhatsApp</span>
+              </label>
+            </div>
+          </div>
+
           <button class="btn btn-primary btn-full" onclick="generateToken()" style="margin-top:16px;">🎫 Generate Interview Token</button>
         </div>
 
@@ -249,13 +287,15 @@
               <button class="copy-btn" onclick="copyTokenUrl()">📋 Copy</button>
             </div>
             <div class="token-display" id="tokenResultToken" onclick="copyTokenRaw()" title="Click to copy token">—</div>
-            <div style="font-size:0.72rem;color:var(--muted);margin-top:8px;">
-              <span id="tokenResultExpiry">—</span>
-            </div>
+            <div style="font-size:0.72rem;color:var(--muted);margin-top:4px;" id="tokenResultAttempts"></div>
+            <div style="font-size:0.72rem;color:var(--muted);margin-top:4px;" id="tokenResultExpiry">—</div>
           </div>
-          <div style="display:flex;gap:8px;margin-top:12px;">
-            <button class="btn btn-accent" onclick="copyInviteEmail()" style="flex:1;">📧 Copy Email Template</button>
-            <button class="btn btn-save" onclick="copyWhatsApp()" style="flex:1;">💬 Copy WhatsApp</button>
+          <!-- Action buttons -->
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px;">
+            <button class="btn" style="background:linear-gradient(135deg,#6366f1,#8b5cf6);padding:11px;" onclick="openEmailClient()">📧 Open Email</button>
+            <button class="btn" style="background:linear-gradient(135deg,#25d366,#128c7e);padding:11px;" onclick="openWhatsApp()">💬 Open WhatsApp</button>
+            <button class="btn btn-accent" onclick="copyInviteEmail()" style="font-size:0.8rem;padding:9px;">📋 Copy Email Text</button>
+            <button class="btn btn-save" onclick="copyWhatsApp()" style="font-size:0.8rem;padding:9px;">📋 Copy WA Text</button>
           </div>
         </div>
 
@@ -417,6 +457,161 @@
         </div>
       </div>
 
+      <!-- ═══════════════════════════════════════ -->
+      <!-- 📣 NOTIFY TAB -->
+      <!-- ═══════════════════════════════════════ -->
+      <div id="tab-notify" class="hidden">
+        <div class="card">
+          <h3>📧 Email Template</h3>
+          <div class="edit-row"><span class="edit-label">Sender Name</span><input class="edit-input" id="nt_senderName" placeholder="Simpatico HR" value="Simpatico HR"></div>
+          <div class="edit-row"><span class="edit-label">Reply-To Email</span><input class="edit-input" id="nt_replyTo" placeholder="hr@yourcompany.com"></div>
+          <div class="edit-row"><span class="edit-label">Subject Line</span><input class="edit-input" id="nt_subject" value="🎤 Interview Invitation — {role}"></div>
+          <label>Email Body (use {name}, {role}, {level}, {link}, {expires}, {questions})</label>
+          <textarea id="nt_emailBody" style="min-height:180px;">Dear {name},
+
+Congratulations! You have been shortlisted for the {role} ({level}) position.
+
+Please complete your AI interview using the link below:
+
+🔗 {link}
+
+📋 Details:
+• Role: {role} ({level})
+• Questions: {questions}
+• Expires: {expires}
+
+⚠️ Important:
+• Use Chrome or Edge browser
+• Enable camera and microphone
+• Single attempt only — do not close the browser
+
+Best regards,
+{sender}
+Simpatico HR Consultancy</textarea>
+          <button class="btn btn-save" onclick="saveNotifyConfig()" style="margin-top:12px;">💾 Save Template</button>
+        </div>
+
+        <div class="card">
+          <h3>💬 WhatsApp Template</h3>
+          <div class="edit-row"><span class="edit-label">Default Country Code</span><input class="edit-input" id="nt_countryCode" value="+91" style="max-width:100px;"></div>
+          <label>Message (use {name}, {role}, {level}, {link}, {expires})</label>
+          <textarea id="nt_waBody" style="min-height:140px;">🎤 *Interview Invitation*
+
+Hi {name}! You've been shortlisted for *{role}* ({level}).
+
+Complete your AI interview here:
+🔗 {link}
+
+⏰ Expires: {expires}
+Good luck! 🍀
+— {sender}</textarea>
+          <button class="btn btn-save" onclick="saveNotifyConfig()" style="margin-top:12px;">💾 Save Template</button>
+        </div>
+
+        <div class="card">
+          <h3>🧪 Test Notification</h3>
+          <div class="row2">
+            <div><label>Test Email</label><input type="email" id="nt_testEmail" placeholder="you@example.com"></div>
+            <div><label>Test Phone (with country code)</label><input type="text" id="nt_testPhone" placeholder="+919876543210"></div>
+          </div>
+          <div style="display:flex;gap:8px;margin-top:12px;">
+            <button class="btn btn-accent" onclick="testEmailNotify()" style="flex:1;padding:12px;">📧 Test Email</button>
+            <button class="btn btn-save" onclick="testWANotify()" style="flex:1;padding:12px;">💬 Test WhatsApp</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ═══════════════════════════════════════ -->
+      <!-- 💎 PLANS TAB -->
+      <!-- ═══════════════════════════════════════ -->
+      <div id="tab-plans" class="hidden">
+        <div class="card">
+          <h3>💎 Mock Interview Plans</h3>
+          <p style="font-size:0.82rem;color:var(--muted);margin-bottom:14px;">Configure pricing tiers shown on the paywall. Each plan can have its own price, duration, and features.</p>
+
+          <!-- Plan 1 -->
+          <div style="border:1px solid rgba(16,185,129,.2);border-radius:12px;padding:14px;margin-bottom:10px;background:rgba(16,185,129,.03);">
+            <div style="font-weight:700;color:#10b981;margin-bottom:8px;">🥉 Plan 1 — Basic</div>
+            <div class="row3">
+              <div><label>Name</label><input class="edit-input" id="pl1_name" value="Basic" style="padding:8px;"></div>
+              <div><label>Price</label><input type="number" class="edit-input" id="pl1_price" value="99" style="padding:8px;"></div>
+              <div><label>Days</label><input type="number" class="edit-input" id="pl1_days" value="7" style="padding:8px;"></div>
+            </div>
+            <div><label>Features (one per line)</label><textarea id="pl1_features" style="min-height:60px;">3 mock interviews
+AI feedback
+Resume-based questions</textarea></div>
+          </div>
+
+          <!-- Plan 2 -->
+          <div style="border:1px solid rgba(99,102,241,.3);border-radius:12px;padding:14px;margin-bottom:10px;background:rgba(99,102,241,.05);">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+              <span style="font-weight:700;color:#6366f1;">🥈 Plan 2 — Pro</span>
+              <span style="background:rgba(99,102,241,.2);color:#818cf8;padding:2px 10px;border-radius:10px;font-size:0.72rem;font-weight:700;">POPULAR</span>
+            </div>
+            <div class="row3">
+              <div><label>Name</label><input class="edit-input" id="pl2_name" value="Pro" style="padding:8px;"></div>
+              <div><label>Price</label><input type="number" class="edit-input" id="pl2_price" value="199" style="padding:8px;"></div>
+              <div><label>Days</label><input type="number" class="edit-input" id="pl2_days" value="30" style="padding:8px;"></div>
+            </div>
+            <div><label>Features (one per line)</label><textarea id="pl2_features" style="min-height:60px;">Unlimited mock interviews
+AI feedback & scoring
+Multi-language support
+Resume-based questions</textarea></div>
+          </div>
+
+          <!-- Plan 3 -->
+          <div style="border:1px solid rgba(245,158,11,.2);border-radius:12px;padding:14px;margin-bottom:14px;background:rgba(245,158,11,.03);">
+            <div style="font-weight:700;color:#f59e0b;margin-bottom:8px;">🥇 Plan 3 — Elite</div>
+            <div class="row3">
+              <div><label>Name</label><input class="edit-input" id="pl3_name" value="Elite" style="padding:8px;"></div>
+              <div><label>Price</label><input type="number" class="edit-input" id="pl3_price" value="499" style="padding:8px;"></div>
+              <div><label>Days</label><input type="number" class="edit-input" id="pl3_days" value="90" style="padding:8px;"></div>
+            </div>
+            <div><label>Features (one per line)</label><textarea id="pl3_features" style="min-height:60px;">Unlimited mock interviews
+Priority AI feedback
+Multi-language + resume
+1-on-1 HR consultation</textarea></div>
+          </div>
+
+          <button class="btn btn-save btn-full" onclick="savePlans()">💾 Save Plans</button>
+        </div>
+
+        <div class="card">
+          <h3>💳 Payment Gateways</h3>
+          <div class="edit-row"><span class="edit-label">Currency</span>
+            <select class="edit-input" id="gw_currency" style="max-width:180px;">
+              <option value="INR">₹ INR (India)</option>
+              <option value="USD">$ USD</option>
+              <option value="GBP">£ GBP</option>
+              <option value="EUR">€ EUR</option>
+              <option value="AED">AED (UAE)</option>
+              <option value="SGD">SGD</option>
+              <option value="MYR">MYR (Malaysia)</option>
+            </select>
+          </div>
+          <div style="margin-top:14px;font-size:0.82rem;font-weight:700;color:var(--muted);">RAZORPAY</div>
+          <div class="edit-row"><span class="edit-label">Key ID</span><input class="edit-input" type="password" id="gw_razorKey" placeholder="rzp_live_xxxx"></div>
+          <div style="margin-top:14px;font-size:0.82rem;font-weight:700;color:var(--muted);">STRIPE</div>
+          <div class="edit-row"><span class="edit-label">Publishable Key</span><input class="edit-input" type="password" id="gw_stripeKey" placeholder="pk_live_xxxx"></div>
+          <div style="margin-top:14px;font-size:0.82rem;font-weight:700;color:var(--muted);">PAYPAL</div>
+          <div class="edit-row"><span class="edit-label">Client ID</span><input class="edit-input" id="gw_paypalId" placeholder="PayPal Client ID"></div>
+          <div style="margin-top:14px;font-size:0.82rem;font-weight:700;color:var(--muted);">UPI / CUSTOM</div>
+          <div class="edit-row"><span class="edit-label">UPI ID</span><input class="edit-input" id="gw_upiId" placeholder="yourname@upi"></div>
+          <div class="edit-row"><span class="edit-label">Custom Pay Link</span><input class="edit-input" id="gw_customLink" placeholder="https://pay.yoursite.com/checkout"></div>
+          <div class="edit-row"><span class="edit-label">Custom Link Label</span><input class="edit-input" id="gw_customLabel" placeholder="Pay via Bank Transfer"></div>
+          <button class="btn btn-save" onclick="saveGateways()" style="margin-top:12px;">💾 Save Gateways</button>
+        </div>
+
+        <div class="card">
+          <h3>🎟️ Trial Settings</h3>
+          <div class="edit-row"><span class="edit-label">Enable Free Trial</span><div class="toggle-switch" id="tog_trial" onclick="toggleSwitch(this)"></div><span class="edit-preview">Off</span></div>
+          <div class="edit-row"><span class="edit-label">Trial Attempts</span><input class="edit-input" type="number" id="tr_attempts" value="2" style="max-width:80px;"></div>
+          <div class="edit-row"><span class="edit-label">Trial Duration (days)</span><input class="edit-input" type="number" id="tr_days" value="3" style="max-width:80px;"></div>
+          <div class="edit-row"><span class="edit-label">Trial CTA Text</span><input class="edit-input" id="tr_cta" value="Start Free Trial" placeholder="Start Free Trial"></div>
+          <button class="btn btn-save" onclick="saveTrialSettings()" style="margin-top:12px;">💾 Save Trial</button>
+        </div>
+      </div>
+
       <!-- SETTINGS -->
       <div id="tab-settings" class="hidden">
         <div class="card"><h3>🔐 Passwords</h3>
@@ -489,12 +684,14 @@ function doLogout(){
 // TABS
 // ═══════════════════════════════════════
 function showTab(tab){
-  const tabs=['dashboard','tokens','editor','payments','access','clients','jobs','candidates','usage','settings'];
+  const tabs=['dashboard','tokens','notify','plans','editor','payments','access','clients','jobs','candidates','usage','settings'];
   tabs.forEach(t=>document.getElementById('tab-'+t)?.classList.add('hidden'));
   document.getElementById('tab-'+tab)?.classList.remove('hidden');
   document.querySelectorAll('.admin-tab').forEach((b,i)=>b.classList.toggle('active',tabs[i]===tab));
   if(tab==='dashboard')loadDashboard();
   if(tab==='tokens')loadTokens();
+  if(tab==='notify')loadNotifyConfig();
+  if(tab==='plans')loadPlans();
   if(tab==='payments')loadPayments();
   if(tab==='access')loadCodes();
   if(tab==='clients')loadClients();
@@ -523,7 +720,18 @@ async function loadDashboard(){
 }
 
 // ═══════════════════════════════════════
-// 🎫 TOKEN GENERATION (FIXED & COMPLETE)
+// TOKEN TYPE HELPER
+// ═══════════════════════════════════════
+function onTokenTypeChange(){
+  const v=document.getElementById('tk_tokenType').value;
+  document.getElementById('tk_trialDaysWrap').classList.toggle('hidden',v!=='trial');
+  document.getElementById('tk_maxAttemptsWrap').classList.toggle('hidden',v==='single');
+  if(v==='single')document.getElementById('tk_maxAttempts').value=1;
+  if(v==='trial')document.getElementById('tk_maxAttempts').value=getConfig('trialAttempts',2);
+}
+
+// ═══════════════════════════════════════
+// 🎫 TOKEN GENERATION (UPGRADED)
 // ═══════════════════════════════════════
 let _lastGeneratedToken=null;
 
@@ -544,6 +752,7 @@ async function loadTokenJobs(){
 async function generateToken(){
   const name=document.getElementById('tk_name').value.trim();
   const email=document.getElementById('tk_email').value.trim();
+  const phone=document.getElementById('tk_phone').value.trim();
   const roleEl=document.getElementById('tk_role');
   let role=roleEl.value==='custom'?document.getElementById('tk_customRole').value.trim():roleEl.value;
 
@@ -557,6 +766,11 @@ async function generateToken(){
   const hours=parseInt(document.getElementById('tk_expiry').value)||72;
   const type=document.getElementById('tk_type').value;
   const jobId=document.getElementById('tk_jobId').value||null;
+  const tokenType=document.getElementById('tk_tokenType').value;
+  const maxAttempts=tokenType==='single'?1:parseInt(document.getElementById('tk_maxAttempts').value)||1;
+  const trialDays=tokenType==='trial'?parseInt(document.getElementById('tk_trialDays').value)||3:null;
+  const doEmail=document.getElementById('tk_sendEmail').checked;
+  const doWA=document.getElementById('tk_sendWA').checked;
 
   const token=genUUID();
   const expires=new Date(Date.now()+hours*3600000);
@@ -581,34 +795,46 @@ async function generateToken(){
       application_id:appId,
       job_id:jobId,
       token:token,
+      candidate_name:name,
+      candidate_email:email,
+      candidate_phone:phone||null,
       interview_type:type,
+      token_type:tokenType,
       status:'pending',
       interview_role:role,
       interview_level:level,
       question_count:questions,
       interview_language:lang,
+      max_attempts:maxAttempts,
+      attempts_used:0,
+      trial_days:trialDays,
       expires_at:expires.toISOString(),
       created_at:new Date().toISOString()
     });
 
     // Step 3: Build the interview URL
     const baseUrl=window.location.origin;
-    const interviewPage=type==='real'?'evalis-interview.html':'evalis-platform.html';
-    const fullUrl=baseUrl+'/'+interviewPage+'?token='+token;
+    const fullUrl=baseUrl+'/evalis-platform.html?token='+token;
 
-    // Step 4: Display result
-    _lastGeneratedToken={name,email,role,level,token,url:fullUrl,expires,type,questions,lang};
+    // Step 4: Store and display result
+    _lastGeneratedToken={name,email,phone,role,level,token,url:fullUrl,expires,type,questions,lang,tokenType,maxAttempts,trialDays};
 
     document.getElementById('tokenResultCard').classList.remove('hidden');
     document.getElementById('tokenResultName').textContent=name+' — '+role+' ('+level+')';
-    document.getElementById('tokenResultMeta').textContent='📧 '+email+' • 🔢 '+questions+' questions • 🌐 '+lang+' • '+(type==='real'?'🔒 Proctored':'🎯 Mock');
+    
+    const typeBadge=tokenType==='trial'?'🎟️ Trial ('+maxAttempts+' attempts)':tokenType==='multi'?'🔄 Multi ('+maxAttempts+' attempts)':'🔒 Single Use';
+    document.getElementById('tokenResultMeta').textContent='📧 '+email+(phone?' • 📱 '+phone:'')+' • 🔢 '+questions+' Qs • 🌐 '+lang+' • '+typeBadge;
     document.getElementById('tokenResultUrl').value=fullUrl;
     document.getElementById('tokenResultToken').textContent='Token: '+token;
+    document.getElementById('tokenResultAttempts').textContent=maxAttempts>1?'🔄 '+maxAttempts+' attempts allowed':'🔒 Single use';
     document.getElementById('tokenResultExpiry').textContent='⏰ Expires: '+expires.toLocaleString()+' ('+hours+'h)';
 
     toast('✅ Token generated for '+name+'!');
 
-    // Reload token list
+    // Step 5: Auto-notify
+    if(doEmail)setTimeout(()=>openEmailClient(),800);
+    if(doWA&&phone)setTimeout(()=>openWhatsApp(),doEmail?2000:800);
+
     loadAllTokens();
   }catch(e){
     toast('❌ Failed: '+e.message);
@@ -628,55 +854,177 @@ function copyTokenRaw(){
   toast('📋 Token copied!');
 }
 
-function copyInviteEmail(){
-  if(!_lastGeneratedToken)return;
-  const t=_lastGeneratedToken;
-  const email=`Subject: Interview Invitation — ${t.role} at Simpatico HR
+function fillTemplate(template,t){
+  const sender=getConfig('notifySenderName','Simpatico HR');
+  return template
+    .replace(/{name}/g,t.name||'Candidate')
+    .replace(/{role}/g,t.role||'')
+    .replace(/{level}/g,t.level||'')
+    .replace(/{link}/g,t.url||'')
+    .replace(/{expires}/g,t.expires?t.expires.toLocaleString():'')
+    .replace(/{questions}/g,t.questions||10)
+    .replace(/{sender}/g,sender);
+}
 
-Dear ${t.name},
+function getEmailText(){
+  if(!_lastGeneratedToken)return'';
+  const defaultBody=`Dear {name},
 
-Congratulations! You have been shortlisted for the ${t.role} (${t.level}) position.
+Congratulations! You have been shortlisted for the {role} ({level}) position.
 
-Please complete your ${t.type==='real'?'proctored':'mock'} AI interview using the link below:
+Please complete your AI interview using the link below:
 
-🔗 ${t.url}
+🔗 {link}
 
-📋 Details:
-• Role: ${t.role} (${t.level})
-• Questions: ${t.questions}
-• Type: ${t.type==='real'?'Proctored (screen share + camera required)':'Mock Practice'}
-• Expires: ${t.expires.toLocaleString()}
+Details: {questions} questions • Expires: {expires}
 
-${t.type==='real'?'⚠️ Important:\n• Use Chrome/Edge browser\n• Share your entire screen\n• Enable camera\n• Single attempt only\n• Tab switching = violation\n':''}
+⚠️ Use Chrome/Edge, enable camera & microphone. Single attempt only.
+
 Best regards,
-Simpatico HR Consultancy`;
+{sender}`;
+  const body=getConfig('notifyEmailBody',defaultBody);
+  return fillTemplate(body,_lastGeneratedToken);
+}
 
-  navigator.clipboard?.writeText(email);
-  toast('📧 Email template copied!');
+function getEmailSubject(){
+  const t=_lastGeneratedToken;if(!t)return'Interview Invitation';
+  const subj=getConfig('notifySubject','🎤 Interview Invitation — {role}');
+  return fillTemplate(subj,t);
+}
+
+function getWAText(){
+  if(!_lastGeneratedToken)return'';
+  const defaultMsg=`🎤 *Interview Invitation*
+
+Hi {name}! You've been shortlisted for *{role}* ({level}).
+
+Complete your AI interview here:
+🔗 {link}
+
+⏰ Expires: {expires}
+Good luck! 🍀
+— {sender}`;
+  const msg=getConfig('notifyWABody',defaultMsg);
+  return fillTemplate(msg,_lastGeneratedToken);
+}
+
+function openEmailClient(){
+  if(!_lastGeneratedToken){toast('❌ Generate a token first');return}
+  const t=_lastGeneratedToken;
+  const subject=encodeURIComponent(getEmailSubject());
+  const body=encodeURIComponent(getEmailText());
+  window.open('mailto:'+encodeURIComponent(t.email)+'?subject='+subject+'&body='+body,'_blank');
+  toast('📧 Email client opened!');
+}
+
+function openWhatsApp(){
+  if(!_lastGeneratedToken){toast('❌ Generate a token first');return}
+  const t=_lastGeneratedToken;
+  const phone=(t.phone||'').replace(/[\s\-\(\)]/g,'');
+  const msg=encodeURIComponent(getWAText());
+  if(phone){
+    window.open('https://wa.me/'+phone.replace(/^\+/,'')+'?text='+msg,'_blank');
+  }else{
+    window.open('https://wa.me/?text='+msg,'_blank');
+    toast('💬 WhatsApp opened (no phone — add phone for direct message)');
+    return;
+  }
+  toast('💬 WhatsApp opened!');
+}
+
+function copyInviteEmail(){
+  const text=getEmailText();
+  if(!text){toast('❌ Generate a token first');return}
+  navigator.clipboard?.writeText(text);
+  toast('📧 Email text copied!');
 }
 
 function copyWhatsApp(){
-  if(!_lastGeneratedToken)return;
-  const t=_lastGeneratedToken;
-  const msg=`🎤 *Interview Invitation*
-
-Hi ${t.name}! You're shortlisted for *${t.role}* (${t.level}).
-
-Complete your AI interview here:
-${t.url}
-
-📋 ${t.questions} questions • ${t.type==='real'?'🔒 Proctored':'🎯 Practice'}
-⏰ Expires: ${t.expires.toLocaleDateString()}
-
-Good luck! 🍀
-— Simpatico HR`;
-
-  navigator.clipboard?.writeText(msg);
+  const text=getWAText();
+  if(!text){toast('❌ Generate a token first');return}
+  navigator.clipboard?.writeText(text);
   toast('💬 WhatsApp message copied!');
 }
 
-// Bulk Generate
-async function bulkGenerateTokens(){
+// Resend from token list — opens email or WA with stored candidate info
+function resendToken(token,role,email,phone){
+  // Build a minimal token object for templates
+  const url=window.location.origin+'/evalis-platform.html?token='+token;
+  const tmp={name:email?email.split('@')[0]:'Candidate',email:email||'',phone:phone||'',role:role||'Interview',level:'',url,expires:new Date(Date.now()+72*3600000),questions:10};
+  _lastGeneratedToken=tmp;
+  // Open WA if phone available, else email
+  if(phone)openWhatsApp();
+  else if(email)openEmailClient();
+  else{navigator.clipboard?.writeText(url);toast('📋 Interview link copied!')}
+}
+
+// Load All Tokens (with attempt tracking + WA resend)
+let _tokenFilter='all';
+function filterTokens(f){_tokenFilter=f;loadAllTokens()}
+
+async function loadAllTokens(){
+  const el=document.getElementById('allTokensList');
+  el.innerHTML='<span class="loading"></span> Loading...';
+  try{
+    const data=await db('select','interviews',null,null,null,'created_at.desc');
+    let arr=Array.isArray(data)?data:[];
+    const now=new Date();
+
+    if(_tokenFilter==='expired')arr=arr.filter(i=>i.expires_at&&new Date(i.expires_at)<now&&i.status!=='completed');
+    else if(_tokenFilter!=='all')arr=arr.filter(i=>i.status===_tokenFilter);
+
+    if(!arr.length){el.innerHTML='<p style="color:var(--muted);text-align:center;padding:20px;">No tokens found</p>';return}
+
+    el.innerHTML=arr.slice(0,50).map(i=>{
+      const exp=i.expires_at?new Date(i.expires_at):null;
+      const isExpired=exp&&exp<now&&i.status!=='completed';
+      const sc={pending:'#f59e0b',in_progress:'#3b82f6',completed:'#10b981'}[i.status]||'#94a3b8';
+      const sb={pending:'rgba(245,158,11,.15)',in_progress:'rgba(59,130,246,.15)',completed:'rgba(16,185,129,.15)'}[i.status]||'rgba(255,255,255,.05)';
+      const url=window.location.origin+'/evalis-platform.html?token='+i.token;
+      const maxAtt=i.max_attempts||1;
+      const usedAtt=i.attempts_used||0;
+      const attPct=Math.min(100,Math.round((usedAtt/maxAtt)*100));
+      const typeBadge=i.token_type==='trial'?'🎟️ Trial':i.token_type==='multi'?'🔄 Multi':'🔒';
+      const email=i.candidate_email||'';
+      const phone=(i.candidate_phone||'').replace(/[\s\-\(\)]/g,'');
+
+      return`<div style="padding:12px;border-bottom:1px solid var(--border);${isExpired?'opacity:0.5;':''}">
+        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px;">
+          <div>
+            <div style="font-weight:700;font-size:0.9rem;">${i.interview_role||'?'} — ${i.interview_level||''}</div>
+            <div style="font-size:0.72rem;color:var(--muted);">${i.candidate_name||''} ${email?'• '+email:''} ${phone?'• 📱':''}</div>
+            <div style="font-size:0.72rem;color:var(--muted);">Token: ${(i.token||'?').substring(0,16)}... • ${i.created_at?new Date(i.created_at).toLocaleDateString():''}</div>
+            ${maxAtt>1?`<div style="margin-top:4px;"><div style="font-size:0.7rem;color:var(--muted);">Attempts: ${usedAtt}/${maxAtt}</div><div class="usage-bar" style="width:120px;"><div class="usage-fill" style="width:${attPct}%;background:${attPct>=100?'#ef4444':'#6366f1'};"></div></div></div>`:''}
+          </div>
+          <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+            ${i.overall_score?`<span class="score-badge" style="background:rgba(16,185,129,.15);color:${i.overall_score>=70?'#10b981':i.overall_score>=50?'#f59e0b':'#ef4444'};">${i.overall_score}/100</span>`:''}
+            <span class="status-pill" style="background:${isExpired?'rgba(239,68,68,.15)':sb};color:${isExpired?'#ef4444':sc};">${isExpired?'Expired':i.status||'?'}</span>
+            <span class="status-pill" style="color:#94a3b8;font-size:0.68rem;">${typeBadge}</span>
+          </div>
+        </div>
+        <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;">
+          <button class="btn btn-accent" style="padding:3px 10px;font-size:0.72rem;" onclick="navigator.clipboard?.writeText('${url}');toast('📋 URL copied!')">📋 URL</button>
+          <button class="btn" style="padding:3px 10px;font-size:0.72rem;background:rgba(245,158,11,.15);color:#f59e0b;" onclick="navigator.clipboard?.writeText('${i.token}');toast('📋 Token copied!')">🔑 Token</button>
+          ${i.status!=='completed'&&!isExpired?`
+            <button class="btn" style="padding:3px 10px;font-size:0.72rem;background:rgba(99,102,241,.15);color:#a5b4fc;" onclick="resendToken('${i.token}','${(i.interview_role||'').replace(/'/g,"\\'")}','${email}','${phone}')">📧 Email</button>
+            ${phone?`<button class="btn" style="padding:3px 10px;font-size:0.72rem;background:rgba(37,211,102,.15);color:#25d366;" onclick="quickWA('${phone}','${(i.interview_role||'').replace(/'/g,"\\'")}','${url}')">💬 WA</button>`:''}
+          `:''}
+          ${i.status==='completed'?`<button class="btn" style="padding:3px 10px;font-size:0.72rem;background:rgba(59,130,246,.15);color:#3b82f6;" onclick="viewResult('${i.id}')">📊 Results</button>`:''}
+          <button class="btn btn-danger" style="padding:3px 10px;font-size:0.72rem;" onclick="revokeToken('${i.id}')">🗑️</button>
+        </div>
+      </div>`;
+    }).join('');
+  }catch(e){el.innerHTML='<p style="color:var(--red);">'+e.message+'</p>'}
+}
+
+function quickWA(phone,role,url){
+  const countryCode=getConfig('notifyCountryCode','+91');
+  const cleanPhone=phone.replace(/^\+/,'');
+  const sender=getConfig('notifySenderName','Simpatico HR');
+  const msg=encodeURIComponent(`🎤 *Interview Reminder*\n\nYour AI interview for *${role}* is still pending.\n\n🔗 ${url}\n\n— ${sender}`);
+  window.open('https://wa.me/'+cleanPhone+'?text='+msg,'_blank');
+  toast('💬 WhatsApp opened!');
+}
   const emails=document.getElementById('tk_bulkEmails').value.trim().split('\n').map(e=>e.trim()).filter(e=>e&&e.includes('@'));
   const role=document.getElementById('tk_bulkRole').value.trim();
   const level=document.getElementById('tk_bulkLevel').value;
@@ -776,13 +1124,6 @@ async function loadAllTokens(){
       </div>`;
     }).join('');
   }catch(e){el.innerHTML='<p style="color:var(--red);">'+e.message+'</p>'}
-}
-
-function resendToken(token,role){
-  const url=window.location.origin+'/evalis-interview.html?token='+token;
-  const msg=`🎤 Interview Reminder\n\nYour AI interview for "${role}" is still pending.\n\n🔗 ${url}\n\n— Simpatico HR`;
-  navigator.clipboard?.writeText(msg);
-  toast('📋 Resend message copied!');
 }
 
 async function viewResult(id){
@@ -976,6 +1317,141 @@ async function loadUsageAnalytics(){
     topEl.innerHTML=top.length?top.map(i=>`<div class="cand-row"><div><strong>${i.interview_role||'?'}</strong><div style="font-size:0.72rem;color:var(--muted);">${i.interview_level||''} • ${i.completed_at?new Date(i.completed_at).toLocaleDateString():''}</div></div><span class="score-badge" style="background:rgba(16,185,129,.15);color:${(i.overall_score||0)>=70?'#10b981':'#f59e0b'};">${i.overall_score}/100 ${i.grade||''}</span></div>`).join(''):'<p style="color:var(--muted);text-align:center;">No completed interviews</p>';
 
   }catch(e){console.error(e)}
+}
+
+// ═══════════════════════════════════════
+// 📣 NOTIFY CONFIG
+// ═══════════════════════════════════════
+function loadNotifyConfig(){
+  document.getElementById('nt_senderName').value=getConfig('notifySenderName','Simpatico HR');
+  document.getElementById('nt_replyTo').value=getConfig('notifyReplyTo','');
+  document.getElementById('nt_subject').value=getConfig('notifySubject','🎤 Interview Invitation — {role}');
+  document.getElementById('nt_countryCode').value=getConfig('notifyCountryCode','+91');
+  const defaultEmail=`Dear {name},
+
+Congratulations! You have been shortlisted for the {role} ({level}) position.
+
+Please complete your AI interview using the link below:
+
+🔗 {link}
+
+Details: {questions} questions • Expires: {expires}
+
+⚠️ Use Chrome/Edge, enable camera & microphone. Single attempt only.
+
+Best regards,
+{sender}`;
+  document.getElementById('nt_emailBody').value=getConfig('notifyEmailBody',defaultEmail);
+  const defaultWA=`🎤 *Interview Invitation*
+
+Hi {name}! You've been shortlisted for *{role}* ({level}).
+
+Complete your AI interview here:
+🔗 {link}
+
+⏰ Expires: {expires}
+Good luck! 🍀
+— {sender}`;
+  document.getElementById('nt_waBody').value=getConfig('notifyWABody',defaultWA);
+}
+
+function saveNotifyConfig(){
+  setConfig('notifySenderName',document.getElementById('nt_senderName').value.trim());
+  setConfig('notifyReplyTo',document.getElementById('nt_replyTo').value.trim());
+  setConfig('notifySubject',document.getElementById('nt_subject').value.trim());
+  setConfig('notifyCountryCode',document.getElementById('nt_countryCode').value.trim());
+  setConfig('notifyEmailBody',document.getElementById('nt_emailBody').value);
+  setConfig('notifyWABody',document.getElementById('nt_waBody').value);
+  toast('💾 Notification templates saved!');
+}
+
+function testEmailNotify(){
+  const email=document.getElementById('nt_testEmail').value.trim();
+  if(!email){toast('❌ Enter test email');return}
+  const tmp={name:'Test Candidate',email,phone:'',role:'Frontend Developer',level:'Mid-Level',url:window.location.origin+'/evalis-platform.html?token=TEST',expires:new Date(Date.now()+72*3600000),questions:10};
+  _lastGeneratedToken=tmp;
+  openEmailClient();
+}
+
+function testWANotify(){
+  const phone=document.getElementById('nt_testPhone').value.trim().replace(/[\s\-\(\)]/g,'');
+  if(!phone){toast('❌ Enter test phone number');return}
+  const tmp={name:'Test Candidate',email:'',phone,role:'Frontend Developer',level:'Mid-Level',url:window.location.origin+'/evalis-platform.html?token=TEST',expires:new Date(Date.now()+72*3600000),questions:10};
+  _lastGeneratedToken=tmp;
+  openWhatsApp();
+}
+
+// ═══════════════════════════════════════
+// 💎 PLANS
+// ═══════════════════════════════════════
+function loadPlans(){
+  const p=JSON.parse(localStorage.getItem('mockPlans')||'{}');
+  const defaults=[
+    {name:'Basic',price:99,days:7,features:'3 mock interviews\nAI feedback\nResume-based questions'},
+    {name:'Pro',price:199,days:30,features:'Unlimited mock interviews\nAI feedback & scoring\nMulti-language support\nResume-based questions'},
+    {name:'Elite',price:499,days:90,features:'Unlimited mock interviews\nPriority AI feedback\nMulti-language + resume\n1-on-1 HR consultation'}
+  ];
+  [1,2,3].forEach((n,i)=>{
+    const d=p['plan'+n]||defaults[i];
+    document.getElementById('pl'+n+'_name').value=d.name||'';
+    document.getElementById('pl'+n+'_price').value=d.price||0;
+    document.getElementById('pl'+n+'_days').value=d.days||30;
+    document.getElementById('pl'+n+'_features').value=d.features||'';
+  });
+
+  // Load gateways
+  document.getElementById('gw_currency').value=getConfig('currency','INR');
+  document.getElementById('gw_razorKey').value=getConfig('razorpayKey','');
+  document.getElementById('gw_stripeKey').value=getConfig('stripeKey','');
+  document.getElementById('gw_paypalId').value=getConfig('paypalClientId','');
+  document.getElementById('gw_upiId').value=getConfig('upiId','');
+  document.getElementById('gw_customLink').value=getConfig('customPayLink','');
+  document.getElementById('gw_customLabel').value=getConfig('customPayLabel','Pay via Bank Transfer');
+
+  // Load trial settings
+  if(getConfig('trialEnabled',false))document.getElementById('tog_trial').classList.add('on');
+  document.getElementById('tr_attempts').value=getConfig('trialAttempts',2);
+  document.getElementById('tr_days').value=getConfig('trialDays',3);
+  document.getElementById('tr_cta').value=getConfig('trialCTA','Start Free Trial');
+}
+
+function savePlans(){
+  const plans={};
+  [1,2,3].forEach(n=>{
+    plans['plan'+n]={
+      name:document.getElementById('pl'+n+'_name').value.trim(),
+      price:parseInt(document.getElementById('pl'+n+'_price').value)||0,
+      days:parseInt(document.getElementById('pl'+n+'_days').value)||30,
+      features:document.getElementById('pl'+n+'_features').value.trim()
+    };
+  });
+  localStorage.setItem('mockPlans',JSON.stringify(plans));
+  // Also update default price in adminConfig for backward compat
+  setConfig('mockPrice',plans.plan2?.price||199);
+  setConfig('accessDays',plans.plan2?.days||30);
+  toast('💾 Plans saved!');
+}
+
+function saveGateways(){
+  setConfig('currency',document.getElementById('gw_currency').value);
+  setConfig('razorpayKey',document.getElementById('gw_razorKey').value.trim());
+  setConfig('stripeKey',document.getElementById('gw_stripeKey').value.trim());
+  setConfig('paypalClientId',document.getElementById('gw_paypalId').value.trim());
+  setConfig('upiId',document.getElementById('gw_upiId').value.trim());
+  setConfig('customPayLink',document.getElementById('gw_customLink').value.trim());
+  setConfig('customPayLabel',document.getElementById('gw_customLabel').value.trim());
+  // For legacy compat
+  setConfig('razorpayKey',document.getElementById('gw_razorKey').value.trim());
+  setConfig('upiId',document.getElementById('gw_upiId').value.trim());
+  toast('💾 Gateways saved!');
+}
+
+function saveTrialSettings(){
+  setConfig('trialEnabled',document.getElementById('tog_trial').classList.contains('on'));
+  setConfig('trialAttempts',parseInt(document.getElementById('tr_attempts').value)||2);
+  setConfig('trialDays',parseInt(document.getElementById('tr_days').value)||3);
+  setConfig('trialCTA',document.getElementById('tr_cta').value.trim()||'Start Free Trial');
+  toast('💾 Trial settings saved!');
 }
 
 // ═══════════════════════════════════════
