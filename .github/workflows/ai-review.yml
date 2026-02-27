@@ -1,0 +1,29 @@
+name: Qwen3 AI Review
+on:
+  push:
+    branches: [main]
+
+jobs:
+  ai-review:
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Qwen3 Code Review
+        run: |
+          $diff = git diff HEAD~1
+          $body = @{
+            model = "x-coder-rl-qwen3-8b-i1"
+            messages = @(
+              @{role="system"; content="Review this HTML/CSS/JS code diff for bugs and issues. Be concise."},
+              @{role="user"; content="Review: $diff"}
+            )
+            temperature = 0.3
+            max_tokens = 500
+          } | ConvertTo-Json -Depth 5
+          $response = Invoke-RestMethod -Uri "http://127.0.0.1:1234/v1/chat/completions" -Method Post -ContentType "application/json" -Body $body
+          Write-Host "Qwen3 Review:"
+          Write-Host $response.choices[0].message.content
+        shell: powershell
