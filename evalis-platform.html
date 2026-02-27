@@ -341,10 +341,10 @@
   <div class="proctor-cam hidden" id="proctorCam"><video id="proctorVideo" autoplay muted playsinline></video><div class="cam-label">🔴 REC</div></div>
 
 <script>
-  const W="https://solitary-sound-11b9.simpaticohrconsultancy.workers.dev/";
+  const W="https://solitary-sound-11b9.simpaticohrconsultancy.workers.dev";
 const SILENCE_TIMEOUT=3.0,MIN_ANS=10,MAX_RETRIES=3,MAX_VIOLATIONS=3;
-const HR_PASSWORD="simpatico2025";
 let hrAuth=false;
+let curToken=null; // stores token for real-mode interview update
 let mode="mock",cv="",lang="en",role="",level="",totalQ=10;
 let mainQ=0,isFollowUp=false,chat=[],answers=[];
 let rec=null,transcript="",timerInt=null,secs=0;
@@ -402,10 +402,7 @@ function showError(m){
 // ═══════════════════════════════════════
 function nav(p){
   if(p==='hr'&&!hrAuth){
-    const pwd=prompt("🔒 Enter HR Admin Password:");
-    if(!pwd)return;
-    if(pwd!==HR_PASSWORD){toast("❌ Wrong password!");return}
-    hrAuth=true;toast("✅ HR Access granted!");
+    showHRLogin();return;
   }
   const pages=['home','jobs','apply','setup','live','results','hr'];
   pages.forEach(x=>document.getElementById('page-'+x)?.classList.add('hidden'));
@@ -415,6 +412,48 @@ function nav(p){
   document.querySelectorAll('#mainNav .nav-btn')[map[p]||0]?.classList.add('active');
   if(p==='jobs')loadJobs();
   if(p==='hr')loadHR();
+}
+
+function showHRLogin(){
+  let modal=document.getElementById('hrLoginModal');
+  if(!modal){
+    modal=document.createElement('div');
+    modal.id='hrLoginModal';
+    modal.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.75);backdrop-filter:blur(10px);z-index:9000;display:flex;align-items:center;justify-content:center;padding:20px;';
+    modal.innerHTML=`<div style="background:rgba(15,23,42,.95);border:1px solid rgba(255,255,255,.1);border-radius:20px;padding:32px;width:100%;max-width:380px;text-align:center;">
+      <div style="font-size:2rem;margin-bottom:8px;">🔐</div>
+      <h3 style="margin-bottom:6px;color:#f8fafc;">HR Admin Access</h3>
+      <p style="color:#94a3b8;font-size:0.82rem;margin-bottom:20px;">Enter your HR admin password</p>
+      <input type="password" id="hrPwdInput" placeholder="Password" style="width:100%;padding:12px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:10px;color:#f8fafc;font-size:0.95rem;outline:none;font-family:inherit;margin-bottom:8px;"
+        onkeydown="if(event.key==='Enter')doHRLogin()">
+      <div id="hrLoginErr" style="color:#ef4444;font-size:0.8rem;margin-bottom:8px;display:none;"></div>
+      <button onclick="doHRLogin()" style="width:100%;padding:13px;background:linear-gradient(135deg,#6366f1,#8b5cf6);border:none;border-radius:12px;color:#fff;font-weight:700;cursor:pointer;font-size:0.95rem;font-family:inherit;margin-bottom:8px;">🔓 Login</button>
+      <button onclick="document.getElementById('hrLoginModal').style.display='none'" style="width:100%;padding:11px;background:transparent;border:1px solid rgba(255,255,255,.1);border-radius:12px;color:#94a3b8;font-weight:600;cursor:pointer;font-size:0.88rem;font-family:inherit;">Cancel</button>
+    </div>`;
+    document.body.appendChild(modal);
+    modal.addEventListener('click',e=>{if(e.target===modal)modal.style.display='none';});
+  }
+  modal.style.display='flex';
+  setTimeout(()=>document.getElementById('hrPwdInput').focus(),100);
+}
+
+function doHRLogin(){
+  const input=document.getElementById('hrPwdInput');
+  const err=document.getElementById('hrLoginErr');
+  const pwd=input.value.trim();
+  if(!pwd){err.textContent='Enter password';err.style.display='block';return;}
+  // Check against adminConfig (set by admin dashboard) or fallback default
+  const cfg=JSON.parse(localStorage.getItem('adminConfig')||'{}');
+  const correctPwd=cfg.hrPassword||'simpatico2025';
+  if(pwd!==correctPwd){
+    err.textContent='❌ Wrong password';err.style.display='block';
+    input.value='';input.focus();return;
+  }
+  hrAuth=true;
+  document.getElementById('hrLoginModal').style.display='none';
+  input.value='';err.style.display='none';
+  toast('✅ HR Access granted!');
+  nav('hr');
 }
 
 // ═══════════════════════════════════════
@@ -431,12 +470,12 @@ async function loadJobs(){
     el.innerHTML=data.map(j=>`<div class="job-card">
       <h3>${j.title||''}</h3>
       <div class="job-meta">
-        <span>🏢 ${j["Company Name"]||j.department||''}</span>
+        <span>🏢 ${j.company_name||j["Company Name"]||j.department||''}</span>
         <span>📍 ${j.location||''} ${j.Country?'('+j.Country+')':''}</span>
         <span>📊 ${j.level||'Mid-Level'}</span>
       </div>
       <p style="font-size:0.82rem;color:var(--muted);margin:6px 0;">${(j.description||'').substring(0,180)}</p>
-      <div>${(j.skills||[]).map(s=>'<span class="skill-tag">'+s+'</span>').join('')}</div>
+      <div>${(Array.isArray(j.skills)?j.skills:typeof j.skills==='string'&&j.skills?j.skills.split(',').map(s=>s.trim()).filter(Boolean):[]).map(s=>'<span class="skill-tag">'+s+'</span>').join('')}</div>
       <button class="btn btn-go" style="margin-top:10px;padding:10px;" 
         onclick="applyTo('${j.id}','${(j.title||'').replace(/'/g,"\\'")}')">📝 Apply</button>
     </div>`).join('');
@@ -541,7 +580,7 @@ async function exFile(f){
   else if(ext==='pdf')t=await exPDF(f);
   else if(ext==='doc'||ext==='docx')t=await exDOC(f);
   else t=await f.text();
-  return t.replace(/\s+/g,' ').replace(/[^\x20-\x7E\n]/g,'').trim().substring(0,5000);
+  return t.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g,'').replace(/\s+/g,' ').trim().substring(0,5000);
 }
 
 async function exPDF(f){
@@ -572,8 +611,10 @@ async function exDOC(f){
 async function exFB(f){
   const b=await f.arrayBuffer();
   const t=new TextDecoder('utf-8',{fatal:false}).decode(b);
-  const r=t.match(/[a-zA-Z0-9@.,:;!?\-/()\s]{5,}/g);
-  return r?r.filter(s=>(s.match(/[a-zA-Z]/g)||[]).length/s.length>0.5&&s.trim().length>5).join(' '):'';
+  // Only strip control characters, keep unicode (for Indian language CVs)
+  const clean=t.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g,'');
+  const r=clean.match(/[\w\u0900-\u097F\u0D00-\u0D7F\u0600-\u06FF\u0400-\u04FF@.,:;!?\-/()\s]{5,}/g);
+  return r?r.filter(s=>s.trim().length>5).join(' '):'';
 }
 
 document.getElementById('cvFile').addEventListener('change',async e=>{
@@ -595,7 +636,7 @@ async function callAI(messages){
   const ctrl=new AbortController();
   const tm=setTimeout(()=>ctrl.abort(),45000);
   try{
-    const r=await fetch(W,{method:"POST",headers:{"Content-Type":"application/json"},
+    const r=await fetch(W+"/",{method:"POST",headers:{"Content-Type":"application/json"},
       body:JSON.stringify({messages}),signal:ctrl.signal});
     clearTimeout(tm);
     if(!r.ok)throw new Error('Error '+r.status);
@@ -1008,6 +1049,7 @@ async function startInterview(){
 
       curAppId=interview.application_id;
       curJobId=interview.job_id;
+      curToken=token; // ✅ Store for saveResults() UPDATE
 
       await db('update','interviews',{
         status:'in_progress',started_at:new Date().toISOString()
@@ -1177,10 +1219,7 @@ Keep strings short. ONLY JSON.`}
 
 async function saveResults(r){
   try{
-    if(!curAppId)return;
-    const token=crypto.randomUUID?crypto.randomUUID():Date.now().toString(36);
-    await db('insert','interviews',{
-      application_id:curAppId,job_id:curJobId,token,
+    const resultData={
       interview_type:mode,status:'completed',
       interview_role:role,interview_level:level,interview_language:lang,
       question_count:totalQ,
@@ -1191,8 +1230,23 @@ async function saveResults(r){
       strengths:r.strengths||[],improvements:r.improvements||[],
       feedback:r.feedback||[],answers:answers,
       violation_log:violations,violation_count:violations.length
-    });
-    await db('update','applications',{status:'interviewed'},{id:curAppId});
+    };
+
+    if(mode==='real'&&curToken){
+      // UPDATE the existing token-linked interview row (do NOT create duplicate)
+      await db('update','interviews',resultData,{token:curToken});
+    }else{
+      // Mock mode — insert a new result row if we have an app context, else skip
+      if(curAppId){
+        const newToken=crypto.randomUUID?crypto.randomUUID():Date.now().toString(36);
+        await db('insert','interviews',{
+          ...resultData,
+          application_id:curAppId,job_id:curJobId,token:newToken
+        });
+      }
+    }
+
+    if(curAppId)await db('update','applications',{status:'interviewed'},{id:curAppId});
     console.log('[DB] Results saved!');
   }catch(e){console.error('[DB]',e)}
 }
@@ -1329,6 +1383,7 @@ async function postJob(){
       title,
       category:document.getElementById('hrCat').value,
       department:document.getElementById('hrDept').value.trim(),
+      company_name:document.getElementById('hrCompany').value.trim(),
       "Company Name":document.getElementById('hrCompany').value.trim(),
       location:document.getElementById('hrLocation').value.trim(),
       level:document.getElementById('hrLevel').value,
@@ -1336,7 +1391,7 @@ async function postJob(){
       skills:document.getElementById('hrSkills').value.split(',').map(s=>s.trim()).filter(Boolean),
       question_count:parseInt(document.getElementById('hrQCount').value),
       ats_threshold:parseInt(document.getElementById('hrATS').value),
-      is_active:true,status:'active'
+      is_active:true,status:'active',created_at:new Date().toISOString()
     });
     toast('✅ Posted!');
     document.getElementById('hrTitle').value='';
@@ -1411,11 +1466,45 @@ async function sendInvite(appId,email){
       expires_at:new Date(Date.now()+72*3600000).toISOString()
     });
     const url=`${location.origin}${location.pathname}?token=${token}`;
+
+    // Copy to clipboard
     try{await navigator.clipboard.writeText(url)}catch(e){}
-    toast('✅ Link created!');
-    alert(`📧 Send to ${email}:\n\n${url}\n\n(Copied to clipboard!)`);
+
+    // Show proper link modal instead of alert()
+    let lm=document.getElementById('inviteLinkModal');
+    if(!lm){
+      lm=document.createElement('div');
+      lm.id='inviteLinkModal';
+      lm.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.75);backdrop-filter:blur(8px);z-index:9000;display:flex;align-items:center;justify-content:center;padding:20px;';
+      lm.innerHTML=`<div style="background:rgba(15,23,42,.95);border:1px solid rgba(255,255,255,.1);border-radius:20px;padding:28px;width:100%;max-width:460px;">
+        <h3 style="margin-bottom:6px;color:#f8fafc;">📧 Interview Invitation Ready</h3>
+        <p id="inviteEmailLabel" style="color:#94a3b8;font-size:0.82rem;margin-bottom:16px;"></p>
+        <label style="display:block;font-size:0.75rem;color:#94a3b8;margin-bottom:6px;font-weight:600;">INTERVIEW LINK (send this to the candidate)</label>
+        <div style="display:flex;gap:8px;">
+          <input type="text" id="inviteLinkInput" readonly style="flex:1;padding:10px;background:rgba(99,102,241,.08);border:1px solid rgba(99,102,241,.3);border-radius:10px;color:#a5b4fc;font-size:0.82rem;outline:none;font-family:monospace;">
+          <button onclick="copyInviteLink()" id="inviteCopyBtn" style="padding:10px 16px;background:#6366f1;border:none;border-radius:10px;color:#fff;font-weight:700;cursor:pointer;font-family:inherit;white-space:nowrap;">📋 Copy</button>
+        </div>
+        <p style="margin-top:10px;font-size:0.75rem;color:#64748b;">⏰ Expires in 72 hours • Token is single-use</p>
+        <button onclick="document.getElementById('inviteLinkModal').style.display='none'" style="width:100%;padding:12px;margin-top:16px;background:transparent;border:1px solid rgba(255,255,255,.1);border-radius:12px;color:#94a3b8;font-weight:600;cursor:pointer;font-size:0.88rem;font-family:inherit;">Close</button>
+      </div>`;
+      document.body.appendChild(lm);
+      lm.addEventListener('click',e=>{if(e.target===lm)lm.style.display='none';});
+    }
+    document.getElementById('inviteEmailLabel').textContent='For: '+email;
+    document.getElementById('inviteLinkInput').value=url;
+    lm.style.display='flex';
+
+    toast('✅ Invite link ready & copied!');
     loadCands(selHRJob,'');
   }catch(e){toast('❌ '+e.message)}
+}
+
+function copyInviteLink(){
+  const input=document.getElementById('inviteLinkInput');
+  const btn=document.getElementById('inviteCopyBtn');
+  try{navigator.clipboard.writeText(input.value)}catch(e){input.select();document.execCommand('copy')}
+  btn.textContent='✅ Copied!';
+  setTimeout(()=>{btn.textContent='📋 Copy'},2000);
 }
 
 // ═══════════════════════════════════════
