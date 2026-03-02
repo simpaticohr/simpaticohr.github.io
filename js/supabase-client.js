@@ -1,5 +1,5 @@
 // js/supabase-client.js
-const SUPABASE_URL = 'https://cvkxtsvgnynxexmemfuy.supabase.co';
+const SUPABASE_URL = 'https://api.simpaticohr.in';
 const SUPABASE_ANON_KEY = 'YOUR_SUPABASE_ANON_KEY'; // Replace with your actual key
 const WORKER_URL = 'https://evalis-ai.simpaticohrconsultancy.workers.dev';
 const SITE_URL = 'https://simpaticohr.in';
