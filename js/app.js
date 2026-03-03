@@ -381,3 +381,189 @@ async function handleDrop(event, newStage) {
 
     // Trigger automation
     triggerAutomation('application
+
+// ==========================================
+// INTERVIEWS
+// ==========================================
+async function loadInterviews() {
+  const tbody = document.getElementById('interviewsTable');
+  if (!tbody) return;
+  tbody.innerHTML = '<tr><td colspan="7" class="text-center" style="padding:2rem;color:#6B7280">Loading interviews...</td></tr>';
+  try {
+    const { data, error } = await SimpaticoDB
+      .from('interviews')
+      .select('*, candidate:users!interviews_candidate_id_fkey(full_name, email), job:jobs(title)')
+      .eq('company_id', currentCompanyId)
+      .order('scheduled_at', { ascending: false });
+    if (error) throw error;
+    const interviews = data || [];
+    const scheduled = interviews.filter(i => i.status === 'scheduled').length;
+    const completed = interviews.filter(i => i.status === 'completed').length;
+    const today = interviews.filter(i => {
+      if (!i.scheduled_at) return false;
+      return new Date(i.scheduled_at).toDateString() === new Date().toDateString();
+    }).length;
+    if (document.getElementById('intScheduled'))   document.getElementById('intScheduled').textContent  = scheduled;
+    if (document.getElementById('intCompleted'))   document.getElementById('intCompleted').textContent  = completed;
+    if (document.getElementById('statInterviews')) document.getElementById('statInterviews').textContent = today;
+    if (!interviews.length) {
+      tbody.innerHTML = '<tr><td colspan="7" class="text-center" style="padding:2rem;color:#9CA3AF">No interviews scheduled yet</td></tr>';
+      return;
+    }
+    tbody.innerHTML = interviews.map(i => {
+      const name     = i.candidate?.full_name || 'Unknown';
+      const email    = i.candidate?.email || '';
+      const job      = i.job?.title || '-';
+      const date     = i.scheduled_at ? new Date(i.scheduled_at).toLocaleString('en-IN', { day:'numeric', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' }) : '-';
+      const status   = i.status || 'scheduled';
+      const initials = name.split(' ').map(n => n[0]).join('').toUpperCase();
+      const badgeColor = status === 'completed' ? '#059669' : status === 'cancelled' ? '#DC2626' : '#D97706';
+      const roomLink = `https://simpaticohr.in/interview/proctored-room.html?interview_id=${i.id}&token=${i.access_token || ''}`;
+      return `<tr>
+        <td><div style="display:flex;align-items:center;gap:10px;">
+          <div style="width:34px;height:34px;border-radius:50%;background:linear-gradient(135deg,#6366f1,#8b5cf6);display:flex;align-items:center;justify-content:center;color:#fff;font-size:12px;font-weight:700">${initials}</div>
+          <div><div style="font-weight:600;font-size:14px">${name}</div><div style="font-size:12px;color:#6B7280">${email}</div></div>
+        </div></td>
+        <td style="font-size:13px">${job}</td>
+        <td style="font-size:13px">${date}</td>
+        <td><span style="padding:3px 10px;border-radius:20px;font-size:11px;font-weight:700;background:${badgeColor}22;color:${badgeColor};border:1px solid ${badgeColor}44">${status}</span></td>
+        <td style="font-size:13px">${i.interview_type || 'AI Interview'}</td>
+        <td><button onclick="copyInterviewLink('${roomLink}')" style="padding:4px 10px;border-radius:6px;font-size:11px;font-weight:600;background:#EFF6FF;color:#2563EB;border:none;cursor:pointer"><i class="fas fa-link"></i> Copy Link</button></td>
+        <td>${status === 'completed'
+          ? `<button onclick="viewInterviewReport('${i.id}')" style="padding:4px 10px;border-radius:6px;font-size:11px;font-weight:600;background:#F0FDF4;color:#059669;border:none;cursor:pointer"><i class="fas fa-chart-bar"></i> Report</button>`
+          : `<button onclick="cancelInterview('${i.id}')" style="padding:4px 10px;border-radius:6px;font-size:11px;font-weight:600;background:#FEF2F2;color:#DC2626;border:none;cursor:pointer"><i class="fas fa-times"></i> Cancel</button>`
+        }</td>
+      </tr>`;
+    }).join('');
+  } catch (err) {
+    tbody.innerHTML = `<tr><td colspan="7" class="text-center" style="padding:2rem;color:#EF4444">${err.message}</td></tr>`;
+  }
+}
+
+function openScheduleInterviewModal() {
+  let modal = document.getElementById('scheduleInterviewModal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'scheduleInterviewModal';
+    modal.className = 'modal-overlay';
+    modal.innerHTML = `
+      <div class="modal" style="max-width:560px">
+        <div class="modal-header">
+          <h3><i class="fas fa-calendar-plus" style="color:#6366f1;margin-right:8px"></i>Schedule Interview</h3>
+          <button class="btn btn-ghost btn-icon" onclick="closeModal('scheduleInterviewModal')">&times;</button>
+        </div>
+        <div class="modal-body">
+          <div class="form-group">
+            <label class="form-label">Select Job *</label>
+            <select class="form-control" id="siJob"></select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Candidate Email *</label>
+            <input type="email" class="form-control" id="siEmail" placeholder="candidate@email.com">
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">Date & Time *</label>
+              <input type="datetime-local" class="form-control" id="siDateTime">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Interview Type</label>
+              <select class="form-control" id="siType">
+                <option value="ai_interview">AI Interview</option>
+                <option value="technical">Technical</option>
+                <option value="hr_round">HR Round</option>
+                <option value="final">Final Round</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Duration (minutes)</label>
+            <select class="form-control" id="siDuration">
+              <option value="30">30 minutes</option>
+              <option value="45" selected>45 minutes</option>
+              <option value="60">60 minutes</option>
+              <option value="90">90 minutes</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Notes (optional)</label>
+            <textarea class="form-control" id="siNotes" rows="2" placeholder="Any special instructions..."></textarea>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" onclick="closeModal('scheduleInterviewModal')">Cancel</button>
+          <button class="btn btn-primary" onclick="submitScheduleInterview()"><i class="fas fa-paper-plane"></i> Schedule & Send Link</button>
+        </div>
+      </div>`;
+    document.body.appendChild(modal);
+  }
+  SimpaticoDB.from('jobs').select('id, title').eq('company_id', currentCompanyId).in('status', ['active','paused']).then(({ data }) => {
+    const sel = document.getElementById('siJob');
+    sel.innerHTML = '<option value="">Select a job...</option>' + (data || []).map(j => `<option value="${j.id}">${j.title}</option>`).join('');
+  });
+  const tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  tomorrow.setHours(10, 0, 0, 0);
+  document.getElementById('siDateTime').value = tomorrow.toISOString().slice(0, 16);
+  openModal('scheduleInterviewModal');
+}
+
+async function submitScheduleInterview() {
+  const jobId  = document.getElementById('siJob').value;
+  const email  = document.getElementById('siEmail').value.trim();
+  const dt     = document.getElementById('siDateTime').value;
+  const type   = document.getElementById('siType').value;
+  const dur    = document.getElementById('siDuration').value;
+  const notes  = document.getElementById('siNotes').value.trim();
+  if (!jobId || !email || !dt) { showToast('Please fill in all required fields', 'error'); return; }
+  try {
+    const { data: candidates } = await SimpaticoDB.from('users').select('id').eq('email', email).limit(1);
+    const candidateId = candidates?.[0]?.id || null;
+    const accessToken = crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2);
+    const { data: interview, error } = await SimpaticoDB.from('interviews').insert({
+      company_id: currentCompanyId, candidate_id: candidateId, candidate_email: email,
+      job_id: jobId, scheduled_at: new Date(dt).toISOString(), interview_type: type,
+      duration_mins: parseInt(dur), notes, status: 'scheduled', access_token: accessToken
+    }).select().single();
+    if (error) throw error;
+    const roomLink = `https://simpaticohr.in/interview/proctored-room.html?interview_id=${interview.id}&token=${accessToken}`;
+    try { await window.SimpaticoAPI.sendWhatsApp({ to: email, message: `Your interview is scheduled for ${new Date(dt).toLocaleString('en-IN')}. Join: ${roomLink}` }); } catch(e) {}
+    closeModal('scheduleInterviewModal');
+    showToast('Interview scheduled! Link copied to clipboard.', 'success');
+    navigator.clipboard?.writeText(roomLink).catch(() => {});
+    loadInterviews();
+  } catch (err) {
+    showToast(err.message || 'Failed to schedule interview', 'error');
+  }
+}
+
+function copyInterviewLink(link) {
+  navigator.clipboard.writeText(link)
+    .then(() => showToast('Interview link copied!', 'success'))
+    .catch(() => showToast('Copy failed: ' + link, 'error'));
+}
+
+async function cancelInterview(id) {
+  if (!confirm('Cancel this interview?')) return;
+  try {
+    const { error } = await SimpaticoDB.from('interviews').update({ status: 'cancelled' }).eq('id', id);
+    if (error) throw error;
+    showToast('Interview cancelled', 'success');
+    loadInterviews();
+  } catch (err) { showToast(err.message, 'error'); }
+}
+
+function viewInterviewReport(id) {
+  window.open(`/interview/results.html?interview_id=${id}`, '_blank');
+}
+
+function scheduleInterview(applicationId) {
+  openScheduleInterviewModal();
+  SimpaticoDB.from('applications')
+    .select('candidate:users!applications_candidate_id_fkey(email), job_id')
+    .eq('id', applicationId).single()
+    .then(({ data }) => {
+      if (data?.candidate?.email) document.getElementById('siEmail').value = data.candidate.email;
+      if (data?.job_id) { const s = document.getElementById('siJob'); if (s) s.value = data.job_id; }
+    }).catch(() => {});
+}
