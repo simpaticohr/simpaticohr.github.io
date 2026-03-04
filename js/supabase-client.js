@@ -1,6 +1,6 @@
 // js/supabase-client.js
 const SUPABASE_URL = 'https://api.simpaticohr.in';
-const SUPABASE_ANON_KEY = 'YOUR_SUPABASE_ANON_KEY'; // Replace with your actual key
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN2a3h0c3ZnbnlueGV4bWVtZnV5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc0MjE2NTEsImV4cCI6MjA4Mjk5NzY1MX0.2mys8Cc-ucJ1uLThEGJubeDEg1TvfIAkW-xFsR4ecq4'; // Replace with your actual key
 const WORKER_URL = 'https://evalis-ai.simpaticohrconsultancy.workers.dev';
 const SITE_URL = 'https://simpaticohr.in';
 
