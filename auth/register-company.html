@@ -276,17 +276,17 @@ async function submitCompanyRegistration() {
     if (btnText) btnText.textContent = 'Creating account...';
 
     try {
-        const res = await fetch(`${API}/api/auth/register-company`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
-        });
+        const { data: authData, error: authError } = await window.SimpaticoDB.auth.signUp({ email: payload.email, password: payload.password, options: { data: { full_name: payload.full_name, role: 'company_admin' } } });
+        if (authError) throw authError;
+        const userId = authData.user?.id;
+        if (!userId) throw new Error('Registration failed - no user returned');
+        const { data: company, error: ce } = await window.SimpaticoDB.from('companies').insert({ name: payload.company_name, email: payload.email, contact_email: payload.email, industry: payload.industry, company_size: payload.company_size, website: payload.website, subscription_plan: 'trial', is_active: true }).select().single();
+        if (ce) throw ce;
+        await window.SimpaticoDB.from('users').insert({ auth_id: userId, full_name: payload.full_name, email: payload.email, phone: payload.phone, role: 'company_admin', company_id: company.id, is_active: true });
+        const data = { token: authData.session?.access_token, user: { email: payload.email, full_name: payload.full_name, role: 'company_admin', company_id: company.id } };
 
-        const data = await res.json();
 
-        if (!res.ok || data.error) {
-            throw new Error(data.error || data.message || 'Registration failed');
-        }
+
 
         // Save session
         if (data.token) {
