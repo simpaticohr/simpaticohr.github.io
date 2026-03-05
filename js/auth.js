@@ -189,7 +189,7 @@ class AuthManager {
     return data;
   }
 
-  // Check Session
+  async checkSession() {
     const { data: { session } } = await this.db.auth.getSession();
     if (session) {
       const profile = await this.getUserProfile(session.user.id);
