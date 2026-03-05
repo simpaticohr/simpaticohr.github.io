@@ -203,8 +203,8 @@ class AuthManager {
     const profile = await this.getUserProfile(user.id);
     if (!profile) return null;
     this.currentUser = user;
-    this.userProfile = profile;
     return { session: { user }, profile };
+  }
 
   // Redirect by Role
   redirectByRole(role) {
