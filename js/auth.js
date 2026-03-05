@@ -210,7 +210,7 @@ class AuthManager {
   redirectByRole(role) {
     const routes = {
       'super_admin': '/dashboard/super-admin.html',
-      'company_admin': '/dashboard/company.html',
+      'company_admin': '/dashboard/hr.html',
       'hr_manager': '/dashboard/hr.html',
       'interviewer': '/dashboard/interviewer.html',
       'candidate': '/dashboard/candidate.html'
