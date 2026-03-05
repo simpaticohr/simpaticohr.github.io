@@ -379,7 +379,7 @@ async function handleDrop(event, newStage) {
     const jobId = document.getElementById('pipelineJobFilter').value;
     if (jobId) loadPipeline(jobId);
 
-    // Trigger automation
+    triggerAutomation('application_status_changed', appId, { stage: newStage });
     triggerAutomation('application
 
 // ==========================================
