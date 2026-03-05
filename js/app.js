@@ -569,10 +569,10 @@ function scheduleInterview(applicationId) {
     .then(({ data }) => {
       if (data?.candidate?.email) document.getElementById('siEmail').value = data.candidate.email;
       if (data?.job_id) { const s = document.getElementById('siJob'); if (s) s.value = data.job_id; }
-    }).catch(() => {});
-}
 
 function triggerAutomation(event, id, data) {
+  console.log('Automation:', event, id, data);
+}
 
 
 
