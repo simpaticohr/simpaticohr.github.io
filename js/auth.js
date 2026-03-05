@@ -190,21 +190,21 @@ class AuthManager {
   }
 
   // Check Session
-  async checkSession() {
     const { data: { session } } = await this.db.auth.getSession();
-    if (!session) return null;
-    
-    const profile = await this.getUserProfile(session.user.id);
-    this.currentUser = session.user;
+    if (session) {
+      const profile = await this.getUserProfile(session.user.id);
+      this.currentUser = session.user;
+      this.userProfile = profile;
+      return { session, profile };
+    }
+    const token = localStorage.getItem("simpatico_token");
+    const user = JSON.parse(localStorage.getItem("simpatico_user") || "{}");
+    if (!token || !user.id) return null;
+    const profile = await this.getUserProfile(user.id);
+    if (!profile) return null;
+    this.currentUser = user;
     this.userProfile = profile;
-    return { session, profile };
-  }
-
-  // Logout
-  async logout() {
-    await this.db.auth.signOut();
-    window.location.href = '/auth/login.html';
-  }
+    return { session: { user }, profile };
 
   // Redirect by Role
   redirectByRole(role) {
