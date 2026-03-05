@@ -380,7 +380,7 @@ async function handleDrop(event, newStage) {
     if (jobId) loadPipeline(jobId);
 
     triggerAutomation('application_status_changed', appId, { stage: newStage });
-    triggerAutomation('application
+
 
 // ==========================================
 // INTERVIEWS
@@ -566,4 +566,9 @@ function scheduleInterview(applicationId) {
       if (data?.candidate?.email) document.getElementById('siEmail').value = data.candidate.email;
       if (data?.job_id) { const s = document.getElementById('siJob'); if (s) s.value = data.job_id; }
     }).catch(() => {});
+}
+
+function triggerAutomation(event, id, data) {
+  // Automation trigger placeholder
+  console.log('Automation:', event, id, data);
 }
