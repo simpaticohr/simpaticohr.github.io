@@ -573,9 +573,9 @@ function scheduleInterview(applicationId) {
 }
 
 function triggerAutomation(event, id, data) {
-  // Automation trigger placeholder
-  console.log('Automation:', event, id, data);
-}
+
+
+
 
 function triggerAutomation(event, id, data) {
   // Automation trigger placeholder
