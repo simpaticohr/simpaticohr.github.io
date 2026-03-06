@@ -573,15 +573,5 @@ function scheduleInterview(applicationId) {
 }
 
 function triggerAutomation(event, id, data) {
-  console.log(chr(39)+chr(65)+chr(117)+chr(116)+chr(111)+chr(109)+chr(97)+chr(116)+chr(105)+chr(111)+chr(110)+chr(58)+chr(39), event, id, data);
-}
-  console.log('Automation:', event, id, data);
-}
-
-
-
-
-function triggerAutomation(event, id, data) {
-  // Automation trigger placeholder
   console.log('Automation:', event, id, data);
 }
