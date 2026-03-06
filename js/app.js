@@ -496,7 +496,7 @@ function openScheduleInterviewModal() {
         </div>
         <div class="modal-footer">
           <button class="btn btn-secondary" onclick="closeModal('scheduleInterviewModal')">Cancel</button>
-          <button class="btn btn-primary" onclick="submitScheduleInterview()"><i class="fas fa-paper-plane"></i> Schedule & Send Link</button>
+          <button class="btn btn-primary" onclick="submitScheduleInterview()"><i class="fas fa-paper-plane"></i> Schedule and Send Link</button>
         </div>
       </div>`;
     document.body.appendChild(modal);
