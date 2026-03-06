@@ -51,12 +51,14 @@ async function loadDashboardData(companyId) {
       .eq('company_id', companyId)
       .eq('status', 'active');
     document.getElementById('statActiveJobs').textContent = jobsCount || 0;
+    if(document.getElementById('badgeJobs')) document.getElementById('badgeJobs').textContent = jobsCount || 0;
 
     // Applications Count
     const { count: appsCount } = await SimpaticoDB.from('applications')
       .select('*', { count: 'exact', head: true })
       .eq('company_id', companyId);
     document.getElementById('statApplications').textContent = appsCount || 0;
+    if(document.getElementById('badgeApplications')) document.getElementById('badgeApplications').textContent = appsCount || 0;
 
     // Today's Interviews
     const today = new Date().toISOString().split('T')[0];
