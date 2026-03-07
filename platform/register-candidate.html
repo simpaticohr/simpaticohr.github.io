@@ -254,8 +254,11 @@
         }
     }
 
-   async function handleRegister(e) {
+  async function handleRegister(e) {
     e.preventDefault();
+
+    const btn = document.getElementById('submitBtn');
+    const spinner = document.getElementById('spinner');
 
     const fullName = document.getElementById('fullName').value.trim();
     const phone = document.getElementById('phone').value.trim();
@@ -280,94 +283,68 @@
 
     const payload = {
         name: fullName,
-        phone,
-        email,
+        phone: phone,
+        email: email,
         experience: document.getElementById('experience').value,
         sector: document.getElementById('sector').value,
         skills: document.getElementById('skills').value.trim(),
         location: document.getElementById('location').value.trim(),
-        password
+        password: password
     };
 
-    ...
-}
-      const payload = {
-    name: document.getElementById('fullName').value.trim(),
-            phone: document.getElementById('phone').value.trim(),
-            email: document.getElementById('email').value.trim(),
-            experience: document.getElementById('experience').value,
-            sector: document.getElementById('sector').value,
-            skills: document.getElementById('skills').value.trim(),
-            location: document.getElementById('location').value.trim(),
-            password: password
-        };
+    btn.disabled = true;
+    spinner.style.display = 'inline-block';
 
-        if (!payload.full_name || !payload.email || !payload.phone) {
-            toast('Please fill in all required fields', 'error');
-            return;
+    try {
+
+        const res = await fetch(`${API}/api/auth/register-candidate`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+
+        const data = await res.json();
+
+        if (!res.ok || data.error) {
+            throw new Error(data.error || data.message || 'Registration failed');
         }
 
-        btn.disabled = true;
-        spinner.style.display = 'inline-block';
+        // resume upload
+        const resumeFile = document.getElementById('resumeFile').files[0];
 
-        try {
-            const res = await fetch(`${API}/api/auth/register-candidate`, {
+        if (resumeFile && data.token) {
+
+            const formData = new FormData();
+            formData.append('resume', resumeFile);
+
+            await fetch(`${API}/api/candidate/upload-resume`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
+                headers: {
+                    'Authorization': `Bearer ${data.token}`
+                },
+                body: formData
             });
 
-            const data = await res.json();
-
-            if (!res.ok || data.error) {
-                throw new Error(data.error || data.message || 'Registration failed');
-            }
-
-            // Handle resume upload if file selected
-            const resumeFile = document.getElementById('resumeFile').files[0];
-            if (resumeFile && data.token) {
-                try {
-                    const formData = new FormData();
-                    formData.append('resume', resumeFile);
-                    
-                    await fetch(`${API}/api/candidate/upload-resume`, {
-                        method: 'POST',
-                        headers: { 'Authorization': `Bearer ${data.token}` },
-                        body: formData
-                    });
-                } catch (uploadErr) {
-                    console.warn('Resume upload failed, can be done later:', uploadErr);
-                }
-            }
-
-            // Save auth data
-            if (data.token) {
-                localStorage.setItem('simpatico_token', data.token);
-                localStorage.setItem('simpatico_user', JSON.stringify(data.user || {
-                    email: payload.email,
-                    full_name: payload.full_name,
-                    role: 'candidate'
-                }));
-            }
-
-            toast('Account created successfully! Redirecting...', 'success');
-            
-            setTimeout(() => {
-                if (data.token) {
-                    window.location.href = '../dashboard/candidate.html';
-                } else {
-                    window.location.href = 'login.html';
-                }
-            }, 1500);
-
-        } catch (err) {
-            console.error('Registration error:', err);
-            toast(err.message || 'Registration failed. Please try again.', 'error');
-        } finally {
-            btn.disabled = false;
-            spinner.style.display = 'none';
         }
+
+        toast('Account created successfully! Redirecting...', 'success');
+
+        setTimeout(() => {
+            window.location.href = '../dashboard/candidate.html';
+        }, 1500);
+
+    } catch (err) {
+
+        console.error(err);
+        toast(err.message || 'Registration failed', 'error');
+
+    } finally {
+
+        btn.disabled = false;
+        spinner.style.display = 'none';
+
     }
+}
 
     function toast(msg, type = 'info') {
         const existing = document.querySelector('.toast');
