@@ -462,390 +462,168 @@
     </div>
 </div>
 
+﻿<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
-    const API = 'https://evalis-ai.simpaticohrconsultancy.workers.dev';
-    let token = localStorage.getItem('simpatico_token');
-    let user = null;
-
-    try { user = JSON.parse(localStorage.getItem('simpatico_user')); } catch(e) {}
-
-    if (!token || !user) {
-        window.location.href = '../auth/login.html';
-    }
-
-    // Set user info
-    if (user) {
-        document.getElementById('userName').textContent = user.full_name || 'Candidate';
-        document.getElementById('userAvatar').textContent = (user.full_name || 'C')[0].toUpperCase();
-    }
-
-    // API helper
-    async function api(path, options = {}) {
-        const res = await fetch(${API}${path}, {
-            ...options,
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': Bearer ${token},
-                ...options.headers
-            }
-        });
-        if (res.status === 401) {
-            localStorage.clear();
-            window.location.href = '../auth/login.html';
-            return;
-        }
-        return res.json();
-    }
-
-    // Sidebar toggle
-    function toggleSidebar() {
-        document.getElementById('sidebar').classList.toggle('open');
-        document.getElementById('overlay').classList.toggle('active');
-    }
-
-    // Tab switching
-    function switchTab(tab) {
-        document.querySelectorAll('.tab-section').forEach(s => s.classList.remove('active'));
-        document.getElementById(tab-${tab}).classList.add('active');
-        document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
-        event?.target?.closest('.nav-item')?.classList.add('active');
-
-        const titles = {
-            dashboard: 'Dashboard', jobs: 'Browse Jobs', applications: 'My Applications',
-            interviews: 'My Interviews', profile: 'My Profile', notifications: 'Notifications'
-        };
-        document.getElementById('pageTitle').textContent = titles[tab] || 'Dashboard';
-
-        // Load data for tab
-        if (tab === 'jobs') searchJobs();
-        if (tab === 'applications') loadApplications();
-        if (tab === 'interviews') loadInterviews();
-        if (tab === 'profile') loadProfile();
-        if (tab === 'notifications') loadNotifications();
-
-        // Close mobile sidebar
-        document.getElementById('sidebar').classList.remove('open');
-        document.getElementById('overlay').classList.remove('active');
-    }
-
-    // ═══ Load Dashboard ═══
-    async function loadDashboard() {
-        try {
-            const [apps, interviews] = await Promise.all([
-                api('/api/applications'),
-                api('/api/interviews')
-            ]);
-
-            // Stats
-            const applied = (apps || []).length;
-            const shortlisted = (apps || []).filter(a => ['shortlisted','interview_scheduled','interview_completed','selected'].includes(a.status)).length;
-            const interviewCount = (interviews || []).length;
-            const offers = (apps || []).filter(a => ['offer_sent','offer_accepted','hired'].includes(a.status)).length;
-
-            document.getElementById('statApplied').textContent = applied;
-            document.getElementById('statShortlisted').textContent = shortlisted;
-            document.getElementById('statInterviews').textContent = interviewCount;
-            document.getElementById('statOffers').textContent = offers;
-
-            if (applied > 0) {
-                document.getElementById('appCountBadge').textContent = applied;
-                document.getElementById('appCountBadge').style.display = 'inline';
-            }
-
-            // Upcoming interviews
-            const upcoming = (interviews || []).filter(i => i.status === 'scheduled' && new Date(i.scheduled_at) > new Date());
-            const upEl = document.getElementById('upcomingInterviews');
-            if (upcoming.length === 0) {
-                upEl.innerHTML = '<div class="empty-state"><i class="fas fa-calendar"></i><h3>No upcoming interviews</h3><p>When you\'re scheduled for interviews, they will appear here.</p></div>';
-            } else {
-                upEl.innerHTML = upcoming.slice(0, 3).map(i => `
-                    <div class="interview-card">
-                        <div class="interview-header">
-                            <div>
-                                <div class="interview-title">${i.title || 'Interview'}</div>
-                                <div style="font-size:13px; color:#6B7280;">${i.job?.title || ''} ${i.job?.companies?.name ? '- ' + i.job.companies.name : ''}</div>
-                                <div class="interview-time">
-                                    <i class="fas fa-clock"></i>
-                                    ${new Date(i.scheduled_at).toLocaleDateString('en-IN', { weekday: 'short', month: 'short', day: 'numeric' })}
-                                    at ${new Date(i.scheduled_at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}
-                                    <span style="margin-left:8px; color:#9CA3AF">(${i.duration_minutes || 45} min)</span>
-                                </div>
-                            </div>
-                            ${i.meeting_url ? <a href="${i.meeting_url}" target="_blank" class="btn-join"><i class="fas fa-video" style="margin-right:4px"></i> Join</a> : ''}
-                        </div>
-                    </div>
-                `).join('');
-            }
-
-            // Recent applications
-            const recEl = document.getElementById('recentApplications');
-            if ((apps || []).length === 0) {
-                recEl.innerHTML = '<div class="empty-state"><i class="fas fa-file-alt"></i><h3>No applications yet</h3><p>Browse jobs and start applying!</p></div>';
-            } else {
-                recEl.innerHTML = apps.slice(0, 5).map(a => `
-                    <div class="app-item">
-                        <div class="job-logo">${(a.job?.title || 'J')[0]}</div>
-                        <div style="flex:1">
-                            <div style="font-size:14px; font-weight:600;">${a.job?.title || 'Job'}</div>
-                            <div style="font-size:12px; color:#6B7280;">${a.job?.companies?.name || a.job?.department || ''} · Applied ${new Date(a.created_at).toLocaleDateString('en-IN')}</div>
-                        </div>
-                        <span class="app-status-badge status-${a.status}">${a.status.replace(/_/g, ' ')}</span>
-                    </div>
-                `).join('');
-            }
-
-        } catch(err) {
-            console.error('Dashboard load error:', err);
-        }
-    }
-
-    // ═══ Browse Jobs ═══
-    async function searchJobs() {
-        const search = document.getElementById('jobSearch')?.value || '';
-        const location = document.getElementById('jobLocation')?.value || '';
-        const type = document.getElementById('jobType')?.value || '';
-
-        const el = document.getElementById('jobListings');
-        el.innerHTML = '<div class="loader"><div class="spin"></div>Searching jobs...</div>';
-
-        try {
-            let query = /api/jobs/public?q=${encodeURIComponent(search)};
-            if (location) query += &location=${encodeURIComponent(location)};
-            if (type) query += &type=${type};
-
-            const jobs = await api(query);
-
-            if (!jobs || jobs.length === 0) {
-                el.innerHTML = '<div class="empty-state"><i class="fas fa-briefcase"></i><h3>No jobs found</h3><p>Try adjusting your search filters</p></div>';
-                return;
-            }
-
-            el.innerHTML = jobs.map(j => `
-                <div class="job-card">
-                    <div class="job-logo">${(j.companies?.name || j.title || 'C')[0].toUpperCase()}</div>
-                    <div class="job-info">
-                        <div class="job-title">${j.title}</div>
-                        <div class="job-company">${j.companies?.name || 'Company'}</div>
-                        <div class="job-meta">
-                            <span><i class="fas fa-map-marker-alt"></i> ${j.location || 'Not specified'}</span>
-                            <span><i class="fas fa-building"></i> ${(j.location_type || 'onsite').replace('_', ' ')}</span>
-                            <span><i class="fas fa-clock"></i> ${(j.employment_type || 'full_time').replace('_', ' ')}</span>
-                            ${j.experience_min ? <span><i class="fas fa-briefcase"></i> ${j.experience_min}-${j.experience_max || '?'} yrs</span> : ''}
-                            ${j.salary_min ? <span><i class="fas fa-rupee-sign"></i> ${(j.salary_min/100000).toFixed(0)}-${(j.salary_max/100000).toFixed(0)} LPA</span> : ''}
-                        </div>
-                    </div>
-                    <div class="job-actions">
-                        <button class="btn-sm btn-primary" onclick="openApplyModal('${j.id}', '${j.title.replace(/'/g, "\\'")}')">
-                            <i class="fas fa-paper-plane" style="margin-right:4px"></i> Apply
-                        </button>
-                    </div>
-                </div>
-            `).join('');
-
-        } catch(err) {
-            el.innerHTML = <div class="empty-state"><i class="fas fa-exclamation-triangle"></i><h3>Error loading jobs</h3><p>${err.message}</p></div>;
-        }
-    }
-
-    // ═══ Apply Modal ═══
-    function openApplyModal(jobId, jobTitle) {
-        document.getElementById('applyJobId').value = jobId;
-        document.getElementById('applyJobTitle').textContent = jobTitle;
-        document.getElementById('applyModal').style.display = 'flex';
-    }
-
-    function closeApplyModal() {
-        document.getElementById('applyModal').style.display = 'none';
-    }
-
-    document.getElementById('applyForm').addEventListener('submit', async (e) => {
-        e.preventDefault();
-        const jobId = document.getElementById('applyJobId').value;
-        const coverLetter = document.getElementById('applyCover').value.trim();
-        const resumeUrl = document.getElementById('applyResume').value.trim();
-        const alertEl = document.getElementById('applyAlert');
-
-        try {
-            const result = await api('/api/applications', {
-                method: 'POST',
-                body: JSON.stringify({
-                    job_id: jobId,
-                    cover_letter: coverLetter || null,
-                    resume_url: resumeUrl || null,
-                    source: 'portal'
-                })
-            });
-
-            if (result.error) throw new Error(result.error);
-
-            alertEl.className = 'alert alert-success';
-            alertEl.textContent = 'Application submitted successfully!';
-            alertEl.style.display = 'block';
-
-            setTimeout(() => {
-                closeApplyModal();
-                alertEl.style.display = 'none';
-                loadDashboard();
-            }, 1500);
-
-        } catch(err) {
-            alertEl.className = 'alert alert-error';
-            alertEl.textContent = err.message || 'Failed to submit application';
-            alertEl.style.display = 'block';
-        }
-    });
-
-    // ═══ My Applications ═══
-    async function loadApplications() {
-        const el = document.getElementById('myApplications');
-        el.innerHTML = '<div class="loader"><div class="spin"></div>Loading applications...</div>';
-
-        try {
-            const apps = await api('/api/applications');
-            if (!apps || apps.length === 0) {
-                el.innerHTML = '<div class="empty-state"><i class="fas fa-file-alt"></i><h3>No applications yet</h3><p>Browse jobs and start applying!</p></div>';
-                return;
-            }
-            el.innerHTML = apps.map(a => `
-                <div class="app-item">
-                    <div class="job-logo">${(a.job?.title || 'J')[0]}</div>
-                    <div style="flex:1">
-                        <div style="font-size:15px; font-weight:600;">${a.job?.title || 'Job'}</div>
-                        <div style="font-size:13px; color:#6B7280; margin-top:2px;">
-                            ${a.job?.companies?.name || a.job?.department || ''}
-                            ${a.job?.location ? ' · ' + a.job.location : ''}
-                        </div>
-                        <div style="font-size:12px; color:#9CA3AF; margin-top:4px;">
-                            Applied on ${new Date(a.created_at).toLocaleDateString('en-IN', { year: 'numeric', month: 'short', day: 'numeric' })}
-                            ${a.ai_match_score ? ` · Match: ${a.ai_match_score}%` : ''}
-                        </div>
-                    </div>
-                    <span class="app-status-badge status-${a.status}">${a.status.replace(/_/g, ' ')}</span>
-                </div>
-            `).join('');
-        } catch(err) {
-            el.innerHTML = <div class="empty-state"><i class="fas fa-exclamation-triangle"></i><h3>Error</h3><p>${err.message}</p></div>;
-        }
-    }
-
-    // ═══ My Interviews ═══
-    async function loadInterviews() {
-        const el = document.getElementById('myInterviews');
-        el.innerHTML = '<div class="loader"><div class="spin"></div>Loading interviews...</div>';
-
-        try {
-            const interviews = await api('/api/interviews');
-            if (!interviews || interviews.length === 0) {
-                el.innerHTML = '<div class="empty-state"><i class="fas fa-video"></i><h3>No interviews scheduled</h3><p>Interviews will appear here when scheduled by employers.</p></div>';
-                return;
-            }
-            el.innerHTML = interviews.map(i => {
-                const dt = new Date(i.scheduled_at);
-                const isPast = dt < new Date();
-                return `
-                    <div class="interview-card">
-                        <div class="interview-header">
-                            <div>
-                                <div class="interview-title">${i.title || 'Interview'}</div>
-                                <div style="font-size:13px; color:#6B7280;">${i.job?.title || ''} ${i.job?.companies?.name ? '- ' + i.job.companies.name : ''}</div>
-                                <div class="interview-time">
-                                    <i class="fas fa-clock"></i>
-                                    ${dt.toLocaleDateString('en-IN', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}
-                                    at ${dt.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}
-                                </div>
-                                <div style="margin-top:6px; display:flex; gap:8px; flex-wrap:wrap;">
-                                    <span style="font-size:12px; padding:3px 8px; border-radius:6px; background:#EEF2FF; color:#4F46E5;">
-                                        <i class="fas fa-${i.interview_type === 'ai_proctored' ? 'shield-alt' : 'video'}"></i> ${(i.interview_type || '').replace(/_/g, ' ')}
-                                    </span>
-                                    <span style="font-size:12px; padding:3px 8px; border-radius:6px; background:#F3F4F6; color:#6B7280;">
-                                        ${i.duration_minutes || 45} min
-                                    </span>
-                                    ${i.proctoring_enabled ? '<span style="font-size:12px; padding:3px 8px; border-radius:6px; background:#FEF3C7; color:#92400E;"><i class="fas fa-eye"></i> Proctored</span>' : ''}
-                                </div>
-                            </div>
-                            <div style="text-align:right;">
-                                <span class="app-status-badge status-${i.status === 'scheduled' ? 'applied' : i.status === 'completed' ? 'shortlisted' : 'screened'}">${i.status}</span>
-                                ${!isPast && i.status === 'scheduled' && i.meeting_url ? `
-                                    <br><a href="${i.meeting_url}" target="_blank" class="btn-join" style="margin-top:8px; display:inline-block;">
-                                        <i class="fas fa-video" style="margin-right:4px"></i> Join Interview
-                                    </a>` : ''}
-                                ${i.status === 'completed' && i.overall_score ? <div style="margin-top:6px; font-size:13px; color:#059669; font-weight:600;">Score: ${i.overall_score}%</div> : ''}
-                            </div>
-                        </div>
-                    </div>
-                `;
-            }).join('');
-        } catch(err) {
-            el.innerHTML = <div class="empty-state"><i class="fas fa-exclamation-triangle"></i><h3>Error</h3><p>${err.message}</p></div>;
-        }
-    }
-
-    // ═══ Profile ═══
-    async function loadProfile() {
-        const el = document.getElementById('profileData');
-        el.innerHTML = '<div class="loader"><div class="spin"></div>Loading profile...</div>';
-
-        try {
-            const data = await api('/api/auth/me');
-            const u = data.user;
-            el.innerHTML = `
-                <div class="profile-field"><label>Full Name</label><div class="value">${u.full_name || '-'}</div></div>
-                <div class="profile-field"><label>Email</label><div class="value">${u.email || '-'}</div></div>
-                <div class="profile-field"><label>Phone</label><div class="value">${u.phone || '-'}</div></div>
-                <div class="profile-field"><label>Role</label><div class="value" style="text-transform:capitalize;">${(u.role || '').replace('_', ' ')}</div></div>
-                <div class="profile-field"><label>Last Login</label><div class="value">${u.last_login ? new Date(u.last_login).toLocaleString('en-IN') : 'First login'}</div></div>
-                <div class="profile-field"><label>Joined</label><div class="value">${new Date(u.created_at).toLocaleDateString('en-IN', { year: 'numeric', month: 'long', day: 'numeric' })}</div></div>
-            `;
-        } catch(err) {
-            el.innerHTML = <p style="color:#EF4444">Error loading profile: ${err.message}</p>;
-        }
-    }
-
-    // ═══ Notifications ═══
-    async function loadNotifications() {
-        const el = document.getElementById('notifList');
-        el.innerHTML = '<div class="loader"><div class="spin"></div>Loading...</div>';
-
-        try {
-            const notifs = await api('/api/notifications');
-            if (!notifs || notifs.length === 0) {
-                el.innerHTML = '<div class="empty-state"><i class="fas fa-bell-slash"></i><h3>No notifications</h3><p>You\'re all caught up!</p></div>';
-                return;
-            }
-            el.innerHTML = notifs.map(n => `
-                <div class="app-item" style="opacity:${n.status === 'read' ? '0.6' : '1'}">
-                    <div style="width:36px; height:36px; border-radius:10px; background:${n.status === 'read' ? '#F3F4F6' : '#EEF2FF'}; display:flex; align-items:center; justify-content:center;">
-                        <i class="fas fa-${n.type === 'email' ? 'envelope' : n.type === 'whatsapp' ? 'comment' : 'bell'}" style="color:${n.status === 'read' ? '#9CA3AF' : '#4F46E5'}; font-size:14px;"></i>
-                    </div>
-                    <div style="flex:1">
-                        <div style="font-size:14px; font-weight:${n.status === 'read' ? '400' : '600'};">${n.subject || n.body?.substring(0, 60) || 'Notification'}</div>
-                        <div style="font-size:12px; color:#9CA3AF; margin-top:2px;">${new Date(n.created_at).toLocaleString('en-IN')}</div>
-                    </div>
-                </div>
-            `).join('');
-        } catch(err) {
-            el.innerHTML = <div class="empty-state"><p>${err.message}</p></div>;
-        }
-    }
-
-    function editProfile() {
-        alert('Profile editing coming soon! Please contact HR for any changes.');
-    }
-
-    function logout() {
-        if (confirm('Are you sure you want to sign out?')) {
-            localStorage.clear();
-            window.location.href = '../auth/login.html';
-        }
-    }
-
-    // Enter key for job search
-    document.getElementById('jobSearch')?.addEventListener('keypress', (e) => {
-        if (e.key === 'Enter') searchJobs();
-    });
-
-    // Initial load
-    loadDashboard();
+const SUPABASE_URL='https://cvkxtsvgnynxexmemfuy.supabase.co';
+const SUPABASE_ANON_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN2a3h0c3ZnbnlueGV4bWVtZnV5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc0MjE2NTEsImV4cCI6MjA4Mjk5NzY1MX0.2mys8Cc-ucJ1uLThEGJubeDEg1TvfIAkW-xFsR4ecq4';
+const db=supabase.createClient(SUPABASE_URL,SUPABASE_ANON_KEY);
+let token=localStorage.getItem('simpatico_token');
+let user=null; let currentUserId=null;
+try{user=JSON.parse(localStorage.getItem('simpatico_user'));}catch(e){}
+if(!token||!user){window.location.href='../auth/login.html';}
+if(user){
+  document.getElementById('userName').textContent=user.full_name||'Candidate';
+  document.getElementById('userAvatar').textContent=(user.full_name||'C')[0].toUpperCase();
+}
+async function getCurrentUserId(){
+  if(currentUserId)return currentUserId;
+  const{data}=await db.from('users').select('id').eq('email',user.email).single();
+  currentUserId=data?.id;
+  return currentUserId;
+}
+async function api(path,options){
+  options=options||{};
+  const uid=await getCurrentUserId();
+  if(path.includes('/api/applications')&&options.method==='POST'){
+    const body=JSON.parse(options.body);
+    const{data,error}=await db.from('applications').insert({...body,candidate_id:uid,status:'applied',current_stage:'applied'}).select().single();
+    if(error)throw new Error(error.message);
+    return data;
+  }
+  if(path.includes('/api/applications')){
+    if(!uid)return[];
+    const{data}=await db.from('applications').select('*,job:jobs(title,location,employment_type,companies(name))').eq('candidate_id',uid).order('created_at',{ascending:false});
+    return data||[];
+  }
+  if(path.includes('/api/interviews')){
+    if(!uid)return[];
+    const{data}=await db.from('interviews').select('*,job:jobs(title,companies(name))').eq('candidate_id',uid).order('scheduled_at',{ascending:true});
+    return data||[];
+  }
+  if(path.includes('/api/jobs')){
+    const qs=path.split('?')[1]||'';
+    const params=new URLSearchParams(qs);
+    let query=db.from('jobs').select('*,companies(name)').eq('is_active',true);
+    if(params.get('q'))query=query.ilike('title','%'+params.get('q')+'%');
+    if(params.get('location'))query=query.ilike('location','%'+params.get('location')+'%');
+    if(params.get('type'))query=query.eq('employment_type',params.get('type'));
+    const{data}=await query.limit(20);
+    return data||[];
+  }
+  if(path.includes('/api/profile')){
+    if(!uid)return null;
+    const{data}=await db.from('users').select('*').eq('id',uid).single();
+    return data;
+  }
+  if(path.includes('/api/notifications')){
+    if(!uid)return[];
+    const{data}=await db.from('notifications').select('*').eq('user_id',uid).order('created_at',{ascending:false}).limit(20);
+    return data||[];
+  }
+  return[];
+}
+function toggleSidebar(){
+  document.getElementById('sidebar').classList.toggle('open');
+  document.getElementById('overlay').classList.toggle('active');
+}
+function switchTab(tab){
+  document.querySelectorAll('.tab-section').forEach(s=>s.classList.remove('active'));
+  const el=document.getElementById('tab-'+tab);
+  if(el)el.classList.add('active');
+  document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
+  event?.target?.closest('.nav-item')?.classList.add('active');
+  const titles={dashboard:'Dashboard',jobs:'Browse Jobs',applications:'My Applications',interviews:'My Interviews',profile:'My Profile',notifications:'Notifications'};
+  document.getElementById('pageTitle').textContent=titles[tab]||'Dashboard';
+  if(tab==='jobs')searchJobs();
+  if(tab==='applications')loadApplications();
+  if(tab==='interviews')loadInterviews();
+  if(tab==='profile')loadProfile();
+  if(tab==='notifications')loadNotifications();
+  document.getElementById('sidebar').classList.remove('open');
+  document.getElementById('overlay').classList.remove('active');
+}
+async function loadDashboard(){
+  try{
+    const[apps,interviews]=await Promise.all([api('/api/applications'),api('/api/interviews')]);
+    const applied=(apps||[]).length;
+    const shortlisted=(apps||[]).filter(a=>['shortlisted','interview_scheduled','selected'].includes(a.status)).length;
+    const interviewCount=(interviews||[]).length;
+    const offers=(apps||[]).filter(a=>['offer_sent','hired'].includes(a.status)).length;
+    document.getElementById('statApplied').textContent=applied;
+    document.getElementById('statShortlisted').textContent=shortlisted;
+    document.getElementById('statInterviews').textContent=interviewCount;
+    document.getElementById('statOffers').textContent=offers;
+    const upcoming=(interviews||[]).filter(i=>i.status==='scheduled'&&new Date(i.scheduled_at)>new Date());
+    const upEl=document.getElementById('upcomingInterviews');
+    upEl.innerHTML=upcoming.length===0?'<div class="empty-state"><i class="fas fa-calendar"></i><h3>No upcoming interviews</h3><p>When scheduled, interviews appear here.</p></div>':upcoming.slice(0,3).map(i=>`<div class="interview-card"><div class="interview-header"><div><div class="interview-title">${i.title||'Interview'}</div><div style="font-size:13px;color:#6B7280;">${i.job?.title||''}</div><div class="interview-time"><i class="fas fa-clock"></i> ${new Date(i.scheduled_at).toLocaleDateString('en-IN',{weekday:'short',month:'short',day:'numeric'})} at ${new Date(i.scheduled_at).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'})}</div></div>${i.meeting_url?`<a href="${i.meeting_url}" target="_blank" class="btn-join"><i class="fas fa-video"></i> Join</a>`:''}</div></div>`).join('');
+    const recEl=document.getElementById('recentApplications');
+    recEl.innerHTML=(apps||[]).length===0?'<div class="empty-state"><i class="fas fa-file-alt"></i><h3>No applications yet</h3><p>Browse jobs and start applying!</p></div>':(apps||[]).slice(0,5).map(a=>`<div class="app-item"><div class="job-logo">${(a.job?.title||'J')[0]}</div><div style="flex:1"><div style="font-size:14px;font-weight:600;">${a.job?.title||'Job'}</div><div style="font-size:12px;color:#6B7280;">${a.job?.companies?.name||''} &middot; ${new Date(a.created_at).toLocaleDateString('en-IN')}</div></div><span class="app-status-badge status-${a.status}">${a.status.replace(/_/g,' ')}</span></div>`).join('');
+  }catch(err){console.error('Dashboard error:',err);}
+}
+async function searchJobs(){
+  const search=document.getElementById('jobSearch')?.value||'';
+  const location=document.getElementById('jobLocation')?.value||'';
+  const type=document.getElementById('jobType')?.value||'';
+  const el=document.getElementById('jobListings');
+  el.innerHTML='<div class="loader"><div class="spin"></div>Searching jobs...</div>';
+  try{
+    const jobs=await api('/api/jobs/public?q='+encodeURIComponent(search)+'&location='+encodeURIComponent(location)+'&type='+type);
+    el.innerHTML=(!jobs||jobs.length===0)?'<div class="empty-state"><i class="fas fa-briefcase"></i><h3>No jobs found</h3></div>':jobs.map(j=>`<div class="job-card"><div class="job-logo">${(j.companies?.name||j.title||'C')[0].toUpperCase()}</div><div class="job-info"><div class="job-title">${j.title}</div><div class="job-company">${j.companies?.name||'Company'}</div><div class="job-meta"><span><i class="fas fa-map-marker-alt"></i> ${j.location||'Not specified'}</span></div></div><div class="job-actions"><button class="btn-sm btn-primary" onclick="openApplyModal('${j.id}','${j.title.replace(/'/g,"\\'")}')"><i class="fas fa-paper-plane"></i> Apply</button></div></div>`).join('');
+  }catch(err){el.innerHTML='<div class="empty-state"><i class="fas fa-exclamation-triangle"></i><h3>Error loading jobs</h3></div>';}
+}
+function openApplyModal(jobId,jobTitle){
+  document.getElementById('applyJobId').value=jobId;
+  document.getElementById('applyJobTitle').textContent=jobTitle;
+  document.getElementById('applyModal').style.display='flex';
+}
+function closeApplyModal(){document.getElementById('applyModal').style.display='none';}
+document.getElementById('applyForm').addEventListener('submit',async(e)=>{
+  e.preventDefault();
+  const jobId=document.getElementById('applyJobId').value;
+  const coverLetter=document.getElementById('applyCover').value.trim();
+  const resumeUrl=document.getElementById('applyResume').value.trim();
+  const alertEl=document.getElementById('applyAlert');
+  try{
+    await api('/api/applications',{method:'POST',body:JSON.stringify({job_id:jobId,cover_letter:coverLetter||null,resume_url:resumeUrl||null})});
+    alertEl.className='alert alert-success';alertEl.textContent='Application submitted!';alertEl.style.display='block';
+    setTimeout(()=>{closeApplyModal();alertEl.style.display='none';loadDashboard();},1500);
+  }catch(err){alertEl.className='alert alert-error';alertEl.textContent=err.message||'Failed';alertEl.style.display='block';}
+});
+async function loadApplications(){
+  const el=document.getElementById('myApplications');
+  el.innerHTML='<div class="loader"><div class="spin"></div>Loading...</div>';
+  try{
+    const apps=await api('/api/applications');
+    el.innerHTML=(!apps||apps.length===0)?'<div class="empty-state"><i class="fas fa-file-alt"></i><h3>No applications yet</h3></div>':apps.map(a=>`<div class="app-item"><div class="job-logo">${(a.job?.title||'J')[0]}</div><div style="flex:1"><div style="font-size:15px;font-weight:600;">${a.job?.title||'Job'}</div><div style="font-size:13px;color:#6B7280;">${a.job?.companies?.name||''}</div></div><span class="app-status-badge status-${a.status}">${a.status.replace(/_/g,' ')}</span></div>`).join('');
+  }catch(err){el.innerHTML='<div class="empty-state"><i class="fas fa-exclamation-triangle"></i><h3>Error</h3></div>';}
+}
+async function loadInterviews(){
+  const el=document.getElementById('myInterviews');
+  el.innerHTML='<div class="loader"><div class="spin"></div>Loading...</div>';
+  try{
+    const interviews=await api('/api/interviews');
+    el.innerHTML=(!interviews||interviews.length===0)?'<div class="empty-state"><i class="fas fa-video"></i><h3>No interviews scheduled</h3></div>':interviews.map(i=>`<div class="interview-card"><div class="interview-title">${i.title||'Interview'}</div><div style="font-size:13px;color:#6B7280;">${i.job?.title||''}</div><div class="interview-time"><i class="fas fa-clock"></i> ${new Date(i.scheduled_at).toLocaleDateString('en-IN')}</div>${i.meeting_url?`<a href="${i.meeting_url}" target="_blank" class="btn-join">Join</a>`:''}</div>`).join('');
+  }catch(err){el.innerHTML='<div class="empty-state"><i class="fas fa-exclamation-triangle"></i><h3>Error</h3></div>';}
+}
+async function loadProfile(){
+  const el=document.getElementById('profileContent');
+  el.innerHTML='<div class="loader"><div class="spin"></div>Loading...</div>';
+  try{
+    const profile=await api('/api/profile');
+    if(!profile){el.innerHTML='<div class="empty-state"><i class="fas fa-user"></i><h3>Profile not found</h3></div>';return;}
+    el.innerHTML=`<div style="padding:20px"><h3 style="margin-bottom:16px">${profile.full_name||''}</h3><p><b>Email:</b> ${profile.email||''}</p><p><b>Phone:</b> ${profile.phone||'Not set'}</p><p><b>Location:</b> ${profile.location||'Not set'}</p><p><b>Experience:</b> ${profile.experience||'Not set'}</p><p><b>Skills:</b> ${(profile.skills||[]).join(', ')||'Not set'}</p></div>`;
+  }catch(err){el.innerHTML='<div class="empty-state"><i class="fas fa-exclamation-triangle"></i><h3>Error loading profile</h3></div>';}
+}
+async function loadNotifications(){
+  const el=document.getElementById('notificationsList');
+  el.innerHTML='<div class="loader"><div class="spin"></div>Loading...</div>';
+  try{
+    const notifs=await api('/api/notifications');
+    el.innerHTML=(!notifs||notifs.length===0)?'<div class="empty-state"><i class="fas fa-bell"></i><h3>No notifications</h3></div>':notifs.map(n=>`<div class="app-item"><div style="flex:1"><div style="font-size:14px;font-weight:600;">${n.title||'Notification'}</div><div style="font-size:12px;color:#6B7280;">${n.message||''}</div></div></div>`).join('');
+  }catch(err){el.innerHTML='<div class="empty-state"><i class="fas fa-exclamation-triangle"></i><h3>Error</h3></div>';}
+}
+function signOut(){localStorage.clear();window.location.href='../auth/login.html';}
+loadDashboard();
 </script>
 </body>
 </html>
