@@ -270,124 +270,80 @@
         </div>
     </div>
 
-    <script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
     const SUPABASE_URL = 'https://cvkxtsvgnynxexmemfuy.supabase.co';
     const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN2a3h0c3ZnbnlueGV4bWVtZnV5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc0MjE2NTEsImV4cCI6MjA4Mjk5NzY1MX0.2mys8Cc-ucJ1uLThEGJubeDEg1TvfIAkW-xFsR4ecq4';
+    const db = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
     function showFileName(input) {
         const fn = document.getElementById('fileName');
-        fn.textContent = input.files && input.files[0] ? '📄 ' + input.files[0].name : '';
+        fn.textContent = input.files && input.files[0] ? 'File: ' + input.files[0].name : '';
     }
 
     async function handleRegister(e) {
         e.preventDefault();
-
         const btn     = document.getElementById('submitBtn');
         const spinner = document.getElementById('spinner');
-        const icon    = document.getElementById('submitIcon');
-        const text    = document.getElementById('submitText');
-
-        const fullName        = document.getElementById('fullName').value.trim();
-        const phone           = document.getElementById('phone').value.trim();
-        const email           = document.getElementById('email').value.trim();
-        const password        = document.getElementById('password').value;
-        const confirmPassword = document.getElementById('confirmPassword').value;
-
-        // ── Validation ──
-        if (!fullName || !email || !phone) {
-            toast('Please fill in all required fields', 'error'); return;
-        }
-        if (password !== confirmPassword) {
-            toast('Passwords do not match', 'error'); return;
-        }
-        if (password.length < 8) {
-            toast('Password must be at least 8 characters', 'error'); return;
-        }
-
-        const payload = {
-            name:       fullName,
-            full_name:  fullName,
-            phone:      phone,
-            email:      email,
-            password:   password,
-            experience: document.getElementById('experience').value,
-            sector:     document.getElementById('sector').value,
-            skills:     document.getElementById('skills').value.trim(),
-            location:   document.getElementById('location').value.trim(),
-            role:       'candidate'
-        };
-
-        // ── Loading state ──
-        btn.disabled          = true;
+        const fullName = document.getElementById('fullName').value.trim();
+        const phone    = document.getElementById('phone').value.trim();
+        const email    = document.getElementById('email').value.trim();
+        const password = document.getElementById('password').value;
+        const confirm  = document.getElementById('confirmPassword').value;
+        if (!fullName || !email || !phone) { toast('Please fill in all required fields', 'error'); return; }
+        if (password.length < 8) { toast('Password must be at least 8 characters', 'error'); return; }
+        if (password !== confirm) { toast('Passwords do not match', 'error'); return; }
+        btn.disabled = true;
         spinner.style.display = 'inline-block';
-        icon.style.display    = 'none';
-        text.textContent      = 'Creating account...';
-
         try {
-            const res = await fetch(`${API}/api/auth/register-candidate`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
+            const { data: authData, error: authError } = await db.auth.signUp({
+                email, password,
+                options: { data: { full_name: fullName, role: 'candidate' } }
             });
-
-            const data = await res.json();
-
-            if (!res.ok || data.error) {
-                throw new Error(data.error || data.message || 'Registration failed');
-            }
-
-            // ── Resume upload (non-blocking) ──
+            if (authError) throw authError;
+            const userId = authData.user && authData.user.id;
+            if (!userId) throw new Error('Registration failed - please try again');
+            const skills = document.getElementById('skills').value.trim().split(',').map(function(s) { return s.trim(); }).filter(Boolean);
+            await db.from('users').insert({
+                auth_id: userId, full_name: fullName, email, phone, role: 'candidate',
+                experience: document.getElementById('experience').value,
+                skills: skills,
+                location: document.getElementById('location').value.trim(),
+                is_active: true
+            });
             const resumeFile = document.getElementById('resumeFile').files[0];
-            if (resumeFile && data.token) {
+            if (resumeFile && authData.session && authData.session.access_token) {
                 try {
-                    const formData = new FormData();
-                    formData.append('resume', resumeFile);
-                    await fetch(`${API}/api/candidate/upload-resume`, {
-                        method: 'POST',
-                        headers: { 'Authorization': `Bearer ${data.token}` },
-                        body: formData
-                    });
-                } catch (uploadErr) {
-                    console.warn('Resume upload failed (can retry later):', uploadErr);
-                }
+                    const fileName = userId + '/resume_' + Date.now() + '.pdf';
+                    await db.storage.from('resumes').upload(fileName, resumeFile, { contentType: 'application/pdf' });
+                } catch (uploadErr) { console.warn('Resume upload failed:', uploadErr); }
             }
-
-            // ── Save session ──
-            if (data.token) {
-                localStorage.setItem('simpatico_token', data.token);
-                localStorage.setItem('simpatico_user', JSON.stringify(data.user || {
-                    email:     payload.email,
-                    full_name: payload.full_name,
-                    role:      'candidate'
-                }));
+            if (authData.session) {
+                localStorage.setItem('simpatico_token', authData.session.access_token);
+                localStorage.setItem('simpatico_user', JSON.stringify({ email: email, full_name: fullName, role: 'candidate' }));
             }
-
-            toast('✅ Account created! Redirecting...', 'success');
-            setTimeout(() => {
-                window.location.href = data.token
-                    ? '../dashboard/candidate.html'
-                    : 'login.html';
+            toast('Account created! Redirecting...', 'success');
+            setTimeout(function() {
+                window.location.href = authData.session ? '../dashboard/candidate.html' : 'login.html?verify=1';
             }, 1500);
-
         } catch (err) {
             console.error('Registration error:', err);
             toast(err.message || 'Registration failed. Please try again.', 'error');
-        } finally {
-            btn.disabled          = false;
+            btn.disabled = false;
             spinner.style.display = 'none';
-            icon.style.display    = 'inline';
-            text.textContent      = 'Create Account';
         }
     }
 
-    function toast(msg, type = 'info') {
-        document.querySelector('.toast')?.remove();
-        const t = document.createElement('div');
-        t.className = `toast toast-${type}`;
+    function toast(msg, type) {
+        type = type || 'info';
+        var existing = document.querySelector('.toast');
+        if (existing) existing.remove();
+        var t = document.createElement('div');
+        t.className = 'toast toast-' + type;
         t.textContent = msg;
         document.body.appendChild(t);
-        setTimeout(() => t.remove(), 4000);
+        setTimeout(function() { if (t.parentNode) t.remove(); }, 4000);
     }
-    </script>
+</script>
 </body>
 </html>
