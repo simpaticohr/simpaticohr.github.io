@@ -410,4 +410,10 @@ async function handleCandidateRegistration(e) {
     btn.disabled = false;
     btn.innerHTML = '<i class="fas fa-user-plus"></i> Create Account';
   }
+  logout() {
+    localStorage.clear();
+    sessionStorage.clear();
+    window.location.href = '/auth/login.html';
+  }
+
 }
