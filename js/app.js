@@ -221,7 +221,7 @@ async function publishJob() {
     
     const { error } = await SimpaticoDB.from('jobs').insert({
       company_id: currentCompanyId,
-      created_by: authManager.userProfile.id,
+      created_by: authManager.userProfile?.id || null,
       title,
       department: document.getElementById('newJobDept').value,
       location: document.getElementById('newJobLocation').value,
@@ -256,7 +256,7 @@ async function saveJobDraft() {
   try {
     const { error } = await SimpaticoDB.from('jobs').insert({
       company_id: currentCompanyId,
-      created_by: authManager.userProfile.id,
+      created_by: authManager.userProfile?.id || null,
       title,
       department: document.getElementById('newJobDept').value,
       description: document.getElementById('newJobDesc').value,
