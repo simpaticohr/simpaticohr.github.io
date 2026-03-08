@@ -577,3 +577,8 @@ function scheduleInterview(applicationId) {
 function triggerAutomation(event, id, data) {
   console.log('Automation:', event, id, data);
 }
+
+function setupRealtimeSubscriptions(companyId) {
+  // Realtime subscriptions - placeholder for future implementation
+  console.log('Realtime subscriptions not yet implemented');
+}
