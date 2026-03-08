@@ -191,18 +191,18 @@ async function loadJobs() {
       <tr>
         <td>
           <div style="font-weight:600;">${job.title}</div>
-          <div style="font-size:0.75rem;color:var(--gray-500);">$${job.location || 'Not specified'} • $${job.employment_type || 'Full Time'}</div>
+          <div style="font-size:0.75rem;color:var(--gray-500);">${job.location || 'Not specified'} • ${job.employment_type || 'Full Time'}</div>
         </td>
         <td>${job.department || '-'}</td>
         <td><span style="font-weight:600;color:var(--primary);">${job.applications_count || 0}</span></td>
-        <td><span class="badge badge-$${job.status === 'active' ? 'success' : job.status === 'draft' ? 'gray' : job.status === 'paused' ? 'warning' : 'danger'}">$${job.status}</span></td>
+        <td><span class="badge badge-${job.status === 'active' ? 'success' : job.status === 'draft' ? 'gray' : job.status === 'paused' ? 'warning' : 'danger'}">${job.status}</span></td>
         <td style="font-size:0.85rem;color:var(--gray-500);">${job.published_at ? formatDate(job.published_at) : 'Not published'}</td>
         <td>
           <div style="display:flex;gap:4px;">
             <button class="btn btn-ghost btn-sm" title="Edit"><i class="fas fa-edit"></i></button>
             <button class="btn btn-ghost btn-sm" title="View Pipeline" onclick="showPage('pipeline');loadPipeline('${job.id}')"><i class="fas fa-columns"></i></button>
-            $${job.status === 'draft' ? `<button class="btn btn-success btn-sm" onclick="updateJobStatus('$${job.id}','active')"><i class="fas fa-rocket"></i></button>` : ''}
-            $${job.status === 'active' ? `<button class="btn btn-warning btn-sm" onclick="updateJobStatus('$${job.id}','paused')"><i class="fas fa-pause"></i></button>` : ''}
+            ${job.status === 'draft' ? `<button class="btn btn-success btn-sm" onclick="updateJobStatus('${job.id}','active')"><i class="fas fa-rocket"></i></button>` : ''}
+            ${job.status === 'active' ? `<button class="btn btn-warning btn-sm" onclick="updateJobStatus('${job.id}','paused')"><i class="fas fa-pause"></i></button>` : ''}
           </div>
         </td>
       </tr>
