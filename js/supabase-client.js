@@ -106,6 +106,18 @@ class WorkerAPI {
 const workerAPI = new WorkerAPI();
 
 // Export for use in other modules
+// Restore session from localStorage if exists
+(async () => {
+  const token = localStorage.getItem('simpatico_token');
+  const refresh = localStorage.getItem('simpatico_refresh');
+  if (token) {
+    await supabaseClient.auth.setSession({
+      access_token: token,
+      refresh_token: refresh || ''
+    }).catch(e => console.warn('Session restore failed:', e));
+  }
+})();
+
 window.SimpaticoDB = supabaseClient;
 window.SimpaticoAPI = workerAPI;
 window.SUPABASE_URL = SUPABASE_URL;
