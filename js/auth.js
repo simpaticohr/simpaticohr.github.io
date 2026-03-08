@@ -412,6 +412,4 @@ async function handleCandidateRegistration(e) {
   }
 }
 
-}
-
 function doLogout(){localStorage.clear();sessionStorage.clear();window.location.href="/auth/login.html";}
