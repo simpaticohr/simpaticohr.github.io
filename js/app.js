@@ -582,3 +582,12 @@ function setupRealtimeSubscriptions(companyId) {
   // Realtime subscriptions - placeholder for future implementation
   console.log('Realtime subscriptions not yet implemented');
 }
+
+function formatDate(dateStr) {
+  if (!dateStr) return '-';
+  return new Date(dateStr).toLocaleDateString('en-IN', {day:'numeric', month:'short', year:'numeric'});
+}
+function loadAutomationRules() { console.log('Automation not yet implemented'); }
+function loadProctoringReports() { console.log('Proctoring not yet implemented'); }
+function loadAllApplications() { console.log('Loading all applications...'); }
+function loadOnboarding() { console.log('Onboarding not yet implemented'); }
