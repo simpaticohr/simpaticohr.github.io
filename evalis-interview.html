@@ -174,9 +174,7 @@
     <p>Proctored • AI-Powered • by Simpatico HR</p>
   </div>
 
-  <!-- ══════════════════════════════════════ -->
   <!-- LANDING: TOKEN REQUIRED -->
-  <!-- ══════════════════════════════════════ -->
   <div id="page-landing">
     <div class="locked-card">
       <div class="lock-icon">🔒</div>
@@ -192,9 +190,7 @@
     </div>
   </div>
 
-  <!-- ══════════════════════════════════════ -->
-  <!-- INTERVIEW SETUP (shown after valid token) -->
-  <!-- ══════════════════════════════════════ -->
+  <!-- INTERVIEW SETUP -->
   <div id="page-setup" class="hidden">
     <div class="card">
       <h2>⚙️ Interview Setup</h2>
@@ -248,9 +244,7 @@
     <button class="btn btn-go" style="width:auto;padding:14px 40px;" onclick="requestScreenShare()">📺 Share Screen</button>
   </div>
 
-  <!-- ══════════════════════════════════════ -->
   <!-- LIVE INTERVIEW -->
-  <!-- ══════════════════════════════════════ -->
   <div id="page-live" class="hidden">
     <div class="card">
       <div class="proctor-bar" id="proctorBar"><div style="display:flex;align-items:center;gap:4px;color:var(--green);"><div class="status-dot"></div>Proctored</div><div>⚠️ Violations: <span id="violationCount" style="color:var(--red);font-weight:700;">0</span>/3</div></div>
@@ -269,9 +263,7 @@
     </div>
   </div>
 
-  <!-- ══════════════════════════════════════ -->
   <!-- RESULTS -->
-  <!-- ══════════════════════════════════════ -->
   <div id="page-results" class="hidden">
     <div class="card" style="text-align:center;">
       <h2 style="justify-content:center;">🏆 Interview Complete!</h2>
@@ -299,14 +291,12 @@
 
 <script>
 // ═══════════════════════════════════════════════════════
-// CONFIG
+// ✅ FIX: Worker URL now matches the admin panel
 // ═══════════════════════════════════════════════════════
-const W="https://evalis-ai.simpaticohrconsultancy.workers.dev";
+const W="https://solitary-sound-11b9.simpaticohrconsultancy.workers.dev";
+
 const SILENCE_TIMEOUT=3.0,MIN_ANS=10,MAX_RETRIES=3,MAX_VIOLATIONS=3;
 
-// ═══════════════════════════════════════════════════════
-// STATE
-// ═══════════════════════════════════════════════════════
 let cv="",lang="en",role="",level="",totalQ=10;
 let mainQ=0,isFollowUp=false,chat=[],answers=[];
 let rec=null,transcript="",timerInt=null,secs=0;
@@ -317,9 +307,6 @@ let curJobId=null,curAppId=null,curToken=null,curInterview=null;
 
 const L={en:{s:"en-US",t:"en-US",n:"English"},hi:{s:"hi-IN",t:"hi-IN",n:"Hindi"},ml:{s:"ml-IN",t:"ml-IN",n:"Malayalam"},ta:{s:"ta-IN",t:"ta-IN",n:"Tamil"},te:{s:"te-IN",t:"te-IN",n:"Telugu"},kn:{s:"kn-IN",t:"kn-IN",n:"Kannada"},bn:{s:"bn-IN",t:"bn-IN",n:"Bengali"},es:{s:"es-ES",t:"es-ES",n:"Spanish"},ar:{s:"ar-SA",t:"ar-SA",n:"Arabic"},fr:{s:"fr-FR",t:"fr-FR",n:"French"},de:{s:"de-DE",t:"de-DE",n:"German"},ur:{s:"ur-PK",t:"ur-PK",n:"Urdu"}};
 
-// ═══════════════════════════════════════════════════════
-// DB & AI HELPERS
-// ═══════════════════════════════════════════════════════
 async function db(action,table,data=null,filters=null,select=null,order=null){
   const r=await fetch(W+"/db",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action,table,data,filters,select,order})});return await r.json();}
 
@@ -335,9 +322,6 @@ function showError(m){const b=document.getElementById("errorBox");if(b){b.textCo
 function safeJSON(raw){let c=raw.replace(/```json\s*/gi,'').replace(/```\s*/g,'').trim();const m=c.match(/\{[\s\S]*\}/);if(!m)throw new Error('No JSON');c=m[0].replace(/,\s*([}\]])/g,'$1');c=c.replace(/:\s*"([^"]*?)"/gs,(m,v)=>': "'+v.replace(/\n/g,' ').replace(/\r/g,'').replace(/\t/g,' ').replace(/\\/g,'\\\\').replace(/"/g,'\\"')+'"');try{return JSON.parse(c)}catch(e){try{return JSON.parse(c.replace(/[\x00-\x1F\x7F]/g,' '))}catch(e2){return exFields(raw)}}}
 function exFields(raw){const gn=k=>{const m=raw.match(new RegExp(`"${k}"\\s*:\\s*(\\d+)`));return m?parseInt(m[1]):0};const gs=k=>{const m=raw.match(new RegExp(`"${k}"\\s*:\\s*"([^"]*?)"`));return m?m[1]:''};const ga=k=>{const m=raw.match(new RegExp(`"${k}"\\s*:\\s*\\[([^\\]]*?)\\]`,'s'));if(!m)return[];const i=m[1].match(/"([^"]*?)"/g);return i?i.map(s=>s.replace(/"/g,'')):[]};const fb=[];for(const m of raw.matchAll(/"question"\s*:\s*"([^"]*?)"[^}]*?"score"\s*:\s*(\d+)[^}]*?"comment"\s*:\s*"([^"]*?)"/gs))fb.push({question:m[1].substring(0,100),score:parseInt(m[2]),comment:m[3],type:'main'});return{overallScore:gn('overallScore')||50,grade:gs('grade')||'C',recommendation:gs('recommendation')||'Pending',summary:gs('summary')||'Done.',strengths:ga('strengths'),improvements:ga('improvements'),feedback:fb.length?fb:answers.map(a=>({question:a.question.substring(0,80),score:a.skipped?0:5,comment:a.skipped?'Skipped':'Recorded',type:a.type}))}}
 
-// ═══════════════════════════════════════════════════════
-// FILE EXTRACTORS
-// ═══════════════════════════════════════════════════════
 async function extractFile(f){const ext=f.name.split('.').pop().toLowerCase();let text='';if(ext==='txt')text=await f.text();else if(ext==='pdf')text=await extractPDF(f);else if(ext==='doc'||ext==='docx')text=await extractDOC(f);else text=await f.text();return text.replace(/\s+/g,' ').replace(/[^\x20-\x7E\n]/g,'').trim().substring(0,5000)}
 async function extractPDF(f){if(!window.pdfjsLib)return exFB(f);try{const b=await f.arrayBuffer(),p=await pdfjsLib.getDocument({data:b}).promise;let t='';for(let i=1;i<=p.numPages;i++){const pg=await p.getPage(i),c=await pg.getTextContent();t+=c.items.map(x=>x.str).join(' ')+'\n'}return t}catch(e){return exFB(f)}}
 async function extractDOC(f){const b=await f.arrayBuffer();if(f.name.endsWith('.docx')){try{const t=new TextDecoder('utf-8').decode(new Uint8Array(b)),m=t.match(/<w:t[^>]*>([^<]+)<\/w:t>/g);if(m&&m.length)return m.map(x=>x.replace(/<[^>]+>/g,'')).join(' ')}catch(e){}}return exFB(f)}
@@ -349,9 +333,6 @@ document.getElementById('cvFile').addEventListener('change',async e=>{
   try{cv=await extractFile(file);if(cv.length<30){document.getElementById('cvFileName').textContent='⚠️ Try TXT';cv='';return}
   document.getElementById('cvFileName').textContent='✅ '+file.name;document.getElementById('cvUpArea').classList.add('ok');toast('✅ Loaded!')}catch(e){document.getElementById('cvFileName').textContent='❌ Error';cv=''}});
 
-// ═══════════════════════════════════════════════════════
-// TOKEN VALIDATION
-// ═══════════════════════════════════════════════════════
 async function validateToken(){
   const token=document.getElementById('tokenInput').value.trim();
   if(!token){toast('❌ Paste your token');return}
@@ -373,7 +354,6 @@ async function loadInterview(token){
 
     if(d.interview_language)document.getElementById('langSel').value=d.interview_language;
 
-    // Load candidate info
     let candName='',candEmail='';
     if(d.application_id){
       const apps=await db('select','applications',null,{id:d.application_id});
@@ -381,35 +361,27 @@ async function loadInterview(token){
       if(a){candName=a.name||'';candEmail=a.email||'';if(a.resume_text){cv=a.resume_text;document.getElementById('cvFileName').textContent='✅ Resume loaded from application'}}
     }
 
-    // Show interview info
     document.getElementById('interviewInfo').innerHTML=`
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:0.85rem;">
-        <div><span style="color:var(--text2);">👤 Candidate:</span> <strong>${candName||'—'}</strong></div>
-        <div><span style="color:var(--text2);">📧 Email:</span> <strong>${candEmail||'—'}</strong></div>
+        <div><span style="color:var(--text2);">👤 Candidate:</span> <strong>${candName||d.candidate_name||'—'}</strong></div>
+        <div><span style="color:var(--text2);">📧 Email:</span> <strong>${candEmail||d.candidate_email||'—'}</strong></div>
         <div><span style="color:var(--text2);">💼 Role:</span> <strong style="color:var(--accent);">${role||'—'}</strong></div>
         <div><span style="color:var(--text2);">📊 Level:</span> <strong>${level}</strong></div>
         <div><span style="color:var(--text2);">🔢 Questions:</span> <strong>${totalQ}</strong></div>
         <div><span style="color:var(--text2);">🔒 Type:</span> <strong style="color:var(--red);">Proctored</strong></div>
       </div>`;
 
-    // Show setup page
     document.getElementById('page-landing').classList.add('hidden');
     document.getElementById('page-setup').classList.remove('hidden');
     toast('✅ Token valid! Review and start.');
   }catch(e){toast('❌ '+e.message)}
 }
 
-// ═══════════════════════════════════════════════════════
-// NAV HELPER
-// ═══════════════════════════════════════════════════════
 function showPage(p){
   ['landing','setup','live','results'].forEach(x=>document.getElementById('page-'+x)?.classList.add('hidden'));
   document.getElementById('page-'+p)?.classList.remove('hidden');
 }
 
-// ═══════════════════════════════════════════════════════
-// ORB / TTS / STT / SILENCE / TIMER
-// ═══════════════════════════════════════════════════════
 function setOrb(s){const o=document.getElementById('orb'),l=document.getElementById('orbLabel');if(!o)return;o.className='orb';switch(s){case'speaking':o.classList.add('speaking');l.textContent='Speaking...';break;case'listening':o.classList.add('listening');l.textContent='Listening...';break;case'thinking':o.classList.add('thinking');l.textContent='Thinking...';break;case'processing':o.classList.add('processing');l.textContent='Processing...';break;default:l.textContent='Ready'}}
 function updateProg(){const p=Math.round((mainQ/totalQ)*100);document.getElementById('progBar').style.width=p+'%';if(isFollowUp){document.getElementById('progText').textContent=`Follow-up Q${mainQ}/${totalQ}`;document.getElementById('qTag').textContent=`Q${mainQ}↩`;document.getElementById('qTag').className='followup-tag'}else{document.getElementById('progText').textContent=`Question ${mainQ}/${totalQ} — ${p}%`;document.getElementById('qTag').textContent=`Q${mainQ}`;document.getElementById('qTag').className='q-tag'}}
 
@@ -428,9 +400,6 @@ function stopTimer(){clearInterval(timerInt)}
 function showTime(){const el=document.getElementById('timer');if(el)el.textContent=`${Math.floor(secs/60).toString().padStart(2,'0')}:${(secs%60).toString().padStart(2,'0')}`}
 function showThink(s){document.getElementById('thinkBox')?.classList.toggle('hidden',!s);const w=document.getElementById('waveWrap');if(w)w.style.display=s?'none':'flex';const h=document.getElementById('hfInfo');if(h)h.style.display=s?'none':'block';document.getElementById('silenceWrap')?.classList.remove('show');if(s)document.getElementById('questionBox').textContent=''}
 
-// ═══════════════════════════════════════════════════════
-// PROCTORING
-// ═══════════════════════════════════════════════════════
 function addViolation(type,detail){violations.push({type,detail,time:new Date().toLocaleTimeString(),qNum:mainQ});document.getElementById('violationCount').textContent=violations.length;toast('⚠️ '+detail);if(violations.length>=MAX_VIOLATIONS){toast('🚫 Terminated!');endEarly()}}
 function startProctor(){document.getElementById('proctorBar').style.display='flex';violations=[];document.addEventListener('visibilitychange',onVis);window.addEventListener('blur',onBlur);document.addEventListener('copy',onClip);document.addEventListener('paste',onClip);document.addEventListener('cut',onClip);document.addEventListener('contextmenu',onCtx);document.addEventListener('keydown',onKey);startCam()}
 function stopProctor(){document.removeEventListener('visibilitychange',onVis);window.removeEventListener('blur',onBlur);document.removeEventListener('copy',onClip);document.removeEventListener('paste',onClip);document.removeEventListener('cut',onClip);document.removeEventListener('contextmenu',onCtx);document.removeEventListener('keydown',onKey);if(screenStr){screenStr.getTracks().forEach(t=>t.stop());screenStr=null}if(camStr){camStr.getTracks().forEach(t=>t.stop());camStr=null}document.getElementById('proctorCam')?.classList.add('hidden');document.getElementById('proctorBar').style.display='none'}
@@ -442,9 +411,6 @@ function onKey(e){if((e.ctrlKey||e.metaKey)&&['c','v','u','s','a','p'].includes(
 async function startCam(){try{camStr=await navigator.mediaDevices.getUserMedia({video:true,audio:false});document.getElementById('proctorVideo').srcObject=camStr;document.getElementById('proctorCam').classList.remove('hidden')}catch(e){addViolation('cam','Camera denied')}}
 async function requestScreenShare(){try{screenStr=await navigator.mediaDevices.getDisplayMedia({video:{displaySurface:'monitor'}});screenStr.getVideoTracks()[0].onended=()=>{addViolation('screen','Screen share stopped')};document.getElementById('screenShareOverlay').classList.add('hidden');toast('✅ Screen sharing active');actuallyStart()}catch(e){toast('❌ Screen share required')}}
 
-// ═══════════════════════════════════════════════════════
-// START INTERVIEW
-// ═══════════════════════════════════════════════════════
 async function startInterview(){
   if(!curInterview||!curToken){toast('❌ No valid token');return}
   lang=document.getElementById('langSel').value;
@@ -468,7 +434,6 @@ Start with [NEXT] and first question.`;
   chat=[{role:'system',content:sys}];showPage('live');startProctor();
   setOrb('thinking');showThink(true);
 
-  // Mark interview as started
   await db('update','interviews',{status:'in_progress',started_at:new Date().toISOString()},{token:curToken});
 
   try{
@@ -510,9 +475,6 @@ Output ONLY tag + question. Stay in ${L[lang]?.n||'English'}.`;
 
 function endEarly(){if(answers.length<1){toast('⚠️ Answer at least 1');return}stopListen();speechSynthesis?.cancel();showResults()}
 
-// ═══════════════════════════════════════════════════════
-// RESULTS
-// ═══════════════════════════════════════════════════════
 async function showResults(){stopListen();speechSynthesis?.cancel();stopProctor();showPage('results');toast('📊 Evaluating...');await genEval()}
 
 async function genEval(){
@@ -532,27 +494,16 @@ Keep strings short. ONLY JSON.`}];
 async function saveResults(r){
   try{
     await db('update','interviews',{
-      status:'completed',
-      completed_at:new Date().toISOString(),
-      duration_seconds:secs,
-      overall_score:r.overallScore,
-      grade:r.grade,
-      recommendation:r.recommendation,
-      summary:r.summary,
-      strengths:r.strengths||[],
-      improvements:r.improvements||[],
-      feedback:r.feedback||[],
-      answers:answers,
-      violation_log:violations,
-      violation_count:violations.length
+      status:'completed',completed_at:new Date().toISOString(),duration_seconds:secs,
+      overall_score:r.overallScore,grade:r.grade,recommendation:r.recommendation,
+      summary:r.summary,strengths:r.strengths||[],improvements:r.improvements||[],
+      feedback:r.feedback||[],answers:answers,violation_log:violations,violation_count:violations.length
     },{token:curToken});
     if(curAppId)await db('update','applications',{status:'interviewed'},{id:curAppId});
-    console.log('[DB] Saved!');
   }catch(e){console.error('[DB]',e)}
 }
 
 async function retryEvaluation(){evalRetry=0;toast('🔄 Retrying...');document.getElementById('scoreNum').textContent='0';document.getElementById('gradeBadge').textContent='—';document.getElementById('fbList').innerHTML='';document.getElementById('strengthsCard').style.display='none';document.getElementById('hireBadge').style.display='none';document.getElementById('retryWrap').style.display='none';await genEval()}
-
 function renderFallback(){const ma=answers.filter(a=>a.type==='main'&&!a.skipped).length;const sc=Math.max(0,Math.round((ma/Math.max(totalQ,1))*70)-violations.length*5);renderRes({overallScore:sc,grade:sc>=70?'B':sc>=50?'C':'D',recommendation:sc>=60?'Lean Hire':'Lean No Hire',summary:`Answered ${ma}/${totalQ}.${violations.length?' '+violations.length+' violations.':''}`,strengths:ma>0?['Participated']:[],improvements:['More detail'],feedback:answers.map(a=>({question:a.question.substring(0,80),score:a.skipped?0:5,comment:a.skipped?'Skipped':'Recorded',type:a.type}))})}
 
 function renderRes(r){
@@ -574,9 +525,6 @@ function renderRes(r){
   let cur=0;const el=document.getElementById('scoreNum');const iv=setInterval(()=>{cur+=Math.ceil(sc/30);if(cur>=sc){cur=sc;clearInterval(iv)}el.textContent=cur},30);
 }
 
-// ═══════════════════════════════════════════════════════
-// AUTO-CHECK TOKEN FROM URL
-// ═══════════════════════════════════════════════════════
 window.addEventListener('DOMContentLoaded',()=>{
   if(window.pdfjsLib)console.log('✅ PDF.js');
   if(!window.SpeechRecognition&&!window.webkitSpeechRecognition)console.warn('⚠️ Use Chrome');
