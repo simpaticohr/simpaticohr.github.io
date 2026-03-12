@@ -1089,20 +1089,22 @@ async function startInterview(){
     }
 
     // Manual token — validate now
-    try{
-      toast('🔍 Validating token...');
-      const vres=await fetch(W+'/api/tokens/validate',{
-        method:'POST',headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({token})
-      });
-      if(!vres.ok)throw new Error('Server error '+vres.status);
-      const vdata=await vres.json();
+   try{
+    // Direct DB query instead of hitting the missing worker endpoint
+    const res = await db('select', 'interviews', null, { token: token });
+    
+    if (!res || res.error || !Array.isArray(res) || res.length === 0) {
+      showTokenError('❌ Invalid token. Please check your link.');
+      return;
+    }
+    
+    const d = res[0]; // Get the interview record
 
-      if(!vdata.valid){
-        showTokenError('❌ '+(vdata.error||'Invalid token. Contact HR.'));
-        return;
-      }
-
+    // Optional: Add a check to prevent retaking completed interviews
+    if (d.status === 'completed') {
+      showTokenError('❌ This interview has already been completed.');
+      return;
+    }
       curAppId=vdata.application_id||null;
       curJobId=vdata.job_id||null;
       curToken=token;
