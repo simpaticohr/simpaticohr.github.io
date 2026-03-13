@@ -519,83 +519,80 @@ function pickLang(code,btn){
 
 async function loadFaceModels() {
   try {
-    // Load Tiny Face Detector from reliable CDN
     await faceapi.nets.tinyFaceDetector.loadFromUri('https://cdn.jsdelivr.net/gh/cgarciagl/face-api.js@master/weights');
     faceApiLoaded = true;
     setChk('c3','pass');
   } catch(e) {
-    console.warn("Face API failed to load, proctoring will rely on fallback heuristics", e);
+    console.warn("Face API failed to load", e);
     faceApiLoaded = false;
     setChk('c3','fail');
   }
 }
 
 async function init(){
-  if(!urlToken)return;
-  try{
-    const data=await dbProxy('select','interviews',null,{token:urlToken});
-    const d=Array.isArray(data)?data[0]:data;
-    if(!d||d.error){showAccessDenied('❌ Invalid interview token.');return}
-    if(d.expires_at&&new Date(d.expires_at)<new Date()){showAccessDenied('⏰ This interview link has expired. Please contact the recruiter for a new link.');return}
-    const maxAtt=d.max_attempts||1,usedAtt=d.attempts_used||0;
-    if(usedAtt>=maxAtt&&d.status==='completed'){showAccessDenied('✅ You have already completed this interview. Your results have been submitted.');return}
-    if(usedAtt>=maxAtt){showAccessDenied('🚫 Maximum attempts ('+maxAtt+') reached for this interview token.');return}
+  if(!urlToken) return;
+  
+  try {
+    // 🚀 DIRECT SUPABASE QUERY: Bypasses the Cloudflare 404 error entirely!
+    const SB_URL = 'https://cvkxtsvgnynxexmemfuy.supabase.co';
+    const SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN2a3h0c3ZnbnlueGV4bWVtZnV5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc0MjE2NTEsImV4cCI6MjA4Mjk5NzY1MX0.2mys8Cc-ucJ1uLThEGJubeDEg1TvfIAkW-xFsR4ecq4';
+    
+    const res = await fetch(`${SB_URL}/rest/v1/interviews?token=eq.${urlToken}&select=*`, {
+      headers: { 'apikey': SB_KEY, 'Authorization': `Bearer ${SB_KEY}` }
+    });
+    
+    const data = await res.json();
+    const d = Array.isArray(data) ? data[0] : null;
+    
+    if(!d){ showAccessDenied('❌ Invalid interview token or token not found.'); return; }
+    if(d.expires_at && new Date(d.expires_at) < new Date()){ showAccessDenied('⏰ This interview link has expired.'); return; }
+    
+    const maxAtt = d.max_attempts || 1;
+    const usedAtt = d.attempts_used || 0;
+    
+    if(usedAtt >= maxAtt && d.status === 'completed'){ showAccessDenied('✅ You have already completed this interview.'); return; }
+    if(usedAtt >= maxAtt){ showAccessDenied(`🚫 Maximum attempts (${maxAtt}) reached.`); return; }
 
-    interviewMeta=d;curAppId=d.application_id;
-    S.candidateName=d.candidate_name||'';
-    S.maxQuestions=d.question_count||12;
-    S.jobLevel=(d.interview_level||'mid').toLowerCase();
-    S.jobTitle=d.interview_role||'';
-    if(d.interview_language&&LANG[d.interview_language]){
-      selectedLang=d.interview_language;
-      document.querySelectorAll('.lang-btn').forEach(b=>b.classList.toggle('sel',b.dataset.lang===selectedLang));
+    interviewMeta = d; 
+    curAppId = d.application_id;
+    S.candidateName = d.candidate_name || '';
+    S.maxQuestions = d.question_count || 12;
+    S.jobLevel = (d.interview_level || 'mid').toLowerCase();
+    S.jobTitle = d.interview_role || '';
+    
+    if(d.interview_language && LANG[d.interview_language]){
+      selectedLang = d.interview_language;
+      document.querySelectorAll('.lang-btn').forEach(b => b.classList.toggle('sel', b.dataset.lang === selectedLang));
     }
-    seconds=Math.min((d.duration_minutes||25),60)*60;
+    
+    seconds = Math.min((d.duration_minutes || 25), 60) * 60;
     scaleTargets(S.maxQuestions);
 
-    if(d.job_id){
-      const jd=await dbProxy('select','jobs',null,{id:d.job_id}).catch(()=>null);
-      if(jd&&!jd.error)job=Array.isArray(jd)?jd[0]:jd;
-    }
-    if(job){
-      document.getElementById('jcTitle').textContent=job.title||S.jobTitle||'Interview';
-      document.getElementById('jcDept').innerHTML=`<i class="fas fa-building"></i> ${job.department||job.category||'General'}`;
-      document.getElementById('jcExp').innerHTML=`<i class="fas fa-briefcase"></i> ${job.experience_min||0}–${job.experience_max||'?'} yrs`;
-      document.getElementById('jcLoc').innerHTML=`<i class="fas fa-map-marker-alt"></i> ${job.location||'Remote'}`;
-      const sk=document.getElementById('jcSkills');
-      (job.skills_required||[]).forEach(s=>sk.innerHTML+=`<span class="skill-chip">${s}</span>`);
-      S.skills=[...(job.skills_required||[])];
-      S.jobTitle=job.title||S.jobTitle;
-      S.jobLevel=(job.level||'mid').toLowerCase();
-    }else{
-      document.getElementById('jcTitle').textContent=S.jobTitle||'Interview';
-    }
-    if(curAppId&&!resumeText){
-      const apps=await dbProxy('select','applications',null,{id:curAppId}).catch(()=>null);
-      const a=Array.isArray(apps)?apps[0]:apps;
+    document.getElementById('jcTitle').textContent = S.jobTitle || 'Interview';
+
+    if(curAppId && !resumeText){
+      const appsRes = await fetch(`${SB_URL}/rest/v1/applications?id=eq.${curAppId}&select=*`, {
+          headers: { 'apikey': SB_KEY, 'Authorization': `Bearer ${SB_KEY}` }
+      });
+      const apps = await appsRes.json();
+      const a = Array.isArray(apps) ? apps[0] : null;
       if(a?.resume_text) {
-        resumeText=a.resume_text.substring(0,3000);
+        resumeText = a.resume_text.substring(0,3000);
         document.getElementById('resumeDropZone').classList.add('loaded');
         document.getElementById('resumeLabel').textContent='✅ Pre-loaded CV from Application';
       }
     }
-  }catch(e){console.warn('[init]',e)}
 
-  loadVoices();SS.onvoiceschanged=loadVoices;
-  loadFaceModels(); // Start loading models asynchronously
+  } catch(e) {
+    console.warn('[init]', e);
+    showAccessDenied('❌ Database connection failed. Please try again.');
+    return;
+  }
+
+  loadVoices();
+  SS.onvoiceschanged = loadVoices;
+  loadFaceModels(); 
   await setupMedia();
-}
-
-function showAccessDenied(msg){
-  document.body.innerHTML=`
-  <div style="display:flex;align-items:center;justify-content:center;min-height:100vh;background:#0a0a0f;font-family:'Inter',sans-serif;padding:20px">
-    <div style="background:#12121a;border-radius:24px;padding:44px;max-width:440px;width:100%;text-align:center;border:1px solid #2a2a3e">
-      <div style="font-size:44px;margin-bottom:14px">⚠️</div>
-      <h2 style="color:#e2e8f0;font-size:18px;margin-bottom:10px">Access Denied</h2>
-      <p style="color:#64748b;font-size:14px;margin-bottom:24px;line-height:1.7">${msg}</p>
-      <a href="index.html" style="display:inline-block;padding:11px 26px;background:#6366f1;color:#fff;border-radius:11px;text-decoration:none;font-weight:700;font-size:14px">← Back to Home</a>
-    </div>
-  </div>`;
 }
 
 function scaleTargets(n){
@@ -1048,6 +1045,8 @@ async function startEyeTracking(){
   gazeEl.innerHTML='<div style="width:7px;height:7px;border-radius:50%;background:#34d399;animation:blink 1.5s infinite"></div> AI PROCTORING ACTIVE';
   document.body.appendChild(gazeEl);
 
+  let faceCanvas, faceCtx;
+
   eyeTrackInt=setInterval(async ()=>{
     if(isEnding || !mediaStream || !camOn || vid.readyState < 2) return;
     
@@ -1222,7 +1221,7 @@ async function showResults(){
         <span>⏱️ ${Math.round((25*60-seconds)/60)} min</span>
       </div>
 
-      <a href="evalis-platform.html" style="display:inline-flex;align-items:center;gap:6px;padding:11px 26px;background:var(--primary);color:#fff;border-radius:11px;text-decoration:none;font-weight:700;font-size:14px">
+      <a href="dashboard/candidate.html" style="display:inline-flex;align-items:center;gap:6px;padding:11px 26px;background:var(--primary);color:#fff;border-radius:11px;text-decoration:none;font-weight:700;font-size:14px">
         <i class="fas fa-arrow-left"></i> Back to Portal
       </a>
     </div>
