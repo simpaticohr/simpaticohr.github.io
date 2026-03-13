@@ -428,6 +428,10 @@
     <div id="page-apply" class="hidden">
       <div class="card">
         <h2>📝 Job Application</h2>
+        <div id="applyNoJobWarn" style="display:none;background:rgba(245,158,11,.12);border:1px solid rgba(245,158,11,.3);border-radius:10px;padding:10px 14px;margin-bottom:12px;font-size:0.8rem;color:var(--yellow);">
+          ⚠️ No job selected. <a href="#" onclick="nav('jobs');return false;" style="color:var(--yellow);font-weight:700;">Browse open positions →</a>
+          <span style="color:var(--muted);margin-left:6px;">Or continue as a walk-in application.</span>
+        </div>
         <div id="applyJobInfo" class="apply-info-bar" style="display:none;"></div>
         <div class="row2"><div><label>Full Name *</label><input type="text" id="applyName" placeholder="Your name"></div><div><label>Email *</label><input type="email" id="applyEmail" placeholder="you@email.com"></div></div>
         <label>Phone</label><input type="tel" id="applyPhone" placeholder="+91 XXXXX XXXXX">
@@ -590,6 +594,14 @@
         <button class="btn btn-go" onclick="postJob()">📢 Post Job</button>
       </div>
       <div class="card"><h2>📁 Jobs</h2><div id="hrJobsList"></div></div>
+      <div class="card">
+        <h2 id="hrAllAppsHdr" style="display:flex;align-items:center;justify-content:space-between;">
+          📋 All Applications (0)
+          <button class="btn btn-sm btn-secondary" onclick="loadHR()" style="font-size:0.72rem;padding:6px 12px;">🔄 Refresh</button>
+        </h2>
+        <p style="font-size:0.75rem;color:var(--muted);margin-bottom:12px;">All submitted applications — click a job above to filter by role.</p>
+        <div id="hrAllAppsList"><p style="color:var(--muted);text-align:center;padding:20px;">Loading...</p></div>
+      </div>
       <div class="card" id="hrCandCard" style="display:none;"><h2 id="hrCandTitle">👥 Candidates</h2><div id="hrCandList"></div></div>
     </div>
   </div>
@@ -762,6 +774,10 @@ function _nav(p){
 
 function nav(p){
   if(p==='hr'&&!hrAuth){openHRModal();return}
+  if(p==='apply'){
+    const w=document.getElementById('applyNoJobWarn');
+    if(w)w.style.display=curJobId?'none':'block';
+  }
   _nav(p);
 }
 
@@ -784,6 +800,7 @@ async function loadJobs(){
 function applyTo(id,title){
   curJobId=id;
   const aj=document.getElementById('applyJobInfo');aj.textContent='📋 Applying for: '+title;aj.style.display='block';
+  const w=document.getElementById('applyNoJobWarn');if(w)w.style.display='none';
   nav('apply');
 }
 
@@ -1716,8 +1733,49 @@ async function loadHR(){
     document.getElementById('statApps').textContent=Array.isArray(apps)?apps.length:0;
     document.getElementById('statShort').textContent=Array.isArray(apps)?apps.filter(a=>a.status==='shortlisted').length:0;
     document.getElementById('statInt').textContent=Array.isArray(ints)?ints.length:0;
+    // Render all applications in the all-apps card
+    renderAllApps(Array.isArray(apps)?apps:[]);
   }catch(e){console.error(e)}
   loadHRJobs();
+}
+
+function renderAllApps(apps){
+  const el=document.getElementById('hrAllAppsList');
+  if(!el)return;
+  const hdr=document.getElementById('hrAllAppsHdr');
+  if(hdr)hdr.textContent='📋 All Applications ('+apps.length+')';
+  if(!apps.length){
+    el.innerHTML='<p style="color:var(--muted);text-align:center;padding:20px;">No applications yet.</p>';return;
+  }
+  // Sort newest first
+  const sorted=[...apps].sort((a,b)=>new Date(b.created_at||0)-new Date(a.created_at||0));
+  el.innerHTML=sorted.map(c=>{
+    const sc=c.ats_score||0;
+    const col=sc>=70?'#10b981':sc>=50?'#f59e0b':'#ef4444';
+    const bg=sc>=70?'rgba(16,185,129,.15)':sc>=50?'rgba(245,158,11,.15)':'rgba(239,68,68,.15)';
+    const stc={applied:'#f59e0b',shortlisted:'#10b981',interviewed:'#3b82f6',rejected:'#ef4444'}[c.status]||'#94a3b8';
+    const stb={applied:'rgba(245,158,11,.15)',shortlisted:'rgba(16,185,129,.15)',interviewed:'rgba(59,130,246,.15)',rejected:'rgba(239,68,68,.15)'}[c.status]||'rgba(255,255,255,.05)';
+    const jobLabel=c.job_id?`<span style="font-size:0.68rem;color:var(--muted);">Job #${c.job_id.slice(-6)}</span>`:`<span style="font-size:0.68rem;color:var(--yellow);">Walk-in</span>`;
+    const ts=c.created_at?new Date(c.created_at).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'2-digit'}):'';
+    return`<div class="cand-row">
+      <div style="display:flex;align-items:center;gap:8px;flex:1;min-width:160px;">
+        <div class="cand-avatar">${(c.name||'?')[0].toUpperCase()}</div>
+        <div>
+          <div style="font-weight:700;font-size:0.88rem;">${c.name||'Unknown'}</div>
+          <div style="font-size:0.7rem;color:var(--muted);">${c.email||''}</div>
+          <div style="font-size:0.68rem;margin-top:2px;">${jobLabel} ${ts?'· '+ts:''}</div>
+        </div>
+      </div>
+      <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+        <span class="score-badge" style="background:${bg};color:${col};">ATS:${sc}</span>
+        <span class="status-pill" style="background:${stb};color:${stc};">${c.status||'applied'}</span>
+        ${c.status==='applied'?`<button class="btn btn-sm btn-success" onclick="event.stopPropagation();shortlist('${c.id}');loadHR()">✅</button>`:''}
+        ${c.status==='shortlisted'?`<button class="btn btn-sm" style="background:var(--accent);color:#fff;" onclick="event.stopPropagation();sendInvite('${c.id}','${(c.email||'').replace(/'/g,"\\'")}')">📧</button>`:''}
+        ${c.status!=='rejected'?`<button class="btn btn-sm btn-danger" onclick="event.stopPropagation();reject('${c.id}');loadHR()">❌</button>`:''}
+        ${c.resume_url?`<a href="${c.resume_url}" target="_blank" class="btn btn-sm btn-secondary" style="text-decoration:none;" onclick="event.stopPropagation()">📄 CV</a>`:''}
+      </div>
+    </div>`;
+  }).join('');
 }
 
 async function loadHRJobs(){
@@ -1727,10 +1785,21 @@ async function loadHRJobs(){
     if(!Array.isArray(data)||!data.length){
       el.innerHTML='<p style="color:var(--muted);text-align:center;padding:16px;">No jobs posted yet. Use the form above.</p>';return;
     }
-    el.innerHTML=data.map(j=>`<div class="job-card" onclick="loadCands('${j.id}','${(j.title||'').replace(/'/g,"\\'")}')">
+    // Also fetch app counts per job
+  let appCounts={};
+  try{
+    const allApps=await db('select','applications','id,job_id,status');
+    if(Array.isArray(allApps))allApps.forEach(a=>{if(a.job_id){appCounts[a.job_id]=(appCounts[a.job_id]||0)+1;}});
+  }catch(e){}
+  el.innerHTML=data.map(j=>{
+    const cnt=appCounts[j.id]||0;
+    return`<div class="job-card" onclick="loadCands('${j.id}','${(j.title||'').replace(/'/g,"\\'")}')">
       <div style="display:flex;justify-content:space-between;align-items:center;">
         <h3 style="margin:0;">${j.title||'Untitled'}</h3>
-        <span class="status-pill" style="background:${j.is_active?'rgba(16,185,129,.15)':'rgba(239,68,68,.15)'};color:${j.is_active?'#10b981':'#ef4444'};">${j.is_active?'🟢 Active':'🔴 Off'}</span>
+        <div style="display:flex;gap:6px;align-items:center;">
+          ${cnt?`<span class="score-badge" style="background:rgba(99,102,241,.15);color:var(--accent);">${cnt} applied</span>`:''}
+          <span class="status-pill" style="background:${j.is_active?'rgba(16,185,129,.15)':'rgba(239,68,68,.15)'};color:${j.is_active?'#10b981':'#ef4444'};">${j.is_active?'🟢 Active':'🔴 Off'}</span>
+        </div>
       </div>
       <div class="job-meta" style="margin-top:6px;">
         <span>🏢 ${j['Company Name']||j.company_name||j.department||'—'}</span>
@@ -1738,8 +1807,9 @@ async function loadHRJobs(){
         <span>📊 ${j.level||''}</span>
         <span>🎯 ATS:${j.ats_threshold>0?j.ats_threshold+'+':'Manual'}</span>
       </div>
-      <p style="font-size:0.72rem;color:var(--muted);margin-top:6px;">👆 Click to view candidates</p>
-    </div>`).join('');
+      <p style="font-size:0.72rem;color:var(--muted);margin-top:6px;">👆 Click to view ${cnt||'all'} candidate${cnt!==1?'s':''}</p>
+    </div>`;
+  }).join('');
   }catch(e){el.innerHTML='<p style="color:var(--red);">'+e.message+'</p>'}
 }
 async function postJob(){
