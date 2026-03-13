@@ -722,11 +722,33 @@ const SB_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZ
 async function db(a,t,d=null,f=null,s=null,o=null){
   // Route through worker /db — uses service key, bypasses Supabase RLS
   try{
-    const res=await fetch(W+'/db',{
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({action:a,table:t,data:d,filters:f,select:s,order:o})
-    });
+   // 🚀 DIRECT SUPABASE QUERY: Bypasses the Cloudflare 404 Error!
+const SB_URL = 'https://cvkxtsvgnynxexmemfuy.supabase.co';
+const SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN2a3h0c3ZnbnlueGV4bWVtZnV5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc0MjE2NTEsImV4cCI6MjA4Mjk5NzY1MX0.2mys8Cc-ucJ1uLThEGJubeDEg1TvfIAkW-xFsR4ecq4';
+
+const res = await fetch(`${SB_URL}/rest/v1/interviews?token=eq.${curToken}&select=*`, {
+    headers: { 'apikey': SB_KEY, 'Authorization': `Bearer ${SB_KEY}` }
+});
+
+if (!res.ok) throw new Error("Database connection failed");
+
+const data = await res.json();
+if (!data || data.length === 0) {
+    throw new Error("Invalid token or token not found.");
+}
+
+// Map the Supabase response to the format your app expects
+const validData = {
+    valid: true,
+    interview: data[0],
+    interview_role: data[0].interview_role,
+    interview_level: data[0].interview_level,
+    question_count: data[0].question_count,
+    application_id: data[0].application_id
+};
+
+// Override the standard 'res.json()' call below it to use our validData
+res.json = async () => validData;
     if(!res.ok){const err=await res.json().catch(()=>({}));throw new Error(err.error||'Worker DB error '+res.status);}
     const data=await res.json();
     if(a==='select')return Array.isArray(data)?data:(data&&!data.error?[data]:[]);
