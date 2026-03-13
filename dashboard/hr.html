@@ -732,6 +732,79 @@
     function searchCandidates() {
       alert('Candidate Sourcing coming soon!');
     }
+    async function generateJD() {
+      const title = document.getElementById('jdTitle').value.trim();
+      const department = document.getElementById('jdDepartment').value.trim();
+      const experience = document.getElementById('jdExperience').value.trim();
+      const skills = document.getElementById('jdSkills').value.trim();
+      const location = document.getElementById('jdLocation').value.trim();
+      const workType = document.getElementById('jdWorkType').value;
+      const notes = document.getElementById('jdNotes').value.trim();
+
+      if (!title) {
+        alert("Job Title is required!");
+        return;
+      }
+
+      const btn = document.getElementById('generateJDBtn');
+      const originalText = btn.innerHTML;
+      btn.disabled = true;
+      btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Generating with AI...';
+      document.getElementById('jdOutput').innerHTML = '<div style="text-align:center; padding: 2rem; color: var(--primary);"><i class="fas fa-circle-notch fa-spin fa-2x"></i><br><br>AI is writing your JD...</div>';
+
+      try {
+        const payload = {
+          title: title,
+          department: department,
+          level: experience,
+          skills: skills,
+          location: location + " (" + workType + ")",
+          description: notes
+        };
+
+        // Assuming your app.js has an api() helper function pointing to your Worker
+        const res = await api('/client/jobs/generate-jd', {
+          method: 'POST',
+          body: JSON.stringify(payload)
+        });
+
+        if (res && res.jd) {
+          // Format the output nicely
+          let html = `<h2 style="margin-bottom: 10px;">${title}</h2>`;
+          html += `<p style="color: var(--gray-500); margin-bottom: 20px;"><strong>Dept:</strong> ${department} | <strong>Loc:</strong> ${location} (${workType}) | <strong>Exp:</strong> ${experience} yrs</p>`;
+          html += `<div style="margin-bottom:20px; line-height: 1.6;"><strong>Role Overview:</strong><br>${res.jd.description.replace(/\n/g, '<br>')}</div>`;
+
+          if (res.jd.requirements && res.jd.requirements.length > 0) {
+            html += `<div style="margin-bottom:20px;"><strong>Requirements:</strong><ul style="margin-left: 20px; line-height: 1.6;">`;
+            res.jd.requirements.forEach(r => html += `<li>${r}</li>`);
+            html += `</ul></div>`;
+          }
+
+          if (res.jd.responsibilities && res.jd.responsibilities.length > 0) {
+            html += `<div style="margin-bottom:20px;"><strong>Responsibilities:</strong><ul style="margin-left: 20px; line-height: 1.6;">`;
+            res.jd.responsibilities.forEach(r => html += `<li>${r}</li>`);
+            html += `</ul></div>`;
+          }
+
+          document.getElementById('jdOutput').innerHTML = html;
+        } else {
+          throw new Error("Invalid response from AI");
+        }
+      } catch (err) {
+        document.getElementById('jdOutput').innerHTML = `<div style="color: red;"><i class="fas fa-exclamation-triangle"></i> Failed to generate JD: ${err.message}</div>`;
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = originalText;
+      }
+    }
+
+    function copyJD() {
+      const output = document.getElementById('jdOutput').innerText;
+      if(output && !output.includes("AI is writing")) {
+        navigator.clipboard.writeText(output);
+        alert("Job Description copied to clipboard!");
+      }
+    }
   </script>
 </body>
 </html>
