@@ -641,7 +641,7 @@
 
 <script>
   // Worker URL — reads from adminConfig so admin panel and platform stay in sync
-  const W=(()=>{try{return(JSON.parse(localStorage.getItem("adminConfig")||"{}").workerUrl||"https://solitary-sound-11b9.simpaticohrconsultancy.workers.dev").replace(/\/+$/,"")}catch(e){return"https://solitary-sound-11b9.simpaticohrconsultancy.workers.dev"}})();
+  const W=(()=>{try{return(JSON.parse(localStorage.getItem("adminConfig")||"{}").workerUrl||"https://evalis-ai.simpaticohrconsultancy.workers.dev").replace(/\/+$/,"")}catch(e){return"https://evalis-ai.simpaticohrconsultancy.workers.dev"}})();
 const SILENCE_TIMEOUT=3.0,MIN_ANS=10,MAX_RETRIES=3,MAX_VIOLATIONS=3;
 function getHRPassword(){try{return JSON.parse(localStorage.getItem("adminConfig")||"{}").hrPassword||"simpatico2025"}catch(e){return"simpatico2025"}}
 let hrAuth=false;
@@ -674,19 +674,41 @@ const L={
 const SB_URL='https://cvkxtsvgnynxexmemfuy.supabase.co';
 const SB_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN2a3h0c3ZnbnlueGV4bWVtZnV5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc0MjE2NTEsImV4cCI6MjA4Mjk5NzY1MX0.2mys8Cc-ucJ1uLThEGJubeDEg1TvfIAkW-xFsR4ecq4';
 async function db(a,t,d=null,f=null,s=null,o=null){
-  const sel=s||'*';
-  const headers={'Content-Type':'application/json','apikey':SB_KEY,'Authorization':'Bearer '+SB_KEY,'Prefer':'return=representation'};
-  let url=`${SB_URL}/rest/v1/${t}?select=${sel}`;
-  if(f)Object.entries(f).forEach(([k,v])=>url+=`&${k}=eq.${encodeURIComponent(v)}`);
-  if(o){const[col,dir]=o.split('.');url+=`&order=${col}.${dir||'asc'}`;}
-  if(a==='select'){const r=await fetch(url,{headers});const data=await r.json();return Array.isArray(data)?data:(data.error?[]:data);}
-  if(a==='insert'){const r=await fetch(`${SB_URL}/rest/v1/${t}`,{method:'POST',headers,body:JSON.stringify(d)});const data=await r.json();return Array.isArray(data)?data[0]:data;}
-  if(a==='update'){let u=`${SB_URL}/rest/v1/${t}?select=${sel}`;if(f)Object.entries(f).forEach(([k,v])=>u+=`&${k}=eq.${encodeURIComponent(v)}`);const r=await fetch(u,{method:'PATCH',headers,body:JSON.stringify(d)});const data=await r.json();return Array.isArray(data)?data[0]:data;}
-  if(a==='delete'){let u=`${SB_URL}/rest/v1/${t}`;if(f)Object.entries(f).forEach(([k,v])=>u+=`${u.includes('?')?'&':'?'}${k}=eq.${encodeURIComponent(v)}`);const r=await fetch(u,{method:'DELETE',headers});return await r.json();}
+  // Route through worker /db — uses service key, bypasses Supabase RLS
+  try{
+    const res=await fetch(W+'/db',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({action:a,table:t,data:d,filters:f,select:s,order:o})
+    });
+    if(!res.ok){const err=await res.json().catch(()=>({}));throw new Error(err.error||'Worker DB error '+res.status);}
+    const data=await res.json();
+    if(a==='select')return Array.isArray(data)?data:(data&&!data.error?[data]:[]);
+    return data;
+  }catch(e){
+    // Fallback: direct Supabase with anon key (may be blocked by RLS on some tables)
+    console.warn('[db] Worker unreachable, falling back to direct SB:',e.message);
+    const sel=s||'*';
+    const headers={'Content-Type':'application/json','apikey':SB_KEY,'Authorization':'Bearer '+SB_KEY,'Prefer':'return=representation'};
+    let url=`${SB_URL}/rest/v1/${t}?select=${sel}`;
+    if(f)Object.entries(f).forEach(([k,v])=>url+=`&${k}=eq.${encodeURIComponent(v)}`);
+    if(o){const[col,dir]=o.split('.');url+=`&order=${col}.${dir||'asc'}`;}
+    if(a==='select'){const r=await fetch(url,{headers});const data=await r.json();return Array.isArray(data)?data:(data&&!data.error?[]:data.error?[]:data);}
+    if(a==='insert'){const r=await fetch(`${SB_URL}/rest/v1/${t}`,{method:'POST',headers,body:JSON.stringify(d)});const data=await r.json();return Array.isArray(data)?data[0]:data;}
+    if(a==='update'){let u=`${SB_URL}/rest/v1/${t}?select=${sel}`;if(f)Object.entries(f).forEach(([k,v])=>u+=`&${k}=eq.${encodeURIComponent(v)}`);const r=await fetch(u,{method:'PATCH',headers,body:JSON.stringify(d)});const data=await r.json();return Array.isArray(data)?data[0]:data;}
+    if(a==='delete'){let u=`${SB_URL}/rest/v1/${t}`;if(f)Object.entries(f).forEach(([k,v])=>u+=`${u.includes('?')?'&':'?'}${k}=eq.${encodeURIComponent(v)}`);const r=await fetch(u,{method:'DELETE',headers});return await r.json();}
+  }
 }
 async function uploadFile(file,fn){
-  const headers={'apikey':SB_KEY,'Authorization':'Bearer '+SB_KEY};
-  const r=await fetch(`${SB_URL}/storage/v1/object/resumes/${fn}`,{method:'POST',headers,body:file});
+  // Route through worker /upload — service key, avoids CORS issues
+  try{
+    const fd=new FormData();fd.append('file',file);fd.append('fileName',fn);
+    const r=await fetch(W+'/upload',{method:'POST',body:fd});
+    if(r.ok){const d=await r.json();return {url:d.url||`${SB_URL}/storage/v1/object/public/resumes/${fn}`};}
+  }catch(e){console.warn('[upload] Worker failed:',e.message);}
+  // Fallback: direct storage
+  const headers={'apikey':SB_KEY,'Authorization':'Bearer '+SB_KEY,'Content-Type':file.type||'application/pdf'};
+  await fetch(`${SB_URL}/storage/v1/object/resumes/${fn}`,{method:'POST',headers,body:file});
   return {url:`${SB_URL}/storage/v1/object/public/resumes/${fn}`};
 }
 
@@ -836,15 +858,41 @@ async function submitApplication(){
       resume_url=up.url||'';
     }
     st.textContent='📝 Saving...';
-    const result=await db('insert','applications',{
-      job_id:curJobId||null,name,email,
-      phone:document.getElementById('applyPhone').value.trim(),
-      resume_url,resume_text:cv.substring(0,5000),status:'applied'
-    });
-    const app=Array.isArray(result)?result[0]:result;
-    curAppId=app?.id;
-    st.textContent='🤖 AI screening...';
-    if(app?.id)await runATS(app);
+    // Submit via worker /api/apply — server-side ATS + service key insert
+    let app;
+    try{
+      const applyRes=await fetch(W+'/api/apply',{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({
+          job_id:curJobId||null,name,email,
+          phone:document.getElementById('applyPhone').value.trim(),
+          resume_url,resume_text:cv.substring(0,5000)
+        })
+      });
+      const applyData=await applyRes.json();
+      if(!applyRes.ok)throw new Error(applyData.error||'Submission failed');
+      app=applyData.application;
+      curAppId=app?.id;
+      if(applyData.ats){
+        st.textContent='✅ AI screened!';
+      }else{
+        st.textContent='🤖 AI screening...';
+        if(app?.id)await runATS(app);
+      }
+    }catch(workerErr){
+      // Fallback to direct insert
+      console.warn('[apply] Worker failed, direct insert:',workerErr.message);
+      const result=await db('insert','applications',{
+        job_id:curJobId||null,name,email,
+        phone:document.getElementById('applyPhone').value.trim(),
+        resume_url,resume_text:cv.substring(0,5000),status:'applied'
+      });
+      app=Array.isArray(result)?result[0]:result;
+      curAppId=app?.id;
+      st.textContent='🤖 AI screening...';
+      if(app?.id)await runATS(app);
+    }
     st.innerHTML='<span style="color:var(--green);">✅ Application submitted!</span>';
     toast('✅ Submitted!');
     document.getElementById('applyName').value='';
