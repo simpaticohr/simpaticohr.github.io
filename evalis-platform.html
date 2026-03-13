@@ -1311,7 +1311,8 @@ function initSTT(){
     }
   };
   rec.onerror=e=>{if(e.error!=='no-speech'&&e.error!=='aborted')console.error('[STT]',e.error)};
-  rec.onend=()=>{if(listening&&!processing&&!speaking)try{rec.start()}catch(e){}};
+  // Guard: only restart if still supposed to be listening and handlers weren't nulled (e.g. on cheat stop)
+  rec.onend=()=>{if(listening&&!processing&&!speaking&&rec?.onresult)try{rec.start()}catch(e){}};
 }
 
 function startListen(){
@@ -1341,7 +1342,11 @@ function _bargieWordCount(){
 
 function stopListen(){
   listening=false;resetSil();
-  try{rec?.stop()}catch(e){}
+  if(rec){
+    try{rec.abort()}catch(e){try{rec.stop()}catch(e2){}}
+    // Null all handlers so no callbacks fire after stop
+    rec.onresult=null;rec.onerror=null;rec.onend=null;rec.onspeechend=null;
+  }
   document.getElementById('waveWrap')?.classList.remove('active');
   const tp=document.getElementById('transcriptPill');if(tp)tp.classList.remove('active');
   stopTimer();
@@ -1653,7 +1658,7 @@ Output ONLY tag + question. Stay in ${L[lang]?.n||'English'}.`;
 
 function endEarly(){
   if(answers.length<1){toast('⚠️ Answer at least 1');return}
-  stopListen();speechSynthesis?.cancel();showResults();
+  stopListen();speechSynthesis?.cancel();stopProctor();showResults();
 }
 
 // ═══════════════════════════════════════
