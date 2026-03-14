@@ -119,12 +119,12 @@
 <body>
 
 <nav class="nav">
-  <a class="logo" href="/">SIMPATICO <span>HR</span></a>
+  <a class="logo" href="index.html">SIMPATICO <span>HR</span></a>
   <div class="nav-links">
     <a class="nav-link active" href="jobs.html">💼 Jobs</a>
     <a class="nav-link" href="career-lab.html">🧠 Career Lab</a>
-    <a class="nav-link" href="evalis-platform.html">🎤 Interview</a>
-    <a class="nav-link" href="/">Home</a>
+    <a class="nav-link" href="index.html">🎤 Interview</a>
+    <a class="nav-link" href="index.html">Home</a>
   </div>
 </nav>
 
@@ -173,9 +173,9 @@
     <h3>🔐 HR Login</h3>
     <p>Login with your HR credentials to manage jobs</p>
     <label style="text-align:left;">Email</label>
-    <input type="email" id="simpaticohrconsultancy@gmail.com" placeholder="........................">
+    <input type="email" id="adminEmail" placeholder="........................">
     <label style="text-align:left;margin-top:12px;">Password</label>
-    <input type="password" id="Motion@2025" placeholder=".........." onkeydown="if(event.key==='Enter')doAdminLogin()">
+    <input type="password" id="adminPass" placeholder=".........." onkeydown="if(event.key==='Enter')doAdminLogin()">
     <div id="adminLoginError" style="color:#f87171;font-size:.85rem;margin-top:8px;display:none;"></div>
     <div class="modal-btns">
       <button class="modal-btn cancel" onclick="closeLoginModal()">Cancel</button>
@@ -287,7 +287,6 @@ function showToast(msg, type = "success") {
 async function loadJobs() {
   const el = document.getElementById("jobsList");
   try {
-    // Build query params
     const params = new URLSearchParams();
     const search = document.getElementById('searchInput')?.value?.trim();
     if (search) params.set('search', search);
@@ -295,9 +294,9 @@ async function loadJobs() {
 
     const queryStr = params.toString();
     const sbKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN2a3h0c3ZnbnlueGV4bWVtZnV5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc0MjE2NTEsImV4cCI6MjA4Mjk5NzY1MX0.2mys8Cc-ucJ1uLThEGJubeDEg1TvfIAkW-xFsR4ecq4';
-    let sbUrl = 'https://api.simpaticohr.in/rest/v1/jobs?select=*,companies(name)&status=eq.active&order=created_at.desc';
+    let sbUrl = 'https://cvkxtsvgnynxexmemfuy.supabase.co/rest/v1/jobs?select=*,companies(name)&status=eq.active&order=created_at.desc';
     if (search) sbUrl += '&title=ilike.*' + encodeURIComponent(search) + '*';
-    if (currentFilter !== 'all') sbUrl += '&employment_type=eq.' + currentFilter;
+    if (currentFilter !== 'all') sbUrl += '&job_type=eq.' + currentFilter;
     const res = await fetch(sbUrl, { headers: { apikey: sbKey, Authorization: 'Bearer ' + sbKey } });
     const jobs = (await res.json()) || [];
 
@@ -317,7 +316,7 @@ async function loadJobs() {
     renderJobs(jobs);
 
     document.getElementById('totalJobs').textContent = jobs.length;
-    const companies = [...new Set(jobs.map(j => j.company_name || 'Unknown'))];
+    const companies = [...new Set(jobs.map(j => j.company_name || j.department || 'Unknown'))];
     document.getElementById('totalCompanies').textContent = companies.length;
 
   } catch (err) {
@@ -353,15 +352,16 @@ function renderJobs(jobs) {
     };
     const levelClass = levelMap[job.level] || 'level-mid';
 
-    // Handle skills — could be string or array
     let skills = [];
     if (Array.isArray(job.skills)) {
       skills = job.skills;
     } else if (typeof job.skills === 'string' && job.skills) {
-      skills = job.skills.split(',').map(s => s.trim()).filter(Boolean);
+      // Handle Postgres array string formatting if necessary
+      const cleanSkills = job.skills.replace(/^\["?|"?\]$/g, '').replace(/","/g, ',');
+      skills = cleanSkills.split(',').map(s => s.trim()).filter(Boolean);
     }
 
-    const company = job.company_name || 'Company';
+    const company = job.company_name || job.department || 'Simpatico HR';
     const location = job.location || 'Remote';
     const jobType = job.job_type || 'full-time';
     const level = job.level || 'Mid-Level';
@@ -369,8 +369,8 @@ function renderJobs(jobs) {
     const salary = job.salary_max ? (job.salary_min ? `₹${(job.salary_min/100000).toFixed(0)}–${(job.salary_max/100000).toFixed(0)} LPA` : `Up to ₹${(job.salary_max/100000).toFixed(0)} LPA`) : '';
     const appsCount = job.applications_count || 0;
 
-    // Apply URL — goes to evalis-platform.html with job_id
-    const applyUrl = `evalis-platform.html?apply=${job.id}`;
+    // DIRECTLY TO index.html WITH PARAMS
+    const applyUrl = `index.html?apply=${job.id}&title=${encodeURIComponent(job.title || '')}`;
 
     return `<div class="job-card" id="job-${job.id}">
       <div class="job-header">
@@ -386,13 +386,13 @@ function renderJobs(jobs) {
       <div class="job-body">
         <div class="job-meta">
           <div class="job-meta-item"><i class="fa fa-building"></i>${company}</div>
-          <div class="job-meta-item"><i class="fa fa-briefcase"></i>${jobType}</div>
+          <div class="job-meta-item"><i class="fa fa-briefcase"></i>${jobType.replace('-', ' ')}</div>
           <div class="job-meta-item"><i class="fa fa-location-dot"></i>${location}</div>
           ${salary ? `<div class="job-meta-item"><i class="fa fa-indian-rupee-sign"></i>${salary}</div>` : ''}
           ${appsCount > 0 ? `<div class="job-meta-item"><i class="fa fa-users"></i>${appsCount} applied</div>` : ''}
         </div>
         <p class="job-desc">${desc.length > 300 ? desc.substring(0, 300) + '...' : desc}</p>
-        ${skills.length ? `<div class="job-skills">${skills.map(s => `<span class="skill-tag">${s}</span>`).join('')}</div>` : ''}
+        ${skills.length ? `<div class="job-skills">${skills.slice(0, 8).map(s => `<span class="skill-tag">${s}</span>`).join('')}</div>` : ''}
         <div class="job-footer">
           <span class="job-level ${levelClass}">${level}</span>
           <a class="apply-btn" href="${applyUrl}">Apply Now <i class="fa fa-arrow-right"></i></a>
@@ -403,13 +403,13 @@ function renderJobs(jobs) {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// FILTER & SEARCH — Server-side via GET /jobs?search=&type=
+// FILTER & SEARCH
 // ═══════════════════════════════════════════════════════════════
 function filterJobs(type, btn) {
   currentFilter = type;
   document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
-  loadJobs(); // Reload from API with new filter
+  loadJobs();
 }
 
 let searchTimeout;
@@ -419,25 +419,23 @@ document.getElementById('searchInput').addEventListener('input', () => {
 });
 
 // ═══════════════════════════════════════════════════════════════
-// ADMIN AUTH — Uses POST /auth/login (proper API auth)
+// ADMIN AUTH
 // ═══════════════════════════════════════════════════════════════
 function toggleAdmin() {
   if (!isAdmin) {
-    // Check if already have saved session
     const savedToken = localStorage.getItem('hr_token');
     const savedUser = localStorage.getItem('hr_user');
     if (savedToken && savedUser) {
       try {
-        const decoded = JSON.parse(atob(savedToken));
-        if (decoded.exp && decoded.exp > Date.now()) {
+        const decoded = JSON.parse(atob(savedToken.split('.')[1]));
+        if (decoded.exp * 1000 > Date.now()) {
           HR_TOKEN = savedToken;
           HR_USER = JSON.parse(savedUser);
           enableAdmin();
           return;
         }
-      } catch {}
+      } catch (e) {}
     }
-    // Show login modal
     document.getElementById('loginModal').classList.add('active');
     document.getElementById('adminEmail').focus();
   } else {
@@ -458,7 +456,6 @@ async function doAdminLogin() {
     const data = await api('POST', '/auth/login', { email, password: pass });
     if (!data.success || !data.token) throw new Error(data.error || 'Login failed');
 
-    // Must be client_admin or hr role
     if (!['client_admin', 'hr', 'superadmin'].includes(data.user.role)) {
       throw new Error('Admin or HR role required');
     }
@@ -482,7 +479,6 @@ function enableAdmin() {
   isAdmin = true;
   document.getElementById('adminToggle').classList.add('active');
   document.getElementById('adminLabel').textContent = (HR_USER?.name || 'Admin') + ' ✓';
-  // Re-render to show admin buttons
   renderJobs(allJobs);
 }
 
@@ -505,7 +501,7 @@ function closeLoginModal() {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// EDIT JOB — Uses authenticated API
+// EDIT & DELETE JOB (ADMIN)
 // ═══════════════════════════════════════════════════════════════
 function openEditModal(jobId) {
   const job = allJobs.find(j => j.id === jobId);
@@ -520,7 +516,6 @@ function openEditModal(jobId) {
   document.getElementById('editSalaryMin').value = job.salary_min || '';
   document.getElementById('editSalaryMax').value = job.salary_max || '';
 
-  // Handle skills
   if (Array.isArray(job.skills)) {
     document.getElementById('editSkills').value = job.skills.join(', ');
   } else {
@@ -545,14 +540,12 @@ async function saveEdit() {
     department: document.getElementById('editDepartment').value.trim(),
     location: document.getElementById('editLocation').value.trim(),
     description: document.getElementById('editDescription').value.trim(),
-    skills: document.getElementById('editSkills').value.trim(),
+    skills: document.getElementById('editSkills').value.trim().split(',').map(s=>s.trim()).filter(Boolean),
     salary_min: parseInt(document.getElementById('editSalaryMin').value) || 0,
     salary_max: parseInt(document.getElementById('editSalaryMax').value) || 0
   };
 
   try {
-    // Use authenticated /db proxy for updates (worker validates auth via token)
-    // Alternatively, if you add PUT /client/jobs/:id to the worker, use that
     await api('POST', '/db', {
       action: 'update',
       table: 'jobs',
@@ -569,9 +562,6 @@ async function saveEdit() {
   btn.disabled = false; btn.textContent = '💾 Save';
 }
 
-// ═══════════════════════════════════════════════════════════════
-// DELETE JOB — Uses authenticated API
-// ═══════════════════════════════════════════════════════════════
 function openDeleteModal(jobId, jobTitle) {
   document.getElementById('deleteJobId').value = jobId;
   document.getElementById('deleteJobTitle').textContent = jobTitle;
@@ -588,15 +578,9 @@ async function confirmDelete() {
   btn.disabled = true; btn.textContent = '⏳...';
 
   try {
-    // Use the proper client endpoint if available, otherwise /db proxy
-    try {
-      await api('DELETE', '/client/jobs/' + jobId, null, true);
-    } catch {
-      // Fallback to /db proxy
-      await api('POST', '/db', {
-        action: 'delete', table: 'jobs', filters: { id: jobId }
-      }, true);
-    }
+    await api('POST', '/db', {
+      action: 'delete', table: 'jobs', filters: { id: jobId }
+    }, true);
 
     showToast("🗑️ Job deleted", "success");
     closeDeleteModal();
@@ -630,23 +614,11 @@ document.addEventListener('keydown', e => {
 });
 
 // ═══════════════════════════════════════════════════════════════
-// HANDLE ?apply=JOB_ID from URL (redirect to platform)
-// ═══════════════════════════════════════════════════════════════
-function checkApplyParam() {
-  const params = new URLSearchParams(location.search);
-  const applyId = params.get('apply');
-  if (applyId) {
-    // Redirect to the platform's apply page
-    window.location.href = `evalis-platform.html?apply=${applyId}`;
-  }
-}
-
-// ═══════════════════════════════════════════════════════════════
 // INIT
 // ═══════════════════════════════════════════════════════════════
-checkApplyParam();
 loadJobs();
 </script>
 
 </body>
 </html>
+
