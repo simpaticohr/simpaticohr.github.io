@@ -1329,6 +1329,57 @@ Start with [NEXT] and first question.`;
       toast('✅ Job posted!'); ['hrTitle','hrJD','hrSkills','hrDept','hrCompany','hrLocation'].forEach(id=>{ const el=document.getElementById(id);if(el)el.value=''; }); loadHRJobs();loadHR();
     }catch(e){toast('❌ Failed: '+e.message)}
   }
+  // ═══════════════════════════════════════
+  // RENDER & FILTER JOBS (PLATFORM UI)
+  // ═══════════════════════════════════════
+  let _allJobs = [];
+  
+  function renderJobs(data){
+    const el = document.getElementById('jobsList');
+    if(!data || !data.length){
+      el.innerHTML='<p style="color:var(--muted);text-align:center;padding:30px;">No positions match your search.</p>';
+      return;
+    }
+    
+    el.innerHTML = data.map(j => {
+      let skills = [];
+      try {
+        if(Array.isArray(j.skills)) skills = j.skills;
+        else if(typeof j.skills === 'string' && j.skills.trim()) {
+          const s = j.skills.trim();
+          skills = s.startsWith('[') ? JSON.parse(s) : s.split(',').map(x=>x.trim()).filter(Boolean);
+        }
+      } catch(e) {}
+      
+      const company = j['Company Name'] || j.company_name || j.department || '';
+      
+      return `
+      <div class="job-card">
+        <h3>${j.title || ''}</h3>
+        <div class="job-meta">
+          ${company ? `<span>🏢 ${company}</span>` : ''}
+          ${j.location ? `<span>📍 ${j.location}</span>` : ''}
+          ${j.level ? `<span>📊 ${j.level}</span>` : ''}
+          ${j.category ? `<span>💼 ${j.category}</span>` : ''}
+        </div>
+        <p style="font-size:0.82rem;color:var(--muted);margin:6px 0;">${(j.description||'').substring(0,200)}...</p>
+        <div style="margin-bottom:8px;">${skills.slice(0,8).map(s=>'<span class="skill-tag">'+s+'</span>').join('')}</div>
+        <button class="btn btn-go" style="margin-top:4px;padding:10px;" onclick="applyTo('${j.id}','${(j.title||'').replace(/'/g,"\\'")}')">📝 Apply Now</button>
+      </div>`;
+    }).join('');
+  }
+
+  function filterJobs(){
+    const q = (document.getElementById('jobSearch')?.value || '').toLowerCase();
+    if(!q) { renderJobs(_allJobs); return; }
+    
+    renderJobs(_allJobs.filter(j => {
+      return (j.title||'').toLowerCase().includes(q)
+        || (j.description||'').toLowerCase().includes(q)
+        || (j.location||'').toLowerCase().includes(q)
+        || ((Array.isArray(j.skills) ? j.skills.join(' ') : j.skills||'')).toLowerCase().includes(q);
+    }));
+  }
 
   async function loadCands(jobId,title){
     selHRJob=jobId; document.getElementById('hrCandCard').style.display='block'; document.getElementById('hrCandTitle').textContent='👥 '+(title||'Candidates');
