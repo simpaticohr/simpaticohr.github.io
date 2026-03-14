@@ -1014,61 +1014,104 @@ const CFG = (() => {
   try {
     const a = JSON.parse(localStorage.getItem('adminConfig') || '{}');
     return {
-      workerUrl: (a.workerUrl || 'https://evalis-ai.simpaticohrconsultancy.workers.dev').replace(/\/+$/, ''),
-      hrPassword: a.hrPassword || 'simpatico2025',
-      groqModel: a.groqModel || 'llama-3.3-70b-versatile',
+      workerUrl:  (a.workerUrl  || 'https://evalis-ai.simpaticohrconsultancy.workers.dev').replace(/\/+$/, ''),
+      hrPassword: a.hrPassword  || 'simpatico2025',
+      groqModel:  a.groqModel   || 'llama-3.3-70b-versatile',
     };
-  } catch { return { workerUrl: 'https://evalis-ai.simpaticohrconsultancy.workers.dev', hrPassword: 'simpatico2025', groqModel: 'llama-3.3-70b-versatile' }; }
+  } catch {
+    return {
+      workerUrl:  'https://evalis-ai.simpaticohrconsultancy.workers.dev',
+      hrPassword: 'simpatico2025',
+      groqModel:  'llama-3.3-70b-versatile',
+    };
+  }
 })();
 
-const W = CFG.workerUrl;
-const MIN_ANS = 8;           // minimum chars before auto-submit is considered
-const MAX_RETRIES = 3;
+const W       = CFG.workerUrl;
+const MIN_ANS = 8;
+const MAX_RETRIES    = 3;
 const MAX_VIOLATIONS = 3;
 
 // ─────────────────────────────────────────────
-// SUPABASE — Direct fallback client
+// SUPABASE — Direct REST client
 // ─────────────────────────────────────────────
 const SB_URL = 'https://cvkxtsvgnynxexmemfuy.supabase.co';
 const SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN2a3h0c3ZnbnlueGV4bWVtZnV5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc0MjE2NTEsImV4cCI6MjA4Mjk5NzY1MX0.2mys8Cc-ucJ1uLThEGJubeDEg1TvfIAkW-xFsR4ecq4';
-const SB_HDR = { 'Content-Type': 'application/json', 'apikey': SB_KEY, 'Authorization': 'Bearer ' + SB_KEY, 'Prefer': 'return=representation' };
+const SB_HDR = {
+  'Content-Type':  'application/json',
+  'apikey':        SB_KEY,
+  'Authorization': 'Bearer ' + SB_KEY,
+  'Prefer':        'return=representation',
+};
 
 /**
  * Unified DB helper — direct Supabase REST
- * @param {'select'|'insert'|'update'|'delete'} action
- * @param {string} table
- * @param {object|null} data  — for insert/update
- * @param {object|null} filters — { column: value }
- * @param {string} [select='*']
- * @param {string} [order]  — 'col.desc'
+ * FIX: token/UUID columns now use proper encoding
  */
 async function db(action, table, data = null, filters = null, select = '*', order = null) {
   const sel = select || '*';
-  let url = `${SB_URL}/rest/v1/${table}?select=${sel}`;
-  if (filters) Object.entries(filters).forEach(([k, v]) => { url += `&${k}=eq.${encodeURIComponent(v)}`; });
-  if (order) { const [col, dir] = order.split('.'); url += `&order=${col}.${dir || 'asc'}`; }
+
+  // ── Build filter query string ──
+  // FIX: Use encodeURIComponent only on the value, not the operator
+  function buildFilters(base, f) {
+    if (!f) return base;
+    Object.entries(f).forEach(([k, v]) => {
+      base += `&${encodeURIComponent(k)}=eq.${encodeURIComponent(v)}`;
+    });
+    return base;
+  }
 
   if (action === 'select') {
-    const r = await fetch(url, { headers: SB_HDR });
+    let url = `${SB_URL}/rest/v1/${table}?select=${sel}`;
+    url = buildFilters(url, filters);
+    if (order) {
+      const [col, dir] = order.split('.');
+      url += `&order=${col}.${dir || 'asc'}`;
+    }
+    const r = await fetch(url, { headers: { ...SB_HDR, 'Prefer': 'return=representation' } });
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({}));
+      throw new Error(err.message || `DB select failed (${r.status})`);
+    }
     const d = await r.json();
     return Array.isArray(d) ? d : (d && !d.error ? [d] : []);
   }
+
   if (action === 'insert') {
-    const r = await fetch(`${SB_URL}/rest/v1/${table}`, { method: 'POST', headers: SB_HDR, body: JSON.stringify(data) });
+    const r = await fetch(`${SB_URL}/rest/v1/${table}`, {
+      method: 'POST', headers: SB_HDR, body: JSON.stringify(data),
+    });
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({}));
+      throw new Error(err.message || err.details || `DB insert failed (${r.status})`);
+    }
     const d = await r.json();
     return Array.isArray(d) ? d[0] : d;
   }
+
   if (action === 'update') {
-    let u = `${SB_URL}/rest/v1/${table}?select=${sel}`;
-    if (filters) Object.entries(filters).forEach(([k, v]) => { u += `&${k}=eq.${encodeURIComponent(v)}`; });
-    const r = await fetch(u, { method: 'PATCH', headers: SB_HDR, body: JSON.stringify(data) });
+    let url = `${SB_URL}/rest/v1/${table}?select=${sel}`;
+    url = buildFilters(url, filters);
+    const r = await fetch(url, {
+      method: 'PATCH', headers: SB_HDR, body: JSON.stringify(data),
+    });
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({}));
+      throw new Error(err.message || `DB update failed (${r.status})`);
+    }
     const d = await r.json();
     return Array.isArray(d) ? d[0] : d;
   }
+
   if (action === 'delete') {
-    let u = `${SB_URL}/rest/v1/${table}`;
-    if (filters) { const parts = Object.entries(filters).map(([k, v]) => `${k}=eq.${encodeURIComponent(v)}`); u += '?' + parts.join('&'); }
-    const r = await fetch(u, { method: 'DELETE', headers: SB_HDR });
+    let url = `${SB_URL}/rest/v1/${table}`;
+    if (filters) {
+      const parts = Object.entries(filters).map(([k, v]) =>
+        `${encodeURIComponent(k)}=eq.${encodeURIComponent(v)}`
+      );
+      url += '?' + parts.join('&');
+    }
+    const r = await fetch(url, { method: 'DELETE', headers: SB_HDR });
     if (r.status === 204) return { ok: true };
     return await r.json().catch(() => ({ ok: true }));
   }
@@ -1076,12 +1119,23 @@ async function db(action, table, data = null, filters = null, select = '*', orde
 
 async function uploadFile(file, fn) {
   try {
-    const fd = new FormData(); fd.append('file', file); fd.append('fileName', fn);
+    const fd = new FormData();
+    fd.append('file', file);
+    fd.append('fileName', fn);
     const r = await fetch(W + '/upload', { method: 'POST', body: fd });
-    if (r.ok) { const d = await r.json(); return { url: d.url || `${SB_URL}/storage/v1/object/public/resumes/${fn}` }; }
+    if (r.ok) {
+      const d = await r.json();
+      return { url: d.url || `${SB_URL}/storage/v1/object/public/resumes/${fn}` };
+    }
   } catch (e) { console.warn('[upload] Worker failed:', e.message); }
-  const h = { 'apikey': SB_KEY, 'Authorization': 'Bearer ' + SB_KEY, 'Content-Type': file.type || 'application/pdf' };
-  await fetch(`${SB_URL}/storage/v1/object/resumes/${fn}`, { method: 'POST', headers: h, body: file });
+  const h = {
+    'apikey': SB_KEY,
+    'Authorization': 'Bearer ' + SB_KEY,
+    'Content-Type': file.type || 'application/pdf',
+  };
+  await fetch(`${SB_URL}/storage/v1/object/resumes/${fn}`, {
+    method: 'POST', headers: h, body: file,
+  });
   return { url: `${SB_URL}/storage/v1/object/public/resumes/${fn}` };
 }
 
@@ -1100,14 +1154,13 @@ let _resumeFile = null, _allJobs = [];
 let hrAuth = false;
 let _bargieHideTimer = null;
 
-// Language map
 const L = {
   en:{s:'en-US',t:'en-US',n:'English'}, hi:{s:'hi-IN',t:'hi-IN',n:'Hindi'},
   ml:{s:'ml-IN',t:'ml-IN',n:'Malayalam'}, ta:{s:'ta-IN',t:'ta-IN',n:'Tamil'},
   te:{s:'te-IN',t:'te-IN',n:'Telugu'}, kn:{s:'kn-IN',t:'kn-IN',n:'Kannada'},
   bn:{s:'bn-IN',t:'bn-IN',n:'Bengali'}, es:{s:'es-ES',t:'es-ES',n:'Spanish'},
   ar:{s:'ar-SA',t:'ar-SA',n:'Arabic'}, fr:{s:'fr-FR',t:'fr-FR',n:'French'},
-  de:{s:'de-DE',t:'de-DE',n:'German'}, ur:{s:'ur-PK',t:'ur-PK',n:'Urdu'}
+  de:{s:'de-DE',t:'de-DE',n:'German'}, ur:{s:'ur-PK',t:'ur-PK',n:'Urdu'},
 };
 
 // ─────────────────────────────────────────────
@@ -1115,75 +1168,62 @@ const L = {
 // ─────────────────────────────────────────────
 function toast(msg) {
   const box = document.getElementById('toasts');
-  const el = document.createElement('div');
-  el.className = 'toast'; el.textContent = msg;
+  const el  = document.createElement('div');
+  el.className   = 'toast';
+  el.textContent = msg;
   box.appendChild(el);
   setTimeout(() => el.remove(), 3200);
 }
+
 function showError(msg) {
   const b = document.getElementById('errorBox');
   if (!b) return;
-  b.textContent = msg; b.classList.add('show');
+  b.textContent = msg;
+  b.classList.add('show');
   setTimeout(() => b.classList.remove('show'), 9000);
 }
 
 // ─────────────────────────────────────────────
-// ★ BARGIE — Elite floating voice state badge
+// BARGIE
 // ─────────────────────────────────────────────
 const BARGIE_STATES = {
-  idle:      { cls: 'b-idle',   text: 'READY',         words: false },
-  listening: { cls: 'b-listen', text: 'LISTENING',     words: true  },
-  speaking:  { cls: 'b-speak',  text: 'AI SPEAKING',   words: false },
-  thinking:  { cls: 'b-think',  text: 'ANALYZING',     words: false },
-  processing:{ cls: 'b-proc',   text: 'PROCESSING',    words: false },
+  idle:       { cls: 'b-idle',   text: 'READY',       words: false },
+  listening:  { cls: 'b-listen', text: 'LISTENING',   words: true  },
+  speaking:   { cls: 'b-speak',  text: 'AI SPEAKING', words: false },
+  thinking:   { cls: 'b-think',  text: 'ANALYZING',   words: false },
+  processing: { cls: 'b-proc',   text: 'PROCESSING',  words: false },
 };
 
 function setBargie(state, wordCount = 0) {
-  const el = document.getElementById('bargie');
+  const el  = document.getElementById('bargie');
   const txt = document.getElementById('bargieText');
   const wds = document.getElementById('bargieWords');
   if (!el) return;
-
   const cfg = BARGIE_STATES[state] || BARGIE_STATES.idle;
   clearTimeout(_bargieHideTimer);
-
-  // Remove all state classes
   el.className = 'visible ' + cfg.cls;
-
   if (txt) txt.textContent = cfg.text;
-
   if (wds) {
     if (cfg.words && wordCount > 0) {
-      wds.style.display = 'block';
-      wds.textContent = wordCount + ' word' + (wordCount !== 1 ? 's' : '');
+      wds.style.display  = 'block';
+      wds.textContent    = wordCount + ' word' + (wordCount !== 1 ? 's' : '');
     } else {
       wds.style.display = 'none';
     }
   }
-
-  // Auto-hide after idle
   if (state === 'idle') {
-    _bargieHideTimer = setTimeout(() => {
-      if (el) { el.className = 'b-idle'; } // remove 'visible'
-    }, 2500);
+    _bargieHideTimer = setTimeout(() => { if (el) el.className = 'b-idle'; }, 2500);
   }
 }
 
-// ─────────────────────────────────────────────
-// ORB + BARGIE combined setter
-// ─────────────────────────────────────────────
 function setOrb(state) {
-  const o = document.getElementById('orb');
+  const o   = document.getElementById('orb');
   const lbl = document.getElementById('orbLabel');
   if (!o) return;
-
   o.className = 'orb';
   const labels = {
-    speaking:  'AI Speaking…',
-    listening: 'Listening…',
-    thinking:  'Analyzing…',
-    processing:'Processing…',
-    idle:      'Ready',
+    speaking: 'AI Speaking…', listening: 'Listening…',
+    thinking: 'Analyzing…',  processing: 'Processing…', idle: 'Ready',
   };
   o.classList.add(state);
   if (lbl) lbl.textContent = labels[state] || 'Ready';
@@ -1191,44 +1231,34 @@ function setOrb(state) {
 }
 
 // ─────────────────────────────────────────────
-// ★ TRUE CONTINUOUS STT ENGINE
-//   — Aggressive respawn, hidden transcript,
-//     dynamic silence detection
+// STT ENGINE
 // ─────────────────────────────────────────────
-let _rec = null;
-let _recLock = false; // prevent double-start race
+let _rec = null, _recLock = false;
 
 function initSTT() {
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!SR) { toast('⚠️ Use Chrome or Edge for voice recognition'); return; }
-
-  _rec = new SR();
-  _rec.lang = L[lang]?.s || 'en-US';
-  _rec.interimResults = true;
-  _rec.continuous = true;
+  _rec                 = new SR();
+  _rec.lang            = L[lang]?.s || 'en-US';
+  _rec.interimResults  = true;
+  _rec.continuous      = true;
   _rec.maxAlternatives = 1;
 
   _rec.onresult = (e) => {
     if (!listening || processing || speaking) return;
-
     let finalChunk = '', interim = '';
     for (let i = e.resultIndex; i < e.results.length; i++) {
       if (e.results[i].isFinal) finalChunk += e.results[i][0].transcript + ' ';
       else interim += e.results[i][0].transcript;
     }
-
     if (finalChunk.trim()) {
       transcript += finalChunk;
-      lastSpeech = Date.now();
+      lastSpeech  = Date.now();
       _sttResetSilence();
       _sttStartSilenceTimer();
     }
-
-    // Update Bargie word count from combined transcript
     const wordCount = (transcript + interim).trim().split(/\s+/).filter(Boolean).length;
     if (wordCount > 0) setBargie('listening', wordCount);
-
-    // Wave animation
     const ww = document.getElementById('waveWrap');
     if (ww && (finalChunk || interim)) ww.classList.add('active');
   };
@@ -1238,12 +1268,9 @@ function initSTT() {
     console.warn('[STT error]', e.error);
   };
 
-  // ★ THE CRITICAL PART: Aggressive auto-respawn
   _rec.onend = () => {
     _recLock = false;
-    if (listening && !processing && !speaking) {
-      setTimeout(_recStart, 180); // respawn immediately
-    }
+    if (listening && !processing && !speaking) setTimeout(_recStart, 180);
   };
 }
 
@@ -1251,37 +1278,27 @@ function _recStart() {
   if (_recLock || !_rec || !listening) return;
   _recLock = true;
   try { _rec.start(); }
-  catch (e) {
-    _recLock = false;
-    // If already started, that's fine
-    if (e.name !== 'InvalidStateError') console.warn('[STT start]', e.message);
-  }
+  catch (e) { _recLock = false; if (e.name !== 'InvalidStateError') console.warn('[STT start]', e.message); }
 }
 
 function _recStop() {
   _recLock = false;
-  if (_rec) {
-    try { _rec.abort(); } catch (e) {}
-  }
+  if (_rec) { try { _rec.abort(); } catch (e) {} }
 }
 
 function startListen() {
   if (listening) return;
-  listening = true;
-  transcript = '';
-  lastSpeech = Date.now();
-  ansStart = Date.now();
-
-  _recStop(); // ensure clean state
+  listening   = true;
+  transcript  = '';
+  lastSpeech  = Date.now();
+  ansStart    = Date.now();
+  _recStop();
   setTimeout(_recStart, 150);
-
   setOrb('listening');
   const ww = document.getElementById('waveWrap');
   if (ww) ww.classList.add('active');
-
   const hi = document.getElementById('hfInfo');
-  if (hi) hi.textContent = '🎤 Listening… Speak naturally. Transcript hidden for authentic flow.';
-
+  if (hi) hi.textContent = '🎤 Listening… Speak naturally.';
   startTimer();
   _sttStartSilenceTimer();
 }
@@ -1291,16 +1308,11 @@ function stopListen() {
   listening = false;
   _sttResetSilence();
   _recStop();
-
   const ww = document.getElementById('waveWrap');
   if (ww) ww.classList.remove('active');
   stopTimer();
 }
 
-// ─────────────────────────────────────────────
-// DYNAMIC SILENCE DETECTION
-//   Short response → 2s, medium → 3s, long → 5s
-// ─────────────────────────────────────────────
 function _getDynamicTimeout() {
   const words = transcript.trim().split(/\s+/).filter(Boolean).length;
   if (words < 8)  return 2.2;
@@ -1312,23 +1324,18 @@ function _sttStartSilenceTimer() {
   _sttResetSilence();
   silTimer = setInterval(() => {
     if (!listening || processing || speaking) return;
-
-    const elapsed = (Date.now() - lastSpeech) / 1000;
-    const dynTo = _getDynamicTimeout();
-    const wordCount = transcript.trim().split(/\s+/).filter(Boolean).length;
-
+    const elapsed    = (Date.now() - lastSpeech) / 1000;
+    const dynTo      = _getDynamicTimeout();
+    const wordCount  = transcript.trim().split(/\s+/).filter(Boolean).length;
     if (wordCount >= 2 && elapsed >= 0.8) {
       const remaining = Math.max(0, dynTo - elapsed);
-      const pct = Math.max(0, 100 - (remaining / dynTo * 100));
-
+      const pct       = Math.max(0, 100 - (remaining / dynTo * 100));
       const sw = document.getElementById('silenceWrap');
       const sf = document.getElementById('silenceFill');
       const st = document.getElementById('silenceText');
-
       if (sw) sw.classList.add('show');
       if (sf) sf.style.width = pct + '%';
       if (st) st.textContent = remaining > 0 ? `Submitting in ${remaining.toFixed(1)}s…` : 'Submitting…';
-
       if (elapsed >= dynTo) _autoSubmit();
     } else {
       const sw = document.getElementById('silenceWrap');
@@ -1348,10 +1355,13 @@ function _sttResetSilence() {
 // ─────────────────────────────────────────────
 function startTimer() { secs = 0; _showTime(); timerInt = setInterval(() => { secs++; _showTime(); }, 1000); }
 function stopTimer()  { clearInterval(timerInt); timerInt = null; }
-function _showTime()  { const el = document.getElementById('timer'); if (el) el.textContent = `${String(Math.floor(secs/60)).padStart(2,'0')}:${String(secs%60).padStart(2,'0')}`; }
+function _showTime()  {
+  const el = document.getElementById('timer');
+  if (el) el.textContent = `${String(Math.floor(secs / 60)).padStart(2, '0')}:${String(secs % 60).padStart(2, '0')}`;
+}
 
 // ─────────────────────────────────────────────
-// TTS — high-quality multilingual speech
+// TTS
 // ─────────────────────────────────────────────
 function speak(text) {
   return new Promise(resolve => {
@@ -1362,59 +1372,63 @@ function speak(text) {
 
     const doSpeak = () => {
       try {
-        const u = new SpeechSynthesisUtterance(text);
-        u.lang = L[lang]?.t || 'en-US';
-        u.rate = 0.93; u.pitch = 1.02; u.volume = 1;
-
-        const targetLang = (L[lang]?.t || 'en-US').split('-')[0];
-        const voices = speechSynthesis.getVoices();
-        if (voices.length) {
-          const match = voices.find(v => v.lang.startsWith(targetLang) && !v.localService)
-            || voices.find(v => v.lang.startsWith(targetLang))
-            || voices.find(v => v.lang.startsWith('en'));
+        const u    = new SpeechSynthesisUtterance(text);
+        u.lang     = L[lang]?.t || 'en-US';
+        u.rate     = 0.93; u.pitch = 1.02; u.volume = 1;
+        const tl   = (L[lang]?.t || 'en-US').split('-')[0];
+        const vs   = speechSynthesis.getVoices();
+        if (vs.length) {
+          const match = vs.find(v => v.lang.startsWith(tl) && !v.localService)
+            || vs.find(v => v.lang.startsWith(tl))
+            || vs.find(v => v.lang.startsWith('en'));
           if (match) u.voice = match;
         }
-
-        // Keep TTS alive (Chrome bug workaround)
-        const ka = setInterval(() => { if (!speaking) { clearInterval(ka); return; } speechSynthesis.pause(); speechSynthesis.resume(); }, 9000);
-
-        u.onend = () => { clearInterval(ka); speaking = false; resolve(); };
+        const ka = setInterval(() => {
+          if (!speaking) { clearInterval(ka); return; }
+          speechSynthesis.pause();
+          speechSynthesis.resume();
+        }, 9000);
+        u.onend  = () => { clearInterval(ka); speaking = false; resolve(); };
         u.onerror = () => { clearInterval(ka); speaking = false; resolve(); };
         speechSynthesis.speak(u);
       } catch { speaking = false; resolve(); }
     };
 
-    const voices = speechSynthesis.getVoices();
-    if (voices.length) { setTimeout(doSpeak, 120); }
+    const vs = speechSynthesis.getVoices();
+    if (vs.length) { setTimeout(doSpeak, 120); }
     else {
-      speechSynthesis.onvoiceschanged = () => { speechSynthesis.onvoiceschanged = null; setTimeout(doSpeak, 120); };
-      setTimeout(() => { if (speaking && !speechSynthesis.speaking) { speechSynthesis.onvoiceschanged = null; doSpeak(); } }, 1200);
+      speechSynthesis.onvoiceschanged = () => {
+        speechSynthesis.onvoiceschanged = null;
+        setTimeout(doSpeak, 120);
+      };
+      setTimeout(() => {
+        if (speaking && !speechSynthesis.speaking) {
+          speechSynthesis.onvoiceschanged = null;
+          doSpeak();
+        }
+      }, 1200);
     }
   });
 }
 
 // ─────────────────────────────────────────────
-// AI CALL — Groq LLaMA 3.3 70B via Worker
-//   Falls back to worker root if /groq not found
+// AI CALL
 // ─────────────────────────────────────────────
 async function callAI(messages) {
   const ctrl = new AbortController();
-  const tm = setTimeout(() => ctrl.abort(), 50000);
-
-  // Preferred: worker with explicit Groq model header
+  const tm   = setTimeout(() => ctrl.abort(), 50000);
   const payload = {
     messages,
-    model: CFG.groqModel, // llama-3.3-70b-versatile
+    model:       CFG.groqModel,
     temperature: 0.7,
-    max_tokens: 1024,
+    max_tokens:  1024,
   };
-
   try {
     const r = await fetch(W, {
-      method: 'POST',
+      method:  'POST',
       headers: { 'Content-Type': 'application/json', 'X-Model': CFG.groqModel },
-      body: JSON.stringify(payload),
-      signal: ctrl.signal,
+      body:    JSON.stringify(payload),
+      signal:  ctrl.signal,
     });
     clearTimeout(tm);
     if (!r.ok) throw new Error('Worker error ' + r.status);
@@ -1435,7 +1449,8 @@ function safeJSON(raw) {
   c = m[0]
     .replace(/,\s*([}\]])/g, '$1')
     .replace(/:\s*"([^"]*?)"/gs, (_, v) =>
-      ': "' + v.replace(/\n/g,' ').replace(/\r/g,'').replace(/\t/g,' ').replace(/\\/g,'\\\\').replace(/"/g,'\\"') + '"'
+      ': "' + v.replace(/\n/g,' ').replace(/\r/g,'').replace(/\t/g,' ')
+               .replace(/\\/g,'\\\\').replace(/"/g,'\\"') + '"'
     );
   try { return JSON.parse(c); }
   catch { try { return JSON.parse(c.replace(/[\x00-\x1F\x7F]/g,' ')); } catch { return _exFields(raw); } }
@@ -1444,133 +1459,165 @@ function safeJSON(raw) {
 function _exFields(raw) {
   const gn = k => { const m = raw.match(new RegExp(`"${k}"\\s*:\\s*(\\d+)`)); return m ? parseInt(m[1]) : 0; };
   const gs = k => { const m = raw.match(new RegExp(`"${k}"\\s*:\\s*"([^"]*?)"`)); return m ? m[1] : ''; };
-  const ga = k => { const m = raw.match(new RegExp(`"${k}"\\s*:\\s*\\[([^\\]]*?)\\]`, 's')); if (!m) return []; const items = m[1].match(/"([^"]*?)"/g); return items ? items.map(s => s.replace(/"/g, '')) : []; };
+  const ga = k => { const m = raw.match(new RegExp(`"${k}"\\s*:\\s*\\[([^\\]]*?)\\]`, 's')); if (!m) return []; const items = m[1].match(/"([^"]*?)"/g); return items ? items.map(s => s.replace(/"/g,'')) : []; };
   const fb = [];
   for (const m of raw.matchAll(/"question"\s*:\s*"([^"]*?)"[^}]*?"score"\s*:\s*(\d+)[^}]*?"comment"\s*:\s*"([^"]*?)"/gs))
-    fb.push({ question: m[1].substring(0, 100), score: parseInt(m[2]), comment: m[3], type: 'main' });
+    fb.push({ question: m[1].substring(0,100), score: parseInt(m[2]), comment: m[3], type: 'main' });
   return {
     overallScore: gn('overallScore') || 50, grade: gs('grade') || 'C',
     recommendation: gs('recommendation') || 'Pending', summary: gs('summary') || 'Evaluation complete.',
     strengths: ga('strengths'), improvements: ga('improvements'),
-    feedback: fb.length ? fb : answers.map(a => ({ question: a.question.substring(0,80), score: a.skipped ? 0 : 5, comment: a.skipped ? 'Skipped' : 'Recorded', type: a.type })),
+    feedback: fb.length ? fb : answers.map(a => ({
+      question: a.question.substring(0,80), score: a.skipped ? 0 : 5,
+      comment: a.skipped ? 'Skipped' : 'Recorded', type: a.type,
+    })),
   };
 }
 
 // ─────────────────────────────────────────────
-// TOKEN VALIDATION — FIXED
+// ★ FIX: TOKEN VALIDATION
+// Queries 'interviews' table correctly.
+// Handles UUID hyphens, expired tokens, used tokens.
 // ─────────────────────────────────────────────
-
-/**
- * Validate a token by querying interviews table directly.
- * Returns the interview record or throws with a descriptive error.
- */
 async function validateToken(token) {
-  if (!token || token.trim().length < 8) throw new Error('Token is too short or empty.');
+  if (!token || token.trim().length < 8) {
+    throw new Error('Token is too short or empty.');
+  }
 
-  const data = await db('select', 'interviews', null, { token: token.trim() }, '*');
+  const cleaned = token.trim();
+
+  // Direct fetch — avoids any encoding issues in db() helper
+  const url = `${SB_URL}/rest/v1/interviews?token=eq.${encodeURIComponent(cleaned)}&select=*&limit=1`;
+  const r   = await fetch(url, {
+    headers: {
+      'apikey':        SB_KEY,
+      'Authorization': 'Bearer ' + SB_KEY,
+      'Content-Type':  'application/json',
+    },
+  });
+
+  if (!r.ok) {
+    const err = await r.json().catch(() => ({}));
+    throw new Error('Server error validating token: ' + (err.message || r.status));
+  }
+
+  const data      = await r.json();
   const interview = Array.isArray(data) ? data[0] : null;
 
-  if (!interview) throw new Error('Invalid token — not found. Check your invitation link.');
+  if (!interview) {
+    throw new Error('Invalid token — not found. Check your invitation link.');
+  }
 
-  const maxAtt = interview.max_attempts || 1;
+  const maxAtt  = interview.max_attempts  || 1;
   const usedAtt = interview.attempts_used || 0;
 
-  if (interview.status === 'completed' && maxAtt <= 1)
+  if (interview.status === 'completed' && maxAtt <= 1) {
     throw new Error('This interview has already been completed.');
-
-  if (usedAtt >= maxAtt)
+  }
+  if (usedAtt >= maxAtt) {
     throw new Error(`All ${maxAtt} attempt(s) used. Contact HR for a new token.`);
-
-  if (interview.expires_at && new Date(interview.expires_at) < new Date())
+  }
+  if (interview.expires_at && new Date(interview.expires_at) < new Date()) {
     throw new Error('Token has expired. Please contact HR for a new invitation.');
+  }
 
   return interview;
 }
 
+// ─────────────────────────────────────────────
+// CHECK TOKEN FROM URL — FIXED
+// Now pre-fills the modal input if validation fails
+// ─────────────────────────────────────────────
 async function checkToken() {
   const params = new URLSearchParams(location.search);
-  const token = params.get('token');
+  const token  = params.get('token');
   if (!token) return;
 
+  // Pre-fill the manual token input right away
+  const mti = document.getElementById('manualTokenInput');
+  if (mti) mti.value = token;
+
   toast('🔍 Validating interview token…');
+
   try {
     const interview = await validateToken(token);
-    curToken = token;
-    curAppId = interview.application_id;
-    curJobId = interview.job_id;
-
-    // Pre-fill setup form
-    mode = 'real';
-    role = interview.interview_role || '';
-    level = interview.interview_level || 'Mid-Level';
-    totalQ = interview.question_count || 10;
-    lang = interview.interview_language || 'en';
-
-    // Show setup tab with pre-filled info
+    curToken  = token;
+    curAppId  = interview.application_id;
+    curJobId  = interview.job_id;
+    mode      = 'real';
+    role      = interview.interview_role     || '';
+    level     = interview.interview_level    || 'Mid-Level';
+    totalQ    = interview.question_count     || 10;
+    lang      = interview.interview_language || 'en';
     document.getElementById('navInterview')?.classList.remove('hidden');
     _nav('setup');
-
-    // Set UI to real mode
     _setupRealMode(interview);
     toast('✅ Token verified — fill your details to begin.');
   } catch (err) {
-    toast('❌ ' + err.message);
+    // Show modal with the token already pasted and error shown
     const te = document.getElementById('tokenError');
-    if (te) { te.textContent = err.message; te.style.display = 'block'; }
+    if (te) { te.textContent = '❌ ' + err.message; te.style.display = 'block'; }
     openTokenModal();
+    toast('❌ ' + err.message);
   }
 }
 
 function _setupRealMode(interview) {
   const ind = document.getElementById('modeIndicator');
-  if (ind) ind.innerHTML = '<span class="mode-badge" style="background:rgba(239,68,68,.15);color:var(--red);font-size:.85rem;padding:6px 16px">🔒 PROCTORED REAL INTERVIEW</span>';
+  if (ind) ind.innerHTML = `<span class="mode-badge" style="background:rgba(239,68,68,.15);
+    color:var(--red);font-size:.85rem;padding:6px 16px">🔒 PROCTORED REAL INTERVIEW</span>`;
 
   document.getElementById('realInfoCard')?.classList.remove('hidden');
   document.getElementById('proctorReqCard')?.classList.remove('hidden');
 
-  // Disable role/level/count selects (locked to token config)
   ['roleSel','levelSel','qCount','langSel'].forEach(id => {
     const el = document.getElementById(id);
-    if (el) { el.disabled = true; }
+    if (el) el.disabled = true;
   });
 
-  // Pre-fill selects
   const rs = document.getElementById('roleSel');
   if (rs && interview.interview_role) {
     const opt = [...rs.options].find(o => o.value === interview.interview_role);
     if (opt) { rs.value = interview.interview_role; }
     else {
-      // Custom role — add option
       const o = new Option(interview.interview_role, interview.interview_role, true, true);
       rs.add(o);
     }
   }
-  const ls = document.getElementById('levelSel'); if (ls) ls.value = interview.interview_level || 'Mid-Level';
-  const qc = document.getElementById('qCount'); if (qc) qc.value = String(interview.question_count || 10);
-  const lg = document.getElementById('langSel'); if (lg) lg.value = interview.interview_language || 'en';
 
-  // Token display
+  const ls = document.getElementById('levelSel'); if (ls) ls.value = interview.interview_level    || 'Mid-Level';
+  const qc = document.getElementById('qCount');   if (qc) qc.value = String(interview.question_count || 10);
+  const lg = document.getElementById('langSel');  if (lg) lg.value = interview.interview_language || 'en';
+
   const ct = document.getElementById('candToken');
   if (ct) { ct.value = interview.token || curToken || ''; ct.readOnly = true; ct.style.color = 'var(--muted)'; }
 
-  // Token info box
   const tid = document.getElementById('tokenInfoDisplay');
   const tit = document.getElementById('tokenInfoText');
   if (tid) tid.style.display = 'block';
-  if (tit) tit.innerHTML = `Role: <strong style="color:var(--text)">${interview.interview_role}</strong> · Level: <strong style="color:var(--text)">${interview.interview_level}</strong> · ${interview.question_count} Questions<br>Expires: ${interview.expires_at ? new Date(interview.expires_at).toLocaleString() : 'N/A'}`;
+  if (tit) tit.innerHTML = `
+    Role: <strong style="color:var(--text)">${interview.interview_role}</strong> ·
+    Level: <strong style="color:var(--text)">${interview.interview_level}</strong> ·
+    ${interview.question_count} Questions<br>
+    Expires: ${interview.expires_at ? new Date(interview.expires_at).toLocaleString() : 'N/A'}`;
 }
 
 // ─────────────────────────────────────────────
 // NAVIGATION
 // ─────────────────────────────────────────────
 function _nav(p) {
-  ['home','jobs','apply','setup','live','results','hr'].forEach(x => document.getElementById('page-'+x)?.classList.add('hidden'));
-  document.getElementById('page-'+p)?.classList.remove('hidden');
-  document.querySelectorAll('#mainNav .nav-btn').forEach(b => b.classList.toggle('active', b.dataset.page === p));
+  ['home','jobs','apply','setup','live','results','hr'].forEach(x =>
+    document.getElementById('page-' + x)?.classList.add('hidden')
+  );
+  document.getElementById('page-' + p)?.classList.remove('hidden');
+  document.querySelectorAll('#mainNav .nav-btn').forEach(b =>
+    b.classList.toggle('active', b.dataset.page === p)
+  );
   if (p !== 'apply') document.getElementById('navApply')?.classList.add('hidden');
-  if (p === 'jobs') loadJobs();
-  if (p === 'hr')   loadHR();
+  if (p === 'jobs')  loadJobs();
+  if (p === 'hr')    loadHR();
 }
+
 function nav(p) {
   if (p === 'hr' && !hrAuth) { openHRModal(); return; }
   if (p === 'apply') {
@@ -1584,51 +1631,80 @@ function nav(p) {
 // ─────────────────────────────────────────────
 // HR LOGIN
 // ─────────────────────────────────────────────
-function openHRModal()  { const m = document.getElementById('hrLoginModal'); m.style.display = 'flex'; setTimeout(() => document.getElementById('hrPassInput')?.focus(), 120); }
-function closeHRModal() { document.getElementById('hrLoginModal').style.display = 'none'; document.getElementById('hrPassInput').value = ''; document.getElementById('hrPassError').style.display = 'none'; }
+function openHRModal()  {
+  const m = document.getElementById('hrLoginModal');
+  m.style.display = 'flex';
+  setTimeout(() => document.getElementById('hrPassInput')?.focus(), 120);
+}
+function closeHRModal() {
+  document.getElementById('hrLoginModal').style.display = 'none';
+  document.getElementById('hrPassInput').value          = '';
+  document.getElementById('hrPassError').style.display  = 'none';
+}
 function doHRLogin() {
   const pwd = document.getElementById('hrPassInput').value;
   if (!pwd) return;
-  if (pwd === CFG.hrPassword) { hrAuth = true; closeHRModal(); _nav('hr'); toast('✅ HR access granted!'); }
-  else { document.getElementById('hrPassError').style.display = 'block'; document.getElementById('hrPassInput').value = ''; setTimeout(() => document.getElementById('hrPassError').style.display = 'none', 3000); }
+  if (pwd === CFG.hrPassword) {
+    hrAuth = true; closeHRModal(); _nav('hr'); toast('✅ HR access granted!');
+  } else {
+    document.getElementById('hrPassError').style.display = 'block';
+    document.getElementById('hrPassInput').value          = '';
+    setTimeout(() => document.getElementById('hrPassError').style.display = 'none', 3000);
+  }
 }
 
 // ─────────────────────────────────────────────
 // TOKEN MODAL
 // ─────────────────────────────────────────────
-function openTokenModal()  { const m = document.getElementById('tokenRequiredModal'); m.classList.add('open'); setTimeout(() => document.getElementById('manualTokenInput')?.focus(), 120); }
-function closeTokenModal() { document.getElementById('tokenRequiredModal').classList.remove('open'); document.getElementById('manualTokenInput').value = ''; const te = document.getElementById('tokenError'); if (te) te.style.display = 'none'; }
+function openTokenModal() {
+  const m = document.getElementById('tokenRequiredModal');
+  m.classList.add('open');
+  setTimeout(() => document.getElementById('manualTokenInput')?.focus(), 120);
+}
+function closeTokenModal() {
+  document.getElementById('tokenRequiredModal').classList.remove('open');
+  // Don't clear the input — leave it for user to correct
+  const te = document.getElementById('tokenError');
+  if (te) te.style.display = 'none';
+}
 
 async function useManualToken() {
-  const token = document.getElementById('manualTokenInput').value.trim();
-  const te = document.getElementById('tokenError');
-  if (!token) { if (te) { te.textContent = 'Please paste your token first.'; te.style.display = 'block'; } return; }
+  const input = document.getElementById('manualTokenInput');
+  const token = input?.value.trim();
+  const te    = document.getElementById('tokenError');
+
+  if (!token) {
+    if (te) { te.textContent = 'Please paste your token first.'; te.style.display = 'block'; }
+    return;
+  }
   if (te) te.style.display = 'none';
+
+  // Disable button during validation
+  const btn = document.querySelector('#tokenRequiredModal .modal-btn');
+  if (btn) { btn.disabled = true; btn.textContent = '🔍 Validating…'; }
 
   try {
     toast('🔍 Validating token…');
     const interview = await validateToken(token);
-    curToken = token;
-    curAppId = interview.application_id;
-    curJobId = interview.job_id;
+    curToken  = token;
+    curAppId  = interview.application_id;
+    curJobId  = interview.job_id;
+    mode      = 'real';
+    role      = interview.interview_role     || '';
+    level     = interview.interview_level    || 'Mid-Level';
+    totalQ    = interview.question_count     || 10;
+    lang      = interview.interview_language || 'en';
     closeTokenModal();
-
-    mode = 'real';
-    role = interview.interview_role || '';
-    level = interview.interview_level || 'Mid-Level';
-    totalQ = interview.question_count || 10;
-    lang = interview.interview_language || 'en';
-
     document.getElementById('navInterview')?.classList.remove('hidden');
     _nav('setup');
     _setupRealMode(interview);
     toast('✅ Token valid — complete setup to start.');
-
-    // Update URL without reload
     window.history.replaceState({}, '', '?token=' + encodeURIComponent(token));
   } catch (err) {
     if (te) { te.textContent = '❌ ' + err.message; te.style.display = 'block'; }
     toast('❌ ' + err.message);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '🚀 Load Interview'; }
   }
 }
 
@@ -1641,14 +1717,24 @@ async function loadJobs() {
   try {
     const data = await db('select', 'jobs', null, { is_active: true }, '*', 'created_at.desc');
     _allJobs = Array.isArray(data) ? data : [];
-    if (!_allJobs.length) { el.innerHTML = '<p style="color:var(--muted);text-align:center;padding:30px">No open positions right now.<br><small>Check back soon!</small></p>'; return; }
+    if (!_allJobs.length) {
+      el.innerHTML = `<p style="color:var(--muted);text-align:center;padding:30px">
+        No open positions right now.<br><small>Check back soon!</small></p>`;
+      return;
+    }
     renderJobs(_allJobs);
-  } catch (e) { el.innerHTML = '<p style="color:var(--red)">Error loading jobs: ' + e.message + '</p>'; }
+  } catch (e) {
+    el.innerHTML = '<p style="color:var(--red)">Error loading jobs: ' + e.message + '</p>';
+  }
 }
 
 function renderJobs(data) {
   const el = document.getElementById('jobsList');
-  if (!data?.length) { el.innerHTML = '<p style="color:var(--muted);text-align:center;padding:30px">No positions match your search.</p>'; return; }
+  if (!data?.length) {
+    el.innerHTML = `<p style="color:var(--muted);text-align:center;padding:30px">
+      No positions match your search.</p>`;
+    return;
+  }
   el.innerHTML = data.map(j => {
     let skills = [];
     try {
@@ -1662,14 +1748,20 @@ function renderJobs(data) {
     return `<div class="job-card">
       <h3>${j.title || ''}</h3>
       <div class="job-meta">
-        ${company ? `<span>🏢 ${company}</span>` : ''}
-        ${j.location ? `<span>📍 ${j.location}</span>` : ''}
-        ${j.level ? `<span>📊 ${j.level}</span>` : ''}
-        ${j.category ? `<span>💼 ${j.category}</span>` : ''}
+        ${company      ? `<span>🏢 ${company}</span>`    : ''}
+        ${j.location   ? `<span>📍 ${j.location}</span>` : ''}
+        ${j.level      ? `<span>📊 ${j.level}</span>`    : ''}
+        ${j.category   ? `<span>💼 ${j.category}</span>` : ''}
       </div>
-      <p style="font-size:.82rem;color:var(--muted);margin:6px 0">${(j.description||'').substring(0,200)}…</p>
-      <div style="margin-bottom:8px">${skills.slice(0,8).map(s=>'<span class="skill-tag">'+s+'</span>').join('')}</div>
-      <button class="btn btn-go" style="margin-top:4px;padding:10px" onclick="applyTo('${j.id}','${(j.title||'').replace(/'/g,"\\'")}')">📝 Apply Now</button>
+      <p style="font-size:.82rem;color:var(--muted);margin:6px 0">
+        ${(j.description || '').substring(0, 200)}…</p>
+      <div style="margin-bottom:8px">
+        ${skills.slice(0, 8).map(s => '<span class="skill-tag">' + s + '</span>').join('')}
+      </div>
+      <button class="btn btn-go" style="margin-top:4px;padding:10px"
+        onclick="applyTo('${j.id}','${(j.title || '').replace(/'/g, "\\'")}')">
+        📝 Apply Now
+      </button>
     </div>`;
   }).join('');
 }
@@ -1678,10 +1770,10 @@ function filterJobs() {
   const q = (document.getElementById('jobSearch')?.value || '').toLowerCase();
   if (!q) { renderJobs(_allJobs); return; }
   renderJobs(_allJobs.filter(j =>
-    (j.title||'').toLowerCase().includes(q) ||
-    (j.description||'').toLowerCase().includes(q) ||
-    (j.location||'').toLowerCase().includes(q) ||
-    ((Array.isArray(j.skills) ? j.skills.join(' ') : j.skills||'')).toLowerCase().includes(q)
+    (j.title || '').toLowerCase().includes(q) ||
+    (j.description || '').toLowerCase().includes(q) ||
+    (j.location || '').toLowerCase().includes(q) ||
+    ((Array.isArray(j.skills) ? j.skills.join(' ') : j.skills || '')).toLowerCase().includes(q)
   ));
 }
 
@@ -1700,29 +1792,52 @@ function applyTo(id, title) {
 async function exFile(f) {
   const ext = f.name.split('.').pop().toLowerCase();
   let t = '';
-  if (ext === 'txt') t = await f.text();
-  else if (ext === 'pdf') t = await _exPDF(f);
+  if (ext === 'txt')                   t = await f.text();
+  else if (ext === 'pdf')              t = await _exPDF(f);
   else if (ext === 'doc' || ext === 'docx') t = await _exDOC(f);
-  else t = await f.text();
-  return t.replace(/\s+/g, ' ').replace(/[^\x20-\x7E\n]/g, '').trim().substring(0, 5000);
+  else                                 t = await f.text();
+  return t.replace(/\s+/g,' ').replace(/[^\x20-\x7E\n]/g,'').trim().substring(0, 5000);
 }
 async function _exPDF(f) {
   if (!window.pdfjsLib) return await _exFB(f);
-  try { const b = await f.arrayBuffer(), p = await pdfjsLib.getDocument({data:b}).promise; let t=''; for (let i=1;i<=p.numPages;i++){const pg=await p.getPage(i),c=await pg.getTextContent();t+=c.items.map(x=>x.str).join(' ')+'\n';} return t; } catch { return await _exFB(f); }
+  try {
+    const b = await f.arrayBuffer(), p = await pdfjsLib.getDocument({ data: b }).promise;
+    let t = '';
+    for (let i = 1; i <= p.numPages; i++) {
+      const pg = await p.getPage(i), c = await pg.getTextContent();
+      t += c.items.map(x => x.str).join(' ') + '\n';
+    }
+    return t;
+  } catch { return await _exFB(f); }
 }
 async function _exDOC(f) {
   const b = await f.arrayBuffer();
-  if (f.name.endsWith('.docx')) { try { const t=new TextDecoder('utf-8').decode(new Uint8Array(b)); const m=t.match(/<w:t[^>]*>([^<]+)<\/w:t>/g); if (m?.length) return m.map(x=>x.replace(/<[^>]+>/g,'')).join(' '); } catch {} }
+  if (f.name.endsWith('.docx')) {
+    try {
+      const t = new TextDecoder('utf-8').decode(new Uint8Array(b));
+      const m = t.match(/<w:t[^>]*>([^<]+)<\/w:t>/g);
+      if (m?.length) return m.map(x => x.replace(/<[^>]+>/g, '')).join(' ');
+    } catch {}
+  }
   return await _exFB(f);
 }
-async function _exFB(f) { const b = await f.arrayBuffer(); const t = new TextDecoder('utf-8',{fatal:false}).decode(b); const r = t.match(/[a-zA-Z0-9@.,:;!?\-/()\s]{5,}/g); return r ? r.filter(s=>(s.match(/[a-zA-Z]/g)||[]).length/s.length>0.5&&s.trim().length>5).join(' ') : ''; }
+async function _exFB(f) {
+  const b = await f.arrayBuffer();
+  const t = new TextDecoder('utf-8', { fatal: false }).decode(b);
+  const r = t.match(/[a-zA-Z0-9@.,:;!?\-/()\s]{5,}/g);
+  return r
+    ? r.filter(s => (s.match(/[a-zA-Z]/g) || []).length / s.length > 0.5 && s.trim().length > 5).join(' ')
+    : '';
+}
 
 document.getElementById('applyFile').addEventListener('change', async e => {
   const file = e.target.files[0]; if (!file) return;
   document.getElementById('applyFileName').textContent = '⏳ Processing…';
   try {
     cv = await exFile(file);
-    if (cv.length < 30) { document.getElementById('applyFileName').textContent = '⚠️ Try a TXT file'; cv = ''; return; }
+    if (cv.length < 30) {
+      document.getElementById('applyFileName').textContent = '⚠️ Try a TXT file'; cv = ''; return;
+    }
     document.getElementById('applyFileName').textContent = '✅ ' + file.name;
     document.getElementById('applyUpload').classList.add('ok');
     _resumeFile = file; toast('✅ Resume loaded!');
@@ -1734,9 +1849,12 @@ document.getElementById('cvFile').addEventListener('change', async e => {
   document.getElementById('cvFileName').textContent = '⏳ Processing…';
   try {
     cv = await exFile(file);
-    if (cv.length < 30) { document.getElementById('cvFileName').textContent = '⚠️ Try TXT format'; cv = ''; return; }
+    if (cv.length < 30) {
+      document.getElementById('cvFileName').textContent = '⚠️ Try TXT format'; cv = ''; return;
+    }
     document.getElementById('cvFileName').textContent = '✅ ' + file.name;
-    document.getElementById('cvUpArea').classList.add('ok'); toast('✅ Resume loaded!');
+    document.getElementById('cvUpArea').classList.add('ok');
+    toast('✅ Resume loaded!');
   } catch { document.getElementById('cvFileName').textContent = '❌ Error reading file'; cv = ''; }
 });
 
@@ -1744,54 +1862,104 @@ document.getElementById('cvFile').addEventListener('change', async e => {
 // APPLICATION SUBMIT
 // ─────────────────────────────────────────────
 async function submitApplication() {
-  const name = document.getElementById('applyName').value.trim();
+  const name  = document.getElementById('applyName').value.trim();
   const email = document.getElementById('applyEmail').value.trim();
   if (!name || !email) { toast('❌ Name & Email required'); return; }
-  if (!cv) { toast('❌ Upload your resume first'); return; }
+  if (!cv)             { toast('❌ Upload your resume first'); return; }
 
-  const btn = document.getElementById('applyBtn'); btn.disabled = true; btn.textContent = '⏳ Submitting…';
-  const st = document.getElementById('applyStatus'); st.textContent = '';
+  const btn = document.getElementById('applyBtn');
+  btn.disabled    = true;
+  btn.textContent = '⏳ Submitting…';
+  const st = document.getElementById('applyStatus');
+  st.textContent  = '';
 
   try {
     let resume_url = '';
-    if (_resumeFile) { st.textContent = '📤 Uploading resume…'; const fn = Date.now() + '_' + _resumeFile.name; const up = await uploadFile(_resumeFile, fn); resume_url = up.url || ''; }
+    if (_resumeFile) {
+      st.textContent = '📤 Uploading resume…';
+      const fn = Date.now() + '_' + _resumeFile.name;
+      const up = await uploadFile(_resumeFile, fn);
+      resume_url = up.url || '';
+    }
     st.textContent = '📝 Saving application…';
 
     let app;
     try {
-      const r = await fetch(W + '/api/apply', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ job_id: curJobId||null, name, email, phone: document.getElementById('applyPhone').value.trim(), resume_url, resume_text: cv.substring(0,5000) }) });
+      const r = await fetch(W + '/api/apply', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({
+          job_id:      curJobId || null,
+          name, email,
+          phone:       document.getElementById('applyPhone').value.trim(),
+          resume_url,
+          resume_text: cv.substring(0, 5000),
+        }),
+      });
       const d = await r.json();
       if (!r.ok) throw new Error(d.error || 'Submission failed');
       app = d.application; curAppId = app?.id;
       if (!d.ats) { st.textContent = '🤖 AI screening…'; if (app?.id) await runATS(app); }
     } catch (workerErr) {
       console.warn('[apply] Worker failed, direct insert:', workerErr.message);
-      const result = await db('insert', 'applications', { job_id: curJobId||null, name, email, phone: document.getElementById('applyPhone').value.trim(), resume_url, resume_text: cv.substring(0,5000), status: 'applied' });
+      const result = await db('insert', 'applications', {
+        job_id:      curJobId || null,
+        name, email,
+        phone:       document.getElementById('applyPhone').value.trim(),
+        resume_url,
+        resume_text: cv.substring(0, 5000),
+        status:      'applied',
+      });
       app = result; curAppId = app?.id;
-      st.textContent = '🤖 AI screening…'; if (app?.id) await runATS(app);
+      st.textContent = '🤖 AI screening…';
+      if (app?.id) await runATS(app);
     }
 
     st.innerHTML = '<span style="color:var(--green)">✅ Application submitted successfully!</span>';
     toast('✅ Application submitted!');
-    document.getElementById('applyName').value = ''; document.getElementById('applyEmail').value = '';
+
+    // Clear form
+    document.getElementById('applyName').value      = '';
+    document.getElementById('applyEmail').value     = '';
     document.getElementById('applyFileName').textContent = 'No file selected';
     document.getElementById('applyUpload').classList.remove('ok');
     cv = ''; _resumeFile = null;
-  } catch (err) { st.innerHTML = '<span style="color:var(--red)">❌ ' + err.message + '</span>'; }
+  } catch (err) {
+    st.innerHTML = '<span style="color:var(--red)">❌ ' + err.message + '</span>';
+  }
 
-  btn.disabled = false; btn.textContent = '📨 Submit Application';
+  btn.disabled    = false;
+  btn.textContent = '📨 Submit Application';
 }
 
 async function runATS(app) {
   try {
-    let jd='',sk=[],th=70,jr='',jl='';
-    if (app.job_id) { const job = await db('select','jobs',null,{id:app.job_id}); const j = Array.isArray(job)?job[0]:job; if (j){jd=j.description||'';sk=j.skills||[];th=j.ats_threshold||70;jr=j.title;jl=j.level} }
-    const raw = await callAI([{role:'system',content:'ATS screening AI. Return ONLY valid JSON.'},{role:'user',content:`Score resume for "${jr||'General'}" (${jl||'Mid-Level'}).\nJob: ${jd||'Standard role'}\nSkills: ${sk.join(',')||'General'}\nResume: ${app.resume_text||cv}\nReturn ONLY: {"atsScore":75,"matchedSkills":["s1"],"missingSkills":["s1"],"summary":"Brief"}`}]);
-    const r = safeJSON(raw); const score = Math.min(100, Math.max(0, r.atsScore||50)); const status = th>0&&score>=th ? 'shortlisted' : 'applied';
-    await db('update','applications',{ats_score:score,ats_matched_skills:r.matchedSkills||[],ats_missing_skills:r.missingSkills||[],ats_summary:r.summary||'',status},{id:app.id});
-    if (status==='shortlisted') {
-      const token = crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36)+Math.random().toString(36);
-      await db('insert','interviews',{application_id:app.id,job_id:app.job_id,token,interview_type:'real',status:'pending',interview_role:jr,interview_level:jl,question_count:10,interview_language:'en',max_attempts:1,attempts_used:0,expires_at:new Date(Date.now()+72*3600000).toISOString()});
+    let jd = '', sk = [], th = 70, jr = '', jl = '';
+    if (app.job_id) {
+      const job = await db('select', 'jobs', null, { id: app.job_id });
+      const j   = Array.isArray(job) ? job[0] : job;
+      if (j) { jd = j.description||''; sk = j.skills||[]; th = j.ats_threshold||70; jr = j.title; jl = j.level; }
+    }
+    const raw  = await callAI([
+      { role: 'system', content: 'ATS screening AI. Return ONLY valid JSON.' },
+      { role: 'user',   content: `Score resume for "${jr||'General'}" (${jl||'Mid-Level'}).\nJob: ${jd||'Standard role'}\nSkills: ${sk.join(',')||'General'}\nResume: ${app.resume_text||cv}\nReturn ONLY: {"atsScore":75,"matchedSkills":["s1"],"missingSkills":["s1"],"summary":"Brief"}` },
+    ]);
+    const r      = safeJSON(raw);
+    const score  = Math.min(100, Math.max(0, r.atsScore || 50));
+    const status = th > 0 && score >= th ? 'shortlisted' : 'applied';
+    await db('update', 'applications', {
+      ats_score: score, ats_matched_skills: r.matchedSkills || [],
+      ats_missing_skills: r.missingSkills || [], ats_summary: r.summary || '', status,
+    }, { id: app.id });
+    if (status === 'shortlisted') {
+      const token = crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36);
+      await db('insert', 'interviews', {
+        application_id: app.id, job_id: app.job_id, token,
+        interview_type: 'real', status: 'pending',
+        interview_role: jr, interview_level: jl, question_count: 10,
+        interview_language: 'en', max_attempts: 1, attempts_used: 0,
+        expires_at: new Date(Date.now() + 72 * 3600000).toISOString(),
+      });
     }
   } catch (e) { console.error('[ATS]', e); }
 }
@@ -1809,15 +1977,19 @@ function startMode(m) {
   _nav('setup');
   if (m === 'real') {
     const ind = document.getElementById('modeIndicator');
-    if (ind) ind.innerHTML = '<span class="mode-badge" style="background:rgba(239,68,68,.15);color:var(--red);font-size:.85rem;padding:6px 16px">🔒 PROCTORED REAL INTERVIEW</span>';
+    if (ind) ind.innerHTML = `<span class="mode-badge" style="background:rgba(239,68,68,.15);
+      color:var(--red);font-size:.85rem;padding:6px 16px">🔒 PROCTORED REAL INTERVIEW</span>`;
     document.getElementById('realInfoCard')?.classList.remove('hidden');
     document.getElementById('proctorReqCard')?.classList.remove('hidden');
   } else {
     const ind = document.getElementById('modeIndicator');
-    if (ind) ind.innerHTML = '<span class="mode-badge" style="background:rgba(16,185,129,.15);color:var(--green);font-size:.85rem;padding:6px 16px">🎯 MOCK PRACTICE SESSION</span>';
+    if (ind) ind.innerHTML = `<span class="mode-badge" style="background:rgba(16,185,129,.15);
+      color:var(--green);font-size:.85rem;padding:6px 16px">🎯 MOCK PRACTICE SESSION</span>`;
     document.getElementById('realInfoCard')?.classList.add('hidden');
     document.getElementById('proctorReqCard')?.classList.add('hidden');
-    ['roleSel','levelSel','qCount','langSel'].forEach(id => { const el=document.getElementById(id); if(el) el.disabled=false; });
+    ['roleSel','levelSel','qCount','langSel'].forEach(id => {
+      const el = document.getElementById(id); if (el) el.disabled = false;
+    });
   }
 }
 
@@ -1827,18 +1999,18 @@ function updateProg() {
   if (isFollowUp) {
     document.getElementById('progText').textContent = `Follow-up on Q${mainQ}/${totalQ}`;
     document.getElementById('qTag').textContent = `Q${mainQ}↩`;
-    document.getElementById('qTag').className = 'followup-tag';
+    document.getElementById('qTag').className   = 'followup-tag';
   } else {
     document.getElementById('progText').textContent = `Question ${mainQ} of ${totalQ} — ${p}%`;
     document.getElementById('qTag').textContent = `Q${mainQ}`;
-    document.getElementById('qTag').className = 'q-tag';
+    document.getElementById('qTag').className   = 'q-tag';
   }
 }
 
 function showThink(show) {
   document.getElementById('thinkBox')?.classList.toggle('hidden', !show);
   const ww = document.getElementById('waveWrap'); if (ww) ww.style.display = show ? 'none' : 'flex';
-  const hi = document.getElementById('hfInfo'); if (hi) hi.style.display = show ? 'none' : 'block';
+  const hi = document.getElementById('hfInfo');   if (hi) hi.style.display = show ? 'none' : 'block';
   if (show) { document.getElementById('questionBox').textContent = ''; _sttResetSilence(); }
 }
 
@@ -1851,31 +2023,28 @@ async function startInterview() {
   role = rs === 'custom' ? document.getElementById('customRole').value.trim() : rs;
   if (!role) { toast('❌ Enter the custom role'); return; }
 
-  lang = document.getElementById('langSel').value;
-  level = document.getElementById('levelSel').value;
-  totalQ = parseInt(document.getElementById('qCount').value);
-  mainQ = 0; isFollowUp = false; answers = []; chat = []; evalRetry = 0; violations = [];
+  lang    = document.getElementById('langSel').value;
+  level   = document.getElementById('levelSel').value;
+  totalQ  = parseInt(document.getElementById('qCount').value);
+  mainQ   = 0; isFollowUp = false; answers = []; chat = []; evalRetry = 0; violations = [];
 
   if (mode === 'real') {
-    const n = document.getElementById('candName').value.trim();
-    const e = document.getElementById('candEmail').value.trim();
-    const tokenField = document.getElementById('candToken').value.trim();
-    const token = curToken || tokenField;
+    const n     = document.getElementById('candName').value.trim();
+    const e     = document.getElementById('candEmail').value.trim();
+    const token = curToken || document.getElementById('candToken').value.trim();
 
-    if (!n || !e) { toast('❌ Full Name & Email required'); return; }
-    if (!token)   { toast('❌ Interview token required'); openTokenModal(); return; }
+    if (!n || !e)  { toast('❌ Full Name & Email required'); return; }
+    if (!token)    { toast('❌ Interview token required'); openTokenModal(); return; }
 
     try {
       toast('🔍 Verifying token…');
       const interview = await validateToken(token);
-      curToken = token;
-      curAppId = interview.application_id || curAppId;
-      curJobId = interview.job_id || curJobId;
-
-      // Mark as in_progress + increment attempts
+      curToken  = token;
+      curAppId  = interview.application_id || curAppId;
+      curJobId  = interview.job_id         || curJobId;
       await db('update', 'interviews', {
-        status: 'in_progress',
-        started_at: new Date().toISOString(),
+        status:       'in_progress',
+        started_at:   new Date().toISOString(),
         attempts_used: (interview.attempts_used || 0) + 1,
       }, { token });
       toast('✅ Token verified — starting proctored session…');
@@ -1886,28 +2055,36 @@ async function startInterview() {
       return;
     }
 
-    // Show screen share overlay for real mode
     document.getElementById('screenShareOverlay')?.classList.remove('hidden');
     return;
   }
 
-  // Mock mode — test worker connectivity
-  const btn = document.getElementById('startBtn'); btn.disabled = true; btn.textContent = '⏳ Connecting…';
+  // Mock mode — test connectivity
+  const btn = document.getElementById('startBtn');
+  btn.disabled    = true;
+  btn.textContent = '⏳ Connecting…';
   try {
-    const t = await fetch(W, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ messages: [{ role: 'user', content: 'ping' }] }) });
+    const t = await fetch(W, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ messages: [{ role: 'user', content: 'ping' }] }),
+    });
     if (!t.ok) throw new Error('Worker returned ' + t.status);
-  } catch (e) { toast('❌ AI service unavailable: ' + e.message); btn.disabled=false; btn.textContent='🚀 Start Interview'; return; }
+  } catch (e) {
+    toast('❌ AI service unavailable: ' + e.message);
+    btn.disabled = false; btn.textContent = '🚀 Start Interview';
+    return;
+  }
   btn.disabled = false; btn.textContent = '🚀 Start Interview';
   await _actuallyStart();
 }
 
 async function _actuallyStart() {
-  // Fill meta bar
   const im = document.getElementById('interviewMeta');
   if (im) {
-    document.getElementById('metaRole').textContent = role;
+    document.getElementById('metaRole').textContent  = role;
     document.getElementById('metaLevel').textContent = level;
-    document.getElementById('metaLang').textContent = L[lang]?.n || 'English';
+    document.getElementById('metaLang').textContent  = L[lang]?.n || 'English';
     const mt = document.getElementById('metaModeTag');
     if (mt) mt.innerHTML = mode === 'real'
       ? '<span class="mode-badge" style="background:rgba(239,68,68,.12);color:var(--red)">🔴 PROCTORED</span>'
@@ -1916,10 +2093,9 @@ async function _actuallyStart() {
   }
   document.getElementById('screenShareOverlay')?.classList.add('hidden');
 
-  // System prompt — Groq LLaMA 3.3 optimized
   const sys = `You are Evalis, an expert AI interviewer conducting a ${level}-level interview for the role: "${role}".
 Language: ${L[lang]?.n || 'English'} only. Be warm, professional, and conversational.
-${cv ? '\nCandidate Resume:\n' + cv.substring(0,3000) + '\n' : ''}
+${cv ? '\nCandidate Resume:\n' + cv.substring(0, 3000) + '\n' : ''}
 Interview Protocol:
 1. Ask exactly ${totalQ} MAIN questions. Mix: 30% technical, 40% behavioral (STAR), 30% situational.
 2. Tailor question depth to ${level} level.
@@ -1928,9 +2104,9 @@ Interview Protocol:
 5. After all main questions → output [DONE] with a brief, warm closing message.
 
 STRICT OUTPUT FORMAT — always start with exactly one tag:
-[NEXT] <question text>    — for a new main question
-[FOLLOWUP] <probe text>   — for a clarifying follow-up
-[DONE] <closing message>  — when all questions are complete
+[NEXT] <question text>
+[FOLLOWUP] <probe text>
+[DONE] <closing message>
 
 Start now with [NEXT] and your first question.`;
 
@@ -1938,11 +2114,10 @@ Start now with [NEXT] and your first question.`;
   _nav('live');
   if (mode === 'real') startProctor();
 
-  setOrb('thinking'); showThink(true);
-  setBargie('thinking');
+  setOrb('thinking'); showThink(true); setBargie('thinking');
 
   try {
-    const fq = await callAI(chat);
+    const fq    = await callAI(chat);
     chat.push({ role: 'assistant', content: fq });
     const clean = fq.replace(/\[(NEXT|FOLLOWUP|DONE)\]\s*/i, '').trim();
     mainQ = 1; isFollowUp = false;
@@ -1960,14 +2135,13 @@ Start now with [NEXT] and your first question.`;
 }
 
 // ─────────────────────────────────────────────
-// AUTO SUBMIT (from silence timer)
+// AUTO SUBMIT
 // ─────────────────────────────────────────────
 async function _autoSubmit() {
   if (processing) return;
   processing = true;
   stopListen();
-  setOrb('processing');
-  setBargie('processing');
+  setOrb('processing'); setBargie('processing');
 
   const ans = transcript.trim();
   if (!ans || ans.length < MIN_ANS) {
@@ -1977,7 +2151,7 @@ async function _autoSubmit() {
     return;
   }
 
-  const q = document.getElementById('questionBox').textContent;
+  const q   = document.getElementById('questionBox').textContent;
   const dur = Math.round((Date.now() - ansStart) / 1000);
   answers.push({ question: q, answer: ans, type: isFollowUp ? 'followup' : 'main', mainQNum: mainQ, duration: dur, skipped: false });
   transcript = '';
@@ -1991,8 +2165,11 @@ async function _autoSubmit() {
 async function _getNext(ans) {
   showThink(true); setOrb('thinking'); setBargie('thinking');
 
-  const userMsg = `Candidate answered: "${ans.substring(0,400)}"\nMain questions asked so far: ${mainQ} of ${totalQ}.
-${mainQ >= totalQ && !isFollowUp ? '→ All main questions done. Output [DONE] with a brief, warm closing message.' : '→ Evaluate depth. If shallow/vague → [FOLLOWUP]. If good/acceptable → [NEXT] next question.'}
+  const userMsg = `Candidate answered: "${ans.substring(0, 400)}"
+Main questions asked so far: ${mainQ} of ${totalQ}.
+${mainQ >= totalQ && !isFollowUp
+  ? '→ All main questions done. Output [DONE] with a brief, warm closing message.'
+  : '→ Evaluate depth. If shallow/vague → [FOLLOWUP]. If good/acceptable → [NEXT] next question.'}
 Stay strictly in ${L[lang]?.n || 'English'}. Output ONLY the tag + question/message.`;
 
   chat.push({ role: 'user', content: userMsg });
@@ -2022,7 +2199,6 @@ Stay strictly in ${L[lang]?.n || 'English'}. Output ONLY the tag + question/mess
   } catch (e) {
     showError('❌ AI error: ' + e.message);
     showThink(false); setOrb('idle'); setBargie('idle');
-    // Retry once
     setTimeout(() => startListen(), 2000);
   }
 }
@@ -2086,23 +2262,32 @@ function stopProctor() {
   document.getElementById('proctorCam')?.classList.add('hidden');
   document.getElementById('proctorBar').style.display = 'none';
 }
-function _onVis()  { if (document.hidden && mode==='real') addViolation('tab','Tab switched / window hidden'); }
-function _onBlur() { if (mode==='real' && !document.hidden) addViolation('blur','Window lost focus'); }
-function _onClip(e){ if (mode==='real') { e.preventDefault(); addViolation('clip','Attempted '+e.type); } }
-function _onCtx(e) { if (mode==='real') e.preventDefault(); }
+function _onVis()  { if (document.hidden && mode === 'real') addViolation('tab', 'Tab switched / window hidden'); }
+function _onBlur() { if (mode === 'real' && !document.hidden) addViolation('blur', 'Window lost focus'); }
+function _onClip(e){ if (mode === 'real') { e.preventDefault(); addViolation('clip', 'Attempted ' + e.type); } }
+function _onCtx(e) { if (mode === 'real') e.preventDefault(); }
 function _onKey(e) {
   if (mode !== 'real') return;
-  if ((e.ctrlKey||e.metaKey) && ['c','v','u','s','a','p'].includes(e.key.toLowerCase())) { e.preventDefault(); addViolation('key','Ctrl+'+e.key.toUpperCase()); }
-  if (e.key==='F12'||(e.ctrlKey&&e.shiftKey&&['i','j','c'].includes(e.key.toLowerCase()))) { e.preventDefault(); addViolation('dev','DevTools attempt'); }
+  if ((e.ctrlKey || e.metaKey) && ['c','v','u','s','a','p'].includes(e.key.toLowerCase())) {
+    e.preventDefault(); addViolation('key', 'Ctrl+' + e.key.toUpperCase());
+  }
+  if (e.key === 'F12' || (e.ctrlKey && e.shiftKey && ['i','j','c'].includes(e.key.toLowerCase()))) {
+    e.preventDefault(); addViolation('dev', 'DevTools attempt');
+  }
 }
 async function _startCam() {
-  try { camStr = await navigator.mediaDevices.getUserMedia({video:true,audio:false}); document.getElementById('proctorVideo').srcObject = camStr; document.getElementById('proctorCam').classList.remove('hidden'); }
-  catch { addViolation('cam','Camera access denied'); }
+  try {
+    camStr = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+    document.getElementById('proctorVideo').srcObject = camStr;
+    document.getElementById('proctorCam').classList.remove('hidden');
+  } catch { addViolation('cam', 'Camera access denied'); }
 }
 async function requestScreenShare() {
   try {
-    screenStr = await navigator.mediaDevices.getDisplayMedia({video:{displaySurface:'monitor'}});
-    screenStr.getVideoTracks()[0].onended = () => { if (mode==='real') addViolation('screen','Screen share stopped'); };
+    screenStr = await navigator.mediaDevices.getDisplayMedia({ video: { displaySurface: 'monitor' } });
+    screenStr.getVideoTracks()[0].onended = () => {
+      if (mode === 'real') addViolation('screen', 'Screen share stopped');
+    };
     document.getElementById('screenShareOverlay')?.classList.add('hidden');
     toast('✅ Screen sharing active');
     await _actuallyStart();
@@ -2125,7 +2310,7 @@ async function showResults() {
 async function _genEval() {
   const qa = answers.map(a => {
     const tag = a.type === 'followup' ? 'FOLLOW-UP' : 'MAIN Q' + a.mainQNum;
-    return `[${tag}] (${a.duration||0}s)\nQ: ${a.question.replace(/["\n\r\t\\]/g,' ').substring(0,200)}\nA: ${a.skipped ? 'SKIPPED' : a.answer.replace(/["\n\r\t\\]/g,' ').substring(0,300)}`;
+    return `[${tag}] (${a.duration || 0}s)\nQ: ${a.question.replace(/["\n\r\t\\]/g,' ').substring(0,200)}\nA: ${a.skipped ? 'SKIPPED' : a.answer.replace(/["\n\r\t\\]/g,' ').substring(0,300)}`;
   }).join('\n\n');
 
   const prompt = `You are a senior hiring evaluator. Evaluate this ${level}-level interview for the role: ${role}.
@@ -2146,72 +2331,108 @@ Return ONLY valid JSON (no markdown, no extra text):
   ]
 }
 Scoring: 0-100. Grades: A+(90+), A(80-89), B+(70-79), B(60-69), C+(50-59), C(40-49), D(<40).
-Recommendations: "Strong Hire", "Hire", "Lean Hire", "Borderline", "Lean No Hire", "No Hire".
-Keep all string values concise. Return ONLY the JSON object.`;
+Recommendations: "Strong Hire", "Hire", "Lean Hire", "Borderline", "Lean No Hire", "No Hire".`;
 
   try {
     const raw = await callAI([
       { role: 'system', content: 'Hiring evaluation AI. Return ONLY valid JSON. No markdown code blocks.' },
-      { role: 'user', content: prompt },
+      { role: 'user',   content: prompt },
     ]);
     const r = safeJSON(raw);
     if (typeof r.overallScore !== 'number' || r.overallScore < 0 || r.overallScore > 100) r.overallScore = 50;
-    if (violations.length) { r.overallScore = Math.max(0, r.overallScore - violations.length * 5); r.summary += ` (${violations.length} proctoring violation${violations.length>1?'s':''}, -${violations.length*5}pts)`; }
+    if (violations.length) {
+      r.overallScore  = Math.max(0, r.overallScore - violations.length * 5);
+      r.summary      += ` (${violations.length} proctoring violation${violations.length > 1 ? 's' : ''}, -${violations.length * 5}pts)`;
+    }
     _renderRes(r);
     await _saveResults(r);
     toast('🏆 Evaluation complete!');
     document.getElementById('retryWrap').style.display = 'none';
   } catch (e) {
     console.error('[EVAL]', e); evalRetry++;
-    if (evalRetry < MAX_RETRIES) { toast('⚠️ Retry ' + evalRetry + '/' + MAX_RETRIES + '…'); await _genEval(); }
-    else { toast('⚠️ Using local evaluation'); _renderFallback(); document.getElementById('retryWrap').style.display = 'block'; }
+    if (evalRetry < MAX_RETRIES) {
+      toast('⚠️ Retry ' + evalRetry + '/' + MAX_RETRIES + '…'); await _genEval();
+    } else {
+      toast('⚠️ Using local evaluation'); _renderFallback();
+      document.getElementById('retryWrap').style.display = 'block';
+    }
   }
 }
 
 async function _saveResults(r) {
   try {
-    const payload = { interview_type:mode, status:'completed', interview_role:role, interview_level:level, interview_language:lang, question_count:totalQ, completed_at:new Date().toISOString(), duration_seconds:secs, overall_score:r.overallScore, grade:r.grade, recommendation:r.recommendation, summary:r.summary, strengths:r.strengths||[], improvements:r.improvements||[], feedback:r.feedback||[], answers, violation_log:violations, violation_count:violations.length };
-    if (curToken) { await db('update','interviews',payload,{token:curToken}); }
-    else { const fb = crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36); await db('insert','interviews',{...payload,application_id:curAppId,job_id:curJobId,token:fb,started_at:new Date(Date.now()-secs*1000).toISOString()}); }
-    if (curAppId) await db('update','applications',{status:'interviewed'},{id:curAppId});
+    const payload = {
+      interview_type: mode, status: 'completed',
+      interview_role: role, interview_level: level, interview_language: lang,
+      question_count: totalQ, completed_at: new Date().toISOString(),
+      duration_seconds: secs, overall_score: r.overallScore,
+      grade: r.grade, recommendation: r.recommendation, summary: r.summary,
+      strengths: r.strengths || [], improvements: r.improvements || [],
+      feedback: r.feedback || [], answers, violation_log: violations,
+      violation_count: violations.length,
+    };
+    if (curToken) {
+      await db('update', 'interviews', payload, { token: curToken });
+    } else {
+      const fb = crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36);
+      await db('insert', 'interviews', {
+        ...payload, application_id: curAppId, job_id: curJobId,
+        token: fb, started_at: new Date(Date.now() - secs * 1000).toISOString(),
+      });
+    }
+    if (curAppId) await db('update', 'applications', { status: 'interviewed' }, { id: curAppId });
     console.log('[DB] Results saved ✅');
   } catch (e) { console.error('[DB save]', e); }
 }
 
 async function retryEvaluation() {
   evalRetry = 0; toast('🔄 Retrying evaluation…');
-  document.getElementById('scoreNum').textContent = '0';
-  document.getElementById('gradeBadge').textContent = '—';
-  document.getElementById('fbList').innerHTML = '';
+  document.getElementById('scoreNum').textContent    = '0';
+  document.getElementById('gradeBadge').textContent  = '—';
+  document.getElementById('fbList').innerHTML         = '';
   document.getElementById('strengthsCard').style.display = 'none';
-  document.getElementById('hireBadge').style.display = 'none';
-  document.getElementById('retryWrap').style.display = 'none';
+  document.getElementById('hireBadge').style.display     = 'none';
+  document.getElementById('retryWrap').style.display     = 'none';
   await _genEval();
 }
 
 function _renderFallback() {
-  const ma = answers.filter(a => a.type==='main' && !a.skipped).length;
-  const sc = Math.max(0, Math.round((ma/Math.max(totalQ,1))*70) - violations.length*5);
-  _renderRes({ overallScore:sc, grade:sc>=70?'B':sc>=50?'C':'D', recommendation:sc>=60?'Lean Hire':'Lean No Hire', summary:`Answered ${ma}/${totalQ} questions.${violations.length?' '+violations.length+' violation(s) logged.':''}`, strengths:ma>0?['Participated in the interview']:[], improvements:['Provide more detailed answers'], feedback:answers.map(a=>({question:a.question.substring(0,80),score:a.skipped?0:5,comment:a.skipped?'Question skipped':'Response recorded',type:a.type})) });
+  const ma = answers.filter(a => a.type === 'main' && !a.skipped).length;
+  const sc = Math.max(0, Math.round((ma / Math.max(totalQ, 1)) * 70) - violations.length * 5);
+  _renderRes({
+    overallScore:   sc,
+    grade:          sc >= 70 ? 'B' : sc >= 50 ? 'C' : 'D',
+    recommendation: sc >= 60 ? 'Lean Hire' : 'Lean No Hire',
+    summary:        `Answered ${ma}/${totalQ} questions.${violations.length ? ' ' + violations.length + ' violation(s) logged.' : ''}`,
+    strengths:      ma > 0 ? ['Participated in the interview'] : [],
+    improvements:   ['Provide more detailed answers'],
+    feedback:       answers.map(a => ({
+      question: a.question.substring(0, 80), score: a.skipped ? 0 : 5,
+      comment:  a.skipped ? 'Question skipped' : 'Response recorded', type: a.type,
+    })),
+  });
 }
 
 function _renderRes(r) {
-  const sc = r.overallScore || 0;
-  const ok = sc >= 80, mid = sc >= 60;
+  const sc  = r.overallScore || 0;
+  const ok  = sc >= 80, mid = sc >= 60;
   const col = ok ? '#10b981' : mid ? '#f59e0b' : '#ef4444';
   const bg  = ok ? 'rgba(16,185,129,.15)' : mid ? 'rgba(245,158,11,.15)' : 'rgba(239,68,68,.15)';
 
-  document.getElementById('scoreRing').style.background = `conic-gradient(${col} ${sc*3.6}deg, rgba(255,255,255,.05) 0deg)`;
+  document.getElementById('scoreRing').style.background =
+    `conic-gradient(${col} ${sc * 3.6}deg, rgba(255,255,255,.05) 0deg)`;
 
   const gb = document.getElementById('gradeBadge');
-  gb.textContent = 'Grade: ' + (r.grade||'?'); gb.style.background = bg; gb.style.color = col;
+  gb.textContent = 'Grade: ' + (r.grade || '?');
+  gb.style.background = bg; gb.style.color = col;
 
   if (r.recommendation) {
-    const hb = document.getElementById('hireBadge'); hb.style.display = 'inline-block';
-    hb.textContent = r.recommendation;
+    const hb = document.getElementById('hireBadge');
+    hb.style.display = 'inline-block';
+    hb.textContent   = r.recommendation;
     const isHire = r.recommendation.toLowerCase().includes('hire') && !r.recommendation.toLowerCase().includes('no');
     hb.style.background = isHire ? 'rgba(16,185,129,.15)' : 'rgba(239,68,68,.15)';
-    hb.style.color = isHire ? '#10b981' : '#ef4444';
+    hb.style.color      = isHire ? '#10b981' : '#ef4444';
   }
 
   document.getElementById('scoreSummary').textContent = r.summary || '';
@@ -2219,79 +2440,129 @@ function _renderRes(r) {
   if (r.strengths?.length || r.improvements?.length) {
     document.getElementById('strengthsCard').style.display = 'block';
     const sl = document.getElementById('strengthsList'); sl.innerHTML = '';
-    (r.strengths||[]).forEach(s => { sl.innerHTML += '<li><span>✅</span>' + s + '</li>'; });
+    (r.strengths || []).forEach(s => { sl.innerHTML += '<li><span>✅</span>' + s + '</li>'; });
     const il = document.getElementById('improveList'); il.innerHTML = '';
-    (r.improvements||[]).forEach(s => { il.innerHTML += '<li><span>📈</span>' + s + '</li>'; });
+    (r.improvements || []).forEach(s => { il.innerHTML += '<li><span>📈</span>' + s + '</li>'; });
   }
 
   if (violations.length) {
     document.getElementById('violationsCard').style.display = 'block';
     const vl = document.getElementById('violationsList'); vl.innerHTML = '';
-    violations.forEach(v => { vl.innerHTML += `<div class="violation-item"><span style="font-size:.7rem;color:var(--muted)">${v.time}</span> ⚠️ ${v.detail}</div>`; });
+    violations.forEach(v => {
+      vl.innerHTML += `<div class="violation-item">
+        <span style="font-size:.7rem;color:var(--muted)">${v.time}</span>
+        ⚠️ ${v.detail}
+      </div>`;
+    });
   }
 
   const list = document.getElementById('fbList'); list.innerHTML = '';
-  (r.feedback||[]).forEach((fb, i) => {
-    const s = fb.score || 0;
-    const c  = s>=7?'#10b981':s>=5?'#f59e0b':'#ef4444';
-    const bg2 = s>=7?'rgba(16,185,129,.15)':s>=5?'rgba(245,158,11,.15)':'rgba(239,68,68,.15)';
-    const tTag = fb.type==='followup' ? '<span class="fb-type" style="background:rgba(139,92,246,.15);color:#a78bfa">Follow-up</span>' : '<span class="fb-type" style="background:rgba(99,102,241,.15);color:#818cf8">Main</span>';
-    const ans_text = answers[i] ? (answers[i].skipped ? '[Skipped]' : answers[i].answer.substring(0,120)+(answers[i].answer.length>120?'…':'')) : '';
+  (r.feedback || []).forEach((fb, i) => {
+    const s   = fb.score || 0;
+    const c   = s >= 7 ? '#10b981' : s >= 5 ? '#f59e0b' : '#ef4444';
+    const bg2 = s >= 7 ? 'rgba(16,185,129,.15)' : s >= 5 ? 'rgba(245,158,11,.15)' : 'rgba(239,68,68,.15)';
+    const tTag = fb.type === 'followup'
+      ? '<span class="fb-type" style="background:rgba(139,92,246,.15);color:#a78bfa">Follow-up</span>'
+      : '<span class="fb-type" style="background:rgba(99,102,241,.15);color:#818cf8">Main</span>';
+    const ans_text = answers[i]
+      ? (answers[i].skipped ? '[Skipped]' : answers[i].answer.substring(0, 120) + (answers[i].answer.length > 120 ? '…' : ''))
+      : '';
     const d = document.createElement('div'); d.className = 'fb-item';
-    d.innerHTML = `<div class="fb-q">${fb.question}${tTag}</div>${ans_text?`<div class="fb-a">"${ans_text}"</div>`:''}<span class="fb-score" style="background:${bg2};color:${c}">${s}/10</span><div class="fb-text">${fb.comment}</div>`;
+    d.innerHTML = `<div class="fb-q">${fb.question}${tTag}</div>
+      ${ans_text ? `<div class="fb-a">"${ans_text}"</div>` : ''}
+      <span class="fb-score" style="background:${bg2};color:${c}">${s}/10</span>
+      <div class="fb-text">${fb.comment}</div>`;
     list.appendChild(d);
   });
 
   // Animate score counter
   let cur = 0;
   const el = document.getElementById('scoreNum');
-  const iv = setInterval(() => { cur += Math.ceil(sc/25); if (cur >= sc) { cur = sc; clearInterval(iv); } el.textContent = cur; }, 28);
+  const iv = setInterval(() => {
+    cur += Math.ceil(sc / 25);
+    if (cur >= sc) { cur = sc; clearInterval(iv); }
+    el.textContent = cur;
+  }, 28);
 }
 
 // ─────────────────────────────────────────────
-// HR DASHBOARD
+// ★ FIX: HR DASHBOARD — Applications now render
 // ─────────────────────────────────────────────
 async function loadHR() {
   try {
     const [jobs, apps, ints] = await Promise.all([
-      db('select','jobs'), db('select','applications'), db('select','interviews')
+      db('select', 'jobs'),
+      db('select', 'applications'),
+      db('select', 'interviews'),
     ]);
-    document.getElementById('statJobs').textContent = Array.isArray(jobs) ? jobs.filter(j=>j.is_active).length : 0;
-    document.getElementById('statApps').textContent = Array.isArray(apps) ? apps.length : 0;
-    document.getElementById('statShort').textContent = Array.isArray(apps) ? apps.filter(a=>a.status==='shortlisted').length : 0;
-    document.getElementById('statInt').textContent = Array.isArray(ints) ? ints.length : 0;
-    renderAllApps(Array.isArray(apps) ? apps : []);
-  } catch (e) { console.error('[loadHR]', e); }
-  loadHRJobs(); loadAllTokens();
+
+    const jobsArr  = Array.isArray(jobs) ? jobs : [];
+    const appsArr  = Array.isArray(apps) ? apps : [];
+    const intsArr  = Array.isArray(ints) ? ints : [];
+
+    document.getElementById('statJobs').textContent  = jobsArr.filter(j => j.is_active).length;
+    document.getElementById('statApps').textContent  = appsArr.length;
+    document.getElementById('statShort').textContent = appsArr.filter(a => a.status === 'shortlisted').length;
+    document.getElementById('statInt').textContent   = intsArr.length;
+
+    // ★ FIX: Safe header update that never throws
+    const hdr = document.getElementById('hrAllAppsHdr');
+    if (hdr) {
+      hdr.innerHTML = `📋 All Applications (${appsArr.length})
+        <button class="btn btn-sm btn-secondary" onclick="loadHR()"
+          style="font-size:.72rem;padding:6px 12px">🔄 Refresh</button>`;
+    }
+
+    renderAllApps(appsArr);
+  } catch (e) { console.error('[loadHR]', e); toast('❌ HR load error: ' + e.message); }
+
+  loadHRJobs();
+  loadAllTokens();
 }
 
 function renderAllApps(apps) {
-  const el = document.getElementById('hrAllAppsList'); if (!el) return;
-  const hdr = document.getElementById('hrAllAppsHdr'); if (hdr) hdr.childNodes[0].textContent = '📋 All Applications (' + apps.length + ') ';
-  if (!apps.length) { el.innerHTML = '<p style="color:var(--muted);text-align:center;padding:20px">No applications yet.</p>'; return; }
-  const sorted = [...apps].sort((a,b) => new Date(b.created_at||0) - new Date(a.created_at||0));
-  el.innerHTML = sorted.map(c => _candRowHTML(c, true)).join('');
+  const el = document.getElementById('hrAllAppsList');
+  if (!el) return;
+
+  if (!apps.length) {
+    el.innerHTML = `<p style="color:var(--muted);text-align:center;padding:20px">
+      No applications yet.</p>`;
+    return;
+  }
+
+  const sorted = [...apps].sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
+  el.innerHTML  = sorted.map(c => _candRowHTML(c, true)).join('');
 }
 
 function _candRowHTML(c, showJob = false) {
-  const sc = c.ats_score||0;
-  const col = sc>=70?'#10b981':sc>=50?'#f59e0b':'#ef4444';
-  const bg  = sc>=70?'rgba(16,185,129,.15)':sc>=50?'rgba(245,158,11,.15)':'rgba(239,68,68,.15)';
-  const stc = {applied:'#f59e0b',shortlisted:'#10b981',interviewed:'#3b82f6',rejected:'#ef4444'}[c.status]||'#94a3b8';
-  const stb = {applied:'rgba(245,158,11,.15)',shortlisted:'rgba(16,185,129,.15)',interviewed:'rgba(59,130,246,.15)',rejected:'rgba(239,68,68,.15)'}[c.status]||'rgba(255,255,255,.05)';
-  const ts = c.created_at ? new Date(c.created_at).toLocaleDateString('en-IN',{day:'2-digit',month:'short'}) : '';
+  const sc  = c.ats_score || 0;
+  const col = sc >= 70 ? '#10b981' : sc >= 50 ? '#f59e0b' : '#ef4444';
+  const bg  = sc >= 70 ? 'rgba(16,185,129,.15)' : sc >= 50 ? 'rgba(245,158,11,.15)' : 'rgba(239,68,68,.15)';
+  const stc = { applied:'#f59e0b', shortlisted:'#10b981', interviewed:'#3b82f6', rejected:'#ef4444' }[c.status] || '#94a3b8';
+  const stb = { applied:'rgba(245,158,11,.15)', shortlisted:'rgba(16,185,129,.15)', interviewed:'rgba(59,130,246,.15)', rejected:'rgba(239,68,68,.15)' }[c.status] || 'rgba(255,255,255,.05)';
+  const ts  = c.created_at ? new Date(c.created_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }) : '';
   return `<div class="cand-row">
     <div style="display:flex;align-items:center;gap:8px;flex:1;min-width:160px">
-      <div class="cand-avatar">${(c.name||'?')[0].toUpperCase()}</div>
-      <div><div style="font-weight:700;font-size:.88rem">${c.name||'Unknown'}</div><div style="font-size:.7rem;color:var(--muted)">${c.email||''}${ts?' · '+ts:''}</div></div>
+      <div class="cand-avatar">${(c.name || '?')[0].toUpperCase()}</div>
+      <div>
+        <div style="font-weight:700;font-size:.88rem">${c.name || 'Unknown'}</div>
+        <div style="font-size:.7rem;color:var(--muted)">${c.email || ''}${ts ? ' · ' + ts : ''}</div>
+      </div>
     </div>
     <div style="display:flex;gap:5px;align-items:center;flex-wrap:wrap">
       <span class="score-badge" style="background:${bg};color:${col}">ATS:${sc}</span>
-      <span class="status-pill" style="background:${stb};color:${stc}">${c.status||'applied'}</span>
-      ${c.status==='applied'?`<button class="btn btn-sm btn-success" onclick="shortlist('${c.id}');loadHR()">✅</button>`:''}
-      ${c.status==='shortlisted'?`<button class="btn btn-sm" style="background:var(--accent);color:#fff" onclick="sendInvite('${c.id}','${(c.email||'').replace(/'/g,"\\'")}')">📧 Invite</button>`:''}
-      ${c.status!=='rejected'?`<button class="btn btn-sm btn-danger" onclick="reject('${c.id}');loadHR()">❌</button>`:''}
-      ${c.resume_url?`<a href="${c.resume_url}" target="_blank" class="btn btn-sm btn-secondary" style="text-decoration:none" onclick="event.stopPropagation()">📄 CV</a>`:''}
+      <span class="status-pill" style="background:${stb};color:${stc}">${c.status || 'applied'}</span>
+      ${c.status === 'applied'
+        ? `<button class="btn btn-sm btn-success" onclick="shortlist('${c.id}');loadHR()">✅ Shortlist</button>` : ''}
+      ${c.status === 'shortlisted'
+        ? `<button class="btn btn-sm" style="background:var(--accent);color:#fff"
+            onclick="sendInvite('${c.id}','${(c.email || '').replace(/'/g, "\\'")}')">
+            📧 Send Invite</button>` : ''}
+      ${c.status !== 'rejected'
+        ? `<button class="btn btn-sm btn-danger" onclick="reject('${c.id}');loadHR()">❌ Reject</button>` : ''}
+      ${c.resume_url
+        ? `<a href="${c.resume_url}" target="_blank" class="btn btn-sm btn-secondary"
+            style="text-decoration:none" onclick="event.stopPropagation()">📄 CV</a>` : ''}
     </div>
   </div>`;
 }
@@ -2299,83 +2570,215 @@ function _candRowHTML(c, showJob = false) {
 async function loadHRJobs() {
   const el = document.getElementById('hrJobsList');
   try {
-    const data = await db('select','jobs',null,null,'*','created_at.desc');
-    if (!Array.isArray(data)||!data.length) { el.innerHTML='<p style="color:var(--muted);text-align:center;padding:16px">No jobs posted yet.</p>'; return; }
+    const data = await db('select', 'jobs', null, null, '*', 'created_at.desc');
+    if (!Array.isArray(data) || !data.length) {
+      el.innerHTML = '<p style="color:var(--muted);text-align:center;padding:16px">No jobs posted yet.</p>';
+      return;
+    }
     let appCounts = {};
-    try { const allApps = await db('select','applications',null,null,'id,job_id,status'); if (Array.isArray(allApps)) allApps.forEach(a => { if (a.job_id) appCounts[a.job_id] = (appCounts[a.job_id]||0)+1; }); } catch {}
+    try {
+      const allApps = await db('select', 'applications', null, null, 'id,job_id,status');
+      if (Array.isArray(allApps)) allApps.forEach(a => {
+        if (a.job_id) appCounts[a.job_id] = (appCounts[a.job_id] || 0) + 1;
+      });
+    } catch {}
     el.innerHTML = data.map(j => {
-      const cnt = appCounts[j.id]||0;
+      const cnt = appCounts[j.id] || 0;
       return `<div class="job-card" onclick="loadCands('${j.id}','${(j.title||'').replace(/'/g,"\\'")}')">
         <div style="display:flex;justify-content:space-between;align-items:center">
-          <h3 style="margin:0">${j.title||'Untitled'}</h3>
+          <h3 style="margin:0">${j.title || 'Untitled'}</h3>
           <div style="display:flex;gap:6px;align-items:center">
-            ${cnt?`<span class="score-badge" style="background:rgba(99,102,241,.15);color:var(--accent)">${cnt} applied</span>`:''}
-            <span class="status-pill" style="background:${j.is_active?'rgba(16,185,129,.15)':'rgba(239,68,68,.15)'};color:${j.is_active?'#10b981':'#ef4444'}">${j.is_active?'🟢 Active':'🔴 Off'}</span>
+            ${cnt ? `<span class="score-badge" style="background:rgba(99,102,241,.15);color:var(--accent)">${cnt} applied</span>` : ''}
+            <span class="status-pill" style="background:${j.is_active?'rgba(16,185,129,.15)':'rgba(239,68,68,.15)'};color:${j.is_active?'#10b981':'#ef4444'}">
+              ${j.is_active ? '🟢 Active' : '🔴 Off'}
+            </span>
           </div>
         </div>
-        <div class="job-meta" style="margin-top:6px"><span>📍 ${j.location||'—'}</span><span>📊 ${j.level||''}</span><span>🎯 ATS:${j.ats_threshold>0?j.ats_threshold+'+':'Manual'}</span></div>
+        <div class="job-meta" style="margin-top:6px">
+          <span>📍 ${j.location || '—'}</span>
+          <span>📊 ${j.level || ''}</span>
+          <span>🎯 ATS:${j.ats_threshold > 0 ? j.ats_threshold + '+' : 'Manual'}</span>
+        </div>
         <p style="font-size:.72rem;color:var(--muted);margin-top:4px">👆 Click to view candidates</p>
       </div>`;
     }).join('');
   } catch (e) { el.innerHTML = '<p style="color:var(--red)">' + e.message + '</p>'; }
 }
 
-async function postJob() {
-  const title = document.getElementById('hrTitle').value.trim(); if (!title) { toast('❌ Enter job title'); return; }
-  const company = document.getElementById('hrCompany').value.trim();
-  const skillsRaw = document.getElementById('hrSkills').value.trim();
-  const skills = skillsRaw ? skillsRaw.split(',').map(s=>s.trim()).filter(Boolean) : [];
+// ─────────────────────────────────────────────
+// ★ JD AUTO-GENERATION
+// ─────────────────────────────────────────────
+async function autoGenerateJD() {
+  const title    = document.getElementById('hrTitle').value.trim();
+  const skills   = document.getElementById('hrSkills').value.trim();
+  const level_   = document.getElementById('hrLevel').value;
+  const category = document.getElementById('hrCat').value;
+  const dept     = document.getElementById('hrDept').value.trim();
+  const company  = document.getElementById('hrCompany').value.trim();
+  const jdEl     = document.getElementById('hrJD');
+  const btn      = document.getElementById('autoJDBtn');
+
+  if (!title) { toast('❌ Enter the Job Title first'); return; }
+
+  btn.disabled     = true;
+  btn.textContent  = '⏳ Generating…';
+  jdEl.value       = '';
+  jdEl.placeholder = '✍️ AI is writing your job description…';
+
   try {
-    await db('insert','jobs',{ title, category:document.getElementById('hrCat').value, department:document.getElementById('hrDept').value.trim(), 'Company Name':company, company_name:company, location:document.getElementById('hrLocation').value.trim(), level:document.getElementById('hrLevel').value, description:document.getElementById('hrJD').value.trim(), skills, question_count:parseInt(document.getElementById('hrQCount').value)||10, ats_threshold:parseInt(document.getElementById('hrATS').value)||70, is_active:true, status:'active', created_at:new Date().toISOString() });
-    toast('✅ Job posted!');
-    ['hrTitle','hrJD','hrSkills','hrDept','hrCompany','hrLocation'].forEach(id => { const el=document.getElementById(id); if(el) el.value=''; });
-    loadHRJobs(); loadHR();
+    const prompt = `Write a professional, compelling job description for:
+Role: ${title}
+Level: ${level_}
+Category: ${category}
+${dept    ? 'Department: ' + dept    : ''}
+${company ? 'Company: '    + company : ''}
+${skills  ? 'Key Skills: ' + skills  : ''}
+
+Structure it with these sections:
+1. 🎯 Role Overview (2-3 engaging sentences)
+2. 📋 Key Responsibilities (5-6 bullet points)
+3. ✅ Requirements (5-6 bullet points)
+4. 🌟 What We Offer (3-4 bullet points)
+
+Keep it under 450 words. Professional yet human tone. No placeholders.`;
+
+    const jd = await callAI([
+      { role: 'system', content: 'You are an expert HR content writer. Write compelling, accurate job descriptions.' },
+      { role: 'user',   content: prompt },
+    ]);
+
+    if (jd && jd.trim().length > 50) {
+      jdEl.value       = jd.trim();
+      jdEl.placeholder = 'Job description…';
+      toast('✅ JD generated successfully!');
+    } else {
+      throw new Error('Generated content too short');
+    }
+  } catch (e) {
+    jdEl.placeholder = 'Job description…';
+    toast('❌ JD generation failed: ' + e.message);
+    console.error('[autoGenerateJD]', e);
+  } finally {
+    btn.disabled    = false;
+    btn.textContent = '✨ Auto-Generate JD';
+  }
+}
+
+async function postJob() {
+  const title   = document.getElementById('hrTitle').value.trim();
+  if (!title) { toast('❌ Enter job title'); return; }
+
+  const company    = document.getElementById('hrCompany').value.trim();
+  const skillsRaw  = document.getElementById('hrSkills').value.trim();
+  const skills     = skillsRaw ? skillsRaw.split(',').map(s => s.trim()).filter(Boolean) : [];
+  let   jd         = document.getElementById('hrJD').value.trim();
+
+  const btn = document.getElementById('hrJobsList')?.parentElement
+    ?.querySelector?.('button.btn-go') || null;
+
+  // Auto-generate JD if empty
+  if (!jd) {
+    toast('📝 No JD provided — auto-generating…');
+    try {
+      await autoGenerateJD();
+      jd = document.getElementById('hrJD').value.trim();
+    } catch {}
+  }
+
+  try {
+    await db('insert', 'jobs', {
+      title,
+      category:      document.getElementById('hrCat').value,
+      department:    document.getElementById('hrDept').value.trim(),
+      'Company Name': company,
+      company_name:  company,
+      location:      document.getElementById('hrLocation').value.trim(),
+      level:         document.getElementById('hrLevel').value,
+      description:   jd,
+      skills,
+      question_count:  parseInt(document.getElementById('hrQCount').value) || 10,
+      ats_threshold:   parseInt(document.getElementById('hrATS').value)    || 70,
+      is_active:       true,
+      status:          'active',
+      created_at:      new Date().toISOString(),
+    });
+
+    toast('✅ Job posted successfully!');
+    ['hrTitle','hrJD','hrSkills','hrDept','hrCompany','hrLocation'].forEach(id => {
+      const el = document.getElementById(id); if (el) el.value = '';
+    });
+    loadHRJobs();
+    loadHR();
   } catch (e) { toast('❌ Failed: ' + e.message); }
 }
 
 async function loadCands(jobId, title) {
   selHRJob = jobId;
   document.getElementById('hrCandCard').style.display = 'block';
-  document.getElementById('hrCandTitle').textContent = '👥 ' + (title||'Candidates');
-  const el = document.getElementById('hrCandList'); el.innerHTML = '<span class="loading"></span>';
+  document.getElementById('hrCandTitle').textContent  = '👥 ' + (title || 'Candidates');
+  const el = document.getElementById('hrCandList');
+  el.innerHTML = '<span class="loading"></span>';
   try {
-    const data = await db('select','applications',null,{job_id:jobId},null,'created_at.desc');
-    if (!data?.length) { el.innerHTML='<p style="color:var(--muted);text-align:center;padding:16px">No candidates for this job.</p>'; return; }
+    const data = await db('select', 'applications', null, { job_id: jobId }, null, 'created_at.desc');
+    if (!data?.length) {
+      el.innerHTML = '<p style="color:var(--muted);text-align:center;padding:16px">No candidates for this job.</p>';
+      return;
+    }
     el.innerHTML = data.map(c => _candRowHTML(c)).join('');
   } catch (e) { el.innerHTML = '<p style="color:var(--red)">' + e.message + '</p>'; }
 }
 
-async function shortlist(id) { try { await db('update','applications',{status:'shortlisted'},{id}); toast('✅ Shortlisted'); loadCands(selHRJob,''); } catch (e) { toast('❌ '+e.message); } }
-async function reject(id)     { try { await db('update','applications',{status:'rejected'},{id}); toast('Rejected'); loadCands(selHRJob,''); } catch (e) { toast('❌ '+e.message); } }
+async function shortlist(id) {
+  try { await db('update', 'applications', { status: 'shortlisted' }, { id }); toast('✅ Shortlisted'); loadHR(); }
+  catch (e) { toast('❌ ' + e.message); }
+}
+async function reject(id) {
+  try { await db('update', 'applications', { status: 'rejected' }, { id }); toast('Rejected'); loadHR(); }
+  catch (e) { toast('❌ ' + e.message); }
+}
 
 async function sendInvite(appId, email) {
   try {
-    const token = crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36)+Math.random().toString(36).substring(2,10);
-    const jobData = selHRJob ? await db('select','jobs',null,{id:selHRJob}).then(d=>Array.isArray(d)?d[0]:d).catch(()=>null) : null;
-    const r = jobData?.title||'Interview', lv = jobData?.level||'Mid-Level';
-    await db('insert','interviews',{ application_id:appId, job_id:selHRJob||null, token, interview_type:'real', status:'pending', interview_role:r, interview_level:lv, question_count:jobData?.question_count||10, interview_language:jobData?.interview_language||'en', max_attempts:1, attempts_used:0, expires_at:new Date(Date.now()+72*3600000).toISOString(), created_at:new Date().toISOString() });
+    const token   = crypto.randomUUID ? crypto.randomUUID() : (Date.now().toString(36) + Math.random().toString(36).substring(2, 10));
+    const jobData = selHRJob ? await db('select', 'jobs', null, { id: selHRJob }).then(d => Array.isArray(d) ? d[0] : d).catch(() => null) : null;
+    const r       = jobData?.title  || 'Interview';
+    const lv      = jobData?.level  || 'Mid-Level';
+
+    await db('insert', 'interviews', {
+      application_id:    appId,
+      job_id:            selHRJob || null,
+      token,
+      interview_type:    'real',
+      status:            'pending',
+      interview_role:    r,
+      interview_level:   lv,
+      question_count:    jobData?.question_count || 10,
+      interview_language:'en',
+      max_attempts:      1,
+      attempts_used:     0,
+      expires_at:        new Date(Date.now() + 72 * 3600000).toISOString(),
+      created_at:        new Date().toISOString(),
+    });
+
     const url = `${location.origin}${location.pathname}?token=${token}`;
     try { await navigator.clipboard.writeText(url); } catch {}
-    window._lastDIToken = { name:email.split('@')[0], email, phone:'', role:r, level:lv, token, url, expires:new Date(Date.now()+72*3600000), questions:10 };
+    window._lastDIToken = { name: email.split('@')[0], email, phone: '', role: r, level: lv, token, url, expires: new Date(Date.now() + 72 * 3600000), questions: 10 };
     toast('✅ Interview link created & copied!');
     if (confirm(`📧 Interview link created for ${email}!\n\n${url}\n\nOpen email client?`)) diOpenEmail();
-    loadCands(selHRJob, ''); loadAllTokens();
-  } catch (e) { toast('❌ '+e.message); }
+    loadHR(); loadAllTokens();
+  } catch (e) { toast('❌ ' + e.message); }
 }
 
 // ─────────────────────────────────────────────
 // DIRECT INVITE
 // ─────────────────────────────────────────────
 async function generateDirectInvite() {
-  const name  = (document.getElementById('diName')?.value || '').trim();
+  const name  = (document.getElementById('diName')?.value  || '').trim();
   const email = (document.getElementById('diEmail')?.value || '').trim();
-  const role_ = (document.getElementById('diRole')?.value || '').trim();
+  const role_ = (document.getElementById('diRole')?.value  || '').trim();
   const phone = (document.getElementById('diPhone')?.value || '').trim();
 
-  if (!name || !email || !role_) {
-    toast('❌ Name, Email & Role required');
-    return;
-  }
+  if (!name || !email || !role_) { toast('❌ Name, Email & Role required'); return; }
 
   const level_  = document.getElementById('diLevel')?.value  || 'Mid-Level';
   const qCount  = parseInt(document.getElementById('diQCount')?.value) || 10;
@@ -2388,62 +2791,40 @@ async function generateDirectInvite() {
   if (btn) { btn.disabled = true; btn.textContent = '⏳ Generating…'; }
 
   try {
-    const token   = crypto.randomUUID
-      ? crypto.randomUUID()
-      : (Date.now().toString(36) + Math.random().toString(36).substring(2, 10));
+    const token   = crypto.randomUUID ? crypto.randomUUID() : (Date.now().toString(36) + Math.random().toString(36).substring(2, 10));
     const expires = new Date(Date.now() + hours * 3600000);
 
     await db('insert', 'interviews', {
-      token,
-      candidate_name:    name,
-      candidate_email:   email,
-      candidate_phone:   phone || null,
-      interview_role:    role_,
-      interview_level:   level_,
-      question_count:    qCount,
-      interview_language: lang_,
-      interview_type:    'real',
-      token_type:        document.getElementById('diTokenType')?.value || 'single',
-      status:            'pending',
-      max_attempts:      1,
-      attempts_used:     0,
-      expires_at:        expires.toISOString(),
-      created_at:        new Date().toISOString(),
+      token, candidate_name: name, candidate_email: email,
+      candidate_phone: phone || null, interview_role: role_,
+      interview_level: level_, question_count: qCount,
+      interview_language: lang_, interview_type: 'real',
+      token_type: document.getElementById('diTokenType')?.value || 'single',
+      status: 'pending', max_attempts: 1, attempts_used: 0,
+      expires_at: expires.toISOString(), created_at: new Date().toISOString(),
     });
 
     const url = location.origin + location.pathname + '?token=' + token;
+    window._lastDIToken = { name, email, phone, role: role_, level: level_, token, url, expires, questions: qCount, lang: lang_ };
 
-    // ── Store globally for email/WhatsApp helpers ──
-    window._lastDIToken = {
-      name, email, phone, role: role_, level: level_,
-      token, url, expires, questions: qCount, lang: lang_,
-    };
-
-    // ── Show result card ──
     const res = document.getElementById('diResult');
     if (res) res.style.display = 'block';
-
     const diUrl = document.getElementById('diUrl');
     if (diUrl) diUrl.textContent = url;
 
-    // ── Auto-copy to clipboard ──
     try { await navigator.clipboard.writeText(url); toast('📋 Link copied to clipboard!'); }
-    catch { /* silent fail — user can copy manually */ }
-
+    catch {}
     toast('✅ Interview token generated for ' + name + '!');
 
-    // ── Auto-open email / WhatsApp if checkboxes ticked ──
     if (doEmail) setTimeout(() => diOpenEmail(), 800);
     if (doWA && phone) setTimeout(() => diOpenWA(), 1400);
 
-    // ── Refresh token list ──
     loadAllTokens();
-
   } catch (e) {
     toast('❌ Failed to generate token: ' + e.message);
     console.error('[generateDirectInvite]', e);
   } finally {
-    if (btn) { btn.disabled = false; btn.textContent = '🔗 Generate & Send Interview Link'; }
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-link"></i> Generate &amp; Send Interview Link'; }
   }
 }
 
@@ -2455,27 +2836,20 @@ function copyInviteUrl() {
   if (!url) return;
   navigator.clipboard.writeText(url)
     .then(() => toast('📋 Link copied!'))
-    .catch(() => { /* fallback */ document.execCommand?.('copy'); toast('📋 Copied!'); });
+    .catch(() => toast('❌ Copy failed'));
 }
 
 function diOpenEmail() {
-  const d = window._lastDIToken;
-  if (!d) return;
+  const d = window._lastDIToken; if (!d) return;
   const subject = encodeURIComponent(`Interview Invitation — ${d.role} at Simpatico HR`);
-  const body = encodeURIComponent(
+  const body    = encodeURIComponent(
     `Dear ${d.name},\n\n` +
     `You have been invited to an AI-powered interview for the role of ${d.role} (${d.level}).\n\n` +
     `🔗 Interview Link:\n${d.url}\n\n` +
-    `📋 Details:\n` +
-    `• Role: ${d.role}\n` +
-    `• Level: ${d.level}\n` +
-    `• Questions: ${d.questions}\n` +
-    `• Language: ${d.lang || 'English'}\n` +
-    `• Token Expires: ${d.expires?.toLocaleString()}\n\n` +
-    `Instructions:\n` +
-    `1. Open the link on a desktop browser (Chrome/Edge recommended)\n` +
-    `2. Allow camera and microphone access\n` +
-    `3. Share your entire screen when prompted\n` +
+    `📋 Details:\n• Role: ${d.role}\n• Level: ${d.level}\n• Questions: ${d.questions}\n` +
+    `• Language: ${d.lang || 'English'}\n• Token Expires: ${d.expires?.toLocaleString()}\n\n` +
+    `Instructions:\n1. Open the link on a desktop browser (Chrome/Edge recommended)\n` +
+    `2. Allow camera and microphone access\n3. Share your entire screen when prompted\n` +
     `4. Speak clearly and naturally — the AI will listen\n\n` +
     `Best of luck!\n\nSimpatico HR Team\n${location.origin}`
   );
@@ -2483,10 +2857,9 @@ function diOpenEmail() {
 }
 
 function diOpenWA() {
-  const d = window._lastDIToken;
-  if (!d) return;
+  const d = window._lastDIToken; if (!d) return;
   const phone = (d.phone || '').replace(/[^0-9+]/g, '');
-  if (!phone) { toast('⚠️ No phone number saved — copy & send manually'); copyInviteUrl(); return; }
+  if (!phone) { toast('⚠️ No phone number — copy & send manually'); copyInviteUrl(); return; }
   const msg = encodeURIComponent(
     `Hi ${d.name}! 👋\n\n` +
     `You've been invited for an AI interview for *${d.role}* (${d.level}) at Simpatico HR.\n\n` +
@@ -2494,26 +2867,22 @@ function diOpenWA() {
     `⏳ Expires: ${d.expires?.toLocaleString()}\n\n` +
     `_Use Chrome/Edge on desktop. Allow mic & camera._\n\nGood luck! 🚀`
   );
-  window.open(`https://wa.me/${phone.replace(/^\+/, '')}?text=${msg}`, '_blank');
+  window.open(`https://wa.me/${phone.replace(/^\+/,'')}?text=${msg}`, '_blank');
 }
 
 function doCopyEmailText() {
-  const d = window._lastDIToken;
-  if (!d) return;
-  const text =
-    `Subject: Interview Invitation — ${d.role}\n\n` +
-    `Dear ${d.name},\n\n` +
+  const d = window._lastDIToken; if (!d) return;
+  const text = `Subject: Interview Invitation — ${d.role}\n\nDear ${d.name},\n\n` +
     `You are invited to an AI-powered interview for ${d.role} (${d.level}).\n\n` +
-    `Interview Link: ${d.url}\n` +
-    `Expires: ${d.expires?.toLocaleString()}\n\n` +
+    `Interview Link: ${d.url}\nExpires: ${d.expires?.toLocaleString()}\n\n` +
     `Best of luck!\nSimpatico HR`;
   navigator.clipboard.writeText(text)
     .then(() => toast('📋 Email text copied!'))
-    .catch(() => toast('❌ Copy failed — please copy manually'));
+    .catch(() => toast('❌ Copy failed'));
 }
 
 // ─────────────────────────────────────────────
-// TOKEN LIST — HR Dashboard
+// TOKEN LIST
 // ─────────────────────────────────────────────
 let _tokenFilter = 'all';
 
@@ -2522,7 +2891,7 @@ async function loadAllTokens() {
   if (!el) return;
   el.innerHTML = '<span class="loading"></span> Loading tokens…';
   try {
-    const data = await db('select', 'interviews', null, null, '*', 'created_at.desc');
+    const data   = await db('select', 'interviews', null, null, '*', 'created_at.desc');
     const tokens = Array.isArray(data) ? data : [];
     renderTokens(tokens, _tokenFilter);
   } catch (e) {
@@ -2552,26 +2921,17 @@ function renderTokens(tokens, filter) {
   }
 
   el.innerHTML = filtered.map(t => {
-    const expired  = t.expires_at && new Date(t.expires_at) < new Date();
-    const statusColor = {
-      pending:     '#f59e0b', in_progress: '#3b82f6',
-      completed:   '#10b981', expired:     '#ef4444',
-    }[expired ? 'expired' : (t.status || 'pending')] || '#94a3b8';
-
-    const statusBg = {
-      pending:     'rgba(245,158,11,.15)', in_progress: 'rgba(59,130,246,.15)',
-      completed:   'rgba(16,185,129,.15)', expired:     'rgba(239,68,68,.15)',
-    }[expired ? 'expired' : (t.status || 'pending')] || 'rgba(255,255,255,.05)';
-
-    const created = t.created_at
-      ? new Date(t.created_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: '2-digit' })
-      : '—';
-
-    const url = location.origin + location.pathname + '?token=' + t.token;
+    const expired     = t.expires_at && new Date(t.expires_at) < new Date();
+    const effStatus   = expired && t.status === 'pending' ? 'expired' : (t.status || 'pending');
+    const statusColor = { pending:'#f59e0b', in_progress:'#3b82f6', completed:'#10b981', expired:'#ef4444' }[effStatus] || '#94a3b8';
+    const statusBg    = { pending:'rgba(245,158,11,.15)', in_progress:'rgba(59,130,246,.15)', completed:'rgba(16,185,129,.15)', expired:'rgba(239,68,68,.15)' }[effStatus] || 'rgba(255,255,255,.05)';
+    const created     = t.created_at ? new Date(t.created_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: '2-digit' }) : '—';
+    const url         = location.origin + location.pathname + '?token=' + t.token;
+    const name        = t.candidate_name || t.candidate_email || 'Unknown';
 
     return `<div class="cand-row">
       <div style="flex:1;min-width:140px">
-        <div style="font-weight:700;font-size:.85rem">${t.candidate_name || t.candidate_email || 'Unknown'}</div>
+        <div style="font-weight:700;font-size:.85rem">${name}</div>
         <div style="font-size:.7rem;color:var(--muted)">${t.interview_role || '—'} · ${t.interview_level || '—'}</div>
         <div style="font-size:.68rem;color:var(--muted);margin-top:2px">${created}
           ${t.overall_score != null ? ' · Score: <strong style="color:var(--accent)">' + t.overall_score + '</strong>' : ''}
@@ -2579,12 +2939,12 @@ function renderTokens(tokens, filter) {
       </div>
       <div style="display:flex;gap:5px;align-items:center;flex-wrap:wrap">
         <span class="status-pill" style="background:${statusBg};color:${statusColor}">
-          ${expired ? '⌛ Expired' : t.status || 'pending'}
+          ${effStatus === 'expired' ? '⌛ Expired' : effStatus}
         </span>
         <span style="font-size:.7rem;color:var(--muted)">${t.attempts_used || 0}/${t.max_attempts || 1} uses</span>
         <button class="btn btn-sm" style="background:rgba(99,102,241,.15);color:var(--accent)"
           onclick="navigator.clipboard.writeText('${url}').then(()=>toast('📋 Copied!'))">
-          📋
+          📋 Copy
         </button>
         ${t.status === 'completed'
           ? `<button class="btn btn-sm btn-success" onclick="viewTokenResult('${t.token}')">📊 Results</button>`
@@ -2595,7 +2955,7 @@ function renderTokens(tokens, filter) {
 }
 
 // ─────────────────────────────────────────────
-// BULK INVITE GENERATOR
+// BULK INVITE
 // ─────────────────────────────────────────────
 async function bulkGenerateInvites() {
   const rawEmails = (document.getElementById('diiBulkEmails')?.value || '').trim();
@@ -2613,26 +2973,16 @@ async function bulkGenerateInvites() {
   const results = [];
   for (const email of emails) {
     try {
-      const token   = crypto.randomUUID
-        ? crypto.randomUUID()
-        : (Date.now().toString(36) + Math.random().toString(36).substring(2, 10));
+      const token   = crypto.randomUUID ? crypto.randomUUID() : (Date.now().toString(36) + Math.random().toString(36).substring(2, 10));
       const expires = new Date(Date.now() + 72 * 3600000);
-
       await db('insert', 'interviews', {
-        token,
-        candidate_email:    email,
-        interview_role:     bulkRole,
-        interview_level:    bulkLevel,
-        question_count:     10,
-        interview_language: 'en',
-        interview_type:     'real',
-        status:             'pending',
-        max_attempts:       1,
-        attempts_used:      0,
-        expires_at:         expires.toISOString(),
-        created_at:         new Date().toISOString(),
+        token, candidate_email: email,
+        interview_role: bulkRole, interview_level: bulkLevel,
+        question_count: 10, interview_language: 'en',
+        interview_type: 'real', status: 'pending',
+        max_attempts: 1, attempts_used: 0,
+        expires_at: expires.toISOString(), created_at: new Date().toISOString(),
       });
-
       const url = location.origin + location.pathname + '?token=' + token;
       results.push({ email, token, url, ok: true });
     } catch (e) {
@@ -2645,8 +2995,9 @@ async function bulkGenerateInvites() {
       r.ok
         ? `<div style="padding:6px 0;border-bottom:1px solid var(--border);font-size:.78rem">
             ✅ <strong>${r.email}</strong>
-            <button class="copy-btn" style="margin-left:8px" onclick="navigator.clipboard.writeText('${r.url}').then(()=>toast('Copied!'))">📋 Copy</button>
-          </div>`
+            <button class="copy-btn" style="margin-left:8px"
+              onclick="navigator.clipboard.writeText('${r.url}').then(()=>toast('Copied!'))">
+              📋 Copy</button></div>`
         : `<div style="padding:6px 0;font-size:.78rem;color:var(--red)">❌ ${r.email} — ${r.error}</div>`
     ).join('');
   }
@@ -2656,7 +3007,7 @@ async function bulkGenerateInvites() {
 }
 
 // ─────────────────────────────────────────────
-// SIGN-IN / GUEST SESSION (Mock mode)
+// SIGN-IN / GUEST SESSION
 // ─────────────────────────────────────────────
 function tryMockInterview() {
   const modal = document.getElementById('mockSigninModal');
@@ -2676,7 +3027,6 @@ async function doSignIn() {
   const pass  = document.getElementById('siPass')?.value.trim();
   const err   = document.getElementById('siError');
   if (!email || !pass) { if (err) { err.textContent = 'Email & password required.'; err.style.display = 'block'; } return; }
-
   try {
     const r = await fetch(`${SB_URL}/auth/v1/token?grant_type=password`, {
       method: 'POST',
@@ -2685,7 +3035,6 @@ async function doSignIn() {
     });
     const d = await r.json();
     if (!r.ok) throw new Error(d.error_description || d.msg || 'Sign-in failed');
-
     document.getElementById('mockSigninModal')?.classList.remove('open');
     document.getElementById('mockBadge').textContent = '✅ SIGNED IN';
     toast('✅ Signed in — starting mock interview…');
@@ -2702,7 +3051,6 @@ async function doSignUp() {
   const err   = document.getElementById('srError');
   if (!name || !email || !pass) { if (err) { err.textContent = 'All fields required.'; err.style.display = 'block'; } return; }
   if (pass.length < 6)          { if (err) { err.textContent = 'Password must be 6+ characters.'; err.style.display = 'block'; } return; }
-
   try {
     const r = await fetch(`${SB_URL}/auth/v1/signup`, {
       method: 'POST',
@@ -2711,7 +3059,6 @@ async function doSignUp() {
     });
     const d = await r.json();
     if (!r.ok) throw new Error(d.error_description || d.msg || 'Registration failed');
-
     document.getElementById('mockSigninModal')?.classList.remove('open');
     document.getElementById('mockBadge').textContent = '✅ REGISTERED';
     toast('✅ Account created — starting mock interview…');
@@ -2734,24 +3081,22 @@ function startGuestSession() {
 async function viewTokenResult(token) {
   try {
     const data = await db('select', 'interviews', null, { token }, '*');
-    const iv = Array.isArray(data) ? data[0] : data;
+    const iv   = Array.isArray(data) ? data[0] : data;
     if (!iv || !iv.feedback) { toast('⚠️ No results yet for this token'); return; }
-    answers = iv.answers || [];
+    answers    = iv.answers       || [];
     violations = iv.violation_log || [];
-    secs = iv.duration_seconds || 0;
+    secs       = iv.duration_seconds || 0;
     _nav('results');
     _renderRes({
-      overallScore:   iv.overall_score   || 0,
-      grade:          iv.grade           || '—',
-      recommendation: iv.recommendation  || '',
-      summary:        iv.summary         || '',
-      strengths:      iv.strengths       || [],
-      improvements:   iv.improvements    || [],
-      feedback:       iv.feedback        || [],
+      overallScore:   iv.overall_score  || 0,
+      grade:          iv.grade          || '—',
+      recommendation: iv.recommendation || '',
+      summary:        iv.summary        || '',
+      strengths:      iv.strengths      || [],
+      improvements:   iv.improvements   || [],
+      feedback:       iv.feedback       || [],
     });
-  } catch (e) {
-    toast('❌ Failed to load results: ' + e.message);
-  }
+  } catch (e) { toast('❌ Failed to load results: ' + e.message); }
 }
 
 // ─────────────────────────────────────────────
@@ -2759,8 +3104,7 @@ async function viewTokenResult(token) {
 // ─────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
   _nav('home');
-  checkToken();       // Handle ?token= URL param on load
-  _nav('home');       // Ensure home is shown if no token
+  checkToken();   // Handle ?token= URL param
 });
 </script>
 </body>
