@@ -1036,9 +1036,9 @@ const CFG = (() => {
   }
 })();
 
-const W       = CFG.workerUrl;
-const MIN_ANS = 8;
-const MAX_RETRIES    = 3;
+const W            = CFG.workerUrl;
+const MIN_ANS      = 8;
+const MAX_RETRIES  = 3;
 const MAX_VIOLATIONS = 3;
 
 // ─────────────────────────────────────────────
@@ -1053,15 +1053,9 @@ const SB_HDR = {
   'Prefer':        'return=representation',
 };
 
-/**
- * Unified DB helper — direct Supabase REST
- * FIX: token/UUID columns now use proper encoding
- */
 async function db(action, table, data = null, filters = null, select = '*', order = null) {
   const sel = select || '*';
 
-  // ── Build filter query string ──
-  // FIX: Use encodeURIComponent only on the value, not the operator
   function buildFilters(base, f) {
     if (!f) return base;
     Object.entries(f).forEach(([k, v]) => {
@@ -1214,8 +1208,8 @@ function setBargie(state, wordCount = 0) {
   if (txt) txt.textContent = cfg.text;
   if (wds) {
     if (cfg.words && wordCount > 0) {
-      wds.style.display  = 'block';
-      wds.textContent    = wordCount + ' word' + (wordCount !== 1 ? 's' : '');
+      wds.style.display = 'block';
+      wds.textContent   = wordCount + ' word' + (wordCount !== 1 ? 's' : '');
     } else {
       wds.style.display = 'none';
     }
@@ -1232,7 +1226,7 @@ function setOrb(state) {
   o.className = 'orb';
   const labels = {
     speaking: 'AI Speaking…', listening: 'Listening…',
-    thinking: 'Analyzing…',  processing: 'Processing…', idle: 'Ready',
+    thinking: 'Analyzing…', processing: 'Processing…', idle: 'Ready',
   };
   o.classList.add(state);
   if (lbl) lbl.textContent = labels[state] || 'Ready';
@@ -1297,10 +1291,10 @@ function _recStop() {
 
 function startListen() {
   if (listening) return;
-  listening   = true;
-  transcript  = '';
-  lastSpeech  = Date.now();
-  ansStart    = Date.now();
+  listening  = true;
+  transcript = '';
+  lastSpeech = Date.now();
+  ansStart   = Date.now();
   _recStop();
   setTimeout(_recStart, 150);
   setOrb('listening');
@@ -1333,9 +1327,9 @@ function _sttStartSilenceTimer() {
   _sttResetSilence();
   silTimer = setInterval(() => {
     if (!listening || processing || speaking) return;
-    const elapsed    = (Date.now() - lastSpeech) / 1000;
-    const dynTo      = _getDynamicTimeout();
-    const wordCount  = transcript.trim().split(/\s+/).filter(Boolean).length;
+    const elapsed   = (Date.now() - lastSpeech) / 1000;
+    const dynTo     = _getDynamicTimeout();
+    const wordCount = transcript.trim().split(/\s+/).filter(Boolean).length;
     if (wordCount >= 2 && elapsed >= 0.8) {
       const remaining = Math.max(0, dynTo - elapsed);
       const pct       = Math.max(0, 100 - (remaining / dynTo * 100));
@@ -1381,11 +1375,11 @@ function speak(text) {
 
     const doSpeak = () => {
       try {
-        const u    = new SpeechSynthesisUtterance(text);
-        u.lang     = L[lang]?.t || 'en-US';
-        u.rate     = 0.93; u.pitch = 1.02; u.volume = 1;
-        const tl   = (L[lang]?.t || 'en-US').split('-')[0];
-        const vs   = speechSynthesis.getVoices();
+        const u   = new SpeechSynthesisUtterance(text);
+        u.lang    = L[lang]?.t || 'en-US';
+        u.rate    = 0.93; u.pitch = 1.02; u.volume = 1;
+        const tl  = (L[lang]?.t || 'en-US').split('-')[0];
+        const vs  = speechSynthesis.getVoices();
         if (vs.length) {
           const match = vs.find(v => v.lang.startsWith(tl) && !v.localService)
             || vs.find(v => v.lang.startsWith(tl))
@@ -1421,7 +1415,7 @@ function speak(text) {
 }
 
 // ─────────────────────────────────────────────
-// AI CALL
+// ★ FIX: AI CALL — removed X-Model header (CORS blocker)
 // ─────────────────────────────────────────────
 async function callAI(messages) {
   const ctrl = new AbortController();
@@ -1435,7 +1429,8 @@ async function callAI(messages) {
   try {
     const r = await fetch(W, {
       method:  'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Model': CFG.groqModel },
+      // ★ FIX: Removed 'X-Model' header — was blocked by CORS preflight
+      headers: { 'Content-Type': 'application/json' },
       body:    JSON.stringify(payload),
       signal:  ctrl.signal,
     });
@@ -1484,18 +1479,13 @@ function _exFields(raw) {
 }
 
 // ─────────────────────────────────────────────
-// ★ FIX: TOKEN VALIDATION
-// Queries 'interviews' table correctly.
-// Handles UUID hyphens, expired tokens, used tokens.
+// TOKEN VALIDATION
 // ─────────────────────────────────────────────
 async function validateToken(token) {
   if (!token || token.trim().length < 8) {
     throw new Error('Token is too short or empty.');
   }
-
   const cleaned = token.trim();
-
-  // Direct fetch — avoids any encoding issues in db() helper
   const url = `${SB_URL}/rest/v1/interviews?token=eq.${encodeURIComponent(cleaned)}&select=*&limit=1`;
   const r   = await fetch(url, {
     headers: {
@@ -1504,48 +1494,71 @@ async function validateToken(token) {
       'Content-Type':  'application/json',
     },
   });
-
   if (!r.ok) {
     const err = await r.json().catch(() => ({}));
     throw new Error('Server error validating token: ' + (err.message || r.status));
   }
-
   const data      = await r.json();
   const interview = Array.isArray(data) ? data[0] : null;
-
-  if (!interview) {
-    throw new Error('Invalid token — not found. Check your invitation link.');
-  }
-
+  if (!interview) throw new Error('Invalid token — not found. Check your invitation link.');
   const maxAtt  = interview.max_attempts  || 1;
   const usedAtt = interview.attempts_used || 0;
-
-  if (interview.status === 'completed' && maxAtt <= 1) {
-    throw new Error('This interview has already been completed.');
-  }
-  if (usedAtt >= maxAtt) {
-    throw new Error(`All ${maxAtt} attempt(s) used. Contact HR for a new token.`);
-  }
-  if (interview.expires_at && new Date(interview.expires_at) < new Date()) {
-    throw new Error('Token has expired. Please contact HR for a new invitation.');
-  }
-
+  if (interview.status === 'completed' && maxAtt <= 1) throw new Error('This interview has already been completed.');
+  if (usedAtt >= maxAtt) throw new Error(`All ${maxAtt} attempt(s) used. Contact HR for a new token.`);
+  if (interview.expires_at && new Date(interview.expires_at) < new Date()) throw new Error('Token has expired. Please contact HR for a new invitation.');
   return interview;
 }
 
 // ─────────────────────────────────────────────
-// CHECK TOKEN FROM URL — FIXED
-// Now pre-fills the modal input if validation fails
+// ★ FIX 1: Handle ?apply=JOB_ID&title=... URL params
+// ─────────────────────────────────────────────
+async function checkApplyParam() {
+  const params  = new URLSearchParams(location.search);
+  const applyId = params.get('apply');
+  const title   = params.get('title');
+  if (!applyId) return false;
+
+  curJobId = applyId;
+
+  // Show apply info bar
+  const aj = document.getElementById('applyJobInfo');
+  if (aj) {
+    aj.textContent = '📋 Applying for: ' + decodeURIComponent(title || 'Open Position');
+    aj.style.display = 'block';
+  }
+  const w = document.getElementById('applyNoJobWarn');
+  if (w) w.style.display = 'none';
+
+  // Pre-fill role from title if possible
+  if (title) {
+    const decoded = decodeURIComponent(title);
+    const rs      = document.getElementById('roleSel');
+    if (rs) {
+      const opt = [...rs.options].find(o => o.value.toLowerCase() === decoded.toLowerCase());
+      if (opt) { rs.value = decoded; }
+      else {
+        const o = new Option(decoded, decoded, true, true);
+        rs.add(o);
+      }
+    }
+  }
+
+  document.getElementById('navApply')?.classList.remove('hidden');
+  _nav('apply');
+  toast('📝 Complete your application below');
+  return true;
+}
+
+// ─────────────────────────────────────────────
+// CHECK TOKEN FROM URL
 // ─────────────────────────────────────────────
 async function checkToken() {
   const params = new URLSearchParams(location.search);
   const token  = params.get('token');
   if (!token) return;
 
-  // Pre-fill the manual token input right away
   const mti = document.getElementById('manualTokenInput');
   if (mti) mti.value = token;
-
   toast('🔍 Validating interview token…');
 
   try {
@@ -1563,7 +1576,6 @@ async function checkToken() {
     _setupRealMode(interview);
     toast('✅ Token verified — fill your details to begin.');
   } catch (err) {
-    // Show modal with the token already pasted and error shown
     const te = document.getElementById('tokenError');
     if (te) { te.textContent = '❌ ' + err.message; te.style.display = 'block'; }
     openTokenModal();
@@ -1666,13 +1678,11 @@ function doHRLogin() {
 // TOKEN MODAL
 // ─────────────────────────────────────────────
 function openTokenModal() {
-  const m = document.getElementById('tokenRequiredModal');
-  m.classList.add('open');
+  document.getElementById('tokenRequiredModal').classList.add('open');
   setTimeout(() => document.getElementById('manualTokenInput')?.focus(), 120);
 }
 function closeTokenModal() {
   document.getElementById('tokenRequiredModal').classList.remove('open');
-  // Don't clear the input — leave it for user to correct
   const te = document.getElementById('tokenError');
   if (te) te.style.display = 'none';
 }
@@ -1681,17 +1691,13 @@ async function useManualToken() {
   const input = document.getElementById('manualTokenInput');
   const token = input?.value.trim();
   const te    = document.getElementById('tokenError');
-
   if (!token) {
     if (te) { te.textContent = 'Please paste your token first.'; te.style.display = 'block'; }
     return;
   }
   if (te) te.style.display = 'none';
-
-  // Disable button during validation
   const btn = document.querySelector('#tokenRequiredModal .modal-btn');
   if (btn) { btn.disabled = true; btn.textContent = '🔍 Validating…'; }
-
   try {
     toast('🔍 Validating token…');
     const interview = await validateToken(token);
@@ -1740,8 +1746,7 @@ async function loadJobs() {
 function renderJobs(data) {
   const el = document.getElementById('jobsList');
   if (!data?.length) {
-    el.innerHTML = `<p style="color:var(--muted);text-align:center;padding:30px">
-      No positions match your search.</p>`;
+    el.innerHTML = `<p style="color:var(--muted);text-align:center;padding:30px">No positions match your search.</p>`;
     return;
   }
   el.innerHTML = data.map(j => {
@@ -1801,10 +1806,10 @@ function applyTo(id, title) {
 async function exFile(f) {
   const ext = f.name.split('.').pop().toLowerCase();
   let t = '';
-  if (ext === 'txt')                   t = await f.text();
-  else if (ext === 'pdf')              t = await _exPDF(f);
+  if (ext === 'txt')  t = await f.text();
+  else if (ext === 'pdf') t = await _exPDF(f);
   else if (ext === 'doc' || ext === 'docx') t = await _exDOC(f);
-  else                                 t = await f.text();
+  else t = await f.text();
   return t.replace(/\s+/g,' ').replace(/[^\x20-\x7E\n]/g,'').trim().substring(0, 5000);
 }
 async function _exPDF(f) {
@@ -1918,6 +1923,7 @@ async function submitApplication() {
         resume_url,
         resume_text: cv.substring(0, 5000),
         status:      'applied',
+        created_at:  new Date().toISOString(),
       });
       app = result; curAppId = app?.id;
       st.textContent = '🤖 AI screening…';
@@ -1928,8 +1934,8 @@ async function submitApplication() {
     toast('✅ Application submitted!');
 
     // Clear form
-    document.getElementById('applyName').value      = '';
-    document.getElementById('applyEmail').value     = '';
+    document.getElementById('applyName').value           = '';
+    document.getElementById('applyEmail').value          = '';
     document.getElementById('applyFileName').textContent = 'No file selected';
     document.getElementById('applyUpload').classList.remove('ok');
     cv = ''; _resumeFile = null;
@@ -1953,8 +1959,8 @@ async function runATS(app) {
       { role: 'system', content: 'ATS screening AI. Return ONLY valid JSON.' },
       { role: 'user',   content: `Score resume for "${jr||'General'}" (${jl||'Mid-Level'}).\nJob: ${jd||'Standard role'}\nSkills: ${sk.join(',')||'General'}\nResume: ${app.resume_text||cv}\nReturn ONLY: {"atsScore":75,"matchedSkills":["s1"],"missingSkills":["s1"],"summary":"Brief"}` },
     ]);
-    const r      = safeJSON(raw);
-    const score  = Math.min(100, Math.max(0, r.atsScore || 50));
+    const r     = safeJSON(raw);
+    const score = Math.min(100, Math.max(0, r.atsScore || 50));
     const status = th > 0 && score >= th ? 'shortlisted' : 'applied';
     await db('update', 'applications', {
       ats_score: score, ats_matched_skills: r.matchedSkills || [],
@@ -1968,6 +1974,7 @@ async function runATS(app) {
         interview_role: jr, interview_level: jl, question_count: 10,
         interview_language: 'en', max_attempts: 1, attempts_used: 0,
         expires_at: new Date(Date.now() + 72 * 3600000).toISOString(),
+        created_at: new Date().toISOString(),
       });
     }
   } catch (e) { console.error('[ATS]', e); }
@@ -2007,12 +2014,12 @@ function updateProg() {
   document.getElementById('progBar').style.width = p + '%';
   if (isFollowUp) {
     document.getElementById('progText').textContent = `Follow-up on Q${mainQ}/${totalQ}`;
-    document.getElementById('qTag').textContent = `Q${mainQ}↩`;
-    document.getElementById('qTag').className   = 'followup-tag';
+    document.getElementById('qTag').textContent     = `Q${mainQ}↩`;
+    document.getElementById('qTag').className       = 'followup-tag';
   } else {
     document.getElementById('progText').textContent = `Question ${mainQ} of ${totalQ} — ${p}%`;
-    document.getElementById('qTag').textContent = `Q${mainQ}`;
-    document.getElementById('qTag').className   = 'q-tag';
+    document.getElementById('qTag').textContent     = `Q${mainQ}`;
+    document.getElementById('qTag').className       = 'q-tag';
   }
 }
 
@@ -2024,6 +2031,87 @@ function showThink(show) {
 }
 
 // ─────────────────────────────────────────────
+// ★ FIX 2: Mock interview now requires invitation
+// tryMockInterview() redirects to token modal
+// ─────────────────────────────────────────────
+function tryMockInterview() {
+  // ★ CHANGED: Mock interview now requires token — opens token modal
+  openTokenModal();
+  toast('🔒 Interview access requires an HR invitation token');
+}
+
+// Keep guest/sign-in but they now lead to token-gated flow
+function switchSigninTab(tab) {
+  document.querySelectorAll('.modal-tab').forEach(b =>
+    b.classList.toggle('active', b.textContent.toLowerCase().includes(tab))
+  );
+  document.getElementById('signinLoginForm')?.classList.toggle('active', tab === 'login');
+  document.getElementById('signinRegForm')?.classList.toggle('active',  tab === 'register');
+}
+
+async function doSignIn() {
+  const email = document.getElementById('siEmail')?.value.trim();
+  const pass  = document.getElementById('siPass')?.value.trim();
+  const err   = document.getElementById('siError');
+  if (!email || !pass) {
+    if (err) { err.textContent = 'Email & password required.'; err.style.display = 'block'; }
+    return;
+  }
+  try {
+    const r = await fetch(`${SB_URL}/auth/v1/token?grant_type=password`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'apikey': SB_KEY },
+      body: JSON.stringify({ email, password: pass }),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error_description || d.msg || 'Sign-in failed');
+    document.getElementById('mockSigninModal')?.classList.remove('open');
+    // ★ After sign-in: still require token
+    openTokenModal();
+    toast('✅ Signed in — please enter your invitation token');
+  } catch (e) {
+    if (err) { err.textContent = '❌ ' + e.message; err.style.display = 'block'; }
+  }
+}
+
+async function doSignUp() {
+  const name  = document.getElementById('srName')?.value.trim();
+  const email = document.getElementById('srEmail')?.value.trim();
+  const pass  = document.getElementById('srPass')?.value.trim();
+  const err   = document.getElementById('srError');
+  if (!name || !email || !pass) {
+    if (err) { err.textContent = 'All fields required.'; err.style.display = 'block'; }
+    return;
+  }
+  if (pass.length < 6) {
+    if (err) { err.textContent = 'Password must be 6+ characters.'; err.style.display = 'block'; }
+    return;
+  }
+  try {
+    const r = await fetch(`${SB_URL}/auth/v1/signup`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'apikey': SB_KEY },
+      body: JSON.stringify({ email, password: pass, data: { full_name: name } }),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error_description || d.msg || 'Registration failed');
+    document.getElementById('mockSigninModal')?.classList.remove('open');
+    // ★ After register: still require token
+    openTokenModal();
+    toast('✅ Account created — please enter your invitation token');
+  } catch (e) {
+    if (err) { err.textContent = '❌ ' + e.message; err.style.display = 'block'; }
+  }
+}
+
+// ★ Guest session now also requires token
+function startGuestSession() {
+  document.getElementById('mockSigninModal')?.classList.remove('open');
+  openTokenModal();
+  toast('🔒 Please enter your HR invitation token to proceed');
+}
+
+// ─────────────────────────────────────────────
 // START INTERVIEW
 // ─────────────────────────────────────────────
 async function startInterview() {
@@ -2032,10 +2120,10 @@ async function startInterview() {
   role = rs === 'custom' ? document.getElementById('customRole').value.trim() : rs;
   if (!role) { toast('❌ Enter the custom role'); return; }
 
-  lang    = document.getElementById('langSel').value;
-  level   = document.getElementById('levelSel').value;
-  totalQ  = parseInt(document.getElementById('qCount').value);
-  mainQ   = 0; isFollowUp = false; answers = []; chat = []; evalRetry = 0; violations = [];
+  lang   = document.getElementById('langSel').value;
+  level  = document.getElementById('levelSel').value;
+  totalQ = parseInt(document.getElementById('qCount').value);
+  mainQ  = 0; isFollowUp = false; answers = []; chat = []; evalRetry = 0; violations = [];
 
   if (mode === 'real') {
     const n     = document.getElementById('candName').value.trim();
@@ -2052,8 +2140,8 @@ async function startInterview() {
       curAppId  = interview.application_id || curAppId;
       curJobId  = interview.job_id         || curJobId;
       await db('update', 'interviews', {
-        status:       'in_progress',
-        started_at:   new Date().toISOString(),
+        status:        'in_progress',
+        started_at:    new Date().toISOString(),
         attempts_used: (interview.attempts_used || 0) + 1,
       }, { token });
       toast('✅ Token verified — starting proctored session…');
@@ -2068,7 +2156,13 @@ async function startInterview() {
     return;
   }
 
-  // Mock mode — test connectivity
+  // ★ Mock mode also requires valid token now
+  if (!curToken) {
+    toast('❌ Interview token required');
+    openTokenModal();
+    return;
+  }
+
   const btn = document.getElementById('startBtn');
   btn.disabled    = true;
   btn.textContent = '⏳ Connecting…';
@@ -2387,6 +2481,7 @@ async function _saveResults(r) {
       await db('insert', 'interviews', {
         ...payload, application_id: curAppId, job_id: curJobId,
         token: fb, started_at: new Date(Date.now() - secs * 1000).toISOString(),
+        created_at: new Date().toISOString(),
       });
     }
     if (curAppId) await db('update', 'applications', { status: 'interviewed' }, { id: curAppId });
@@ -2396,9 +2491,9 @@ async function _saveResults(r) {
 
 async function retryEvaluation() {
   evalRetry = 0; toast('🔄 Retrying evaluation…');
-  document.getElementById('scoreNum').textContent    = '0';
-  document.getElementById('gradeBadge').textContent  = '—';
-  document.getElementById('fbList').innerHTML         = '';
+  document.getElementById('scoreNum').textContent         = '0';
+  document.getElementById('gradeBadge').textContent       = '—';
+  document.getElementById('fbList').innerHTML             = '';
   document.getElementById('strengthsCard').style.display = 'none';
   document.getElementById('hireBadge').style.display     = 'none';
   document.getElementById('retryWrap').style.display     = 'none';
@@ -2495,7 +2590,8 @@ function _renderRes(r) {
 }
 
 // ─────────────────────────────────────────────
-// ★ FIX: HR DASHBOARD — Applications now render
+// ★ FIX 3: HR Dashboard — Applications visible
+// Safe sort with null created_at guard
 // ─────────────────────────────────────────────
 async function loadHR() {
   try {
@@ -2514,12 +2610,11 @@ async function loadHR() {
     document.getElementById('statShort').textContent = appsArr.filter(a => a.status === 'shortlisted').length;
     document.getElementById('statInt').textContent   = intsArr.length;
 
-    // ★ FIX: Safe header update that never throws
+    // ★ FIX: Use textContent + manual button re-attach to avoid innerHTML XSS and crashes
     const hdr = document.getElementById('hrAllAppsHdr');
     if (hdr) {
-      hdr.innerHTML = `📋 All Applications (${appsArr.length})
-        <button class="btn btn-sm btn-secondary" onclick="loadHR()"
-          style="font-size:.72rem;padding:6px 12px">🔄 Refresh</button>`;
+      const countSpan = hdr.childNodes[0];
+      if (countSpan) countSpan.textContent = `📋 All Applications (${appsArr.length}) `;
     }
 
     renderAllApps(appsArr);
@@ -2533,14 +2628,19 @@ function renderAllApps(apps) {
   const el = document.getElementById('hrAllAppsList');
   if (!el) return;
 
-  if (!apps.length) {
-    el.innerHTML = `<p style="color:var(--muted);text-align:center;padding:20px">
-      No applications yet.</p>`;
+  if (!apps || !apps.length) {
+    el.innerHTML = `<p style="color:var(--muted);text-align:center;padding:20px">No applications yet.</p>`;
     return;
   }
 
-  const sorted = [...apps].sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
-  el.innerHTML  = sorted.map(c => _candRowHTML(c, true)).join('');
+  // ★ FIX: Safe sort — handle null/undefined created_at
+  const sorted = [...apps].sort((a, b) => {
+    const ta = a.created_at ? new Date(a.created_at).getTime() : 0;
+    const tb = b.created_at ? new Date(b.created_at).getTime() : 0;
+    return tb - ta;
+  });
+
+  el.innerHTML = sorted.map(c => _candRowHTML(c, true)).join('');
 }
 
 function _candRowHTML(c, showJob = false) {
@@ -2550,28 +2650,29 @@ function _candRowHTML(c, showJob = false) {
   const stc = { applied:'#f59e0b', shortlisted:'#10b981', interviewed:'#3b82f6', rejected:'#ef4444' }[c.status] || '#94a3b8';
   const stb = { applied:'rgba(245,158,11,.15)', shortlisted:'rgba(16,185,129,.15)', interviewed:'rgba(59,130,246,.15)', rejected:'rgba(239,68,68,.15)' }[c.status] || 'rgba(255,255,255,.05)';
   const ts  = c.created_at ? new Date(c.created_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }) : '';
+  const safeName = (c.name || '?').replace(/</g,'&lt;').replace(/>/g,'&gt;');
   return `<div class="cand-row">
     <div style="display:flex;align-items:center;gap:8px;flex:1;min-width:160px">
-      <div class="cand-avatar">${(c.name || '?')[0].toUpperCase()}</div>
+      <div class="cand-avatar">${safeName[0].toUpperCase()}</div>
       <div>
-        <div style="font-weight:700;font-size:.88rem">${c.name || 'Unknown'}</div>
-        <div style="font-size:.7rem;color:var(--muted)">${c.email || ''}${ts ? ' · ' + ts : ''}</div>
+        <div style="font-weight:700;font-size:.88rem">${safeName}</div>
+        <div style="font-size:.7rem;color:var(--muted)">${(c.email||'').replace(/</g,'&lt;')}${ts ? ' · '+ts : ''}</div>
       </div>
     </div>
     <div style="display:flex;gap:5px;align-items:center;flex-wrap:wrap">
       <span class="score-badge" style="background:${bg};color:${col}">ATS:${sc}</span>
-      <span class="status-pill" style="background:${stb};color:${stc}">${c.status || 'applied'}</span>
-      ${c.status === 'applied'
-        ? `<button class="btn btn-sm btn-success" onclick="shortlist('${c.id}');loadHR()">✅ Shortlist</button>` : ''}
-      ${c.status === 'shortlisted'
-        ? `<button class="btn btn-sm" style="background:var(--accent);color:#fff"
-            onclick="sendInvite('${c.id}','${(c.email || '').replace(/'/g, "\\'")}')">
-            📧 Send Invite</button>` : ''}
-      ${c.status !== 'rejected'
-        ? `<button class="btn btn-sm btn-danger" onclick="reject('${c.id}');loadHR()">❌ Reject</button>` : ''}
+      <span class="status-pill" style="background:${stb};color:${stc}">${c.status||'applied'}</span>
+      ${c.status==='applied'
+        ?`<button class="btn btn-sm btn-success" onclick="shortlist('${c.id}')">✅ Shortlist</button>`:''}
+      ${c.status==='shortlisted'
+        ?`<button class="btn btn-sm" style="background:var(--accent);color:#fff"
+            onclick="sendInvite('${c.id}','${(c.email||'').replace(/'/g,"\\'")}')">
+            📧 Send Invite</button>`:''}
+      ${c.status!=='rejected'
+        ?`<button class="btn btn-sm btn-danger" onclick="reject('${c.id}')">❌ Reject</button>`:''}
       ${c.resume_url
-        ? `<a href="${c.resume_url}" target="_blank" class="btn btn-sm btn-secondary"
-            style="text-decoration:none" onclick="event.stopPropagation()">📄 CV</a>` : ''}
+        ?`<a href="${c.resume_url}" target="_blank" class="btn btn-sm btn-secondary"
+            style="text-decoration:none">📄 CV</a>`:''}
     </div>
   </div>`;
 }
@@ -2595,27 +2696,27 @@ async function loadHRJobs() {
       const cnt = appCounts[j.id] || 0;
       return `<div class="job-card" onclick="loadCands('${j.id}','${(j.title||'').replace(/'/g,"\\'")}')">
         <div style="display:flex;justify-content:space-between;align-items:center">
-          <h3 style="margin:0">${j.title || 'Untitled'}</h3>
+          <h3 style="margin:0">${j.title||'Untitled'}</h3>
           <div style="display:flex;gap:6px;align-items:center">
-            ${cnt ? `<span class="score-badge" style="background:rgba(99,102,241,.15);color:var(--accent)">${cnt} applied</span>` : ''}
+            ${cnt?`<span class="score-badge" style="background:rgba(99,102,241,.15);color:var(--accent)">${cnt} applied</span>`:''}
             <span class="status-pill" style="background:${j.is_active?'rgba(16,185,129,.15)':'rgba(239,68,68,.15)'};color:${j.is_active?'#10b981':'#ef4444'}">
-              ${j.is_active ? '🟢 Active' : '🔴 Off'}
+              ${j.is_active?'🟢 Active':'🔴 Off'}
             </span>
           </div>
         </div>
         <div class="job-meta" style="margin-top:6px">
-          <span>📍 ${j.location || '—'}</span>
-          <span>📊 ${j.level || ''}</span>
-          <span>🎯 ATS:${j.ats_threshold > 0 ? j.ats_threshold + '+' : 'Manual'}</span>
+          <span>📍 ${j.location||'—'}</span>
+          <span>📊 ${j.level||''}</span>
+          <span>🎯 ATS:${j.ats_threshold>0?j.ats_threshold+'+':'Manual'}</span>
         </div>
         <p style="font-size:.72rem;color:var(--muted);margin-top:4px">👆 Click to view candidates</p>
       </div>`;
     }).join('');
-  } catch (e) { el.innerHTML = '<p style="color:var(--red)">' + e.message + '</p>'; }
+  } catch (e) { el.innerHTML = '<p style="color:var(--red)">'+e.message+'</p>'; }
 }
 
 // ─────────────────────────────────────────────
-// ★ JD AUTO-GENERATION
+// JD AUTO-GENERATION
 // ─────────────────────────────────────────────
 async function autoGenerateJD() {
   const title    = document.getElementById('hrTitle').value.trim();
@@ -2629,9 +2730,9 @@ async function autoGenerateJD() {
 
   if (!title) { toast('❌ Enter the Job Title first'); return; }
 
-  btn.disabled     = true;
-  btn.textContent  = '⏳ Generating…';
-  jdEl.value       = '';
+  btn.disabled    = true;
+  btn.textContent = '⏳ Generating…';
+  jdEl.value      = '';
   jdEl.placeholder = '✍️ AI is writing your job description…';
 
   try {
@@ -2666,7 +2767,6 @@ Keep it under 450 words. Professional yet human tone. No placeholders.`;
   } catch (e) {
     jdEl.placeholder = 'Job description…';
     toast('❌ JD generation failed: ' + e.message);
-    console.error('[autoGenerateJD]', e);
   } finally {
     btn.disabled    = false;
     btn.textContent = '✨ Auto-Generate JD';
@@ -2674,44 +2774,36 @@ Keep it under 450 words. Professional yet human tone. No placeholders.`;
 }
 
 async function postJob() {
-  const title   = document.getElementById('hrTitle').value.trim();
+  const title = document.getElementById('hrTitle').value.trim();
   if (!title) { toast('❌ Enter job title'); return; }
 
-  const company    = document.getElementById('hrCompany').value.trim();
-  const skillsRaw  = document.getElementById('hrSkills').value.trim();
-  const skills     = skillsRaw ? skillsRaw.split(',').map(s => s.trim()).filter(Boolean) : [];
-  let   jd         = document.getElementById('hrJD').value.trim();
+  const company   = document.getElementById('hrCompany').value.trim();
+  const skillsRaw = document.getElementById('hrSkills').value.trim();
+  const skills    = skillsRaw ? skillsRaw.split(',').map(s => s.trim()).filter(Boolean) : [];
+  let   jd        = document.getElementById('hrJD').value.trim();
 
-  const btn = document.getElementById('hrJobsList')?.parentElement
-    ?.querySelector?.('button.btn-go') || null;
-
-  // Auto-generate JD if empty
   if (!jd) {
     toast('📝 No JD provided — auto-generating…');
-    try {
-      await autoGenerateJD();
-      jd = document.getElementById('hrJD').value.trim();
-    } catch {}
+    try { await autoGenerateJD(); jd = document.getElementById('hrJD').value.trim(); } catch {}
   }
 
   try {
     await db('insert', 'jobs', {
       title,
-      category:      document.getElementById('hrCat').value,
-      department:    document.getElementById('hrDept').value.trim(),
+      category:       document.getElementById('hrCat').value,
+      department:     document.getElementById('hrDept').value.trim(),
       'Company Name': company,
-      company_name:  company,
-      location:      document.getElementById('hrLocation').value.trim(),
-      level:         document.getElementById('hrLevel').value,
-      description:   jd,
+      company_name:   company,
+      location:       document.getElementById('hrLocation').value.trim(),
+      level:          document.getElementById('hrLevel').value,
+      description:    jd,
       skills,
-      question_count:  parseInt(document.getElementById('hrQCount').value) || 10,
-      ats_threshold:   parseInt(document.getElementById('hrATS').value)    || 70,
-      is_active:       true,
-      status:          'active',
-      created_at:      new Date().toISOString(),
+      question_count: parseInt(document.getElementById('hrQCount').value) || 10,
+      ats_threshold:  parseInt(document.getElementById('hrATS').value)    || 70,
+      is_active:      true,
+      status:         'active',
+      created_at:     new Date().toISOString(),
     });
-
     toast('✅ Job posted successfully!');
     ['hrTitle','hrJD','hrSkills','hrDept','hrCompany','hrLocation'].forEach(id => {
       const el = document.getElementById(id); if (el) el.value = '';
@@ -2750,8 +2842,8 @@ async function sendInvite(appId, email) {
   try {
     const token   = crypto.randomUUID ? crypto.randomUUID() : (Date.now().toString(36) + Math.random().toString(36).substring(2, 10));
     const jobData = selHRJob ? await db('select', 'jobs', null, { id: selHRJob }).then(d => Array.isArray(d) ? d[0] : d).catch(() => null) : null;
-    const r       = jobData?.title  || 'Interview';
-    const lv      = jobData?.level  || 'Mid-Level';
+    const r       = jobData?.title || 'Interview';
+    const lv      = jobData?.level || 'Mid-Level';
 
     await db('insert', 'interviews', {
       application_id:    appId,
@@ -2821,8 +2913,7 @@ async function generateDirectInvite() {
     const diUrl = document.getElementById('diUrl');
     if (diUrl) diUrl.textContent = url;
 
-    try { await navigator.clipboard.writeText(url); toast('📋 Link copied to clipboard!'); }
-    catch {}
+    try { await navigator.clipboard.writeText(url); toast('📋 Link copied to clipboard!'); } catch {}
     toast('✅ Interview token generated for ' + name + '!');
 
     if (doEmail) setTimeout(() => diOpenEmail(), 800);
@@ -2837,30 +2928,22 @@ async function generateDirectInvite() {
   }
 }
 
-// ─────────────────────────────────────────────
-// INVITE HELPERS
-// ─────────────────────────────────────────────
 function copyInviteUrl() {
   const url = document.getElementById('diUrl')?.textContent?.trim();
   if (!url) return;
-  navigator.clipboard.writeText(url)
-    .then(() => toast('📋 Link copied!'))
-    .catch(() => toast('❌ Copy failed'));
+  navigator.clipboard.writeText(url).then(() => toast('📋 Link copied!')).catch(() => toast('❌ Copy failed'));
 }
 
 function diOpenEmail() {
   const d = window._lastDIToken; if (!d) return;
   const subject = encodeURIComponent(`Interview Invitation — ${d.role} at Simpatico HR`);
   const body    = encodeURIComponent(
-    `Dear ${d.name},\n\n` +
-    `You have been invited to an AI-powered interview for the role of ${d.role} (${d.level}).\n\n` +
-    `🔗 Interview Link:\n${d.url}\n\n` +
-    `📋 Details:\n• Role: ${d.role}\n• Level: ${d.level}\n• Questions: ${d.questions}\n` +
+    `Dear ${d.name},\n\nYou have been invited to an AI-powered interview for the role of ${d.role} (${d.level}).\n\n` +
+    `🔗 Interview Link:\n${d.url}\n\n📋 Details:\n• Role: ${d.role}\n• Level: ${d.level}\n• Questions: ${d.questions}\n` +
     `• Language: ${d.lang || 'English'}\n• Token Expires: ${d.expires?.toLocaleString()}\n\n` +
     `Instructions:\n1. Open the link on a desktop browser (Chrome/Edge recommended)\n` +
     `2. Allow camera and microphone access\n3. Share your entire screen when prompted\n` +
-    `4. Speak clearly and naturally — the AI will listen\n\n` +
-    `Best of luck!\n\nSimpatico HR Team\n${location.origin}`
+    `4. Speak clearly and naturally — the AI will listen\n\nBest of luck!\n\nSimpatico HR Team\n${location.origin}`
   );
   window.open(`mailto:${d.email}?subject=${subject}&body=${body}`, '_blank');
 }
@@ -2870,10 +2953,8 @@ function diOpenWA() {
   const phone = (d.phone || '').replace(/[^0-9+]/g, '');
   if (!phone) { toast('⚠️ No phone number — copy & send manually'); copyInviteUrl(); return; }
   const msg = encodeURIComponent(
-    `Hi ${d.name}! 👋\n\n` +
-    `You've been invited for an AI interview for *${d.role}* (${d.level}) at Simpatico HR.\n\n` +
-    `🔗 *Interview Link:*\n${d.url}\n\n` +
-    `⏳ Expires: ${d.expires?.toLocaleString()}\n\n` +
+    `Hi ${d.name}! 👋\n\nYou've been invited for an AI interview for *${d.role}* (${d.level}) at Simpatico HR.\n\n` +
+    `🔗 *Interview Link:*\n${d.url}\n\n⏳ Expires: ${d.expires?.toLocaleString()}\n\n` +
     `_Use Chrome/Edge on desktop. Allow mic & camera._\n\nGood luck! 🚀`
   );
   window.open(`https://wa.me/${phone.replace(/^\+/,'')}?text=${msg}`, '_blank');
@@ -2883,11 +2964,8 @@ function doCopyEmailText() {
   const d = window._lastDIToken; if (!d) return;
   const text = `Subject: Interview Invitation — ${d.role}\n\nDear ${d.name},\n\n` +
     `You are invited to an AI-powered interview for ${d.role} (${d.level}).\n\n` +
-    `Interview Link: ${d.url}\nExpires: ${d.expires?.toLocaleString()}\n\n` +
-    `Best of luck!\nSimpatico HR`;
-  navigator.clipboard.writeText(text)
-    .then(() => toast('📋 Email text copied!'))
-    .catch(() => toast('❌ Copy failed'));
+    `Interview Link: ${d.url}\nExpires: ${d.expires?.toLocaleString()}\n\nBest of luck!\nSimpatico HR`;
+  navigator.clipboard.writeText(text).then(() => toast('📋 Email text copied!')).catch(() => toast('❌ Copy failed'));
 }
 
 // ─────────────────────────────────────────────
@@ -2930,34 +3008,34 @@ function renderTokens(tokens, filter) {
   }
 
   el.innerHTML = filtered.map(t => {
-    const expired     = t.expires_at && new Date(t.expires_at) < new Date();
-    const effStatus   = expired && t.status === 'pending' ? 'expired' : (t.status || 'pending');
-    const statusColor = { pending:'#f59e0b', in_progress:'#3b82f6', completed:'#10b981', expired:'#ef4444' }[effStatus] || '#94a3b8';
-    const statusBg    = { pending:'rgba(245,158,11,.15)', in_progress:'rgba(59,130,246,.15)', completed:'rgba(16,185,129,.15)', expired:'rgba(239,68,68,.15)' }[effStatus] || 'rgba(255,255,255,.05)';
-    const created     = t.created_at ? new Date(t.created_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: '2-digit' }) : '—';
-    const url         = location.origin + location.pathname + '?token=' + t.token;
-    const name        = t.candidate_name || t.candidate_email || 'Unknown';
+    const expired   = t.expires_at && new Date(t.expires_at) < new Date();
+    const effStatus = expired && t.status === 'pending' ? 'expired' : (t.status || 'pending');
+    const sc = { pending:'#f59e0b', in_progress:'#3b82f6', completed:'#10b981', expired:'#ef4444' }[effStatus] || '#94a3b8';
+    const sb = { pending:'rgba(245,158,11,.15)', in_progress:'rgba(59,130,246,.15)', completed:'rgba(16,185,129,.15)', expired:'rgba(239,68,68,.15)' }[effStatus] || 'rgba(255,255,255,.05)';
+    const created = t.created_at ? new Date(t.created_at).toLocaleDateString('en-IN', { day:'2-digit', month:'short', year:'2-digit' }) : '—';
+    const url     = location.origin + location.pathname + '?token=' + t.token;
+    const name    = (t.candidate_name || t.candidate_email || 'Unknown').replace(/</g,'&lt;');
 
     return `<div class="cand-row">
       <div style="flex:1;min-width:140px">
         <div style="font-weight:700;font-size:.85rem">${name}</div>
-        <div style="font-size:.7rem;color:var(--muted)">${t.interview_role || '—'} · ${t.interview_level || '—'}</div>
+        <div style="font-size:.7rem;color:var(--muted)">${t.interview_role||'—'} · ${t.interview_level||'—'}</div>
         <div style="font-size:.68rem;color:var(--muted);margin-top:2px">${created}
-          ${t.overall_score != null ? ' · Score: <strong style="color:var(--accent)">' + t.overall_score + '</strong>' : ''}
+          ${t.overall_score!=null?' · Score: <strong style="color:var(--accent)">'+t.overall_score+'</strong>':''}
         </div>
       </div>
       <div style="display:flex;gap:5px;align-items:center;flex-wrap:wrap">
-        <span class="status-pill" style="background:${statusBg};color:${statusColor}">
-          ${effStatus === 'expired' ? '⌛ Expired' : effStatus}
+        <span class="status-pill" style="background:${sb};color:${sc}">
+          ${effStatus==='expired'?'⌛ Expired':effStatus}
         </span>
-        <span style="font-size:.7rem;color:var(--muted)">${t.attempts_used || 0}/${t.max_attempts || 1} uses</span>
+        <span style="font-size:.7rem;color:var(--muted)">${t.attempts_used||0}/${t.max_attempts||1} uses</span>
         <button class="btn btn-sm" style="background:rgba(99,102,241,.15);color:var(--accent)"
           onclick="navigator.clipboard.writeText('${url}').then(()=>toast('📋 Copied!'))">
           📋 Copy
         </button>
-        ${t.status === 'completed'
-          ? `<button class="btn btn-sm btn-success" onclick="viewTokenResult('${t.token}')">📊 Results</button>`
-          : ''}
+        ${t.status==='completed'
+          ?`<button class="btn btn-sm btn-success" onclick="viewTokenResult('${t.token}')">📊 Results</button>`
+          :''}
       </div>
     </div>`;
   }).join('');
@@ -3016,75 +3094,6 @@ async function bulkGenerateInvites() {
 }
 
 // ─────────────────────────────────────────────
-// SIGN-IN / GUEST SESSION
-// ─────────────────────────────────────────────
-function tryMockInterview() {
-  const modal = document.getElementById('mockSigninModal');
-  if (modal) modal.classList.add('open');
-}
-
-function switchSigninTab(tab) {
-  document.querySelectorAll('.modal-tab').forEach(b =>
-    b.classList.toggle('active', b.textContent.toLowerCase().includes(tab))
-  );
-  document.getElementById('signinLoginForm')?.classList.toggle('active', tab === 'login');
-  document.getElementById('signinRegForm')?.classList.toggle('active',  tab === 'register');
-}
-
-async function doSignIn() {
-  const email = document.getElementById('siEmail')?.value.trim();
-  const pass  = document.getElementById('siPass')?.value.trim();
-  const err   = document.getElementById('siError');
-  if (!email || !pass) { if (err) { err.textContent = 'Email & password required.'; err.style.display = 'block'; } return; }
-  try {
-    const r = await fetch(`${SB_URL}/auth/v1/token?grant_type=password`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'apikey': SB_KEY },
-      body: JSON.stringify({ email, password: pass }),
-    });
-    const d = await r.json();
-    if (!r.ok) throw new Error(d.error_description || d.msg || 'Sign-in failed');
-    document.getElementById('mockSigninModal')?.classList.remove('open');
-    document.getElementById('mockBadge').textContent = '✅ SIGNED IN';
-    toast('✅ Signed in — starting mock interview…');
-    startMode('mock');
-  } catch (e) {
-    if (err) { err.textContent = '❌ ' + e.message; err.style.display = 'block'; }
-  }
-}
-
-async function doSignUp() {
-  const name  = document.getElementById('srName')?.value.trim();
-  const email = document.getElementById('srEmail')?.value.trim();
-  const pass  = document.getElementById('srPass')?.value.trim();
-  const err   = document.getElementById('srError');
-  if (!name || !email || !pass) { if (err) { err.textContent = 'All fields required.'; err.style.display = 'block'; } return; }
-  if (pass.length < 6)          { if (err) { err.textContent = 'Password must be 6+ characters.'; err.style.display = 'block'; } return; }
-  try {
-    const r = await fetch(`${SB_URL}/auth/v1/signup`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'apikey': SB_KEY },
-      body: JSON.stringify({ email, password: pass, data: { full_name: name } }),
-    });
-    const d = await r.json();
-    if (!r.ok) throw new Error(d.error_description || d.msg || 'Registration failed');
-    document.getElementById('mockSigninModal')?.classList.remove('open');
-    document.getElementById('mockBadge').textContent = '✅ REGISTERED';
-    toast('✅ Account created — starting mock interview…');
-    startMode('mock');
-  } catch (e) {
-    if (err) { err.textContent = '❌ ' + e.message; err.style.display = 'block'; }
-  }
-}
-
-function startGuestSession() {
-  document.getElementById('mockSigninModal')?.classList.remove('open');
-  document.getElementById('mockBadge').textContent = '👤 GUEST';
-  toast('👤 Guest session — results won\'t be saved');
-  startMode('mock');
-}
-
-// ─────────────────────────────────────────────
 // VIEW TOKEN RESULTS
 // ─────────────────────────────────────────────
 async function viewTokenResult(token) {
@@ -3109,11 +3118,31 @@ async function viewTokenResult(token) {
 }
 
 // ─────────────────────────────────────────────
-// INIT
+// ★ FIX 4: HOME CARD — Mock now shows "INVITE REQUIRED"
+// Update the home card onclick behavior
 // ─────────────────────────────────────────────
-document.addEventListener('DOMContentLoaded', () => {
+// This is handled via tryMockInterview() above.
+// Also update the badge text in HTML (see HTML change below).
+
+// ─────────────────────────────────────────────
+// INIT — handle both ?token= and ?apply= params
+// ─────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', async () => {
   _nav('home');
-  checkToken();   // Handle ?token= URL param
+
+  // ★ FIX: Update mock badge on home card
+  const mb = document.getElementById('mockBadge');
+  if (mb) mb.textContent = '🔒 INVITE REQUIRED';
+
+  const params  = new URLSearchParams(location.search);
+  const hasToken = params.get('token');
+  const hasApply = params.get('apply');
+
+  if (hasToken) {
+    await checkToken();
+  } else if (hasApply) {
+    await checkApplyParam();
+  }
 });
 </script>
 </body>
