@@ -1054,31 +1054,25 @@ const SB_HDR = {
 };
 
 async function db(action, table, data = null, filters = null, select = '*', order = null) {
-  const sel = select || '*';
-
-  function buildFilters(base, f) {
-    if (!f) return base;
-    Object.entries(f).forEach(([k, v]) => {
-      base += `&${encodeURIComponent(k)}=eq.${encodeURIComponent(v)}`;
+  try {
+    const r = await fetch(W + '/db', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action, table, data, filters, select, order })
     });
-    return base;
-  }
-
-  if (action === 'select') {
-    let url = `${SB_URL}/rest/v1/${table}?select=${sel}`;
-    url = buildFilters(url, filters);
-    if (order) {
-      const [col, dir] = order.split('.');
-      url += `&order=${col}.${dir || 'asc'}`;
-    }
-    const r = await fetch(url, { headers: { ...SB_HDR, 'Prefer': 'return=representation' } });
+    
     if (!r.ok) {
       const err = await r.json().catch(() => ({}));
-      throw new Error(err.message || `DB select failed (${r.status})`);
+      throw new Error(err.error || `Database operation failed (${r.status})`);
     }
-    const d = await r.json();
-    return Array.isArray(d) ? d : (d && !d.error ? [d] : []);
+    
+    const resData = await r.json();
+    return Array.isArray(resData) ? resData : (resData && !resData.error ? [resData] : []);
+  } catch (err) {
+    console.error(`[DB Proxy Error - ${action} ${table}]`, err);
+    throw err;
   }
+}
 
   if (action === 'insert') {
     const r = await fetch(`${SB_URL}/rest/v1/${table}`, {
