@@ -1054,25 +1054,31 @@ const SB_HDR = {
 };
 
 async function db(action, table, data = null, filters = null, select = '*', order = null) {
-  try {
-    const r = await fetch(W + '/db', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action, table, data, filters, select, order })
+  const sel = select || '*';
+
+  function buildFilters(base, f) {
+    if (!f) return base;
+    Object.entries(f).forEach(([k, v]) => {
+      base += `&${encodeURIComponent(k)}=eq.${encodeURIComponent(v)}`;
     });
-    
+    return base;
+  }
+
+  if (action === 'select') {
+    let url = `${SB_URL}/rest/v1/${table}?select=${sel}`;
+    url = buildFilters(url, filters);
+    if (order) {
+      const [col, dir] = order.split('.');
+      url += `&order=${col}.${dir || 'asc'}`;
+    }
+    const r = await fetch(url, { headers: { ...SB_HDR, 'Prefer': 'return=representation' } });
     if (!r.ok) {
       const err = await r.json().catch(() => ({}));
-      throw new Error(err.error || `Database operation failed (${r.status})`);
+      throw new Error(err.message || `DB select failed (${r.status})`);
     }
-    
-    const resData = await r.json();
-    return Array.isArray(resData) ? resData : (resData && !resData.error ? [resData] : []);
-  } catch (err) {
-    console.error(`[DB Proxy Error - ${action} ${table}]`, err);
-    throw err;
+    const d = await r.json();
+    return Array.isArray(d) ? d : (d && !d.error ? [d] : []);
   }
-}
 
   if (action === 'insert') {
     const r = await fetch(`${SB_URL}/rest/v1/${table}`, {
@@ -2644,17 +2650,13 @@ function _candRowHTML(c, showJob = false) {
   const stc = { applied:'#f59e0b', shortlisted:'#10b981', interviewed:'#3b82f6', rejected:'#ef4444' }[c.status] || '#94a3b8';
   const stb = { applied:'rgba(245,158,11,.15)', shortlisted:'rgba(16,185,129,.15)', interviewed:'rgba(59,130,246,.15)', rejected:'rgba(239,68,68,.15)' }[c.status] || 'rgba(255,255,255,.05)';
   const ts  = c.created_at ? new Date(c.created_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }) : '';
-  
-  // FIX: Mapping the correct DB columns
-  const safeName = (c.candidate_name || c.name || 'Unknown Candidate').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-  const safeEmail = (c.candidate_email || c.email || '').replace(/</g,'&lt;');
-
+  const safeName = (c.name || '?').replace(/</g,'&lt;').replace(/>/g,'&gt;');
   return `<div class="cand-row">
     <div style="display:flex;align-items:center;gap:8px;flex:1;min-width:160px">
       <div class="cand-avatar">${safeName[0].toUpperCase()}</div>
       <div>
         <div style="font-weight:700;font-size:.88rem">${safeName}</div>
-        <div style="font-size:.7rem;color:var(--muted)">${safeEmail}${ts ? ' · '+ts : ''}</div>
+        <div style="font-size:.7rem;color:var(--muted)">${(c.email||'').replace(/</g,'&lt;')}${ts ? ' · '+ts : ''}</div>
       </div>
     </div>
     <div style="display:flex;gap:5px;align-items:center;flex-wrap:wrap">
@@ -2664,7 +2666,7 @@ function _candRowHTML(c, showJob = false) {
         ?`<button class="btn btn-sm btn-success" onclick="shortlist('${c.id}')">✅ Shortlist</button>`:''}
       ${c.status==='shortlisted'
         ?`<button class="btn btn-sm" style="background:var(--accent);color:#fff"
-            onclick="sendInvite('${c.id}','${safeEmail.replace(/'/g,"\\'")}')">
+            onclick="sendInvite('${c.id}','${(c.email||'').replace(/'/g,"\\'")}')">
             📧 Send Invite</button>`:''}
       ${c.status!=='rejected'
         ?`<button class="btn btn-sm btn-danger" onclick="reject('${c.id}')">❌ Reject</button>`:''}
@@ -2674,6 +2676,7 @@ function _candRowHTML(c, showJob = false) {
     </div>
   </div>`;
 }
+
 async function loadHRJobs() {
   const el = document.getElementById('hrJobsList');
   try {
