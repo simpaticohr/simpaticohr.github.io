@@ -610,95 +610,23 @@ async function handleLogin(e) {
 // REDIRECT BY ROLE
 // ═══════════════════════════════════════════════════════════════════
 function redirectByRole(role) {
+    const TAB = {
+        hr: ['hr','hr_manager','interviewer','company_admin'],
+        candidate: ['candidate'],
+        super_admin: ['super_admin'],
+    };
+    if (!(TAB[selectedRole] || []).includes(role)) {
+        showAlert('Access denied.', 'Your account cannot access this portal. Select the correct login tab.');
+        resetBtn(
+            document.getElementById('submitBtn'),
+            document.getElementById('spinner'),
+            document.getElementById('btnIcon'),
+            document.getElementById('btnText')
+        );
+        return;
+    }
     const target = ROLE_ROUTES[role] || ROLE_ROUTES['hr'];
-    debug(`→ ${target}`);
+    debug('-> ' + target);
     window.location.href = target;
 }
 
-// ═══════════════════════════════════════════════════════════════════
-// ERROR MAPPING
-// ═══════════════════════════════════════════════════════════════════
-function mapError(msg) {
-    const m = (msg || '').toLowerCase();
-    if (m.includes('invalid login credentials') || m.includes('invalid password') || m.includes('invalid email'))
-        return 'Invalid email or password.';
-    if (m.includes('email not confirmed'))
-        return 'Please verify your email address before signing in.';
-    if (m.includes('user not found') || m.includes('no user record'))
-        return 'No account found for this email. Please register first.';
-    if (m.includes('profile not found'))
-        return 'User profile not found. Please contact your administrator.';
-    if (m.includes('does not have super admin'))
-        return 'This account does not have Super Admin privileges.';
-    return msg || 'Login failed. Please try again.';
-}
-
-// ═══════════════════════════════════════════════════════════════════
-// UI HELPERS
-// ═══════════════════════════════════════════════════════════════════
-function showAlert(msg, detail, type = 'error') {
-    const box = document.getElementById('alertBox');
-    box.className = `alert-box ${type}`;
-    document.getElementById('alertMsg').textContent = msg;
-    document.getElementById('alertDetail').textContent = detail || '';
-    box.classList.remove('show');
-    void box.offsetWidth; // force reflow for animation
-    box.classList.add('show');
-}
-
-function hideAlert() {
-    document.getElementById('alertBox').classList.remove('show');
-}
-
-function resetBtn(btn, spinner, btnIcon, btnText) {
-    btn.disabled = false;
-    spinner.style.display = 'none';
-    btnIcon.style.display = 'inline';
-    btnText.textContent = 'Sign In';
-}
-
-function toast(msg, type = 'info') {
-    document.querySelectorAll('.toast').forEach(t => t.remove());
-    const t = document.createElement('div');
-    t.className = `toast toast-${type}`;
-    t.textContent = msg;
-    document.body.appendChild(t);
-    setTimeout(() => t.remove(), 4000);
-}
-
-// ═══════════════════════════════════════════════════════════════════
-// DEBUG (Ctrl+Shift+D to toggle)
-// ═══════════════════════════════════════════════════════════════════
-let debugLines = [];
-function debug(msg) {
-    console.log('[Login]', msg);
-    debugLines.push(`[${new Date().toLocaleTimeString()}] ${msg}`);
-    if (debugLines.length > 10) debugLines.shift();
-    const panel = document.getElementById('debugPanel');
-    if (panel) panel.innerHTML = debugLines.join('<br>');
-}
-
-document.addEventListener('keydown', function(e) {
-    if (e.ctrlKey && e.shiftKey && e.key === 'D') {
-        document.getElementById('debugPanel').classList.toggle('show');
-    }
-});
-
-// ═══════════════════════════════════════════════════════════════════
-// API HEALTH CHECK ON LOAD
-// ═══════════════════════════════════════════════════════════════════
-(async function healthCheck() {
-    try {
-        const res = await fetch(
-            'https://evalis-ai.simpaticohrconsultancy.workers.dev/api/jobs/public',
-            { method: 'GET' }
-        );
-        debug(`Worker health: ${res.status} ${res.ok ? '✅' : '❌'}`);
-    } catch (e) {
-        debug(`Worker health: UNREACHABLE ❌ — ${e.message}`);
-    }
-})();
-</script>
-
-</body>
-</html>
