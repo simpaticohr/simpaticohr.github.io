@@ -70,7 +70,7 @@ function renderEmployees() {
     container.innerHTML = filteredEmployees.map(function(emp) {
       return '<div class="emp-card" onclick="viewEmployee(\'' + emp.id + '\')">' +
         '<div class="emp-avatar">' + ((emp.full_name || '?')[0].toUpperCase()) + '</div>' +
-        '<div class="emp-name">' + (emp.full_name || '-') + '</div>' +
+        '<div class="emp-name">' + ((emp.first_name||'') + ' ' + (emp.last_name||'')).trim() || '-' + '</div>' +
         '<div class="emp-role">' + (emp.job_title || '-') + '</div>' +
         '<div class="emp-dept">' + (emp.department || '-') + '</div>' +
         '<span class="emp-status status-' + (emp.status || 'active') + '">' + (emp.status || 'active') + '</span>' +
@@ -82,7 +82,7 @@ function renderEmployees() {
   } else {
     var rows = filteredEmployees.map(function(emp) {
       return '<tr>' +
-        '<td><strong>' + (emp.full_name || '-') + '</strong></td>' +
+        '<td><strong>' + ((emp.first_name||'') + ' ' + (emp.last_name||'')).trim() || '-' + '</strong></td>' +
         '<td>' + (emp.job_title || '-') + '</td>' +
         '<td>' + (emp.department || '-') + '</td>' +
         '<td>' + (emp.email || '-') + '</td>' +
