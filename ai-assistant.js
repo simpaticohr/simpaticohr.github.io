@@ -3,25 +3,21 @@
  * AI chat: Cloudflare AI (llama-3.1-8b) + Vectorize RAG + live Supabase HR context injection
  */
 
-const AI_CONFIG = {
-  supabaseUrl: window.SIMPATICO_CONFIG?.supabaseUrl    || 'https://YOUR_PROJECT.supabase.co',
-  supabaseKey: window.SIMPATICO_CONFIG?.supabaseAnonKey || 'YOUR_ANON_KEY',
-  workerUrl:   window.SIMPATICO_CONFIG?.workerUrl       || 'https://hr-api.YOUR_SUBDOMAIN.workers.dev',
-};
-
-let _sb = null;
+// ── Use existing Supabase client ──
 function sb() {
-  if (_sb) return _sb;
-  if (window.supabase) { _sb = window.supabase.createClient(AI_CONFIG.supabaseUrl, AI_CONFIG.supabaseKey); return _sb; }
-  return null;
+  return window.SimpaticoDB || null;
 }
 
+const AI_CONFIG = {
+  workerUrl: window.WORKER_URL || 'https://evalis-ai.simpaticohrconsultancy.workers.dev',
+};
+
 // ── State ──
-let conversations    = [];
-let currentConvId    = null;
-let messages         = [];
-let activeContexts   = new Set(['employees']);
-let isStreaming       = false;
+let conversations       = [];
+let currentConvId       = null;
+let messages            = [];
+let activeContexts      = new Set(['employees']);
+let isStreaming         = false;
 let currentUserInitials = 'U';
 
 // ── Init ──
@@ -37,6 +33,20 @@ async function loadUser() {
     currentUserInitials = user.email?.slice(0,2).toUpperCase() || 'U';
     const el = document.getElementById('user-avatar');
     if (el) el.textContent = currentUserInitials;
+  }
+}
+
+// ── Auth headers (Supabase v2 compatible) ──
+async function authHeaders() {
+  try {
+    const client = sb();
+    if (!client) return {};
+    const { data } = await client.auth.getSession();
+    const token = data?.session?.access_token || localStorage.getItem('simpatico_token') || '';
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  } catch {
+    const token = localStorage.getItem('simpatico_token') || '';
+    return token ? { Authorization: `Bearer ${token}` } : {};
   }
 }
 
@@ -82,7 +92,6 @@ window.newChat = function() {
   if (welcome) welcome.style.display = 'flex';
   const msgContainer = document.getElementById('messages-container');
   if (msgContainer) {
-    // Remove non-welcome messages
     Array.from(msgContainer.children).forEach(c => {
       if (!c.id || c.id !== 'welcome-screen') c.remove();
     });
@@ -96,39 +105,33 @@ window.sendMessage = async function() {
   const text  = input?.value.trim();
   if (!text || isStreaming) return;
 
-  // Clear input
   input.value = ''; autoResize(input);
 
-  // Hide welcome
   const welcome = document.getElementById('welcome-screen');
   if (welcome) welcome.style.display = 'none';
 
-  // Add user message
   const userMsg = { role: 'user', content: text, timestamp: new Date().toISOString() };
   messages.push(userMsg);
   appendMessageEl(userMsg);
 
-  // Create/update conversation
   if (!currentConvId) {
     currentConvId = crypto.randomUUID?.() || `conv-${Date.now()}`;
     conversations.unshift({ id: currentConvId, title: text.slice(0,50), messages: [], updated_at: new Date().toISOString() });
     document.getElementById('chat-title').textContent = text.slice(0,50);
   }
 
-  // Show typing indicator
   const typingId = showTyping();
   isStreaming = true;
   const btn = document.getElementById('send-btn');
   if (btn) btn.disabled = true;
 
   try {
-    // Build context-enriched system prompt
     const systemContext = await buildHRContext();
+    const headers = await authHeaders();
 
-    // Call Cloudflare Worker which proxies to Cloudflare AI + Vectorize
     const response = await fetch(`${AI_CONFIG.workerUrl}/ai/chat`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      headers: { 'Content-Type': 'application/json', ...headers },
       body: JSON.stringify({
         messages: messages.slice(-12).map(m => ({ role: m.role, content: m.content })),
         system:   systemContext,
@@ -139,7 +142,6 @@ window.sendMessage = async function() {
 
     removeTyping(typingId);
 
-    // Handle streaming response
     if (response.ok && response.body) {
       const assistantMsg = { role: 'assistant', content: '', timestamp: new Date().toISOString() };
       messages.push(assistantMsg);
@@ -154,7 +156,6 @@ window.sendMessage = async function() {
         const { done, value } = await reader.read();
         if (done) break;
         const chunk = decoder.decode(value, { stream: true });
-        // Parse SSE chunks
         const lines = chunk.split('\n').filter(l => l.startsWith('data: '));
         for (const line of lines) {
           try {
@@ -169,7 +170,6 @@ window.sendMessage = async function() {
         }
       }
 
-      // Fallback: if no streaming, read as JSON
       if (!full) {
         const result = await response.json();
         full = result.response || result.content || 'No response.';
@@ -178,23 +178,29 @@ window.sendMessage = async function() {
       }
 
     } else {
-      // Non-streaming fallback
       removeTyping(typingId);
-      const result = await response.json();
-      const assistantMsg = { role: 'assistant', content: result.response || result.error || 'Sorry, I encountered an error.', timestamp: new Date().toISOString() };
+      const result = await response.json().catch(() => ({}));
+      const assistantMsg = {
+        role: 'assistant',
+        content: result.response || result.error || 'Sorry, I encountered an error.',
+        timestamp: new Date().toISOString()
+      };
       messages.push(assistantMsg);
       appendMessageEl(assistantMsg);
     }
 
   } catch (err) {
     removeTyping(typingId);
-    const errorMsg = { role: 'assistant', content: `I couldn't connect to the AI service. Please check your Cloudflare Worker configuration.\n\n\`Error: ${err.message}\``, timestamp: new Date().toISOString() };
+    const errorMsg = {
+      role: 'assistant',
+      content: `I couldn't connect to the AI service. Please check your Cloudflare Worker configuration.\n\n\`Error: ${err.message}\``,
+      timestamp: new Date().toISOString()
+    };
     messages.push(errorMsg);
     appendMessageEl(errorMsg);
   } finally {
     isStreaming = false;
     if (btn) btn.disabled = false;
-    // Save to local storage
     const conv = conversations.find(c => c.id === currentConvId);
     if (conv) { conv.messages = messages; conv.updated_at = new Date().toISOString(); }
     saveConversations();
@@ -203,53 +209,56 @@ window.sendMessage = async function() {
   }
 };
 
-// ── Context builder: pulls live data from Supabase to inject into prompt ──
+// ── Context builder ──
 async function buildHRContext() {
   const client = sb();
   if (!client) return defaultSystemPrompt();
 
   const contextParts = [];
 
-  if (activeContexts.has('employees')) {
-    const { data } = await client.from('employees').select('status').limit(200);
-    const active = (data||[]).filter(e=>e.status==='active').length;
-    const total  = (data||[]).length;
-    contextParts.push(`Current workforce: ${active} active employees out of ${total} total.`);
-  }
+  try {
+    if (activeContexts.has('employees')) {
+      const { data } = await client.from('employees').select('status').limit(200);
+      const active = (data||[]).filter(e=>e.status==='active').length;
+      const total  = (data||[]).length;
+      contextParts.push(`Current workforce: ${active} active employees out of ${total} total.`);
+    }
 
-  if (activeContexts.has('payroll')) {
-    const month = new Date().toISOString().slice(0,7);
-    const { data } = await client.from('payslips').select('net_pay').like('period', `${month}%`);
-    const total = (data||[]).reduce((s,p)=>s+(p.net_pay||0),0);
-    contextParts.push(`Current month payroll (net): $${Math.round(total).toLocaleString()}.`);
-  }
+    if (activeContexts.has('payroll')) {
+      const month = new Date().toISOString().slice(0,7);
+      const { data } = await client.from('payslips').select('net_pay').like('period', `${month}%`);
+      const total = (data||[]).reduce((s,p)=>s+(p.net_pay||0),0);
+      contextParts.push(`Current month payroll (net): ₹${Math.round(total).toLocaleString()}.`);
+    }
 
-  if (activeContexts.has('performance')) {
-    const { data } = await client.from('performance_reviews').select('score').not('score','is',null).limit(100);
-    const scores = (data||[]).map(r=>r.score);
-    const avg = scores.length ? Math.round(scores.reduce((a,b)=>a+b,0)/scores.length) : null;
-    if (avg) contextParts.push(`Average performance score: ${avg}/100 across ${scores.length} reviews.`);
-  }
+    if (activeContexts.has('performance')) {
+      const { data } = await client.from('performance_reviews').select('score').not('score','is',null).limit(100);
+      const scores = (data||[]).map(r=>r.score);
+      const avg = scores.length ? Math.round(scores.reduce((a,b)=>a+b,0)/scores.length) : null;
+      if (avg) contextParts.push(`Average performance score: ${avg}/100 across ${scores.length} reviews.`);
+    }
 
-  if (activeContexts.has('training')) {
-    const { data } = await client.from('training_enrollments').select('status').limit(300);
-    const all   = (data||[]).length;
-    const done  = (data||[]).filter(e=>e.status==='completed').length;
-    contextParts.push(`Training: ${done}/${all} enrollments completed (${all>0?Math.round(done/all*100):0}%).`);
-  }
+    if (activeContexts.has('training')) {
+      const { data } = await client.from('training_enrollments').select('status').limit(300);
+      const all  = (data||[]).length;
+      const done = (data||[]).filter(e=>e.status==='completed').length;
+      contextParts.push(`Training: ${done}/${all} enrollments completed (${all>0?Math.round(done/all*100):0}%).`);
+    }
 
-  if (activeContexts.has('leave')) {
-    const today = new Date().toISOString().slice(0,10);
-    const { data } = await client.from('leave_requests').select('status').eq('status','pending');
-    contextParts.push(`Leave requests: ${(data||[]).length} pending approval.`);
+    if (activeContexts.has('leave')) {
+      const { data } = await client.from('leave_requests').select('status').eq('status','pending');
+      contextParts.push(`Leave requests: ${(data||[]).length} pending approval.`);
+    }
+  } catch(e) {
+    console.warn('Context build error:', e);
   }
 
   return `${defaultSystemPrompt()}
 
 ## Live HR Data Context
-${contextParts.join('\n')}
+${contextParts.length ? contextParts.join('\n') : 'No live data available yet.'}
 
-Today's date: ${new Date().toLocaleDateString('en-US', { weekday:'long', year:'numeric', month:'long', day:'numeric' })}.
+Today's date: ${new Date().toLocaleDateString('en-IN', { weekday:'long', year:'numeric', month:'long', day:'numeric' })}.
 Always answer based on the live data provided. Be concise, professional, and actionable.`;
 }
 
@@ -264,7 +273,7 @@ function defaultSystemPrompt() {
 You can analyze HR data, generate documents (policies, templates, letters), provide strategic guidance, and answer HR-related questions. Format responses clearly using markdown. Be professional, empathetic, and evidence-based.`;
 }
 
-// ── Markdown renderer (simple) ──
+// ── Markdown renderer ──
 function markdownToHtml(text) {
   return text
     .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
@@ -276,7 +285,6 @@ function markdownToHtml(text) {
     .replace(/^[-*] (.+)$/gm, '<li>$1</li>')
     .replace(/(<li>.*<\/li>\n?)+/g, m => `<ul>${m}</ul>`)
     .replace(/\n\n/g, '</p><p>')
-    .replace(/^(.+)$/gm, (m) => m.startsWith('<') ? m : m)
     .replace(/\n/g, '<br>');
 }
 
@@ -287,17 +295,14 @@ function appendMessageEl(msg, streaming=false) {
   const wrap = document.createElement('div');
   wrap.className = `ai-msg ${isUser ? 'user' : 'assistant'}`;
   wrap.id = `msg-${Date.now()}`;
-
-  const time = new Date(msg.timestamp).toLocaleTimeString('en-US', { hour:'2-digit', minute:'2-digit' });
+  const time = new Date(msg.timestamp).toLocaleTimeString('en-IN', { hour:'2-digit', minute:'2-digit' });
   const avatarLabel = isUser ? currentUserInitials : '✦';
-
   wrap.innerHTML = `
     <div class="msg-avatar ${isUser ? 'user-av' : 'ai-av'}">${avatarLabel}</div>
     <div>
       <div class="msg-bubble">${isUser ? escHtml(msg.content) : markdownToHtml(msg.content || (streaming ? '…' : ''))}</div>
       <div class="msg-time">${time}</div>
     </div>`;
-
   container.appendChild(wrap);
   scrollToBottom();
   return wrap;
@@ -344,18 +349,13 @@ window.toggleContext = function(ctx) {
   else { activeContexts.add(ctx); btn?.classList.add('active'); }
 };
 
-// ── Suggested prompt ──
 window.suggest = function(text) {
   const input = document.getElementById('ai-input');
   if (input) { input.value = text; autoResize(input); input.focus(); }
 };
 
-// ── Keyboard handler ──
 window.handleKey = function(e) {
-  if (e.key === 'Enter' && !e.shiftKey) {
-    e.preventDefault();
-    sendMessage();
-  }
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
 };
 
 window.autoResize = function(el) {
@@ -363,7 +363,6 @@ window.autoResize = function(el) {
   el.style.height = Math.min(el.scrollHeight, 160) + 'px';
 };
 
-// ── Clear & Export ──
 window.clearChat = function() {
   if (!confirm('Clear this conversation?')) return;
   messages = [];
@@ -385,15 +384,12 @@ window.exportChat = function() {
   showToast('Chat exported', 'success');
 };
 
-function authHeaders() {
-  const token = sb()?.auth?.session()?.access_token || localStorage.getItem('sb-token') || '';
-  return token ? { Authorization: `Bearer ${token}` } : {};
-}
 function escHtml(s) {
   return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>');
 }
+
 window.showToast = (msg, type='info') => {
-  const c=document.getElementById('toasts'); if(!c) return;
-  const t=document.createElement('div'); t.className=`hr-toast ${type}`; t.textContent=msg;
+  const c = document.getElementById('toasts'); if (!c) return;
+  const t = document.createElement('div'); t.className=`hr-toast ${type}`; t.textContent=msg;
   c.appendChild(t); setTimeout(()=>t.remove(),3800);
 };
