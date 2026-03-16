@@ -1,0 +1,364 @@
+/**
+ * training.js — Simpatico HR Platform
+ * Training & LMS: Supabase + Cloudflare AI + R2 + Vectorize for semantic course search
+ */
+
+const TR_CONFIG = {
+  supabaseUrl: window.SIMPATICO_CONFIG?.supabaseUrl    || 'https://YOUR_PROJECT.supabase.co',
+  supabaseKey: window.SIMPATICO_CONFIG?.supabaseAnonKey || 'YOUR_ANON_KEY',
+  workerUrl:   window.SIMPATICO_CONFIG?.workerUrl       || 'https://hr-api.YOUR_SUBDOMAIN.workers.dev',
+  r2PublicUrl: window.SIMPATICO_CONFIG?.r2PublicUrl     || 'https://files.YOUR_DOMAIN.com',
+};
+
+let _sb = null;
+function sb() {
+  if (_sb) return _sb;
+  if (window.supabase) { _sb = window.supabase.createClient(TR_CONFIG.supabaseUrl, TR_CONFIG.supabaseKey); return _sb; }
+  return null;
+}
+
+let allCourses       = [];
+let allEnrollments   = [];
+let currentTabId     = 'tab-courses';
+
+const THUMB_PALETTES = {
+  compliance:  ['#ef4444','#b91c1c'],
+  technical:   ['#0ea5e9','#0369a1'],
+  leadership:  ['#f59e0b','#b45309'],
+  soft_skills: ['#10b981','#047857'],
+  onboarding:  ['#8b5cf6','#6d28d9'],
+};
+const THUMB_ICONS = { compliance:'🛡️', technical:'💻', leadership:'🎯', soft_skills:'🤝', onboarding:'🚀' };
+
+document.addEventListener('DOMContentLoaded', async () => {
+  await Promise.all([
+    loadUser(),
+    loadCourses(),
+    loadEnrollments(),
+    loadComplianceReport(),
+  ]);
+  loadEnrollSelects();
+});
+
+async function loadUser() {
+  const client = sb(); if (!client) return;
+  const { data: { user } } = await client.auth.getUser();
+  if (user) {
+    const el = document.getElementById('user-avatar');
+    if (el) el.textContent = user.email?.slice(0,2).toUpperCase() || 'U';
+  }
+}
+
+async function loadCourses() {
+  const client = sb(); if (!client) return;
+  const { data, error } = await client
+    .from('training_courses')
+    .select('id, title, description, category, duration_hours, is_required, content_url, thumbnail_key, created_at')
+    .order('created_at', { ascending: false });
+
+  if (error) { console.error(error); return; }
+  allCourses = data || [];
+
+  setText('stat-courses', allCourses.length);
+  setText('stat-courses-sub', `${allCourses.filter(c=>c.is_required).length} compliance required`);
+
+  renderCourses(allCourses);
+}
+
+function renderCourses(list) {
+  const grid = document.getElementById('courses-grid'); if (!grid) return;
+  if (list.length === 0) {
+    grid.innerHTML = '<div class="hr-empty" style="grid-column:1/-1"><p>No courses found. Create your first course.</p></div>';
+    return;
+  }
+  grid.innerHTML = list.map(c => {
+    const pal = THUMB_PALETTES[c.category] || ['#6366f1','#4338ca'];
+    const ico = THUMB_ICONS[c.category] || '📚';
+    return `
+    <div class="course-card" onclick="openCourse('${c.id}')">
+      <div class="course-thumb" style="--thumb-a:${pal[0]};--thumb-b:${pal[1]}">
+        ${c.thumbnail_key
+          ? `<img src="${TR_CONFIG.r2PublicUrl}/${c.thumbnail_key}" style="width:100%;height:100%;object-fit:cover">`
+          : `<span class="thumb-icon">${ico}</span>`
+        }
+        <span class="thumb-badge">${formatEnum(c.category)}</span>
+      </div>
+      <div class="course-body">
+        <div class="course-title">${c.title}</div>
+        <div class="course-meta">${c.description ? c.description.slice(0,90)+'…' : 'No description'}</div>
+        ${c.is_required ? '<span class="hr-badge hr-badge-danger">Compliance Required</span>' : ''}
+      </div>
+      <div class="course-footer">
+        <div class="course-stat">⏱ <strong>${c.duration_hours || '—'}h</strong></div>
+        <div style="display:flex;gap:6px">
+          <button class="hr-btn hr-btn-ghost hr-btn-sm" onclick="event.stopPropagation();enrollCourseModal('${c.id}')">Enroll</button>
+          <button class="hr-btn hr-btn-ghost hr-btn-sm" onclick="event.stopPropagation();editCourse('${c.id}')">Edit</button>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+async function loadEnrollments() {
+  const client = sb(); if (!client) return;
+  const thirtyDaysAgo = new Date(Date.now() - 30*24*60*60*1000).toISOString();
+
+  const { data, error } = await client
+    .from('training_enrollments')
+    .select(`
+      id, status, progress, enrolled_at, completed_at, due_date,
+      employees(first_name, last_name),
+      training_courses(id, title, is_required)
+    `)
+    .order('enrolled_at', { ascending: false });
+
+  if (error) { console.error(error); return; }
+  allEnrollments = data || [];
+
+  const completions = allEnrollments.filter(e => e.status === 'completed' && new Date(e.completed_at) >= new Date(thirtyDaysAgo)).length;
+  const learners    = new Set(allEnrollments.map(e => e.employees?.id)).size;
+  setText('stat-completions', completions);
+  setText('stat-learners', learners);
+
+  renderEnrollmentsTable(allEnrollments);
+}
+
+function renderEnrollmentsTable(list) {
+  const tbody = document.getElementById('enrollments-tbody'); if (!tbody) return;
+  tbody.innerHTML = list.slice(0, 50).map(e => {
+    const emp    = e.employees;
+    const course = e.training_courses;
+    const name   = emp ? `${emp.first_name} ${emp.last_name}` : '—';
+    const pct    = e.progress || (e.status === 'completed' ? 100 : 0);
+    const badge  = e.status === 'completed'
+      ? '<span class="hr-badge hr-badge-active">Completed</span>'
+      : e.status === 'in_progress'
+      ? '<span class="hr-badge hr-badge-info">In Progress</span>'
+      : '<span class="hr-badge hr-badge-pending">Enrolled</span>';
+    return `<tr>
+      <td><span class="primary-text">${name}</span></td>
+      <td>${course?.title || '—'}</td>
+      <td>${e.enrolled_at ? new Date(e.enrolled_at).toLocaleDateString() : '—'}</td>
+      <td>
+        <div style="display:flex;align-items:center;gap:10px">
+          <div class="hr-progress-bar" style="width:80px"><div class="hr-progress-fill" style="width:${pct}%"></div></div>
+          <span style="font-size:12px;color:var(--hr-text-muted)">${pct}%</span>
+        </div>
+      </td>
+      <td>${badge}</td>
+    </tr>`;
+  }).join('');
+}
+
+async function loadComplianceReport() {
+  const client = sb(); if (!client) return;
+  const today = new Date().toISOString().slice(0,10);
+  const soon  = new Date(Date.now() + 30*24*60*60*1000).toISOString().slice(0,10);
+
+  const { data, error } = await client
+    .from('training_enrollments')
+    .select(`
+      id, due_date, status,
+      employees(first_name, last_name),
+      training_courses(title, is_required)
+    `)
+    .eq('training_courses.is_required', true)
+    .or(`due_date.lte.${soon},status.eq.overdue`)
+    .order('due_date');
+
+  if (error) { console.error(error); return; }
+  const compliance = (data || []).filter(e => e.training_courses?.is_required);
+  setText('stat-compliance', compliance.filter(e => e.status !== 'completed').length);
+
+  const tbody = document.getElementById('compliance-tbody'); if (!tbody) return;
+  if (compliance.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--hr-text-muted);padding:40px">No compliance issues</td></tr>';
+    return;
+  }
+  tbody.innerHTML = compliance.map(e => {
+    const emp  = e.employees;
+    const name = emp ? `${emp.first_name} ${emp.last_name}` : '—';
+    const due  = e.due_date ? new Date(e.due_date) : null;
+    const isOverdue = due && due < new Date() && e.status !== 'completed';
+    const badge = e.status === 'completed'
+      ? '<span class="hr-badge hr-badge-active">Done</span>'
+      : isOverdue
+      ? '<span class="hr-badge hr-badge-danger">Overdue</span>'
+      : '<span class="hr-badge hr-badge-pending">Pending</span>';
+    return `<tr>
+      <td><span class="primary-text">${name}</span></td>
+      <td>${e.training_courses?.title || '—'}</td>
+      <td style="${isOverdue?'color:var(--hr-danger)':''}">${due ? due.toLocaleDateString() : '—'}</td>
+      <td>${badge}</td>
+      <td><button class="hr-btn hr-btn-ghost hr-btn-sm" onclick="sendReminder('${e.id}')">Send Reminder</button></td>
+    </tr>`;
+  }).join('');
+}
+
+function filterCourses() {
+  const q    = (document.getElementById('course-search')?.value || '').toLowerCase();
+  const cat  = document.getElementById('category-filter')?.value || '';
+  const list = allCourses.filter(c =>
+    (!q || c.title.toLowerCase().includes(q) || (c.description||'').toLowerCase().includes(q)) &&
+    (!cat || c.category === cat)
+  );
+  renderCourses(list);
+}
+
+// ── Create Course ──
+window.openCreateCourseModal = () => openModal('create-course-modal');
+
+window.saveCourse = async function() {
+  const title = document.getElementById('course-title')?.value.trim();
+  if (!title) { showToast('Course title required', 'error'); return; }
+
+  const payload = {
+    title,
+    description:    document.getElementById('course-desc')?.value.trim() || null,
+    category:       document.getElementById('course-category')?.value,
+    duration_hours: parseFloat(document.getElementById('course-duration')?.value) || null,
+    content_url:    document.getElementById('course-url')?.value.trim() || null,
+    is_required:    document.getElementById('course-required')?.checked || false,
+  };
+
+  try {
+    const res = await fetch(`${TR_CONFIG.workerUrl}/training/courses`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify(payload),
+    });
+    const result = await res.json();
+    if (!res.ok) throw new Error(result.error || 'Failed to create course');
+    showToast('Course created!', 'success');
+    closeModal('create-course-modal');
+    await loadCourses();
+  } catch (err) { showToast(err.message, 'error'); }
+};
+
+// ── AI Course Generation via Cloudflare AI ──
+window.generateCourseWithAI = async function() {
+  const title = document.getElementById('course-title')?.value.trim();
+  if (!title) { showToast('Enter a course title first', 'error'); return; }
+  showToast('Generating course with AI…', 'info');
+
+  try {
+    const res = await fetch(`${TR_CONFIG.workerUrl}/ai/generate-course`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify({ title }),
+    });
+    const { description, duration_hours } = await res.json();
+    const descEl = document.getElementById('course-desc');
+    const durEl  = document.getElementById('course-duration');
+    if (descEl && description) descEl.value = description;
+    if (durEl && duration_hours) durEl.value = duration_hours;
+    showToast('AI generated course details', 'success');
+  } catch { showToast('AI generation failed', 'error'); }
+};
+
+// ── Semantic course search via Cloudflare Vectorize ──
+window.semanticSearch = async function(query) {
+  try {
+    const res = await fetch(`${TR_CONFIG.workerUrl}/training/semantic-search`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify({ query }),
+    });
+    const { courses } = await res.json();
+    renderCourses(courses || []);
+  } catch { filterCourses(); }
+};
+
+// ── Enroll ──
+function loadEnrollSelects() {
+  const coursesSel = document.getElementById('enroll-course');
+  if (coursesSel) {
+    allCourses.forEach(c => {
+      const opt = document.createElement('option');
+      opt.value = c.id; opt.textContent = c.title;
+      coursesSel.appendChild(opt);
+    });
+  }
+  // Employees
+  const empSel = document.getElementById('enroll-employees');
+  if (empSel && sb()) {
+    sb().from('employees').select('id,first_name,last_name').eq('status','active').order('first_name')
+      .then(({ data }) => {
+        (data||[]).forEach(e => {
+          const opt = document.createElement('option');
+          opt.value = e.id; opt.textContent = `${e.first_name} ${e.last_name}`;
+          empSel.appendChild(opt);
+        });
+      });
+  }
+}
+
+window.openEnrollModal = () => openModal('enroll-modal');
+window.enrollCourseModal = (courseId) => {
+  const sel = document.getElementById('enroll-course');
+  if (sel) sel.value = courseId;
+  openModal('enroll-modal');
+};
+
+window.enrollEmployees = async function() {
+  const courseId   = document.getElementById('enroll-course')?.value;
+  const sel        = document.getElementById('enroll-employees');
+  const empIds     = sel ? Array.from(sel.selectedOptions).map(o => o.value) : [];
+  const due        = document.getElementById('enroll-due')?.value || null;
+
+  if (!courseId) { showToast('Select a course', 'error'); return; }
+  if (empIds.length === 0) { showToast('Select at least one employee', 'error'); return; }
+
+  try {
+    const res = await fetch(`${TR_CONFIG.workerUrl}/training/enroll`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify({ course_id: courseId, employee_ids: empIds, due_date: due }),
+    });
+    if (!res.ok) throw new Error('Enrollment failed');
+    showToast(`${empIds.length} employee(s) enrolled`, 'success');
+    closeModal('enroll-modal');
+    await loadEnrollments();
+  } catch (err) { showToast(err.message, 'error'); }
+};
+
+window.sendReminder = async function(enrollmentId) {
+  try {
+    await fetch(`${TR_CONFIG.workerUrl}/training/remind/${enrollmentId}`, {
+      method: 'POST', headers: authHeaders(),
+    });
+    showToast('Reminder sent', 'success');
+  } catch { showToast('Failed to send reminder', 'error'); }
+};
+
+window.openCourse = function(id) {
+  location.href = `course-viewer.html?id=${id}`;
+};
+window.editCourse = function(id) {
+  showToast('Edit course — coming soon', 'info');
+};
+
+// ── Tab switching ──
+window.switchTab = function(btn, tabId) {
+  document.querySelectorAll('.hr-tab').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  ['tab-courses','tab-paths','tab-compliance','tab-enrollments'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.style.display = id === tabId ? 'block' : 'none';
+  });
+  currentTabId = tabId;
+};
+
+function authHeaders() {
+  const token = sb()?.auth?.session()?.access_token || localStorage.getItem('sb-token') || '';
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+function formatEnum(s) { return (s||'').replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase()); }
+function setText(id, v) { const el = document.getElementById(id); if (el) el.textContent = v; }
+window.openModal  = id => document.getElementById(id)?.classList.add('open');
+window.closeModal = id => document.getElementById(id)?.classList.remove('open');
+window.showToast = (msg, type='info') => {
+  const c = document.getElementById('toasts'); if (!c) return;
+  const t = document.createElement('div'); t.className = `hr-toast ${type}`; t.textContent = msg;
+  c.appendChild(t); setTimeout(() => t.remove(), 3800);
+};
