@@ -22,7 +22,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 });
 
 async function loadUser() {
-  const client = sb(); if (!client) return;
+  const client = window.SimpaticoDB; if (!client) return;
   try {
     const { data: { user } } = await client.auth.getUser();
     if (user) {
@@ -35,7 +35,7 @@ async function loadUser() {
 
 async function authHeaders() {
   try {
-    const client = sb(); if (!client) return {};
+    const client = window.SimpaticoDB; if (!client) return {};
     const { data } = await client.auth.getSession();
     const token = data?.session?.access_token || localStorage.getItem('simpatico_token') || '';
     return token ? { Authorization: `Bearer ${token}` } : {};
@@ -163,7 +163,7 @@ window.sendMessage = async function() {
 };
 
 async function buildHRContext() {
-  const client = sb(); if (!client) return defaultSystemPrompt();
+  const client = window.SimpaticoDB; if (!client) return defaultSystemPrompt();
   const contextParts = [];
   try {
     if (activeContexts.has('employees')) {
@@ -293,3 +293,4 @@ window.showToast = (msg, type='info') => {
   const t = document.createElement('div'); t.className = `hr-toast ${type}`; t.textContent = msg;
   c.appendChild(t); setTimeout(() => t.remove(), 3800);
 };
+

@@ -1,5 +1,5 @@
-﻿/**
- * onboarding.js — Simpatico HR Platform
+/**
+ * onboarding.js � Simpatico HR Platform
  * Onboarding module: Supabase + Cloudflare Workers + AI task suggestions
  */
 
@@ -32,7 +32,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 });
 
 async function loadUser() {
-  const client = sb(); if (!client) return;
+  const client = window.SimpaticoDB; if (!client) return;
   const { data: { user } } = await client.auth.getUser();
   if (user) {
     const el = document.getElementById('user-avatar');
@@ -41,7 +41,7 @@ async function loadUser() {
 }
 
 async function loadEmployeeSelects() {
-  const client = sb(); if (!client) return;
+  const client = window.SimpaticoDB; if (!client) return;
   const { data } = await client
     .from('employees')
     .select('id, first_name, last_name')
@@ -60,7 +60,7 @@ async function loadEmployeeSelects() {
 }
 
 async function loadTemplates() {
-  const client = sb(); if (!client) return;
+  const client = window.SimpaticoDB; if (!client) return;
   const { data } = await client
     .from('onboarding_templates')
     .select('id, name')
@@ -75,7 +75,7 @@ async function loadTemplates() {
 }
 
 async function loadOnboarding() {
-  const client = sb(); if (!client) return;
+  const client = window.SimpaticoDB; if (!client) return;
   const { data, error } = await client
     .from('onboarding_records')
     .select(`
@@ -134,10 +134,10 @@ function renderOnboardCard(r) {
     <div class="hr-emp-avatar" style="background:${color};color:#fff;width:38px;height:38px;font-size:13px">${initials}</div>
     <div class="emp-info">
       <h4>${name}</h4>
-      <div class="sub">${role}${dept ? ` · ${dept}` : ''}</div>
+      <div class="sub">${role}${dept ? ` � ${dept}` : ''}</div>
       <div style="margin-top:8px">
         <div class="hr-progress-bar"><div class="hr-progress-fill" style="width:${pct}%"></div></div>
-        <div style="font-size:11px;color:var(--hr-text-muted);margin-top:4px">${done}/${tasks.length} tasks${overdue ? ` · <span style="color:var(--hr-warning)">${overdue} overdue</span>` : ''}</div>
+        <div style="font-size:11px;color:var(--hr-text-muted);margin-top:4px">${done}/${tasks.length} tasks${overdue ? ` � <span style="color:var(--hr-warning)">${overdue} overdue</span>` : ''}</div>
       </div>
     </div>
     <div class="progress-col">
@@ -158,7 +158,7 @@ window.startOnboarding = async function() {
 
   if (!empId) { showToast('Please select an employee', 'error'); return; }
 
-  showToast('Starting onboarding…', 'info');
+  showToast('Starting onboarding�', 'info');
   try {
     const res = await fetch(`${OB_CONFIG.workerUrl}/onboarding/start`, {
       method: 'POST',
@@ -183,7 +183,7 @@ window.startOnboarding = async function() {
 window.openStartModal    = () => openModal('start-modal');
 window.openTemplateModal = () => showToast('Template manager coming soon', 'info');
 
-// ── AI-generated checklist suggestions via Cloudflare AI ──
+// -- AI-generated checklist suggestions via Cloudflare AI --
 window.generateAIChecklist = async function(role, department) {
   try {
     const res = await fetch(`${OB_CONFIG.workerUrl}/ai/onboarding-checklist`, {
@@ -197,7 +197,7 @@ window.generateAIChecklist = async function(role, department) {
 };
 
 function authHeaders() {
-  const token = sb()?.auth?.session()?.access_token || localStorage.getItem('sb-token') || '';
+  const token = (await window.SimpaticoDB.auth.getSession())?.data?.session?.access_token || localStorage.getItem('sb-token') || '';
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 function avatarColor(id) {
@@ -215,5 +215,6 @@ window.showToast  = (msg, type='info') => {
   t.textContent = msg; c.appendChild(t);
   setTimeout(() => t.remove(), 3800);
 };
+
 
 

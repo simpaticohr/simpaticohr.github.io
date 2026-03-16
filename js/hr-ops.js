@@ -1,5 +1,5 @@
-﻿/**
- * hr-ops.js — Simpatico HR Platform
+/**
+ * hr-ops.js � Simpatico HR Platform
  * Leave management, policies (R2), HR tickets, org chart
  */
 
@@ -25,7 +25,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 });
 
 async function loadUser() {
-  const client = sb(); if (!client) return;
+  const client = window.SimpaticoDB; if (!client) return;
   const { data: { user } } = await client.auth.getUser();
   if (user) {
     const el = document.getElementById('user-avatar');
@@ -34,7 +34,7 @@ async function loadUser() {
 }
 
 async function loadEmployeeSelect() {
-  const client = sb(); if (!client) return;
+  const client = window.SimpaticoDB; if (!client) return;
   const { data } = await client.from('employees').select('id,first_name,last_name').eq('status','active').order('first_name');
   const sel = document.getElementById('leave-employee'); if (!sel) return;
   (data||[]).forEach(e => {
@@ -44,9 +44,9 @@ async function loadEmployeeSelect() {
   });
 }
 
-// ── Leave ──
+// -- Leave --
 async function loadLeave() {
-  const client = sb(); if (!client) return;
+  const client = window.SimpaticoDB; if (!client) return;
   const today = new Date().toISOString().slice(0,10);
   const thirtyDaysAgo = new Date(Date.now()-30*24*60*60*1000).toISOString().slice(0,10);
 
@@ -80,7 +80,7 @@ function renderLeaveTable(list) {
   }
   tbody.innerHTML = list.map(l => {
     const emp  = l.employees;
-    const name = emp ? `${emp.first_name} ${emp.last_name}` : '—';
+    const name = emp ? `${emp.first_name} ${emp.last_name}` : '�';
     const type = l.type?.replace('_',' ');
     const badgeClass = { pending:'hr-badge-pending', approved:'hr-badge-active', rejected:'hr-badge-danger' }[l.status] || 'hr-badge-inactive';
     const actions = l.status === 'pending'
@@ -90,10 +90,10 @@ function renderLeaveTable(list) {
     return `<tr>
       <td><span class="primary-text">${name}</span></td>
       <td>${type}</td>
-      <td>${l.from_date || '—'}</td>
-      <td>${l.to_date || '—'}</td>
-      <td>${l.days || '—'}</td>
-      <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${l.reason || '—'}</td>
+      <td>${l.from_date || '�'}</td>
+      <td>${l.to_date || '�'}</td>
+      <td>${l.days || '�'}</td>
+      <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${l.reason || '�'}</td>
       <td><span class="hr-badge ${badgeClass}">${l.status}</span></td>
       <td>${actions}</td>
     </tr>`;
@@ -146,9 +146,9 @@ window.submitLeaveRequest = async function() {
   } catch (err) { showToast(err.message, 'error'); }
 };
 
-// ── Policies ──
+// -- Policies --
 async function loadPolicies() {
-  const client = sb(); if (!client) return;
+  const client = window.SimpaticoDB; if (!client) return;
   const { data } = await client
     .from('hr_policies')
     .select('id, name, category, version, file_key, updated_at')
@@ -173,7 +173,7 @@ async function loadPolicies() {
         </div>
         <div style="flex:1">
           <div style="font-weight:600;font-size:14px">${p.name}</div>
-          <div style="font-size:12px;color:var(--hr-text-muted);margin-top:3px">v${p.version} · Updated ${updated}</div>
+          <div style="font-size:12px;color:var(--hr-text-muted);margin-top:3px">v${p.version} � Updated ${updated}</div>
           <span class="hr-chip" style="margin-top:8px">${p.category || 'General'}</span>
         </div>
       </div>
@@ -196,7 +196,7 @@ window.uploadPolicy = async function() {
     const file = e.target.files[0]; if (!file) return;
     const name = prompt('Policy name:', file.name.replace(/\.[^.]+$/,''));
     if (!name) return;
-    showToast('Uploading policy…', 'info');
+    showToast('Uploading policy�', 'info');
     const formData = new FormData();
     formData.append('file', file);
     formData.append('name', name);
@@ -212,9 +212,9 @@ window.uploadPolicy = async function() {
   input.click();
 };
 
-// ── HR Tickets ──
+// -- HR Tickets --
 async function loadTickets() {
-  const client = sb(); if (!client) return;
+  const client = window.SimpaticoDB; if (!client) return;
   const { data, error } = await client
     .from('hr_tickets')
     .select(`
@@ -243,8 +243,8 @@ function renderTickets(list) {
     const sBadge = { open:'hr-badge-info', in_progress:'hr-badge-pending', resolved:'hr-badge-active', closed:'hr-badge-inactive' }[t.status] || 'hr-badge-inactive';
     return `<tr>
       <td><span class="primary-text hr-font-mono">${t.ticket_number || t.id.slice(0,8).toUpperCase()}</span></td>
-      <td>${emp ? `${emp.first_name} ${emp.last_name}` : '—'}</td>
-      <td>${t.category || '—'}</td>
+      <td>${emp ? `${emp.first_name} ${emp.last_name}` : '�'}</td>
+      <td>${t.category || '�'}</td>
       <td>${t.subject}</td>
       <td><span class="hr-badge ${pBadge}">${t.priority}</span></td>
       <td><span class="hr-badge ${sBadge}">${t.status?.replace('_',' ')}</span></td>
@@ -253,11 +253,11 @@ function renderTickets(list) {
   }).join('');
 }
 
-window.openTicketModal = () => showToast('New ticket modal — coming soon', 'info');
+window.openTicketModal = () => showToast('New ticket modal � coming soon', 'info');
 
-// ── Org Chart (simple tree) ──
+// -- Org Chart (simple tree) --
 window.loadOrgChart = async function() {
-  const client = sb(); if (!client) return;
+  const client = window.SimpaticoDB; if (!client) return;
   const { data } = await client
     .from('employees')
     .select('id, first_name, last_name, job_title, manager_id, departments(name)')
@@ -315,7 +315,7 @@ function hexToRgb(hex) {
   return `${r},${g},${b}`;
 }
 function authHeaders() {
-  const token = sb()?.auth?.session()?.access_token || localStorage.getItem('sb-token') || '';
+  const token = (await window.SimpaticoDB.auth.getSession())?.data?.session?.access_token || localStorage.getItem('sb-token') || '';
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 function avatarColor(id) {
@@ -331,5 +331,6 @@ window.showToast  = (msg,type='info') => {
   const t=document.createElement('div'); t.className=`hr-toast ${type}`; t.textContent=msg;
   c.appendChild(t); setTimeout(()=>t.remove(),3800);
 };
+
 
 

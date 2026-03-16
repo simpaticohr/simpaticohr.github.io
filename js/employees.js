@@ -69,7 +69,7 @@ function renderEmployees() {
   if (currentView === 'grid') {
     container.innerHTML = filteredEmployees.map(function(emp) {
       return '<div class="emp-card" onclick="viewEmployee(\'' + emp.id + '\')">' +
-        '<div class="emp-avatar">' + ((emp.full_name || '?')[0].toUpperCase()) + '</div>' +
+        '<div class="emp-avatar">' + (((emp.first_name||'?'))[0].toUpperCase()) + '</div>' +
         '<div class="emp-name">' + ((emp.first_name||'') + ' ' + (emp.last_name||'')).trim() || '-' + '</div>' +
         '<div class="emp-role">' + (emp.job_title || '-') + '</div>' +
         '<div class="emp-dept">' + (emp.department || '-') + '</div>' +
@@ -112,7 +112,7 @@ function updateStats() {
 function searchEmployees(q) {
   q = q.toLowerCase();
   filteredEmployees = allEmployees.filter(function(e) {
-    return (e.full_name || '').toLowerCase().indexOf(q) !== -1 ||
+    return ((e.first_name||'') + ' ' + (e.last_name||'')).toLowerCase().indexOf(q) !== -1 ||
            (e.email || '').toLowerCase().indexOf(q) !== -1 ||
            (e.job_title || '').toLowerCase().indexOf(q) !== -1;
   });
@@ -211,6 +211,7 @@ function exportEmployees() {
 
 function openAddModal() { editingId = null; var modal = document.getElementById('add-modal'); if (modal) { modal.style.display = 'flex'; modal.style.opacity = '1'; modal.style.pointerEvents = 'all'; } }
 function closeModal(id) { var modal = document.getElementById(id || 'add-modal'); if (modal) modal.style.display = 'none'; }
+
 
 
 
