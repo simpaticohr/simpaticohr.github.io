@@ -37,8 +37,8 @@ document.addEventListener('DOMContentLoaded', function() {
 async function loadEmployees() {
   var companyId = await getCompanyId();
   var query = window.SimpaticoDB.from('employees').select('*').order('created_at', { ascending: false });
-  if (companyId) query = query.eq('company_id', companyId);
-  var res = await query;
+  if (companyId) { query = query.eq('company_id', companyId); } else { console.warn('No company ID - loading all employees'); }
+  var res = await window.SimpaticoDB.from('employees').select('*').order('created_at', { ascending: false });
   if (res.error) { console.error('Load employees:', res.error); return; }
   allEmployees = res.data || [];
   filteredEmployees = allEmployees.slice();
@@ -49,8 +49,8 @@ async function loadEmployees() {
 async function loadDepartments() {
   var companyId = await getCompanyId();
   var query = window.SimpaticoDB.from('employees').select('department');
-  if (companyId) query = query.eq('company_id', companyId);
-  var res = await query;
+  if (companyId) { query = query.eq('company_id', companyId); } else { console.warn('No company ID - loading all employees'); }
+  var res = await window.SimpaticoDB.from('employees').select('*').order('created_at', { ascending: false });
   var depts = [];
   (res.data || []).forEach(function(e) {
     if (e.department && depts.indexOf(e.department) === -1) depts.push(e.department);
@@ -208,3 +208,4 @@ function exportEmployees() {
   a.download = 'employees.csv';
   a.click();
 }
+
