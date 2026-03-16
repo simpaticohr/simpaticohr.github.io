@@ -1,350 +1,210 @@
-﻿/**
- * employees.js — Simpatico HR Platform
- * Uses window.SimpaticoDB (shared Supabase client)
- */
+// employees.js - Simpatico HR Platform
+// Uses window.SimpaticoDB (shared Supabase client)
 
-function window.SimpaticoDB { return window.SimpaticoDB || window.supabaseClient || null; }
+var allEmployees = [];
+var filteredEmployees = [];
+var currentView = 'list';
+var editingId = null;
 
-async function authHeaders() {
+async function getCompanyId() {
   try {
-    const client = window.SimpaticoDB; if (!client) return {};
-    const { data } = await client.auth.getSession();
-    const token = data?.session?.access_token || localStorage.getItem('simpatico_token') || '';
-    return token ? { Authorization: 'Bearer ' + token } : {};
-  } catch {
-    const token = localStorage.getItem('simpatico_token') || '';
-    return token ? { Authorization: 'Bearer ' + token } : {};
+    var res = await window.SimpaticoDB.auth.getSession();
+    var session = res.data && res.data.session;
+    if (!session) return null;
+    var result = await window.SimpaticoDB
+      .from('companies')
+      .select('id')
+      .eq('user_id', session.user.id)
+      .single();
+    return result.data ? result.data.id : null;
+  } catch(e) {
+    console.warn('getCompanyId error:', e);
+    return null;
   }
 }
 
-// ── State ──
-let allEmployees = [];
-let filteredEmployees = [];
-let currentView = 'list';
-let editingId = null;
-
-// ── Init ──
-document.addEventListener('DOMContentLoaded', () => {
-  const wait = setInterval(() => {
+document.addEventListener('DOMContentLoaded', function() {
+  var wait = setInterval(function() {
     if (window.SimpaticoDB) {
       clearInterval(wait);
       loadEmployees();
       loadDepartments();
     }
   }, 100);
-  setTimeout(() => clearInterval(wait), 5000);
+  setTimeout(function() { clearInterval(wait); }, 5000);
 });
 
-// ── Load Employees ──
 async function loadEmployees() {
-  const client = window.SimpaticoDB; if (!client) return;
-  try {
-    const { data, error } = await client.from('employees').select('*').order('created_at', { ascending: false });
-    if (error) throw error;
-    allEmployees = data || [];
-    filteredEmployees = [...allEmployees];
-    renderStats();
-    renderEmployees();
-  } catch (e) {
-    showToast('Failed to load employees: ' + e.message, 'error');
-  }
+  var companyId = await getCompanyId();
+  var query = window.SimpaticoDB.from('employees').select('*').order('created_at', { ascending: false });
+  if (companyId) query = query.eq('company_id', companyId);
+  var res = await query;
+  if (res.error) { console.error('Load employees:', res.error); return; }
+  allEmployees = res.data || [];
+  filteredEmployees = allEmployees.slice();
+  renderEmployees();
+  updateStats();
 }
 
-// ── Load Departments ──
 async function loadDepartments() {
-  const client = window.SimpaticoDB; if (!client) return;
-  try {
-    const { data } = await client.from('departments').select('*').order('name');
-    const depts = data || [];
-    // Populate department dropdowns
-    ['emp-dept', 'filter-dept'].forEach(id => {
-      const el = document.getElementById(id);
-      if (!el) return;
-      const placeholder = el.options[0];
-      el.innerHTML = '';
-      el.appendChild(placeholder);
-      depts.forEach(d => {
-        const opt = document.createElement('option');
-        opt.value = d.id; opt.textContent = d.name;
-        el.appendChild(opt);
-      });
-    });
-    // Manager dropdown
-    const mgr = document.getElementById('emp-manager');
-    if (mgr && allEmployees.length) {
-      mgr.innerHTML = '<option value="">No manager</option>';
-      allEmployees.forEach(e => {
-        const opt = document.createElement('option');
-        opt.value = e.id;
-        opt.textContent = e.first_name + ' ' + e.last_name;
-        mgr.appendChild(opt);
-      });
-    }
-  } catch (e) {
-    console.warn('loadDepartments:', e.message);
-  }
+  var companyId = await getCompanyId();
+  var query = window.SimpaticoDB.from('employees').select('department');
+  if (companyId) query = query.eq('company_id', companyId);
+  var res = await query;
+  var depts = [];
+  (res.data || []).forEach(function(e) {
+    if (e.department && depts.indexOf(e.department) === -1) depts.push(e.department);
+  });
+  var select = document.getElementById('dept-filter');
+  if (!select) return;
+  select.innerHTML = '<option value="">All Departments</option>' +
+    depts.map(function(d) { return '<option value="' + d + '">' + d + '</option>'; }).join('');
 }
 
-// ── Render Stats ──
-function renderStats() {
-  const total  = allEmployees.length;
-  const active = allEmployees.filter(e => e.status === 'active').length;
-  const onLeave = allEmployees.filter(e => e.status === 'on_leave').length;
-  const depts  = new Set(allEmployees.map(e => e.department_id).filter(Boolean)).size;
-
-  setText('stat-total',    total);
-  setText('stat-active',   active);
-  setText('stat-on-leave', onLeave);
-  setText('stat-depts',    depts);
-}
-
-function setText(id, val) {
-  const el = document.getElementById(id); if (el) el.textContent = val;
-}
-
-// ── Render Employees ──
 function renderEmployees() {
-  const container = document.getElementById('employees-container');
+  var container = document.getElementById('employee-list');
   if (!container) return;
-
   if (!filteredEmployees.length) {
-    container.innerHTML = `<div style="text-align:center;padding:60px;color:var(--hr-text-muted)">
-      <div style="font-size:48px;margin-bottom:16px">👥</div>
-      <div style="font-size:16px;font-weight:600">No employees found</div>
-      <div style="font-size:13px;margin-top:8px">Add your first employee to get started</div>
-    </div>`;
+    container.innerHTML = '<div style="text-align:center;padding:40px;color:var(--hr-text-muted)">No employees found. Click Add Employee to get started.</div>';
     return;
   }
-
   if (currentView === 'grid') {
-    container.innerHTML = `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:16px;padding:16px">
-      ${filteredEmployees.map(e => employeeCard(e)).join('')}
-    </div>`;
+    container.innerHTML = filteredEmployees.map(function(emp) {
+      return '<div class="emp-card" onclick="viewEmployee(\'' + emp.id + '\')">' +
+        '<div class="emp-avatar">' + ((emp.full_name || '?')[0].toUpperCase()) + '</div>' +
+        '<div class="emp-name">' + (emp.full_name || '-') + '</div>' +
+        '<div class="emp-role">' + (emp.job_title || '-') + '</div>' +
+        '<div class="emp-dept">' + (emp.department || '-') + '</div>' +
+        '<span class="emp-status status-' + (emp.status || 'active') + '">' + (emp.status || 'active') + '</span>' +
+        '<div class="emp-actions">' +
+        '<button class="hr-btn hr-btn-ghost hr-btn-sm" onclick="event.stopPropagation();editEmployee(\'' + emp.id + '\')">Edit</button>' +
+        '<button class="hr-btn hr-btn-ghost hr-btn-sm" onclick="event.stopPropagation();deleteEmployee(\'' + emp.id + '\')">Delete</button>' +
+        '</div></div>';
+    }).join('');
   } else {
-    container.innerHTML = `<table class="hr-table" style="width:100%">
-      <thead><tr>
-        <th>Employee</th><th>Job Title</th><th>Department</th>
-        <th>Type</th><th>Status</th><th>Actions</th>
-      </tr></thead>
-      <tbody>${filteredEmployees.map(e => employeeRow(e)).join('')}</tbody>
-    </table>`;
+    var rows = filteredEmployees.map(function(emp) {
+      return '<tr>' +
+        '<td><strong>' + (emp.full_name || '-') + '</strong></td>' +
+        '<td>' + (emp.job_title || '-') + '</td>' +
+        '<td>' + (emp.department || '-') + '</td>' +
+        '<td>' + (emp.email || '-') + '</td>' +
+        '<td><span class="emp-status status-' + (emp.status || 'active') + '">' + (emp.status || 'active') + '</span></td>' +
+        '<td>' +
+        '<button class="hr-btn hr-btn-ghost hr-btn-sm" onclick="editEmployee(\'' + emp.id + '\')">Edit</button> ' +
+        '<button class="hr-btn hr-btn-ghost hr-btn-sm" onclick="deleteEmployee(\'' + emp.id + '\')">Delete</button>' +
+        '</td></tr>';
+    }).join('');
+    container.innerHTML = '<table class="hr-table"><thead><tr><th>Name</th><th>Title</th><th>Department</th><th>Email</th><th>Status</th><th>Actions</th></tr></thead><tbody>' + rows + '</tbody></table>';
   }
 }
 
-function employeeCard(e) {
-  const initials = (e.first_name?.[0] || '') + (e.last_name?.[0] || '');
-  const statusColor = e.status === 'active' ? 'var(--hr-success)' : e.status === 'on_leave' ? 'var(--hr-warning)' : 'var(--hr-danger)';
-  return `<div class="hr-card" style="padding:20px;cursor:pointer" onclick="viewEmployee('${e.id}')">
-    <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
-      <div style="width:44px;height:44px;border-radius:50%;background:var(--hr-primary-dim);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:15px;color:var(--hr-primary)">${initials}</div>
-      <div>
-        <div style="font-weight:600">${e.first_name} ${e.last_name}</div>
-        <div style="font-size:12px;color:var(--hr-text-muted)">${e.employee_id || ''}</div>
-      </div>
-    </div>
-    <div style="font-size:13px;color:var(--hr-text-secondary);margin-bottom:4px">${e.job_title || '—'}</div>
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:12px">
-      <span style="font-size:11px;padding:3px 8px;border-radius:20px;background:${statusColor}22;color:${statusColor};border:1px solid ${statusColor}44">${e.status}</span>
-      <div style="display:flex;gap:6px">
-        <button class="hr-btn hr-btn-ghost hr-btn-sm" onclick="event.stopPropagation();editEmployee('${e.id}')">Edit</button>
-      </div>
-    </div>
-  </div>`;
+function updateStats() {
+  var total = allEmployees.length;
+  var active = allEmployees.filter(function(e) { return e.status === 'active'; }).length;
+  var onLeave = allEmployees.filter(function(e) { return e.status === 'on_leave'; }).length;
+  var depts = [];
+  allEmployees.forEach(function(e) { if (e.department && depts.indexOf(e.department) === -1) depts.push(e.department); });
+  var setEl = function(id, val) { var el = document.getElementById(id); if (el) el.textContent = val; };
+  setEl('total-employees', total);
+  setEl('active-employees', active);
+  setEl('on-leave-count', onLeave);
+  setEl('dept-count', depts.length);
 }
 
-function employeeRow(e) {
-  const initials = (e.first_name?.[0] || '') + (e.last_name?.[0] || '');
-  const statusColor = e.status === 'active' ? 'var(--hr-success)' : e.status === 'on_leave' ? 'var(--hr-warning)' : 'var(--hr-danger)';
-  return `<tr>
-    <td>
-      <div style="display:flex;align-items:center;gap:10px">
-        <div style="width:36px;height:36px;border-radius:50%;background:var(--hr-primary-dim);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;color:var(--hr-primary)">${initials}</div>
-        <div>
-          <div style="font-weight:600">${e.first_name} ${e.last_name}</div>
-          <div style="font-size:12px;color:var(--hr-text-muted)">${e.email}</div>
-        </div>
-      </div>
-    </td>
-    <td>${e.job_title || '—'}</td>
-    <td>${e.department_id || '—'}</td>
-    <td><span style="font-size:12px">${e.employment_type || '—'}</span></td>
-    <td><span style="font-size:11px;padding:3px 8px;border-radius:20px;background:${statusColor}22;color:${statusColor};border:1px solid ${statusColor}44">${e.status}</span></td>
-    <td>
-      <div style="display:flex;gap:4px">
-        <button class="hr-btn hr-btn-ghost hr-btn-sm" onclick="viewEmployee('${e.id}')">View</button>
-        <button class="hr-btn hr-btn-ghost hr-btn-sm" onclick="editEmployee('${e.id}')">Edit</button>
-        <button class="hr-btn hr-btn-ghost hr-btn-sm" style="color:var(--hr-danger)" onclick="deleteEmployee('${e.id}')">Delete</button>
-      </div>
-    </td>
-  </tr>`;
-}
-
-// ── Search & Filter ──
-window.searchEmployees = function() {
-  const q = (document.getElementById('search-employees')?.value || '').toLowerCase();
-  applyFilters(q);
-};
-
-window.filterByDept = function() {
-  applyFilters();
-};
-
-window.filterByStatus = function() {
-  applyFilters();
-};
-
-function applyFilters(searchQ) {
-  const q      = searchQ ?? (document.getElementById('search-employees')?.value || '').toLowerCase();
-  const dept   = document.getElementById('filter-dept')?.value || '';
-  const status = document.getElementById('filter-status')?.value || '';
-
-  filteredEmployees = allEmployees.filter(e => {
-    const name = (e.first_name + ' ' + e.last_name + ' ' + (e.email||'') + ' ' + (e.job_title||'')).toLowerCase();
-    if (q && !name.includes(q)) return false;
-    if (dept && e.department_id !== dept) return false;
-    if (status && e.status !== status) return false;
-    return true;
+function searchEmployees(q) {
+  q = q.toLowerCase();
+  filteredEmployees = allEmployees.filter(function(e) {
+    return (e.full_name || '').toLowerCase().indexOf(q) !== -1 ||
+           (e.email || '').toLowerCase().indexOf(q) !== -1 ||
+           (e.job_title || '').toLowerCase().indexOf(q) !== -1;
   });
   renderEmployees();
 }
 
-// ── View Toggle ──
-window.setView = function(view) {
-  currentView = view;
-  document.getElementById('btn-grid')?.classList.toggle('active', view === 'grid');
-  document.getElementById('btn-list')?.classList.toggle('active', view === 'list');
+function filterByDept(dept) {
+  filteredEmployees = dept ? allEmployees.filter(function(e) { return e.department === dept; }) : allEmployees.slice();
   renderEmployees();
-};
-
-// ── Modal ──
-window.openAddModal = function() {
-  editingId = null;
-  document.getElementById('modal-title').textContent = 'Add New Employee';
-  document.getElementById('emp-form')?.reset();
-  document.getElementById('emp-modal').classList.add('active');
-  loadDepartments();
-};
-
-window.closeEmpModal = function() {
-  document.getElementById('emp-modal')?.classList.remove('active');
-};
-
-window.editEmployee = function(id) {
-  const emp = allEmployees.find(e => e.id === id);
-  if (!emp) return;
-  editingId = id;
-  document.getElementById('modal-title').textContent = 'Edit Employee';
-
-  setValue('emp-first', emp.first_name);
-  setValue('emp-last',  emp.last_name);
-  setValue('emp-email', emp.email);
-  setValue('emp-phone', emp.phone);
-  setValue('emp-title', emp.job_title);
-  setValue('emp-dept',  emp.department_id);
-  setValue('emp-type',  emp.employment_type);
-  setValue('emp-status', emp.status);
-  setValue('emp-start', emp.start_date);
-  setValue('emp-location', emp.location);
-  setValue('emp-salary', emp.salary);
-  setValue('emp-manager', emp.manager_id);
-
-  document.getElementById('emp-modal').classList.add('active');
-};
-
-function setValue(id, val) {
-  const el = document.getElementById(id);
-  if (el && val !== null && val !== undefined) el.value = val;
 }
 
-window.saveEmployee = async function() {
-  const client = window.SimpaticoDB; if (!client) return;
+function filterByStatus(status) {
+  filteredEmployees = status ? allEmployees.filter(function(e) { return e.status === status; }) : allEmployees.slice();
+  renderEmployees();
+}
 
-  const firstName = document.getElementById('emp-first')?.value.trim();
-  const lastName  = document.getElementById('emp-last')?.value.trim();
-  const email     = document.getElementById('emp-email')?.value.trim();
+function toggleView(view) {
+  currentView = view;
+  renderEmployees();
+}
 
-  if (!firstName || !lastName || !email) {
-    showToast('First name, last name and email are required', 'error');
-    return;
+function openAddModal() {
+  editingId = null;
+  var title = document.getElementById('modal-title');
+  if (title) title.textContent = 'Add Employee';
+  var form = document.getElementById('emp-form');
+  if (form) form.reset();
+  var modal = document.getElementById('employee-modal');
+  if (modal) modal.style.display = 'flex';
+}
+
+function editEmployee(id) {
+  var emp = null;
+  for (var i = 0; i < allEmployees.length; i++) {
+    if (allEmployees[i].id === id) { emp = allEmployees[i]; break; }
   }
+  if (!emp) return;
+  editingId = id;
+  var title = document.getElementById('modal-title');
+  if (title) title.textContent = 'Edit Employee';
+  var fields = ['full_name','email','phone','job_title','department','status','hire_date','salary'];
+  fields.forEach(function(f) {
+    var el = document.getElementById('emp-' + f.replace(/_/g, '-'));
+    if (el) el.value = emp[f] || '';
+  });
+  var modal = document.getElementById('employee-modal');
+  if (modal) modal.style.display = 'flex';
+}
 
-  const data = {
-    first_name:       firstName,
-    last_name:        lastName,
-    email,
-    phone:            document.getElementById('emp-phone')?.value.trim() || null,
-    job_title:        document.getElementById('emp-title')?.value.trim() || null,
-    department_id:    document.getElementById('emp-dept')?.value || null,
-    employment_type:  document.getElementById('emp-type')?.value || 'full_time',
-    status:           document.getElementById('emp-status')?.value || 'active',
-    start_date:       document.getElementById('emp-start')?.value || null,
-    location:         document.getElementById('emp-location')?.value.trim() || null,
-    salary:           parseFloat(document.getElementById('emp-salary')?.value) || null,
-    manager_id:       document.getElementById('emp-manager')?.value || null,
-    updated_at:       new Date().toISOString(),
-  };
+function closeModal() {
+  var modal = document.getElementById('employee-modal');
+  if (modal) modal.style.display = 'none';
+}
 
-  try {
-    if (editingId) {
-      const { error } = await client.from('employees').update(data).eq('id', editingId);
-      if (error) throw error;
-      showToast('Employee updated!', 'success');
-    } else {
-      // Generate employee ID
-      data.employee_id = 'EMP-' + String(Date.now()).slice(-5);
-      data.created_at = new Date().toISOString();
-      const { error } = await client.from('employees').insert(data);
-      if (error) throw error;
-      showToast('Employee added!', 'success');
-    }
-    closeEmpModal();
-    loadEmployees();
-  } catch (e) {
-    showToast('Error: ' + e.message, 'error');
+async function saveEmployee() {
+  var companyId = await getCompanyId();
+  var fields = ['full_name','email','phone','job_title','department','status','hire_date','salary'];
+  var data = { company_id: companyId };
+  fields.forEach(function(f) {
+    var el = document.getElementById('emp-' + f.replace(/_/g, '-'));
+    if (el) data[f] = el.value || null;
+  });
+  var res;
+  if (editingId) {
+    res = await window.SimpaticoDB.from('employees').update(data).eq('id', editingId);
+  } else {
+    res = await window.SimpaticoDB.from('employees').insert(data);
   }
-};
+  if (res.error) { alert('Error: ' + res.error.message); return; }
+  closeModal();
+  loadEmployees();
+}
 
-window.deleteEmployee = async function(id) {
+async function deleteEmployee(id) {
   if (!confirm('Delete this employee?')) return;
-  const client = window.SimpaticoDB; if (!client) return;
-  try {
-    const { error } = await client.from('employees').delete().eq('id', id);
-    if (error) throw error;
-    showToast('Employee deleted', 'success');
-    loadEmployees();
-  } catch (e) {
-    showToast('Error: ' + e.message, 'error');
-  }
-};
+  await window.SimpaticoDB.from('employees').delete().eq('id', id);
+  loadEmployees();
+}
 
-window.viewEmployee = function(id) {
-  window.location.href = `employee-profile.html?id=${id}`;
-};
+function viewEmployee(id) {
+  window.location.href = 'employee-profile.html?id=' + id;
+}
 
-// ── Export ──
-window.exportEmployees = function() {
-  if (!allEmployees.length) { showToast('No employees to export', 'info'); return; }
-  const headers = ['ID', 'First Name', 'Last Name', 'Email', 'Job Title', 'Status', 'Employment Type', 'Start Date'];
-  const rows = allEmployees.map(e => [
-    e.employee_id, e.first_name, e.last_name, e.email,
-    e.job_title, e.status, e.employment_type, e.start_date
-  ].map(v => `"${v || ''}"`).join(','));
-  const csv = [headers.join(','), ...rows].join('\n');
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
-  a.download = `employees-${new Date().toISOString().slice(0,10)}.csv`;
+function exportEmployees() {
+  var csv = ['Name,Email,Title,Department,Status,Hire Date'];
+  filteredEmployees.forEach(function(e) {
+    csv.push('"' + (e.full_name||'') + '","' + (e.email||'') + '","' + (e.job_title||'') + '","' + (e.department||'') + '","' + (e.status||'') + '","' + (e.hire_date||'') + '"');
+  });
+  var a = document.createElement('a');
+  a.href = 'data:text/csv,' + encodeURIComponent(csv.join('\n'));
+  a.download = 'employees.csv';
   a.click();
-  showToast('Exported!', 'success');
-};
-
-// ── Toast ──
-window.showToast = function(msg, type = 'info') {
-  const c = document.getElementById('toasts'); if (!c) return;
-  const t = document.createElement('div');
-  t.className = `hr-toast ${type}`; t.textContent = msg;
-  c.appendChild(t); setTimeout(() => t.remove(), 3800);
-};
-
-
-
-
+}
