@@ -60,7 +60,7 @@ async function loadDepartments() {
 }
 
 function renderEmployees() {
-  var container = document.getElementById('employee-list');
+  var container = document.getElementById('employees-table'); var loadingEl = document.getElementById('table-loading'); if (loadingEl) loadingEl.style.display = 'none'; if (container) container.style.display = 'table';
   if (!container) return;
   if (!filteredEmployees.length) {
     container.innerHTML = '<div style="text-align:center;padding:40px;color:var(--hr-text-muted)">No employees found. Click Add Employee to get started.</div>';
@@ -211,6 +211,7 @@ function exportEmployees() {
 
 function openAddModal() { editingId = null; var modal = document.getElementById('add-modal'); if (modal) { modal.style.display = 'flex'; modal.style.opacity = '1'; modal.style.pointerEvents = 'all'; } }
 function closeModal(id) { var modal = document.getElementById(id || 'add-modal'); if (modal) modal.style.display = 'none'; }
+
 
 
 
