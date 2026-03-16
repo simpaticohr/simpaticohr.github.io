@@ -153,7 +153,7 @@ function editEmployee(id) {
   editingId = id;
   var title = document.getElementById('modal-title');
   if (title) title.textContent = 'Edit Employee';
-  var fields = ['full_name','email','phone','job_title','department','status','hire_date','salary'];
+  var fields = ['email','phone','job_title','department','status','hire_date','salary','location','employment_type']; data['first_name'] = (document.getElementById('emp-first')||{}).value||''; data['last_name'] = (document.getElementById('emp-last')||{}).value||'';
   fields.forEach(function(f) {
     var el = document.getElementById('emp-' + f.replace(/_/g, '-'));
     if (el) el.value = emp[f] || '';
@@ -169,7 +169,7 @@ function closeModal() {
 
 async function saveEmployee() {
   var companyId = await getCompanyId();
-  var fields = ['full_name','email','phone','job_title','department','status','hire_date','salary'];
+  var fields = ['email','phone','job_title','department','status','hire_date','salary','location','employment_type']; data['first_name'] = (document.getElementById('emp-first')||{}).value||''; data['last_name'] = (document.getElementById('emp-last')||{}).value||'';
   var data = { company_id: companyId };
   fields.forEach(function(f) {
     var el = document.getElementById('emp-' + f.replace(/_/g, '-'));
