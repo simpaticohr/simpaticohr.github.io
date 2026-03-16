@@ -324,13 +324,14 @@ function avatarColor(id) {
   return c[Math.abs(h)%c.length];
 }
 function setText(id,v) { const el=document.getElementById(id); if(el) el.textContent=v; }
-window.openModal  = id => document.getElementById(id)?.classList.add('open');
+window.openModal = id => { var m = document.getElementById(id); if(m){ m.classList.add('open'); m.style.display='flex'; m.style.opacity='1'; m.style.pointerEvents='all'; } };
 window.closeModal = id => document.getElementById(id)?.classList.remove('open');
 window.showToast  = (msg,type='info') => {
   const c=document.getElementById('toasts'); if(!c) return;
   const t=document.createElement('div'); t.className=`hr-toast ${type}`; t.textContent=msg;
   c.appendChild(t); setTimeout(()=>t.remove(),3800);
 };
+
 
 
 
