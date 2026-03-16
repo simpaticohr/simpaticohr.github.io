@@ -108,7 +108,7 @@ window.filterLeave = () => {
 window.approveLeave = async (id) => updateLeaveStatus(id, 'approved');
 window.rejectLeave  = async (id) => updateLeaveStatus(id, 'rejected');
 
-async function updateLeaveStatus(id, status) { try { const { error } = await window.SimpaticoDB.from('leave_requests').update({ status }).eq('id', id); if (error) throw error; showToast('Leave ' + status, 'success'); await loadLeave(); } catch (err) { showToast(err.message, 'error'); } } catch (err) { showToast(err.message, 'error'); }
+async function updateLeaveStatus(id, status) { try { const { error } = await window.SimpaticoDB.from('leave_requests').update({ status }).eq('id', id); if (error) throw error; showToast('Leave ' + status, 'success'); await loadLeave(); } catch (err) { showToast(err.message, 'error'); }
 }
 
 window.openLeaveRequestModal = () => openModal('leave-modal');
@@ -319,6 +319,7 @@ window.showToast  = (msg,type='info') => {
   const t=document.createElement('div'); t.className=`hr-toast ${type}`; t.textContent=msg;
   c.appendChild(t); setTimeout(()=>t.remove(),3800);
 };
+
 
 
 
