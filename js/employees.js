@@ -585,7 +585,7 @@ function populateManagerSelect() {
 
 // ── Helpers ──
 function authHeaders() {
-  const token = sb()?.auth?.session()?.access_token || localStorage.getItem('sb-token') || '';
+  const token = (await sb()?.auth?.getSession())?.data?.session?.access_token || localStorage.getItem('sb-token') || '';
   return token ? { 'Authorization': `Bearer ${token}` } : {};
 }
 function statusBadge(s) {
@@ -621,6 +621,7 @@ window.showToast = function(msg, type='info') {
   c.appendChild(t);
   setTimeout(() => t.remove(), 3800);
 };
+
 
 
 
