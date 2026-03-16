@@ -1,5 +1,5 @@
 /**
- * hr-ops.js — Simpatico HR Platform
+ * hr-ops.js ï¿½ Simpatico HR Platform
  * Leave management, policies (R2), HR tickets, org chart
  */
 
@@ -54,8 +54,7 @@ async function loadLeave() {
     .from('leave_requests')
     .select(`
       id, type, from_date, to_date, days, reason, status, created_at,
-      employees(first_name, last_name),
-      approver:employees!approver_id(first_name, last_name)
+      employees(first_name, last_name)
     `)
     .order('created_at', { ascending: false });
 
@@ -80,7 +79,7 @@ function renderLeaveTable(list) {
   }
   tbody.innerHTML = list.map(l => {
     const emp  = l.employees;
-    const name = emp ? `${emp.first_name} ${emp.last_name}` : '—';
+    const name = emp ? `${emp.first_name} ${emp.last_name}` : 'ï¿½';
     const type = l.type?.replace('_',' ');
     const badgeClass = { pending:'hr-badge-pending', approved:'hr-badge-active', rejected:'hr-badge-danger' }[l.status] || 'hr-badge-inactive';
     const actions = l.status === 'pending'
@@ -90,10 +89,10 @@ function renderLeaveTable(list) {
     return `<tr>
       <td><span class="primary-text">${name}</span></td>
       <td>${type}</td>
-      <td>${l.from_date || '—'}</td>
-      <td>${l.to_date || '—'}</td>
-      <td>${l.days || '—'}</td>
-      <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${l.reason || '—'}</td>
+      <td>${l.from_date || 'ï¿½'}</td>
+      <td>${l.to_date || 'ï¿½'}</td>
+      <td>${l.days || 'ï¿½'}</td>
+      <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${l.reason || 'ï¿½'}</td>
       <td><span class="hr-badge ${badgeClass}">${l.status}</span></td>
       <td>${actions}</td>
     </tr>`;
@@ -109,15 +108,7 @@ window.filterLeave = () => {
 window.approveLeave = async (id) => updateLeaveStatus(id, 'approved');
 window.rejectLeave  = async (id) => updateLeaveStatus(id, 'rejected');
 
-async function updateLeaveStatus(id, status) {
-  try {
-    const res = await fetch(`${OPS_CONFIG.workerUrl}/leave/${id}/${status}`, {
-      method: 'PATCH', headers: { 'Content-Type': 'application/json', ...authHeaders() },
-    });
-    if (!res.ok) throw new Error('Failed to update leave');
-    showToast(`Leave ${status}`, 'success');
-    await loadLeave();
-  } catch (err) { showToast(err.message, 'error'); }
+async function updateLeaveStatus(id, status) { try { const { error } = await window.SimpaticoDB.from('leave_requests').update({ status }).eq('id', id); if (error) throw error; showToast('Leave ' + status, 'success'); await loadLeave(); } catch (err) { showToast(err.message, 'error'); } } catch (err) { showToast(err.message, 'error'); }
 }
 
 window.openLeaveRequestModal = () => openModal('leave-modal');
@@ -134,12 +125,15 @@ window.submitLeaveRequest = async function() {
   const days = Math.round((new Date(to) - new Date(from)) / (1000*60*60*24)) + 1;
 
   try {
-    const res = await fetch(`${OPS_CONFIG.workerUrl}/leave`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...authHeaders() },
-      body: JSON.stringify({ employee_id: empId, type, from_date: from, to_date: to, days, reason }),
-    });
-    if (!res.ok) throw new Error('Failed to submit request');
+    const { error: leaveErr } = await window.SimpaticoDB.from('leave_requests').insert({ employee_id: empId, type, from_date: from, to_date: to, days, reason, status: 'pending' });
+    if (leaveErr) throw leaveErr;
+```
+
+Save with **Ctrl+S** then push:
+```
+git add .
+git commit -m "Fix leave direct Supabase"
+git push
     showToast('Leave request submitted', 'success');
     closeModal('leave-modal');
     await loadLeave();
@@ -173,7 +167,7 @@ async function loadPolicies() {
         </div>
         <div style="flex:1">
           <div style="font-weight:600;font-size:14px">${p.name}</div>
-          <div style="font-size:12px;color:var(--hr-text-muted);margin-top:3px">v${p.version} · Updated ${updated}</div>
+          <div style="font-size:12px;color:var(--hr-text-muted);margin-top:3px">v${p.version} ï¿½ Updated ${updated}</div>
           <span class="hr-chip" style="margin-top:8px">${p.category || 'General'}</span>
         </div>
       </div>
@@ -196,7 +190,7 @@ window.uploadPolicy = async function() {
     const file = e.target.files[0]; if (!file) return;
     const name = prompt('Policy name:', file.name.replace(/\.[^.]+$/,''));
     if (!name) return;
-    showToast('Uploading policy…', 'info');
+    showToast('Uploading policyï¿½', 'info');
     const formData = new FormData();
     formData.append('file', file);
     formData.append('name', name);
@@ -243,8 +237,8 @@ function renderTickets(list) {
     const sBadge = { open:'hr-badge-info', in_progress:'hr-badge-pending', resolved:'hr-badge-active', closed:'hr-badge-inactive' }[t.status] || 'hr-badge-inactive';
     return `<tr>
       <td><span class="primary-text hr-font-mono">${t.ticket_number || t.id.slice(0,8).toUpperCase()}</span></td>
-      <td>${emp ? `${emp.first_name} ${emp.last_name}` : '—'}</td>
-      <td>${t.category || '—'}</td>
+      <td>${emp ? `${emp.first_name} ${emp.last_name}` : 'ï¿½'}</td>
+      <td>${t.category || 'ï¿½'}</td>
       <td>${t.subject}</td>
       <td><span class="hr-badge ${pBadge}">${t.priority}</span></td>
       <td><span class="hr-badge ${sBadge}">${t.status?.replace('_',' ')}</span></td>
@@ -253,7 +247,7 @@ function renderTickets(list) {
   }).join('');
 }
 
-window.openTicketModal = () => showToast('New ticket modal — coming soon', 'info');
+window.openTicketModal = () => showToast('New ticket modal ï¿½ coming soon', 'info');
 
 // -- Org Chart (simple tree) --
 window.loadOrgChart = async function() {
@@ -331,6 +325,8 @@ window.showToast  = (msg,type='info') => {
   const t=document.createElement('div'); t.className=`hr-toast ${type}`; t.textContent=msg;
   c.appendChild(t); setTimeout(()=>t.remove(),3800);
 };
+
+
 
 
 
