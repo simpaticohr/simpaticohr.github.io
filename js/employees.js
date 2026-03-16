@@ -140,7 +140,7 @@ function openAddModal() {
   if (title) title.textContent = 'Add Employee';
   var form = document.getElementById('emp-form');
   if (form) form.reset();
-  var modal = document.getElementById('employee-modal');
+  var modal = document.getElementById('add-modal');
   if (modal) modal.style.display = 'flex';
 }
 
@@ -158,12 +158,12 @@ function editEmployee(id) {
     var el = document.getElementById('emp-' + f.replace(/_/g, '-'));
     if (el) el.value = emp[f] || '';
   });
-  var modal = document.getElementById('employee-modal');
+  var modal = document.getElementById('add-modal');
   if (modal) modal.style.display = 'flex';
 }
 
 function closeModal() {
-  var modal = document.getElementById('employee-modal');
+  var modal = document.getElementById('add-modal');
   if (modal) modal.style.display = 'none';
 }
 
@@ -206,4 +206,5 @@ function exportEmployees() {
   a.download = 'employees.csv';
   a.click();
 }
+
 
