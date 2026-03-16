@@ -36,8 +36,6 @@ document.addEventListener('DOMContentLoaded', function() {
 
 async function loadEmployees() {
   var companyId = await getCompanyId();
-  var query = window.SimpaticoDB.from('employees').select('*').order('created_at', { ascending: false });
-  if (companyId) { query = query.eq('company_id', companyId); } else { console.warn('No company ID - loading all employees'); }
   var res = await window.SimpaticoDB.from('employees').select('*').order('created_at', { ascending: false });
   if (res.error) { console.error('Load employees:', res.error); return; }
   allEmployees = res.data || [];
