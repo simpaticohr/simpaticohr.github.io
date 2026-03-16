@@ -1,4 +1,4 @@
-/**
+﻿/**
  * training.js — Simpatico HR Platform
  * Training & LMS: Supabase + Cloudflare AI + R2 + Vectorize for semantic course search
  */
@@ -362,3 +362,4 @@ window.showToast = (msg, type='info') => {
   const t = document.createElement('div'); t.className = `hr-toast ${type}`; t.textContent = msg;
   c.appendChild(t); setTimeout(() => t.remove(), 3800);
 };
+

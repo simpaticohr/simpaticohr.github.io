@@ -1,4 +1,4 @@
-/**
+﻿/**
  * employees.js — Simpatico HR Platform
  * Employees module: Supabase + Cloudflare Workers + R2
  */
@@ -621,3 +621,5 @@ window.showToast = function(msg, type='info') {
   c.appendChild(t);
   setTimeout(() => t.remove(), 3800);
 };
+
+

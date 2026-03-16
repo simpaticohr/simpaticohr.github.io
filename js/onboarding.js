@@ -1,4 +1,4 @@
-/**
+﻿/**
  * onboarding.js — Simpatico HR Platform
  * Onboarding module: Supabase + Cloudflare Workers + AI task suggestions
  */
@@ -215,3 +215,4 @@ window.showToast  = (msg, type='info') => {
   t.textContent = msg; c.appendChild(t);
   setTimeout(() => t.remove(), 3800);
 };
+

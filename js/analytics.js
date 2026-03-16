@@ -1,4 +1,4 @@
-/**
+﻿/**
  * analytics.js — Simpatico HR Platform
  * Analytics: Supabase aggregations + Cloudflare Workers analytics API + Chart.js
  */
@@ -325,3 +325,4 @@ window.showToast = (msg, type='info') => {
   const t=document.createElement('div'); t.className=`hr-toast ${type}`; t.textContent=msg;
   c.appendChild(t); setTimeout(()=>t.remove(),3800);
 };
+

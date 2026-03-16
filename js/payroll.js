@@ -1,4 +1,4 @@
-/**
+﻿/**
  * payroll.js — Simpatico HR Platform
  * Payroll processing: Supabase + Cloudflare Workers (computation) + R2 (payslip PDFs)
  */
@@ -371,3 +371,4 @@ window.showToast  = (msg, type='info') => {
   const t=document.createElement('div'); t.className=`hr-toast ${type}`; t.textContent=msg;
   c.appendChild(t); setTimeout(()=>t.remove(),3800);
 };
+

@@ -1,4 +1,4 @@
-/**
+﻿/**
  * hr-ops.js — Simpatico HR Platform
  * Leave management, policies (R2), HR tickets, org chart
  */
@@ -331,3 +331,4 @@ window.showToast  = (msg,type='info') => {
   const t=document.createElement('div'); t.className=`hr-toast ${type}`; t.textContent=msg;
   c.appendChild(t); setTimeout(()=>t.remove(),3800);
 };
+
