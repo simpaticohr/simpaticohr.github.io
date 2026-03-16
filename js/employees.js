@@ -584,9 +584,17 @@ function populateManagerSelect() {
 }
 
 // ── Helpers ──
-function authHeaders() {
-  const token = (await sb()?.auth?.getSession())?.data?.session?.access_token || localStorage.getItem('sb-token') || '';
-  return token ? { 'Authorization': `Bearer ${token}` } : {};
+async function authHeaders() {
+  try {
+    const client = window.SimpaticoDB; if (!client) return {};
+    const { data } = await client.auth.getSession();
+    const token = data?.session?.access_token || localStorage.getItem("simpatico_token") || "";
+    return token ? { Authorization: "Bearer " + token } : {};
+  } catch {
+    const token = localStorage.getItem("simpatico_token") || "";
+    return token ? { Authorization: "Bearer " + token } : {};
+  }
+}` } : {};
 }
 function statusBadge(s) {
   const map = { active:'hr-badge-active', on_leave:'hr-badge-pending', terminated:'hr-badge-inactive' };
@@ -621,6 +629,7 @@ window.showToast = function(msg, type='info') {
   c.appendChild(t);
   setTimeout(() => t.remove(), 3800);
 };
+
 
 
 
