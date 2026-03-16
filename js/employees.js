@@ -3,11 +3,11 @@
  * Uses window.SimpaticoDB (shared Supabase client)
  */
 
-function db() { return window.SimpaticoDB || window.supabaseClient || null; }
+function window.SimpaticoDB { return window.SimpaticoDB || window.supabaseClient || null; }
 
 async function authHeaders() {
   try {
-    const client = db(); if (!client) return {};
+    const client = window.SimpaticoDB; if (!client) return {};
     const { data } = await client.auth.getSession();
     const token = data?.session?.access_token || localStorage.getItem('simpatico_token') || '';
     return token ? { Authorization: 'Bearer ' + token } : {};
@@ -37,7 +37,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // ── Load Employees ──
 async function loadEmployees() {
-  const client = db(); if (!client) return;
+  const client = window.SimpaticoDB; if (!client) return;
   try {
     const { data, error } = await client.from('employees').select('*').order('created_at', { ascending: false });
     if (error) throw error;
@@ -52,7 +52,7 @@ async function loadEmployees() {
 
 // ── Load Departments ──
 async function loadDepartments() {
-  const client = db(); if (!client) return;
+  const client = window.SimpaticoDB; if (!client) return;
   try {
     const { data } = await client.from('departments').select('*').order('name');
     const depts = data || [];
@@ -257,7 +257,7 @@ function setValue(id, val) {
 }
 
 window.saveEmployee = async function() {
-  const client = db(); if (!client) return;
+  const client = window.SimpaticoDB; if (!client) return;
 
   const firstName = document.getElementById('emp-first')?.value.trim();
   const lastName  = document.getElementById('emp-last')?.value.trim();
@@ -306,7 +306,7 @@ window.saveEmployee = async function() {
 
 window.deleteEmployee = async function(id) {
   if (!confirm('Delete this employee?')) return;
-  const client = db(); if (!client) return;
+  const client = window.SimpaticoDB; if (!client) return;
   try {
     const { error } = await client.from('employees').delete().eq('id', id);
     if (error) throw error;
@@ -344,6 +344,7 @@ window.showToast = function(msg, type = 'info') {
   t.className = `hr-toast ${type}`; t.textContent = msg;
   c.appendChild(t); setTimeout(() => t.remove(), 3800);
 };
+
 
 
 
