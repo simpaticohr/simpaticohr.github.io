@@ -6,7 +6,7 @@
 const AN_CONFIG = {
   supabaseUrl: window.SIMPATICO_CONFIG?.supabaseUrl    || 'https://YOUR_PROJECT.supabase.co',
   supabaseKey: window.SIMPATICO_CONFIG?.supabaseAnonKey || 'YOUR_ANON_KEY',
-  workerUrl:   window.SIMPATICO_CONFIG?.workerUrl       || 'https://hr-api.YOUR_SUBDOMAIN.workers.dev',
+  workerUrl:   window.SIMPATICO_CONFIG?.workerUrl       || 'https://evalis-ai.simpaticohrconsultancy.workers.dev',
 };
 
 let _sb = null;
@@ -325,6 +325,7 @@ window.showToast = (msg, type='info') => {
   const t=document.createElement('div'); t.className=`hr-toast ${type}`; t.textContent=msg;
   c.appendChild(t); setTimeout(()=>t.remove(),3800);
 };
+
 
 
 
