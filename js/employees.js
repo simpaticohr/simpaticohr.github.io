@@ -208,3 +208,6 @@ function exportEmployees() {
 }
 
 
+
+function openAddModal() { editingId = null; var modal = document.getElementById('add-modal'); if (modal) modal.style.display = 'flex'; }
+function closeModal(id) { var modal = document.getElementById(id || 'add-modal'); if (modal) modal.style.display = 'none'; }
