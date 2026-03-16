@@ -141,7 +141,7 @@ function openAddModal() {
   var form = document.getElementById('emp-form');
   if (form) form.reset();
   var modal = document.getElementById('add-modal');
-  if (modal) modal.style.display = 'flex';
+  if (modal) { modal.style.display = 'flex'; modal.style.opacity = '1'; modal.style.pointerEvents = 'all'; }
 }
 
 function editEmployee(id) {
@@ -159,7 +159,7 @@ function editEmployee(id) {
     if (el) el.value = emp[f] || '';
   });
   var modal = document.getElementById('add-modal');
-  if (modal) modal.style.display = 'flex';
+  if (modal) { modal.style.display = 'flex'; modal.style.opacity = '1'; modal.style.pointerEvents = 'all'; }
 }
 
 function closeModal() {
@@ -209,5 +209,6 @@ function exportEmployees() {
 
 
 
-function openAddModal() { editingId = null; var modal = document.getElementById('add-modal'); if (modal) modal.style.display = 'flex'; }
+function openAddModal() { editingId = null; var modal = document.getElementById('add-modal'); if (modal) { modal.style.display = 'flex'; modal.style.opacity = '1'; modal.style.pointerEvents = 'all'; } }
 function closeModal(id) { var modal = document.getElementById(id || 'add-modal'); if (modal) modal.style.display = 'none'; }
+
