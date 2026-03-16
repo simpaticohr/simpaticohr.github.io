@@ -1,9 +1,9 @@
-/**
+﻿/**
  * employees.js — Simpatico HR Platform
  * Uses window.SimpaticoDB (shared Supabase client)
  */
 
-function db() { return window.SimpaticoDB || null; }
+function db() { return window.SimpaticoDB || window.supabaseClient || null; }
 
 async function authHeaders() {
   try {
@@ -25,8 +25,14 @@ let editingId = null;
 
 // ── Init ──
 document.addEventListener('DOMContentLoaded', () => {
-  loadEmployees();
-  loadDepartments();
+  const wait = setInterval(() => {
+    if (window.SimpaticoDB) {
+      clearInterval(wait);
+      loadEmployees();
+      loadDepartments();
+    }
+  }, 100);
+  setTimeout(() => clearInterval(wait), 5000);
 });
 
 // ── Load Employees ──
@@ -338,3 +344,6 @@ window.showToast = function(msg, type = 'info') {
   t.className = `hr-toast ${type}`; t.textContent = msg;
   c.appendChild(t); setTimeout(() => t.remove(), 3800);
 };
+
+
+
