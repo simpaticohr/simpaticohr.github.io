@@ -127,13 +127,7 @@ window.submitLeaveRequest = async function() {
   try {
     const { error: leaveErr } = await window.SimpaticoDB.from('leave_requests').insert({ employee_id: empId, type, from_date: from, to_date: to, days, reason, status: 'pending' });
     if (leaveErr) throw leaveErr;
-```
 
-Save with **Ctrl+S** then push:
-```
-git add .
-git commit -m "Fix leave direct Supabase"
-git push
     showToast('Leave request submitted', 'success');
     closeModal('leave-modal');
     await loadLeave();
