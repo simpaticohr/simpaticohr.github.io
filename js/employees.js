@@ -103,10 +103,10 @@ function updateStats() {
   var depts = [];
   allEmployees.forEach(function(e) { if (e.department && depts.indexOf(e.department) === -1) depts.push(e.department); });
   var setEl = function(id, val) { var el = document.getElementById(id); if (el) el.textContent = val; };
-  setEl('total-employees', total);
-  setEl('active-employees', active);
-  setEl('on-leave-count', onLeave);
-  setEl('dept-count', depts.length);
+  setEl('stat-total', total);
+  setEl('stat-active', active);
+  setEl('stat-leave', onLeave);
+  setEl('stat-depts', depts.length);
 }
 
 function searchEmployees(q) {
@@ -211,6 +211,7 @@ function exportEmployees() {
 
 function openAddModal() { editingId = null; var modal = document.getElementById('add-modal'); if (modal) { modal.style.display = 'flex'; modal.style.opacity = '1'; modal.style.pointerEvents = 'all'; } }
 function closeModal(id) { var modal = document.getElementById(id || 'add-modal'); if (modal) modal.style.display = 'none'; }
+
 
 
 
