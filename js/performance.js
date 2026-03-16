@@ -275,7 +275,7 @@ window.switchPerfTab = function(btn, tabId) {
   if (tabId === 'tab-nine-box') renderNineBox();
 };
 
-function authHeaders() {
+async function authHeaders() {
   const token = (await window.SimpaticoDB.auth.getSession())?.data?.session?.access_token || localStorage.getItem('sb-token') || '';
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
@@ -292,6 +292,7 @@ window.showToast  = (msg, type='info') => {
   const t = document.createElement('div'); t.className = `hr-toast ${type}`; t.textContent = msg;
   c.appendChild(t); setTimeout(() => t.remove(), 3800);
 };
+
 
 
 

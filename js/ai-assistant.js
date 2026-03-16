@@ -33,7 +33,7 @@ async function loadUser() {
   } catch(e) { console.warn('loadUser:', e.message); }
 }
 
-async function authHeaders() {
+async async function authHeaders() {
   try {
     const client = window.SimpaticoDB; if (!client) return {};
     const { data } = await client.auth.getSession();
@@ -293,4 +293,5 @@ window.showToast = (msg, type='info') => {
   const t = document.createElement('div'); t.className = `hr-toast ${type}`; t.textContent = msg;
   c.appendChild(t); setTimeout(() => t.remove(), 3800);
 };
+
 

@@ -196,7 +196,7 @@ window.generateAIChecklist = async function(role, department) {
   } catch { return []; }
 };
 
-function authHeaders() {
+async function authHeaders() {
   const token = (await window.SimpaticoDB.auth.getSession())?.data?.session?.access_token || localStorage.getItem('sb-token') || '';
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
@@ -215,6 +215,7 @@ window.showToast  = (msg, type='info') => {
   t.textContent = msg; c.appendChild(t);
   setTimeout(() => t.remove(), 3800);
 };
+
 
 
 
