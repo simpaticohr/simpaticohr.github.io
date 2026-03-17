@@ -592,6 +592,7 @@ function loadProctoringReports() { console.log('Proctoring not yet implemented')
 function loadAllApplications() { console.log('Loading all applications...'); }
 function loadOnboarding() { console.log('Onboarding not yet implemented'); }
 
-function api(endpoint, options = {}) { const token = localStorage.getItem('simpatico_token') || ''; return fetch(window.WORKER_URL + endpoint, { ...options, headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token, ...(options.headers||{}) } }).then(r => r.json()); }
+function api(endpoint, options = {}) { const token = localStorage.getItem('simpatico_token') || localStorage.getItem('sb_token') || ''; return fetch(window.WORKER_URL + endpoint, { ...options, headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token, ...(options.headers||{}) } }).then(r => r.json()); }
+
 
 
