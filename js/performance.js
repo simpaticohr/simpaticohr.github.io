@@ -259,7 +259,7 @@ window.filterReviews = () => {
   const cy = document.getElementById('cycle-filter')?.value || '';
   const st = document.getElementById('review-status-filter')?.value || '';
   const filtered = allReviews.filter(r => {
-    const name = `${r.employees?.first_name||''} ${r.employees?.last_name||}`.toLowerCase();
+    const name = `${r.employees?.first_name||''} ${r.employees?.last_name||''}`.toLowerCase();
     return (!q || name.includes(q)) && (!cy || r.cycle_id === cy) && (!st || r.status === st);
   });
   renderReviews(filtered);
@@ -292,6 +292,7 @@ window.showToast  = (msg, type='info') => {
   const t = document.createElement('div'); t.className = `hr-toast ${type}`; t.textContent = msg;
   c.appendChild(t); setTimeout(() => t.remove(), 3800);
 };
+
 
 
 

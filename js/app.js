@@ -591,3 +591,5 @@ function loadAutomationRules() { console.log('Automation not yet implemented'); 
 function loadProctoringReports() { console.log('Proctoring not yet implemented'); }
 function loadAllApplications() { console.log('Loading all applications...'); }
 function loadOnboarding() { console.log('Onboarding not yet implemented'); }
+
+function api(endpoint, options = {}) { return window.SimpaticoAPI ? window.SimpaticoAPI.request(endpoint, options) : fetch(window.WORKER_URL + endpoint, { ...options, headers: { 'Content-Type': 'application/json', ...(options.headers||{}) } }).then(r => r.json()); }
