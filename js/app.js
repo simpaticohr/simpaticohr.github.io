@@ -48,7 +48,7 @@ async function loadDashboardData(companyId) {
     // Active Jobs Count
     const { count: jobsCount } = await SimpaticoDB.from('jobs')
       .select('*', { count: 'exact', head: true })
-      .eq('company_id', companyId)
+      
       .eq('status', 'active');
     document.getElementById('statActiveJobs').textContent = jobsCount || 0;
     if(document.getElementById('badgeJobs')) document.getElementById('badgeJobs').textContent = jobsCount || 0;
@@ -56,7 +56,7 @@ async function loadDashboardData(companyId) {
     // Applications Count
     const { count: appsCount } = await SimpaticoDB.from('applications')
       .select('*', { count: 'exact', head: true })
-      .eq('company_id', companyId);
+      ;
     document.getElementById('statApplications').textContent = appsCount || 0;
     if(document.getElementById('badgeApplications')) document.getElementById('badgeApplications').textContent = appsCount || 0;
 
@@ -64,7 +64,7 @@ async function loadDashboardData(companyId) {
     const today = new Date().toISOString().split('T')[0];
     const { count: intCount } = await SimpaticoDB.from('interviews')
       .select('*', { count: 'exact', head: true })
-      .eq('company_id', companyId)
+      
       .gte('scheduled_at', today + 'T00:00:00')
       .lte('scheduled_at', today + 'T23:59:59');
     document.getElementById('statInterviews').textContent = intCount || 0;
@@ -73,7 +73,7 @@ async function loadDashboardData(companyId) {
     const monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString();
     const { count: hiredCount } = await SimpaticoDB.from('applications')
       .select('*', { count: 'exact', head: true })
-      .eq('company_id', companyId)
+      
       .eq('status', 'hired')
       .gte('updated_at', monthStart);
     document.getElementById('statHired').textContent = hiredCount || 0;
@@ -81,7 +81,7 @@ async function loadDashboardData(companyId) {
     // Recent Applications
     const { data: recentApps } = await SimpaticoDB.from('applications')
       .select('*, candidate:users!applications_candidate_id_fkey(full_name, email), job:jobs!applications_job_id_fkey(title)')
-      .eq('company_id', companyId)
+      
       .order('created_at', { ascending: false })
       .limit(10);
 
@@ -90,7 +90,7 @@ async function loadDashboardData(companyId) {
     // Upcoming Interviews
     const { data: upcomingInt } = await SimpaticoDB.from('interviews')
       .select('*, candidate:users!interviews_candidate_id_fkey(full_name), job:jobs!interviews_job_id_fkey(title)')
-      .eq('company_id', companyId)
+      
       .in('status', ['scheduled', 'in_progress'])
       .gte('scheduled_at', new Date().toISOString())
       .order('scheduled_at', { ascending: true })
@@ -593,6 +593,10 @@ function loadAllApplications() { console.log('Loading all applications...'); }
 function loadOnboarding() { console.log('Onboarding not yet implemented'); }
 
 function api(endpoint, options={}) { const token=localStorage.getItem('simpatico_token')||localStorage.getItem('sb_token')||''; const SB='https://cvkxtsvgnynxexmemfuy.supabase.co'; const SB_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN2a3h0c3ZnbnlueGV4bWVtZnV5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc0MjE2NTEsImV4cCI6MjA4Mjk5NzY1MX0.2mys8Cc-ucJ1uLThEGJubeDEg1TvfIAkW-xFsR4ecq4'; const map={'/client/applications':'applications','/client/jobs':'jobs','/client/stats':'applications','/client/pipeline':'applications','/client/interviews':'interviews','/client/onboarding':'onboarding_forms'}; const table=Object.entries(map).find(([k])=>endpoint.startsWith(k))?.[1]; if(table){ return fetch(SB+'/rest/v1/'+table+'?select=*&limit=100',{headers:{'apikey':SB_KEY,'Authorization':'Bearer '+token,'Content-Type':'application/json'}}).then(r=>r.json()).then(d=>({applications:d,jobs:d,interviews:d,data:d})); } return fetch(window.WORKER_URL+endpoint,{...options,headers:{'Content-Type':'application/json','Authorization':'Bearer '+token,...(options.headers||{})}}).then(r=>r.json()); }
+
+
+
+
 
 
 
