@@ -592,7 +592,8 @@ function loadProctoringReports() { console.log('Proctoring not yet implemented')
 function loadAllApplications() { console.log('Loading all applications...'); }
 function loadOnboarding() { console.log('Onboarding not yet implemented'); }
 
-function api(endpoint, options = {}) { const token = localStorage.getItem('simpatico_token') || localStorage.getItem('sb_token') || ''; return fetch(window.WORKER_URL + endpoint, { ...options, headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token, ...(options.headers||{}) } }).then(r => r.json()); }
+function api(endpoint, options={}) { const token=localStorage.getItem('simpatico_token')||localStorage.getItem('sb_token')||''; const SB='https://cvkxtsvgnynxexmemfuy.supabase.co'; const SB_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN2a3h0c3ZnbnlueGV4bWVtZnV5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc0MjE2NTEsImV4cCI6MjA4Mjk5NzY1MX0.2mys8Cc-ucJ1uLThEGJubeDEg1TvfIAkW-xFsR4ecq4'; const map={'/client/applications':'applications','/client/jobs':'jobs','/client/stats':'applications','/client/pipeline':'applications','/client/interviews':'interviews','/client/onboarding':'onboarding_forms'}; const table=Object.entries(map).find(([k])=>endpoint.startsWith(k))?.[1]; if(table){ return fetch(SB+'/rest/v1/'+table+'?select=*&limit=100',{headers:{'apikey':SB_KEY,'Authorization':'Bearer '+token,'Content-Type':'application/json'}}).then(r=>r.json()).then(d=>({applications:d,jobs:d,interviews:d,data:d})); } return fetch(window.WORKER_URL+endpoint,{...options,headers:{'Content-Type':'application/json','Authorization':'Bearer '+token,...(options.headers||{})}}).then(r=>r.json()); }
+
 
 
 
