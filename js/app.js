@@ -1,6 +1,40 @@
 // js/app.js
 // SimpaticoHR Main Application Logic
 
+const SB_URL = "https://cvkxtsvgnynxexmemfuy.supabase.co";
+const SB_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN2a3h0c3ZnbnlueGV4bWVtZnV5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc0MjE2NTEsImV4cCI6MjA4Mjk5NzY1MX0.2mys8Cc-ucJ1uLThEGJubeDEg1TvfIAkW-xFsR4ecq4";
+
+function sbHeaders() {
+  return {
+    "apikey": SB_KEY,
+    "Authorization": "Bearer " + (localStorage.getItem("simpatico_token") || SB_KEY),
+    "Content-Type": "application/json"
+  };
+}
+
+async function sbFetch(table, query) {
+  const r = await fetch(SB_URL + "/rest/v1/" + table + "?" + (query || ""), { headers: sbHeaders() });
+  return r.json();
+}
+
+async function sbInsert(table, data) {
+  const r = await fetch(SB_URL + "/rest/v1/" + table, {
+    method: "POST",
+    headers: { ...sbHeaders(), "Prefer": "return=representation" },
+    body: JSON.stringify(data)
+  });
+  return r.json();
+}
+
+async function sbUpdate(table, data, filter) {
+  const r = await fetch(SB_URL + "/rest/v1/" + table + "?" + filter, {
+    method: "PATCH",
+    headers: { ...sbHeaders(), "Prefer": "return=representation" },
+    body: JSON.stringify(data)
+  });
+  return r.json();
+}
+
 let currentCompanyId = null;
 
 // ==========================================
@@ -8,16 +42,16 @@ let currentCompanyId = null;
 // ==========================================
 function showPage(pageId) {
   document.querySelectorAll('.page-content').forEach(p => p.classList.add('hidden'));
-  const page = document.getElementById(`page-${pageId}`);
+  const page = document.getElementById('page-' + pageId);
   if (page) page.classList.remove('hidden');
 
   document.querySelectorAll('.menu-item').forEach(m => m.classList.remove('active'));
-  const menuItem = document.querySelector(`.menu-item[data-page="${pageId}"]`);
+  const menuItem = document.querySelector('.menu-item[data-page="' + pageId + '"]');
   if (menuItem) menuItem.classList.add('active');
 
-  document.getElementById('breadcrumbCurrent').textContent = pageId.replace(/-/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+  const bc = document.getElementById('breadcrumbCurrent');
+  if (bc) bc.textContent = pageId.replace(/-/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
 
-  // Load page-specific data
   switch (pageId) {
     case 'jobs': loadJobs(); break;
     case 'applications': loadAllApplications(); break;
@@ -33,184 +67,200 @@ function toggleSidebar() {
   document.getElementById('sidebar').classList.toggle('collapsed');
 }
 
-function openModal(id) { document.getElementById(id).classList.add('active'); }
-function closeModal(id) { document.getElementById(id).classList.remove('active'); }
+function openModal(id) { const el = document.getElementById(id); if (el) el.classList.add('active'); }
+function closeModal(id) { const el = document.getElementById(id); if (el) el.classList.remove('active'); }
 function openCreateJobModal() { openModal('createJobModal'); }
-function toggleNotifications() { openModal('notificationPanel'); loadNotifications(); }
+function toggleNotifications() { openModal('notificationPanel'); }
 
 // ==========================================
 // DASHBOARD DATA LOADING
 // ==========================================
-async function loadDashboardData(companyId) { const SB="https://cvkxtsvgnynxexmemfuy.supabase.co"; const KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN2a3h0c3ZnbnlueGV4bWVtZnV5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc0MjE2NTEsImV4cCI6MjA4Mjk5NzY1MX0.2mys8Cc-ucJ1uLThEGJubeDEg1TvfIAkW-xFsR4ecq4"; const hdr={"apikey":KEY,"Authorization":"Bearer "+localStorage.getItem("simpatico_token")}; const sbFetch=async(t,q)=>{const r=await fetch(SB+"/rest/v1/"+t+"?"+(q||""),{headers:hdr});return r.json();}; try{ const jobs=await sbFetch("jobs","select=id&is_active=eq.true"); document.getElementById("statActiveJobs").textContent=Array.isArray(jobs)?jobs.length:0; if(document.getElementById("badgeJobs"))document.getElementById("badgeJobs").textContent=Array.isArray(jobs)?jobs.length:0; const apps=await sbFetch("applications","select=*&order=created_at.desc&limit=100"); document.getElementById("statApplications").textContent=Array.isArray(apps)?apps.length:0; if(document.getElementById("badgeApplications"))document.getElementById("badgeApplications").textContent=Array.isArray(apps)?apps.length:0; if(document.getElementById("allApplicationsTable"))renderAllApplications(apps); if(document.getElementById("recentApplicationsTable"))renderRecentApplications(apps.slice(0,5)); const ints=await sbFetch("interviews","select=*&order=created_at.desc&limit=50"); document.getElementById("statInterviews").textContent=Array.isArray(ints)?ints.length:0; document.getElementById("statHired").textContent=Array.isArray(apps)?apps.filter(a=>a.status==="hired").length:0; if(document.getElementById("badgeInterviews"))document.getElementById("badgeInterviews").textContent=Array.isArray(ints)?ints.length:0; renderJobsTable(await sbFetch("jobs","select=*&order=created_at.desc&limit=50")); renderInterviewsTable(ints); }catch(e){console.error("[loadDashboardData]",e);} currentCompanyId=companyId;
-  const SB="https://cvkxtsvgnynxexmemfuy.supabase.co";
-  const KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN2a3h0c3ZnbnlueGV4bWVtZnV5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc0MjE2NTEsImV4cCI6MjA4Mjk5NzY1MX0.2mys8Cc-ucJ1uLThEGJubeDEg1TvfIAkW-xFsR4ecq4";
-  const hdr={"apikey":KEY,"Authorization":"Bearer "+localStorage.getItem("simpatico_token")};
-  const sbFetch=async(t,q="")=>{const r=await fetch(SB+"/rest/v1/"+t+"?"+q,{headers:hdr});return r.json();};
-  try{
-    const jobs=await sbFetch("jobs","select=id&is_active=eq.true");
-    document.getElementById("statActiveJobs").textContent=Array.isArray(jobs)?jobs.length:0;
-    if(document.getElementById("badgeJobs"))document.getElementById("badgeJobs").textContent=Array.isArray(jobs)?jobs.length:0;
-    const apps=await sbFetch("applications","select=*&order=created_at.desc&limit=100");
-    document.getElementById("statApplications").textContent=Array.isArray(apps)?apps.length:0;
-    if(document.getElementById("badgeApplications"))document.getElementById("badgeApplications").textContent=Array.isArray(apps)?apps.length:0;
-    if(document.getElementById("allApplicationsTable"))renderAllApplications(apps);
-    if(document.getElementById("recentApplicationsTable"))renderRecentApplications(apps.slice(0,5));
-    const ints=await sbFetch("interviews","select=*&order=created_at.desc&limit=50");
-    document.getElementById("statInterviews").textContent=Array.isArray(ints)?ints.length:0;
-    document.getElementById("statHired").textContent=Array.isArray(apps)?apps.filter(a=>a.status==="hired").length:0;
-    if(document.getElementById("badgeInterviews"))document.getElementById("badgeInterviews").textContent=Array.isArray(ints)?ints.length:0;
-    renderJobsTable(await sbFetch("jobs","select=*&order=created_at.desc&limit=50"));
-    renderInterviewsTable(ints);
-  }catch(e){console.error("[loadDashboardData]",e);}
-  //OLDBODY
-  const SB="https://cvkxtsvgnynxexmemfuy.supabase.co";
-  const KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN2a3h0c3ZnbnlueGV4bWVtZnV5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc0MjE2NTEsImV4cCI6MjA4Mjk5NzY1MX0.2mys8Cc-ucJ1uLThEGJubeDEg1TvfIAkW-xFsR4ecq4";
-  const hdr={"apikey":KEY,"Authorization":"Bearer "+localStorage.getItem("simpatico_token")};
-  const sbFetch=async(t,q="")=>{const r=await fetch(SB+"/rest/v1/"+t+"?"+q,{headers:hdr});return r.json();};
-  try{
-    const jobs=await sbFetch("jobs","select=id&is_active=eq.true");
-    document.getElementById("statActiveJobs").textContent=Array.isArray(jobs)?jobs.length:0;
-    if(document.getElementById("badgeJobs"))document.getElementById("badgeJobs").textContent=Array.isArray(jobs)?jobs.length:0;
-    const apps=await sbFetch("applications","select=*&order=created_at.desc&limit=100");
-    document.getElementById("statApplications").textContent=Array.isArray(apps)?apps.length:0;
-    if(document.getElementById("badgeApplications"))document.getElementById("badgeApplications").textContent=Array.isArray(apps)?apps.length:0;
-    if(document.getElementById("allApplicationsTable"))renderAllApplications(apps);
-    if(document.getElementById("recentApplicationsTable"))renderRecentApplications(apps.slice(0,5));
-    const ints=await sbFetch("interviews","select=*&order=created_at.desc&limit=50");
-    document.getElementById("statInterviews").textContent=Array.isArray(ints)?ints.length:0;
-    document.getElementById("statHired").textContent=Array.isArray(apps)?apps.filter(a=>a.status==="hired").length:0;
-    if(document.getElementById("badgeInterviews"))document.getElementById("badgeInterviews").textContent=Array.isArray(ints)?ints.length:0;
-    renderJobsTable(await sbFetch("jobs","select=*&order=created_at.desc&limit=50"));
-    renderInterviewsTable(ints);
-  }catch(e){console.error("[loadDashboardData]",e);}
-  //OLDBODY
+async function loadDashboardData(companyId) {
   currentCompanyId = companyId;
-
   try {
-    // Active Jobs Count
-    const { count: jobsCount } = await SimpaticoDB.from('jobs')
-      .select('*', { count: 'exact', head: true })
-      
-      .eq('status', 'active');
-    document.getElementById('statActiveJobs').textContent = jobsCount || 0;
-    if(document.getElementById('badgeJobs')) document.getElementById('badgeJobs').textContent = jobsCount || 0;
+    const [jobs, apps, ints] = await Promise.all([
+      sbFetch("jobs", "select=*&order=created_at.desc&limit=50"),
+      sbFetch("applications", "select=*&order=created_at.desc&limit=100"),
+      sbFetch("interviews", "select=*&order=created_at.desc&limit=50")
+    ]);
 
-    // Applications Count
-    const { count: appsCount } = await SimpaticoDB.from('applications')
-      .select('*', { count: 'exact', head: true })
-      .eq('company_id', companyId);
-    document.getElementById('statApplications').textContent = appsCount || 0;
-    if(document.getElementById('badgeApplications')) document.getElementById('badgeApplications').textContent = appsCount || 0;
+    const jobsArr = Array.isArray(jobs) ? jobs : [];
+    const appsArr = Array.isArray(apps) ? apps : [];
+    const intsArr = Array.isArray(ints) ? ints : [];
 
-    // Today's Interviews
-    const today = new Date().toISOString().split('T')[0];
-    const { count: intCount } = await SimpaticoDB.from('interviews')
-      .select('*', { count: 'exact', head: true })
-      
-      .gte('scheduled_at', today + 'T00:00:00')
-      .lte('scheduled_at', today + 'T23:59:59');
-    document.getElementById('statInterviews').textContent = intCount || 0;
+    const activeJobs = jobsArr.filter(j => j.is_active || j.status === 'active');
 
-    // Hired this month
-    const monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString();
-    const { count: hiredCount } = await SimpaticoDB.from('applications')
-      .select('*', { count: 'exact', head: true })
-      
-      .eq('status', 'hired')
-      .gte('updated_at', monthStart);
-    document.getElementById('statHired').textContent = hiredCount || 0;
+    document.getElementById("statActiveJobs").textContent = activeJobs.length;
+    document.getElementById("statApplications").textContent = appsArr.length;
+    document.getElementById("statInterviews").textContent = intsArr.length;
+    document.getElementById("statHired").textContent = appsArr.filter(a => a.status === "hired").length;
 
-    // Recent Applications
-    const { data: recentApps } = await SimpaticoDB.from('applications')
-      .select('*, candidate:users!applications_candidate_id_fkey(full_name, email), job:jobs!applications_job_id_fkey(title)')
-      .eq('company_id', companyId)
-      .order('created_at', { ascending: false })
-      .limit(10);
+    if (document.getElementById("badgeJobs")) document.getElementById("badgeJobs").textContent = activeJobs.length;
+    if (document.getElementById("badgeApplications")) document.getElementById("badgeApplications").textContent = appsArr.length;
+    if (document.getElementById("badgeInterviews")) document.getElementById("badgeInterviews").textContent = intsArr.length;
 
-    renderRecentApplications(recentApps || []);
+    renderRecentApplications(appsArr.slice(0, 5));
+    renderUpcomingInterviews(intsArr.slice(0, 5));
+    renderJobsTable(jobsArr);
+    renderInterviewsTable(intsArr);
 
-    // Upcoming Interviews
-    const { data: upcomingInt } = await SimpaticoDB.from('interviews')
-      .select('*, candidate:users!interviews_candidate_id_fkey(full_name), job:jobs!interviews_job_id_fkey(title)')
-      
-      .in('status', ['scheduled', 'in_progress'])
-      .gte('scheduled_at', new Date().toISOString())
-      .order('scheduled_at', { ascending: true })
-      .limit(5);
+    if (document.getElementById("allApplicationsTable")) renderAllApplications(appsArr);
 
-    renderUpcomingInterviews(upcomingInt || []);
-
-    // Setup real-time subscriptions
-    setupRealtimeSubscriptions(companyId);
-
-  } catch (error) {
-    console.error('Error loading dashboard:', error);
-    showToast('Error loading dashboard data', 'error');
+  } catch(e) {
+    console.error("[loadDashboardData]", e);
   }
 }
 
+// ==========================================
+// RENDER FUNCTIONS
+// ==========================================
 function renderRecentApplications(apps) {
   const tbody = document.getElementById('recentApplicationsTable');
-  if (!apps.length) {
-    tbody.innerHTML = '<tr><td colspan="6" class="text-center text-gray" style="padding: 2rem;">No applications yet</td></tr>';
+  if (!tbody) return;
+  if (!apps || !apps.length) {
+    tbody.innerHTML = '<tr><td colspan="6" class="text-center text-gray" style="padding:2rem;">No applications yet</td></tr>';
     return;
   }
-  tbody.innerHTML = apps.map(app => `
-    <tr>
-      <td>
-        <div style="display: flex; align-items: center; gap: 10px;">
-          <div style="width:32px;height:32px;border-radius:50%;background:var(--primary-100);display:flex;align-items:center;justify-content:center;font-weight:600;font-size:0.75rem;color:var(--primary);">
-            ${app.candidate?.full_name?.split(' ').map(n => n[0]).join('') || '?'}
-          </div>
-          <div>
-            <div style="font-weight:600;font-size:0.85rem;">${app.candidate?.full_name || 'Unknown'}</div>
-            <div style="font-size:0.75rem;color:var(--gray-500);">${app.candidate?.email || ''}</div>
-          </div>
-        </div>
-      </td>
-      <td style="font-size:0.85rem;">${app.job?.title || 'N/A'}</td>
-      <td>
-        <span class="match-score ${(app.ai_match_score || 0) >= 80 ? 'high' : (app.ai_match_score || 0) >= 50 ? 'medium' : 'low'}">
-          ${app.ai_match_score || '--'}%
-        </span>
-      </td>
-      <td><span class="badge badge-${getStatusBadgeClass(app.status)}">${formatStatus(app.status)}</span></td>
-      <td style="font-size:0.8rem;color:var(--gray-500);">${timeAgo(app.created_at)}</td>
-      <td>
-        <div style="display:flex;gap:4px;">
-          <button class="btn btn-ghost btn-sm" onclick="viewApplication('${app.id}')"><i class="fas fa-eye"></i></button>
-          <button class="btn btn-ghost btn-sm" onclick="moveApplication('${app.id}', 'shortlisted')"><i class="fas fa-star"></i></button>
-        </div>
-      </td>
-    </tr>
-  `).join('');
+  tbody.innerHTML = apps.map(app => {
+    const name = app.name || app.candidate_name || 'Unknown';
+    const email = app.email || app.candidate_email || '';
+    const initials = name.split(' ').map(n => n[0]).join('').toUpperCase().substring(0,2);
+    const score = app.ats_score || app.ai_match_score || null;
+    return '<tr>' +
+      '<td><div style="display:flex;align-items:center;gap:10px;">' +
+        '<div style="width:32px;height:32px;border-radius:50%;background:var(--primary-100);display:flex;align-items:center;justify-content:center;font-weight:600;font-size:0.75rem;color:var(--primary);">' + initials + '</div>' +
+        '<div><div style="font-weight:600;font-size:0.85rem;">' + name + '</div>' +
+        '<div style="font-size:0.75rem;color:var(--gray-500);">' + email + '</div></div>' +
+      '</div></td>' +
+      '<td style="font-size:0.85rem;">' + (app.job_title || 'N/A') + '</td>' +
+      '<td><span style="padding:2px 8px;border-radius:6px;font-size:0.75rem;font-weight:600;background:rgba(99,102,241,0.1);color:#6366f1;">' + (score !== null ? score + '%' : '--') + '</span></td>' +
+      '<td><span class="badge badge-' + getStatusBadgeClass(app.status) + '">' + formatStatus(app.status) + '</span></td>' +
+      '<td style="font-size:0.8rem;color:var(--gray-500);">' + timeAgo(app.created_at) + '</td>' +
+      '<td><div style="display:flex;gap:4px;">' +
+        '<button class="btn btn-ghost btn-sm" onclick="viewApplication(\'' + app.id + '\')"><i class="fas fa-eye"></i></button>' +
+      '</div></td>' +
+    '</tr>';
+  }).join('');
 }
 
-function renderUpcomingInterviews(interviews) {
-  const container = document.getElementById('upcomingInterviews');
-  if (!interviews.length) {
-    container.innerHTML = '<p class="text-gray text-center" style="padding: 1rem;">No upcoming interviews</p>';
+function renderAllApplications(apps) {
+  const tbody = document.getElementById('allApplicationsTable');
+  if (!tbody) return;
+  if (!apps || !apps.length) {
+    tbody.innerHTML = '<tr><td colspan="6" class="text-center text-gray" style="padding:2rem;">No applications found.</td></tr>';
     return;
   }
-  container.innerHTML = interviews.map(int => `
-    <div style="display:flex;align-items:center;gap:12px;padding:12px;border:1px solid var(--gray-200);border-radius:var(--radius-sm);margin-bottom:8px;">
-      <div style="width:40px;height:40px;border-radius:50%;background:${int.status === 'in_progress' ? 'var(--success-light)' : 'var(--info-light)'};display:flex;align-items:center;justify-content:center;">
-        <i class="fas fa-${int.interview_type === 'ai_proctored' ? 'eye' : 'video'}" style="color:${int.status === 'in_progress' ? 'var(--success)' : 'var(--info)'};"></i>
-      </div>
-      <div style="flex:1;">
-        <div style="font-weight:600;font-size:0.85rem;">${int.candidate?.full_name || 'Candidate'}</div>
-        <div style="font-size:0.75rem;color:var(--gray-500);">${int.job?.title || ''} • ${formatDateTime(int.scheduled_at)}</div>
-      </div>
-      <div>
-        <span class="badge badge-${int.status === 'in_progress' ? 'success' : 'info'}">${int.status === 'in_progress' ? '🔴 Live' : int.interview_type}</span>
-      </div>
-      ${int.proctoring_enabled ? `
-        <a href="../interview/proctored-room.html?id=${int.id}" class="btn btn-primary btn-sm" target="_blank">
-          <i class="fas fa-video"></i>
-        </a>
-      ` : ''}
-    </div>
-  `).join('');
+  tbody.innerHTML = apps.map(app => {
+    const name = app.name || app.candidate_name || 'Unknown';
+    const email = app.email || app.candidate_email || '';
+    const initials = name.split(' ').map(n => n[0]).join('').toUpperCase().substring(0,2);
+    const score = app.ats_score || app.ai_match_score || null;
+    return '<tr>' +
+      '<td><div style="display:flex;align-items:center;gap:10px;">' +
+        '<div style="width:32px;height:32px;border-radius:50%;background:var(--primary-100);display:flex;align-items:center;justify-content:center;font-weight:600;font-size:0.75rem;color:var(--primary);">' + initials + '</div>' +
+        '<div><div style="font-weight:600;font-size:0.85rem;">' + name + '</div>' +
+        '<div style="font-size:0.75rem;color:var(--gray-500);">' + email + '</div></div>' +
+      '</div></td>' +
+      '<td style="font-size:0.85rem;">' + (app.job_title || 'N/A') + '</td>' +
+      '<td><span style="padding:2px 8px;border-radius:6px;font-size:0.75rem;font-weight:600;background:rgba(99,102,241,0.1);color:#6366f1;">' + (score !== null ? score + '%' : '--') + '</span></td>' +
+      '<td><span class="badge badge-' + getStatusBadgeClass(app.status) + '">' + formatStatus(app.status) + '</span></td>' +
+      '<td style="font-size:0.8rem;color:var(--gray-500);">' + timeAgo(app.created_at) + '</td>' +
+      '<td><div style="display:flex;gap:4px;">' +
+        '<button class="btn btn-ghost btn-sm" onclick="viewApplication(\'' + app.id + '\')"><i class="fas fa-eye"></i></button>' +
+        '<button class="btn btn-ghost btn-sm" onclick="moveApplication(\'' + app.id + '\', \'shortlisted\')"><i class="fas fa-star"></i></button>' +
+      '</div></td>' +
+    '</tr>';
+  }).join('');
+}
+
+function renderUpcomingInterviews(ints) {
+  const container = document.getElementById('upcomingInterviews');
+  if (!container) return;
+  if (!ints || !ints.length) {
+    container.innerHTML = '<p class="text-gray text-center" style="padding:1rem;">No interviews yet</p>';
+    return;
+  }
+  container.innerHTML = ints.map(i => {
+    const name = i.candidate_name || 'Candidate';
+    const role = i.interview_role || '';
+    const status = i.status || 'pending';
+    const score = i.overall_score !== null && i.overall_score !== undefined ? i.overall_score + '%' : '--';
+    return '<div style="display:flex;align-items:center;gap:12px;padding:10px;border:1px solid var(--gray-200);border-radius:8px;margin-bottom:8px;">' +
+      '<div style="width:36px;height:36px;border-radius:50%;background:var(--info-light);display:flex;align-items:center;justify-content:center;">' +
+        '<i class="fas fa-video" style="color:var(--info);font-size:0.8rem;"></i>' +
+      '</div>' +
+      '<div style="flex:1;">' +
+        '<div style="font-weight:600;font-size:0.85rem;">' + name + '</div>' +
+        '<div style="font-size:0.75rem;color:var(--gray-500);">' + role + ' • Score: ' + score + '</div>' +
+      '</div>' +
+      '<span class="badge badge-' + (status === 'completed' ? 'success' : status === 'in_progress' ? 'warning' : 'info') + '">' + status + '</span>' +
+    '</div>';
+  }).join('');
+}
+
+function renderJobsTable(jobs) {
+  const tbody = document.getElementById('jobsTable');
+  if (!tbody) return;
+  if (!jobs || !jobs.length) {
+    tbody.innerHTML = '<tr><td colspan="6" class="text-center text-gray" style="padding:2rem;">No jobs yet. Click "Create Job" to get started!</td></tr>';
+    return;
+  }
+  tbody.innerHTML = jobs.map(job => {
+    const status = job.status || (job.is_active ? 'active' : 'draft');
+    return '<tr>' +
+      '<td><div style="font-weight:600;">' + (job.title || 'Untitled') + '</div>' +
+        '<div style="font-size:0.75rem;color:var(--gray-500);">' + (job.location || 'Remote') + ' • ' + (job.level || 'Mid-Level') + '</div></td>' +
+      '<td>' + (job.department || '-') + '</td>' +
+      '<td><span style="font-weight:600;color:var(--primary);">' + (job.applications_count || 0) + '</span></td>' +
+      '<td><span class="badge badge-' + (status === 'active' ? 'success' : status === 'draft' ? 'gray' : 'warning') + '">' + status + '</span></td>' +
+      '<td style="font-size:0.85rem;color:var(--gray-500);">' + formatDate(job.created_at) + '</td>' +
+      '<td><div style="display:flex;gap:4px;">' +
+        '<button class="btn btn-ghost btn-sm" title="View Pipeline" onclick="showPage(\'pipeline\')"><i class="fas fa-columns"></i></button>' +
+      '</div></td>' +
+    '</tr>';
+  }).join('');
+}
+
+function renderInterviewsTable(ints) {
+  const tbody = document.getElementById('interviewsTable');
+  if (!tbody) return;
+  if (!ints || !ints.length) {
+    tbody.innerHTML = '<tr><td colspan="7" class="text-center text-gray" style="padding:2rem;">No interviews yet.</td></tr>';
+    return;
+  }
+
+  const scheduled = ints.filter(i => i.status === 'pending').length;
+  const completed = ints.filter(i => i.status === 'completed').length;
+  const flagged = ints.filter(i => i.violation_count > 0).length;
+  const scored = ints.filter(i => i.overall_score != null);
+  const avgTrust = scored.length ? Math.round(scored.reduce((s,i) => s + (i.trust_score || i.overall_score || 0), 0) / scored.length) : null;
+
+  if (document.getElementById('intScheduled')) document.getElementById('intScheduled').textContent = scheduled;
+  if (document.getElementById('intCompleted')) document.getElementById('intCompleted').textContent = completed;
+  if (document.getElementById('intFlagged')) document.getElementById('intFlagged').textContent = flagged;
+  if (document.getElementById('intAvgTrust')) document.getElementById('intAvgTrust').textContent = avgTrust !== null ? avgTrust + '%' : '--';
+
+  tbody.innerHTML = ints.map(i => {
+    const name = i.candidate_name || 'Candidate';
+    const role = i.interview_role || '-';
+    const status = i.status || 'pending';
+    const score = i.overall_score != null ? i.overall_score + '%' : '--';
+    const trust = i.trust_score != null ? i.trust_score + '%' : '--';
+    const badgeColor = status === 'completed' ? '#059669' : status === 'in_progress' ? '#D97706' : '#6366f1';
+    const url = 'https://simpaticohr.in/evalis-platform.html?token=' + i.token;
+    return '<tr>' +
+      '<td style="font-weight:600;font-size:0.85rem;">' + name + '</td>' +
+      '<td style="font-size:0.85rem;">' + role + '</td>' +
+      '<td style="font-size:0.85rem;">' + (i.interview_type || 'AI') + '</td>' +
+      '<td style="font-size:0.8rem;color:var(--gray-500);">' + timeAgo(i.created_at) + '</td>' +
+      '<td><span style="font-weight:700;color:' + (i.trust_score >= 70 ? 'var(--success)' : 'var(--warning)') + ';">' + trust + '</span></td>' +
+      '<td><span style="padding:3px 10px;border-radius:20px;font-size:11px;font-weight:700;background:' + badgeColor + '22;color:' + badgeColor + ';border:1px solid ' + badgeColor + '44">' + status + '</span></td>' +
+      '<td><div style="display:flex;gap:4px;">' +
+        (status === 'completed' ? '<button onclick="viewInterviewReport(\'' + i.id + '\')" class="btn btn-ghost btn-sm"><i class="fas fa-chart-bar"></i></button>' : '') +
+        '<button onclick="navigator.clipboard.writeText(\'' + url + '\').then(()=>showToast(\'Link copied!\',\'success\'))" class="btn btn-ghost btn-sm"><i class="fas fa-link"></i></button>' +
+      '</div></td>' +
+    '</tr>';
+  }).join('');
 }
 
 // ==========================================
@@ -218,216 +268,74 @@ function renderUpcomingInterviews(interviews) {
 // ==========================================
 async function loadJobs() {
   try {
-    const { data: jobs } = await SimpaticoDB.from('jobs')
-      .select('*')
-      .eq('company_id', currentCompanyId)
-      .order('created_at', { ascending: false });
-
-    const tbody = document.getElementById('jobsTable');
-    if (!jobs?.length) {
-      tbody.innerHTML = '<tr><td colspan="6" class="text-center text-gray" style="padding: 2rem;">No jobs created yet. Click "Create Job" to get started!</td></tr>';
-      return;
-    }
-
-    tbody.innerHTML = jobs.map(job => `
-      <tr>
-        <td>
-          <div style="font-weight:600;">${job.title}</div>
-          <div style="font-size:0.75rem;color:var(--gray-500);">${job.location || 'Not specified'} • ${job.employment_type || 'Full Time'}</div>
-        </td>
-        <td>${job.department || '-'}</td>
-        <td><span style="font-weight:600;color:var(--primary);">${job.applications_count || 0}</span></td>
-        <td><span class="badge badge-${job.status === 'active' ? 'success' : job.status === 'draft' ? 'gray' : job.status === 'paused' ? 'warning' : 'danger'}">${job.status}</span></td>
-        <td style="font-size:0.85rem;color:var(--gray-500);">${job.published_at ? formatDate(job.published_at) : 'Not published'}</td>
-        <td>
-          <div style="display:flex;gap:4px;">
-            <button class="btn btn-ghost btn-sm" title="Edit"><i class="fas fa-edit"></i></button>
-            <button class="btn btn-ghost btn-sm" title="View Pipeline" onclick="showPage('pipeline');loadPipeline('${job.id}')"><i class="fas fa-columns"></i></button>
-            ${job.status === 'draft' ? `<button class="btn btn-success btn-sm" onclick="updateJobStatus('${job.id}','active')"><i class="fas fa-rocket"></i></button>` : ''}
-            ${job.status === 'active' ? `<button class="btn btn-warning btn-sm" onclick="updateJobStatus('${job.id}','paused')"><i class="fas fa-pause"></i></button>` : ''}
-          </div>
-        </td>
-      </tr>
-    `).join('');
-  } catch (error) {
-    console.error('Error loading jobs:', error);
+    const jobs = await sbFetch("jobs", "select=*&order=created_at.desc&limit=50");
+    renderJobsTable(Array.isArray(jobs) ? jobs : []);
+  } catch (e) {
+    console.error('Error loading jobs:', e);
   }
 }
 
 async function publishJob() {
   const title = document.getElementById('newJobTitle').value;
   if (!title) { showToast('Job title is required', 'error'); return; }
-
   try {
     const skills = document.getElementById('newJobSkills').value.split(',').map(s => s.trim()).filter(Boolean);
-    
-    const { error } = await SimpaticoDB.from('jobs').insert({
-      company_id: currentCompanyId,
-      created_by: authManager.userProfile?.id || null,
+    await sbInsert("jobs", {
       title,
       department: document.getElementById('newJobDept').value,
       location: document.getElementById('newJobLocation').value,
-      experience_min: parseFloat(document.getElementById('newJobExpMin').value) || null,
-      experience_max: parseFloat(document.getElementById('newJobExpMax').value) || null,
-      salary_min: parseFloat(document.getElementById('newJobSalaryMin').value) || null,
-      salary_max: parseFloat(document.getElementById('newJobSalaryMax').value) || null,
-      skills_required: skills,
+      skills: skills,
       description: document.getElementById('newJobDesc').value,
-      employment_type: document.getElementById('newJobType').value,
-      positions: parseInt(document.getElementById('newJobPositions').value) || 1,
-      auto_screen: document.getElementById('newJobAutoScreen').checked,
+      level: 'Mid-Level',
+      is_active: true,
       status: 'active',
-      published_at: new Date().toISOString()
+      created_at: new Date().toISOString()
     });
-
-    if (error) throw error;
-    
     closeModal('createJobModal');
     showToast('Job published successfully!', 'success');
     loadDashboardData(currentCompanyId);
-    loadJobs();
-  } catch (error) {
-    showToast(error.message, 'error');
+  } catch (e) {
+    showToast(e.message, 'error');
   }
 }
 
 async function saveJobDraft() {
   const title = document.getElementById('newJobTitle').value;
   if (!title) { showToast('Job title is required', 'error'); return; }
-
   try {
-    const { error } = await SimpaticoDB.from('jobs').insert({
-      company_id: currentCompanyId,
-      created_by: authManager.userProfile?.id || null,
-      title,
-      department: document.getElementById('newJobDept').value,
-      description: document.getElementById('newJobDesc').value,
-      status: 'draft'
-    });
-
-    if (error) throw error;
+    await sbInsert("jobs", { title, department: document.getElementById('newJobDept').value, description: document.getElementById('newJobDesc').value, status: 'draft', is_active: false, created_at: new Date().toISOString() });
     closeModal('createJobModal');
     showToast('Job saved as draft', 'success');
-  } catch (error) {
-    showToast(error.message, 'error');
-  }
-}
-
-async function updateJobStatus(jobId, status) {
-  try {
-    const updates = { status };
-    if (status === 'active') updates.published_at = new Date().toISOString();
-    if (status === 'closed') updates.closed_at = new Date().toISOString();
-
-    const { error } = await SimpaticoDB.from('jobs').update(updates).eq('id', jobId);
-    if (error) throw error;
-    showToast(`Job ${status}!`, 'success');
-    loadJobs();
-  } catch (error) {
-    showToast(error.message, 'error');
+  } catch (e) {
+    showToast(e.message, 'error');
   }
 }
 
 // ==========================================
-// PIPELINE (KANBAN)
+// APPLICATIONS
 // ==========================================
-const PIPELINE_STAGES = [
-  { key: 'applied', label: 'Applied', color: 'var(--gray-500)' },
-  { key: 'screened', label: 'Screened', color: 'var(--info)' },
-  { key: 'shortlisted', label: 'Shortlisted', color: 'var(--primary)' },
-  { key: 'interview_scheduled', label: 'Interview', color: 'var(--warning)' },
-  { key: 'selected', label: 'Selected', color: 'var(--success)' },
-  { key: 'offer_sent', label: 'Offer Sent', color: '#8b5cf6' },
-  { key: 'hired', label: 'Hired', color: '#059669' }
-];
-
-async function loadPipelineJobs() {
-  const { data: jobs } = await SimpaticoDB.from('jobs')
-    .select('id, title')
-    .eq('company_id', currentCompanyId)
-    .in('status', ['active', 'paused']);
-
-  const select = document.getElementById('pipelineJobFilter');
-  select.innerHTML = '<option value="">Select Job</option>' + 
-    (jobs || []).map(j => `<option value="$${j.id}">$${j.title}</option>`).join('');
-}
-
-async function loadPipeline(jobId) {
-  if (!jobId) return;
-  
-  const { data: applications } = await SimpaticoDB.from('applications')
-    .select('*, candidate:users!applications_candidate_id_fkey(full_name, email)')
-    .eq('job_id', jobId)
-    .order('ai_match_score', { ascending: false });
-
-  const board = document.getElementById('pipelineBoard');
-  board.innerHTML = PIPELINE_STAGES.map(stage => {
-    const stageApps = (applications || []).filter(a => a.status === stage.key);
-    return `
-      <div class="pipeline-stage" data-stage="${stage.key}">
-        <div class="pipeline-stage-header">
-          <div style="display:flex;align-items:center;gap:8px;">
-            <div style="width:10px;height:10px;border-radius:50%;background:${stage.color};"></div>
-            <h4>${stage.label}</h4>
-          </div>
-          <span class="count">${stageApps.length}</span>
-        </div>
-        <div class="pipeline-cards" 
-             ondragover="event.preventDefault();this.style.background='var(--primary-50)'"
-             ondragleave="this.style.background=''"
-             ondrop="handleDrop(event, '${stage.key}')">
-          ${stageApps.map(app => `
-            <div class="pipeline-card" draggable="true" 
-                 ondragstart="event.dataTransfer.setData('text','${app.id}')"
-                 data-id="${app.id}">
-              <div class="candidate-info">
-                <div class="candidate-avatar">${app.candidate?.full_name?.split(' ').map(n => n[0]).join('') || '?'}</div>
-                <div>
-                  <div class="candidate-name">${app.candidate?.full_name || 'Unknown'}</div>
-                  <div class="candidate-role">${app.candidate?.email || ''}</div>
-                </div>
-                <span class="match-score ${(app.ai_match_score || 0) >= 80 ? 'high' : (app.ai_match_score || 0) >= 50 ? 'medium' : 'low'}" style="margin-left:auto;">
-                  ${app.ai_match_score || '--'}%
-                </span>
-              </div>
-              <div style="display:flex;gap:4px;font-size:0.75rem;">
-                <button class="btn btn-ghost btn-sm" style="padding:4px 8px;" onclick="viewApplication('${app.id}')">
-                  <i class="fas fa-eye"></i>
-                </button>
-                ${stage.key === 'shortlisted' ? `
-                  <button class="btn btn-ghost btn-sm" style="padding:4px 8px;" onclick="scheduleInterview('${app.id}')">
-                    <i class="fas fa-calendar-plus"></i>
-                  </button>
-                ` : ''}
-              </div>
-            </div>
-          `).join('')}
-        </div>
-      </div>
-    `;
-  }).join('');
-}
-
-async function handleDrop(event, newStage) {
-  event.preventDefault();
-  event.target.closest('.pipeline-cards').style.background = '';
-  const appId = event.dataTransfer.getData('text');
-  
+async function loadAllApplications() {
+  const tbody = document.getElementById('allApplicationsTable');
+  if (!tbody) return;
+  tbody.innerHTML = '<tr><td colspan="6" class="text-center text-gray" style="padding:2rem;">Loading...</td></tr>';
   try {
-    const { error } = await SimpaticoDB.from('applications')
-      .update({ status: newStage, current_stage: newStage })
-      .eq('id', appId);
-    if (error) throw error;
-    
-    showToast(`Candidate moved to ${newStage}`, 'success');
-    const jobId = document.getElementById('pipelineJobFilter').value;
-    if (jobId) loadPipeline(jobId);
-
-    triggerAutomation('application_status_changed', appId, { stage: newStage });
-    triggerAutomation('application_status_changed', appId, { stage: newStage });
-  } catch (err) {
-    showToast(err.message, 'error');
+    const apps = await sbFetch("applications", "select=*&order=created_at.desc&limit=100");
+    renderAllApplications(Array.isArray(apps) ? apps : []);
+  } catch (e) {
+    tbody.innerHTML = '<tr><td colspan="6" class="text-center" style="padding:2rem;color:red;">' + e.message + '</td></tr>';
   }
+}
+
+async function moveApplication(appId, status) {
+  try {
+    await sbUpdate("applications", { status }, "id=eq." + appId);
+    showToast('Moved to ' + status, 'success');
+    loadDashboardData(currentCompanyId);
+  } catch (e) { showToast(e.message, 'error'); }
+}
+
+function viewApplication(id) {
+  showToast('Application ID: ' + id, 'info');
 }
 
 // ==========================================
@@ -436,267 +344,86 @@ async function handleDrop(event, newStage) {
 async function loadInterviews() {
   const tbody = document.getElementById('interviewsTable');
   if (!tbody) return;
-  tbody.innerHTML = '<tr><td colspan="7" class="text-center" style="padding:2rem;color:#6B7280">Loading interviews...</td></tr>';
   try {
-    const { data, error } = await SimpaticoDB
-      .from('interviews')
-      .select('*, candidate:users!interviews_candidate_id_fkey(full_name, email), job:jobs(title)')
-      .eq('company_id', currentCompanyId)
-      .order('scheduled_at', { ascending: false });
-    if (error) throw error;
-    const interviews = data || [];
-    const scheduled = interviews.filter(i => i.status === 'scheduled').length;
-    const completed = interviews.filter(i => i.status === 'completed').length;
-    const today = interviews.filter(i => {
-      if (!i.scheduled_at) return false;
-      return new Date(i.scheduled_at).toDateString() === new Date().toDateString();
-    }).length;
-    if (document.getElementById('intScheduled'))   document.getElementById('intScheduled').textContent  = scheduled;
-    if (document.getElementById('intCompleted'))   document.getElementById('intCompleted').textContent  = completed;
-    if (document.getElementById('statInterviews')) document.getElementById('statInterviews').textContent = today;
-    if (!interviews.length) {
-      tbody.innerHTML = '<tr><td colspan="7" class="text-center" style="padding:2rem;color:#9CA3AF">No interviews scheduled yet</td></tr>';
-      return;
-    }
-    tbody.innerHTML = interviews.map(i => {
-      const name     = i.candidate?.full_name || 'Unknown';
-      const email    = i.candidate?.email || '';
-      const job      = i.job?.title || '-';
-      const date     = i.scheduled_at ? new Date(i.scheduled_at).toLocaleString('en-IN', { day:'numeric', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' }) : '-';
-      const status   = i.status || 'scheduled';
-      const initials = name.split(' ').map(n => n[0]).join('').toUpperCase();
-      const badgeColor = status === 'completed' ? '#059669' : status === 'cancelled' ? '#DC2626' : '#D97706';
-      const roomLink = `https://simpaticohr.in/interview/proctored-room.html?interview_id=${i.id}&token=${i.access_token || ''}`;
-      return `<tr>
-        <td><div style="display:flex;align-items:center;gap:10px;">
-          <div style="width:34px;height:34px;border-radius:50%;background:linear-gradient(135deg,#6366f1,#8b5cf6);display:flex;align-items:center;justify-content:center;color:#fff;font-size:12px;font-weight:700">${initials}</div>
-          <div><div style="font-weight:600;font-size:14px">${name}</div><div style="font-size:12px;color:#6B7280">${email}</div></div>
-        </div></td>
-        <td style="font-size:13px">${job}</td>
-        <td style="font-size:13px">${date}</td>
-        <td><span style="padding:3px 10px;border-radius:20px;font-size:11px;font-weight:700;background:${badgeColor}22;color:${badgeColor};border:1px solid ${badgeColor}44">${status}</span></td>
-        <td style="font-size:13px">${i.interview_type || 'AI Interview'}</td>
-        <td><button onclick="copyInterviewLink('${roomLink}')" style="padding:4px 10px;border-radius:6px;font-size:11px;font-weight:600;background:#EFF6FF;color:#2563EB;border:none;cursor:pointer"><i class="fas fa-link"></i> Copy Link</button></td>
-        <td>${status === 'completed'
-          ? `<button onclick="viewInterviewReport('${i.id}')" style="padding:4px 10px;border-radius:6px;font-size:11px;font-weight:600;background:#F0FDF4;color:#059669;border:none;cursor:pointer"><i class="fas fa-chart-bar"></i> Report</button>`
-          : `<button onclick="cancelInterview('${i.id}')" style="padding:4px 10px;border-radius:6px;font-size:11px;font-weight:600;background:#FEF2F2;color:#DC2626;border:none;cursor:pointer"><i class="fas fa-times"></i> Cancel</button>`
-        }</td>
-      </tr>`;
-    }).join('');
-  } catch (err) {
-    tbody.innerHTML = `<tr><td colspan="7" class="text-center" style="padding:2rem;color:#EF4444">${err.message}</td></tr>`;
+    const ints = await sbFetch("interviews", "select=*&order=created_at.desc&limit=50");
+    renderInterviewsTable(Array.isArray(ints) ? ints : []);
+  } catch (e) {
+    if (tbody) tbody.innerHTML = '<tr><td colspan="7" style="padding:2rem;color:red;text-align:center;">' + e.message + '</td></tr>';
   }
-}
-
-function openScheduleInterviewModal() {
-  let modal = document.getElementById('scheduleInterviewModal');
-  if (!modal) {
-    modal = document.createElement('div');
-    modal.id = 'scheduleInterviewModal';
-    modal.className = 'modal-overlay';
-    modal.innerHTML = `
-      <div class="modal" style="max-width:560px">
-        <div class="modal-header">
-          <h3><i class="fas fa-calendar-plus" style="color:#6366f1;margin-right:8px"></i>Schedule Interview</h3>
-          <button class="btn btn-ghost btn-icon" onclick="closeModal('scheduleInterviewModal')">&times;</button>
-        </div>
-        <div class="modal-body">
-          <div class="form-group">
-            <label class="form-label">Select Job *</label>
-            <select class="form-control" id="siJob"></select>
-          </div>
-          <div class="form-group">
-            <label class="form-label">Candidate Email *</label>
-            <input type="email" class="form-control" id="siEmail" placeholder="candidate@email.com">
-          </div>
-          <div class="form-row">
-            <div class="form-group">
-              <label class="form-label">Date & Time *</label>
-              <input type="datetime-local" class="form-control" id="siDateTime">
-            </div>
-            <div class="form-group">
-              <label class="form-label">Interview Type</label>
-              <select class="form-control" id="siType">
-                <option value="ai_interview">AI Interview</option>
-                <option value="technical">Technical</option>
-                <option value="hr_round">HR Round</option>
-                <option value="final">Final Round</option>
-              </select>
-            </div>
-          </div>
-          <div class="form-group">
-            <label class="form-label">Duration (minutes)</label>
-            <select class="form-control" id="siDuration">
-              <option value="30">30 minutes</option>
-              <option value="45" selected>45 minutes</option>
-              <option value="60">60 minutes</option>
-              <option value="90">90 minutes</option>
-            </select>
-          </div>
-          <div class="form-group">
-            <label class="form-label">Notes (optional)</label>
-            <textarea class="form-control" id="siNotes" rows="2" placeholder="Any special instructions..."></textarea>
-          </div>
-        </div>
-        <div class="modal-footer">
-          <button class="btn btn-secondary" onclick="closeModal('scheduleInterviewModal')">Cancel</button>
-          <button class="btn btn-primary" onclick="submitScheduleInterview()"><i class="fas fa-paper-plane"></i> Schedule and Send Link</button>
-        </div>
-      </div>`;
-    document.body.appendChild(modal);
-  }
-  SimpaticoDB.from('jobs').select('id, title').eq('company_id', currentCompanyId).in('status', ['active','paused']).then(({ data }) => {
-    const sel = document.getElementById('siJob');
-    sel.innerHTML = '<option value="">Select a job...</option>' + (data || []).map(j => `<option value="${j.id}">${j.title}</option>`).join('');
-  });
-  const tomorrow = new Date();
-  tomorrow.setDate(tomorrow.getDate() + 1);
-  tomorrow.setHours(10, 0, 0, 0);
-  document.getElementById('siDateTime').value = tomorrow.toISOString().slice(0, 16);
-  openModal('scheduleInterviewModal');
-}
-
-async function submitScheduleInterview() {
-  const jobId  = document.getElementById('siJob').value;
-  const email  = document.getElementById('siEmail').value.trim();
-  const dt     = document.getElementById('siDateTime').value;
-  const type   = document.getElementById('siType').value;
-  const dur    = document.getElementById('siDuration').value;
-  const notes  = document.getElementById('siNotes').value.trim();
-  if (!jobId || !email || !dt) { showToast('Please fill in all required fields', 'error'); return; }
-  try {
-    const { data: candidates } = await SimpaticoDB.from('users').select('id').eq('email', email).limit(1);
-    const candidateId = candidates?.[0]?.id || null;
-    const accessToken = crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2);
-    const { data: interview, error } = await SimpaticoDB.from('interviews').insert({
-      company_id: currentCompanyId, candidate_id: candidateId, candidate_email: email,
-      job_id: jobId, scheduled_at: new Date(dt).toISOString(), interview_type: type,
-      duration_mins: parseInt(dur), notes, status: 'scheduled', access_token: accessToken
-    }).select().single();
-    if (error) throw error;
-    const roomLink = `https://simpaticohr.in/interview/proctored-room.html?interview_id=${interview.id}&token=${accessToken}`;
-    try { await window.SimpaticoAPI.sendWhatsApp({ to: email, message: `Your interview is scheduled for ${new Date(dt).toLocaleString('en-IN')}. Join: ${roomLink}` }); } catch(e) {}
-    closeModal('scheduleInterviewModal');
-    showToast('Interview scheduled! Link copied to clipboard.', 'success');
-    navigator.clipboard?.writeText(roomLink).catch(() => {});
-    loadInterviews();
-  } catch (err) {
-    showToast(err.message || 'Failed to schedule interview', 'error');
-  }
-}
-
-function copyInterviewLink(link) {
-  navigator.clipboard.writeText(link)
-    .then(() => showToast('Interview link copied!', 'success'))
-    .catch(() => showToast('Copy failed: ' + link, 'error'));
-}
-
-async function cancelInterview(id) {
-  if (!confirm('Cancel this interview?')) return;
-  try {
-    const { error } = await SimpaticoDB.from('interviews').update({ status: 'cancelled' }).eq('id', id);
-    if (error) throw error;
-    showToast('Interview cancelled', 'success');
-    loadInterviews();
-  } catch (err) { showToast(err.message, 'error'); }
 }
 
 function viewInterviewReport(id) {
-  window.open(`/interview/results.html?interview_id=${id}`, '_blank');
+  window.open('/interview/results.html?interview_id=' + id, '_blank');
 }
 
-function scheduleInterview(applicationId) {
-  openScheduleInterviewModal();
-  SimpaticoDB.from('applications')
-    .select('candidate:users!applications_candidate_id_fkey(email), job_id')
-    .eq('id', applicationId).single()
-    .then(({ data }) => {
-      if (data?.candidate?.email) document.getElementById('siEmail').value = data.candidate.email;
-      if (data?.job_id) { const s = document.getElementById('siJob'); if (s) s.value = data.job_id; }
-    }).catch(() => {});
-}
+// ==========================================
+// PIPELINE
+// ==========================================
+const PIPELINE_STAGES = [
+  { key: 'applied', label: 'Applied', color: 'var(--gray-500)' },
+  { key: 'shortlisted', label: 'Shortlisted', color: 'var(--primary)' },
+  { key: 'interviewed', label: 'Interviewed', color: 'var(--warning)' },
+  { key: 'hired', label: 'Hired', color: 'var(--success)' },
+  { key: 'rejected', label: 'Rejected', color: 'var(--danger)' }
+];
 
-function triggerAutomation(event, id, data) {
-  console.log('Automation:', event, id, data);
-}
-
-function setupRealtimeSubscriptions(companyId) {
-  // Realtime subscriptions - placeholder for future implementation
-  console.log('Realtime subscriptions not yet implemented');
-}
-
-function formatDate(dateStr) {
-  if (!dateStr) return '-';
-  return new Date(dateStr).toLocaleDateString('en-IN', {day:'numeric', month:'short', year:'numeric'});
-}
-function loadAutomationRules() { console.log('Automation not yet implemented'); }
-function loadProctoringReports() { console.log('Proctoring not yet implemented'); }
-async function loadAllApplications() {
-  const tbody = document.getElementById('allApplicationsTable');
-  if (!tbody) return;
-  tbody.innerHTML = '<tr><td colspan="6" class="text-center text-gray" style="padding:2rem;">Loading applications...</td></tr>';
-
+async function loadPipelineJobs() {
   try {
-    const { data: apps, error } = await SimpaticoDB.from('applications')
-      .select('*, candidate:users!applications_candidate_id_fkey(full_name, email), job:jobs!applications_job_id_fkey(title)')
-      .eq('company_id', currentCompanyId)
-      .order('created_at', { ascending: false });
-
-    if (error) throw error;
-
-    if (!apps.length) {
-      tbody.innerHTML = '<tr><td colspan="6" class="text-center text-gray" style="padding: 2rem;">No applications found for your company.</td></tr>';
-      return;
-    }
-
-    tbody.innerHTML = apps.map(app => `
-      <tr>
-        <td>
-          <div style="display: flex; align-items: center; gap: 10px;">
-            <div style="width:32px;height:32px;border-radius:50%;background:var(--primary-100);display:flex;align-items:center;justify-content:center;font-weight:600;font-size:0.75rem;color:var(--primary);">
-              ${app.candidate?.full_name?.split(' ').map(n => n[0]).join('') || '?'}
-            </div>
-            <div>
-              <div style="font-weight:600;font-size:0.85rem;">${app.candidate?.full_name || 'Unknown'}</div>
-              <div style="font-size:0.75rem;color:var(--gray-500);">${app.candidate?.email || ''}</div>
-            </div>
-          </div>
-        </td>
-        <td style="font-size:0.85rem;">${app.job?.title || 'N/A'}</td>
-        <td>
-          <span class="match-score ${(app.ai_match_score || 0) >= 80 ? 'high' : (app.ai_match_score || 0) >= 50 ? 'medium' : 'low'}">
-            ${app.ai_match_score || '--'}%
-          </span>
-        </td>
-        <td><span class="badge badge-${getStatusBadgeClass(app.status)}">${formatStatus(app.status)}</span></td>
-        <td style="font-size:0.8rem;color:var(--gray-500);">${timeAgo(app.created_at)}</td>
-        <td>
-          <div style="display:flex;gap:4px;">
-            <button class="btn btn-ghost btn-sm" onclick="viewApplication('${app.id}')"><i class="fas fa-eye"></i></button>
-            <button class="btn btn-ghost btn-sm" onclick="moveApplication('${app.id}', 'shortlisted')"><i class="fas fa-star"></i></button>
-          </div>
-        </td>
-      </tr>
-    `).join('');
-  } catch (error) {
-    console.error('Error loading all applications:', error);
-    tbody.innerHTML = `<tr><td colspan="6" class="text-center text-danger" style="padding: 2rem;">Error: ${error.message}</td></tr>`;
-  }
+    const jobs = await sbFetch("jobs", "select=id,title&is_active=eq.true");
+    const select = document.getElementById('pipelineJobFilter');
+    if (!select) return;
+    select.innerHTML = '<option value="">Select Job</option>' + (Array.isArray(jobs) ? jobs : []).map(j => '<option value="' + j.id + '">' + j.title + '</option>').join('');
+  } catch(e) { console.error(e); }
 }
-function loadOnboarding() { console.log('Onboarding not yet implemented'); }
+
+async function loadPipeline(jobId) {
+  if (!jobId) return;
+  try {
+    const apps = await sbFetch("applications", "select=*&job_id=eq." + jobId + "&order=created_at.desc");
+    const board = document.getElementById('pipelineBoard');
+    if (!board) return;
+    board.innerHTML = PIPELINE_STAGES.map(stage => {
+      const stageApps = (Array.isArray(apps) ? apps : []).filter(a => a.status === stage.key);
+      return '<div class="pipeline-stage" data-stage="' + stage.key + '">' +
+        '<div class="pipeline-stage-header"><div style="display:flex;align-items:center;gap:8px;"><div style="width:10px;height:10px;border-radius:50%;background:' + stage.color + ';"></div><h4>' + stage.label + '</h4></div><span class="count">' + stageApps.length + '</span></div>' +
+        '<div class="pipeline-cards" ondragover="event.preventDefault()" ondrop="handleDrop(event,\'' + stage.key + '\')">' +
+          stageApps.map(app => '<div class="pipeline-card" draggable="true" ondragstart="event.dataTransfer.setData(\'text\',\'' + app.id + '\')">' +
+            '<div style="font-weight:600;font-size:0.85rem;">' + (app.name || app.candidate_name || 'Unknown') + '</div>' +
+            '<div style="font-size:0.75rem;color:var(--gray-500);">' + (app.email || app.candidate_email || '') + '</div>' +
+            '<div style="font-size:0.75rem;margin-top:4px;">ATS: <strong>' + (app.ats_score || '--') + '</strong></div>' +
+          '</div>').join('') +
+        '</div></div>';
+    }).join('');
+  } catch(e) { console.error(e); }
+}
+
+async function handleDrop(event, newStage) {
+  event.preventDefault();
+  const appId = event.dataTransfer.getData('text');
+  try {
+    await sbUpdate("applications", { status: newStage }, "id=eq." + appId);
+    showToast('Moved to ' + newStage, 'success');
+    const jobId = document.getElementById('pipelineJobFilter').value;
+    if (jobId) loadPipeline(jobId);
+  } catch(e) { showToast(e.message, 'error'); }
+}
+
+// ==========================================
+// GLOBAL SEARCH
+// ==========================================
+function handleGlobalSearch(val) {
+  if (!val || val.length < 2) return;
+  console.log('Search:', val);
+}
 
 // ==========================================
 // HELPER FUNCTIONS
 // ==========================================
-
 function getStatusBadgeClass(status) {
   switch (status) {
     case 'hired': return 'success';
-    case 'interview_scheduled':
-    case 'selected':
-      return 'warning';
     case 'shortlisted': return 'primary';
-    case 'screened': return 'info';
+    case 'interviewed': return 'warning';
     case 'rejected': return 'danger';
     default: return 'gray';
   }
@@ -709,51 +436,60 @@ function formatStatus(status) {
 
 function timeAgo(dateStr) {
   if (!dateStr) return 'N/A';
-  const date = new Date(dateStr);
-  const seconds = Math.floor((new Date() - date) / 1000);
-  let interval = seconds / 31536000;
-  if (interval > 1) {
-    return Math.floor(interval) + " years ago";
-  }
-  interval = seconds / 2592000;
-  if (interval > 1) {
-    return Math.floor(interval) + " months ago";
-  }
-  interval = seconds / 86400;
-  if (interval > 1) {
-    return Math.floor(interval) + " days ago";
-  }
-  interval = seconds / 3600;
-  if (interval > 1) {
-    return Math.floor(interval) + " hours ago";
-  }
-  interval = seconds / 60;
-  if (interval > 1) {
-    return Math.floor(interval) + " minutes ago";
-  }
-  return Math.floor(seconds) + " seconds ago";
+  const seconds = Math.floor((new Date() - new Date(dateStr)) / 1000);
+  if (seconds < 60) return 'just now';
+  if (seconds < 3600) return Math.floor(seconds / 60) + ' min ago';
+  if (seconds < 86400) return Math.floor(seconds / 3600) + ' hours ago';
+  if (seconds < 2592000) return Math.floor(seconds / 86400) + ' days ago';
+  return Math.floor(seconds / 2592000) + ' months ago';
+}
+
+function formatDate(dateStr) {
+  if (!dateStr) return '-';
+  return new Date(dateStr).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
 function formatDateTime(dateStr) {
   if (!dateStr) return 'N/A';
-  return new Date(dateStr).toLocaleString('en-IN', {
-    day: 'numeric',
-    month: 'short',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit'
-  });
+  return new Date(dateStr).toLocaleString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
 
+function showToast(message, type) {
+  const container = document.getElementById('toastContainer');
+  if (!container) return;
+  const toast = document.createElement('div');
+  const colors = { success: '#10b981', error: '#ef4444', warning: '#f59e0b', info: '#6366f1' };
+  toast.style.cssText = 'padding:12px 20px;border-radius:8px;background:' + (colors[type] || colors.info) + ';color:#fff;font-size:0.85rem;font-weight:600;margin-top:8px;box-shadow:0 4px 12px rgba(0,0,0,0.15);';
+  toast.textContent = message;
+  container.appendChild(toast);
+  setTimeout(() => toast.remove(), 3000);
+}
 
+function doLogout() {
+  localStorage.removeItem('simpatico_token');
+  localStorage.removeItem('simpatico_user');
+  window.location.href = '/auth/login.html';
+}
 
+// ==========================================
+// STUBS
+// ==========================================
+function loadAutomationRules() { console.log('Automation not yet implemented'); }
+function loadProctoringReports() { console.log('Proctoring not yet implemented'); }
+function loadOnboarding() { console.log('Onboarding not yet implemented'); }
+function loadNotifications() { console.log('Notifications not yet implemented'); }
+function triggerAutomation(event, id, data) { console.log('Automation:', event, id, data); }
+function setupRealtimeSubscriptions(companyId) { console.log('Realtime subscriptions not yet implemented'); }
+function scheduleInterview(applicationId) { alert('Schedule interview coming soon!'); }
+function searchCandidates() { alert('Candidate Sourcing coming soon!'); }
+function openScheduleInterviewModal() { alert('Manual Interview Scheduler coming soon!'); }
+function openCreateAutomationModal() { alert('Automation Rule Creator coming soon!'); }
 
-
-
-
-
-
-
-
-
-
+function api(endpoint, options) {
+  const token = localStorage.getItem('simpatico_token') || '';
+  const workerUrl = 'https://evalis-ai.simpaticohrconsultancy.workers.dev';
+  return fetch(workerUrl + endpoint, {
+    ...options,
+    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token, ...((options || {}).headers || {}) }
+  }).then(r => r.json());
+}
