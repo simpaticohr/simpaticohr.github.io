@@ -7,7 +7,9 @@ const SB_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
 function sbHeaders() {
   return {
     "apikey": SB_KEY,
-    "Authorization": "Bearer " + (localStorage.getItem("simpatico_token") || SB_KEY),
+    "Authorization": "Bearer " + SB_KEY,
+```
+
     "Content-Type": "application/json"
   };
 }
@@ -480,9 +482,9 @@ function loadOnboarding() { console.log('Onboarding not yet implemented'); }
 function loadNotifications() { console.log('Notifications not yet implemented'); }
 function triggerAutomation(event, id, data) { console.log('Automation:', event, id, data); }
 function setupRealtimeSubscriptions(companyId) { console.log('Realtime subscriptions not yet implemented'); }
-function scheduleInterview(applicationId) { alert('Schedule interview coming soon!'); }
+
 function searchCandidates() { alert('Candidate Sourcing coming soon!'); }
-function openScheduleInterviewModal() { alert('Manual Interview Scheduler coming soon!'); }
+
 function openCreateAutomationModal() { alert('Automation Rule Creator coming soon!'); }
 
 function api(endpoint, options) {
