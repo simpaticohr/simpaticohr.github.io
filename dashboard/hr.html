@@ -726,8 +726,196 @@
     }
 
     function openScheduleInterviewModal() {
-      alert('Manual Interview Scheduler coming soon!');
-    }
+  const modal = document.createElement('div');
+  modal.id = 'scheduleInterviewModal';
+  modal.className = 'modal-overlay';
+  modal.style.display = 'flex';
+  modal.innerHTML = `
+    <div class="modal" style="max-width:600px;">
+      <div class="modal-header">
+        <h3><i class="fas fa-calendar-plus" style="color:var(--primary);"></i> Schedule Interview</h3>
+        <button class="btn btn-ghost btn-icon" onclick="document.getElementById('scheduleInterviewModal').remove()">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Candidate Name *</label>
+            <input type="text" class="form-control" id="siCandName" placeholder="John Doe">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Candidate Email *</label>
+            <input type="email" class="form-control" id="siCandEmail" placeholder="john@email.com">
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Phone (WhatsApp)</label>
+            <input type="tel" class="form-control" id="siCandPhone" placeholder="+91 98765 43210">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Select Job</label>
+            <select class="form-control" id="siJobSelect">
+              <option value="">Loading jobs...</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Job Role *</label>
+            <input type="text" class="form-control" id="siRole" placeholder="Senior Developer">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Level</label>
+            <select class="form-control" id="siLevel">
+              <option value="Fresher">Fresher</option>
+              <option value="Junior">Junior</option>
+              <option value="Mid-Level" selected>Mid-Level</option>
+              <option value="Senior">Senior</option>
+              <option value="Lead">Lead</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Questions</label>
+            <select class="form-control" id="siQuestions">
+              <option value="5">5</option>
+              <option value="8">8</option>
+              <option value="10" selected>10</option>
+              <option value="15">15</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Expires In</label>
+            <select class="form-control" id="siExpiry">
+              <option value="24">24 Hours</option>
+              <option value="48">48 Hours</option>
+              <option value="72" selected>72 Hours</option>
+              <option value="168">7 Days</option>
+            </select>
+          </div>
+        </div>
+        <div id="siResult" style="display:none;margin-top:16px;padding:16px;
+          background:var(--success-light);border:1px solid var(--success);border-radius:10px;">
+          <p style="font-weight:700;color:var(--success);margin-bottom:8px;">✅ Interview Link Generated!</p>
+          <div style="background:#fff;padding:10px;border-radius:8px;font-family:monospace;
+            font-size:0.8rem;word-break:break-all;margin-bottom:10px;" id="siLink"></div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            <button class="btn btn-primary btn-sm" onclick="siCopyLink()"><i class="fas fa-copy"></i> Copy Link</button>
+            <button class="btn btn-sm" style="background:#25D366;color:#fff;" onclick="siSendWA()"><i class="fab fa-whatsapp"></i> WhatsApp</button>
+            <button class="btn btn-secondary btn-sm" onclick="siSendEmail()"><i class="fas fa-envelope"></i> Email</button>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="document.getElementById('scheduleInterviewModal').remove()">Cancel</button>
+        <button class="btn btn-primary" id="siGenerateBtn" onclick="siGenerateLink()">
+          <i class="fas fa-link"></i> Generate Interview Link
+        </button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(modal);
+  siLoadJobs();
+}
+
+async function siLoadJobs() {
+  try {
+    const res = await api('/client/jobs', { method: 'GET' });
+    const jobs = res.jobs || [];
+    const sel = document.getElementById('siJobSelect');
+    if (!sel) return;
+    sel.innerHTML = '<option value="">— No specific job —</option>';
+    jobs.forEach(j => {
+      const opt = document.createElement('option');
+      opt.value = j.id;
+      opt.dataset.title = j.title;
+      opt.dataset.level = j.level || 'Mid-Level';
+      opt.textContent = j.title + (j.location ? ' · ' + j.location : '');
+      sel.appendChild(opt);
+    });
+    sel.addEventListener('change', () => {
+      const opt = sel.options[sel.selectedIndex];
+      if (opt.dataset.title) {
+        document.getElementById('siRole').value = opt.dataset.title;
+        document.getElementById('siLevel').value = opt.dataset.level || 'Mid-Level';
+      }
+    });
+  } catch(e) { console.warn('Could not load jobs:', e.message); }
+}
+
+let _siLastInvite = null;
+
+async function siGenerateLink() {
+  const name  = document.getElementById('siCandName')?.value.trim();
+  const email = document.getElementById('siCandEmail')?.value.trim();
+  const phone = document.getElementById('siCandPhone')?.value.trim();
+  const role  = document.getElementById('siRole')?.value.trim();
+  const level = document.getElementById('siLevel')?.value;
+  const questions = document.getElementById('siQuestions')?.value;
+  const expiry = document.getElementById('siExpiry')?.value;
+  const jobId = document.getElementById('siJobSelect')?.value || null;
+
+  if (!name || !email || !role) { showToast('Name, Email and Role are required', 'error'); return; }
+
+  const btn = document.getElementById('siGenerateBtn');
+  btn.disabled = true;
+  btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Generating...';
+
+  try {
+    const res = await api('/client/interviews/create', {
+      method: 'POST',
+      body: JSON.stringify({
+        candidate_name:  name,
+        candidate_email: email,
+        candidate_phone: phone || null,
+        job_id:          jobId || null,
+        role, level,
+        questions: parseInt(questions) || 10,
+        expires_hours: parseInt(expiry) || 72,
+        type: 'real',
+      })
+    });
+    if (res.error) throw new Error(res.error);
+    const token = res.token || res.interview?.token;
+    if (!token) throw new Error('No token returned');
+    const link = `https://simpaticohr.in/interview/proctored-room.html?token=${token}`;
+    _siLastInvite = { name, email, phone, role, level, link, token,
+      expires: new Date(Date.now() + parseInt(expiry) * 3600000) };
+    document.getElementById('siLink').textContent = link;
+    document.getElementById('siResult').style.display = 'block';
+    showToast('✅ Interview link generated!', 'success');
+  } catch(e) {
+    showToast('❌ ' + e.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="fas fa-link"></i> Generate Interview Link';
+  }
+}
+
+function siCopyLink() {
+  if (!_siLastInvite) return;
+  navigator.clipboard.writeText(_siLastInvite.link)
+    .then(() => showToast('📋 Link copied!', 'success'))
+    .catch(() => showToast('Copy failed', 'error'));
+}
+
+function siSendWA() {
+  if (!_siLastInvite) return;
+  const d = _siLastInvite;
+  const phone = (d.phone || '').replace(/[^0-9]/g, '');
+  if (!phone) { showToast('No phone number entered', 'error'); return; }
+  const msg = encodeURIComponent(`Hi ${d.name}! 👋\n\nYou've been invited for an AI interview for *${d.role}* (${d.level}).\n\n🔗 Interview Link:\n${d.link}\n\n⏰ Expires: ${d.expires.toLocaleString()}\n\nGood luck! 🚀`);
+  window.open(`https://wa.me/${phone.replace(/^\+/, '')}?text=${msg}`, '_blank');
+}
+
+function siSendEmail() {
+  if (!_siLastInvite) return;
+  const d = _siLastInvite;
+  const subject = encodeURIComponent(`Interview Invitation — ${d.role}`);
+  const body = encodeURIComponent(`Dear ${d.name},\n\nYou have been invited to an AI-powered interview for ${d.role} (${d.level}).\n\n🔗 Interview Link:\n${d.link}\n\n⏰ Expires: ${d.expires.toLocaleString()}\n\nBest of luck!\nSimpatico HR Team`);
+  window.open(`mailto:${d.email}?subject=${subject}&body=${body}`, '_blank');
+}
 
     function searchCandidates() {
       alert('Candidate Sourcing coming soon!');
@@ -819,7 +1007,7 @@
 
   try {
 
-    const res = await api('/client/jobs/create', {
+    const res = await api('/client/jobs', {
       method: "POST",
       body: JSON.stringify({
         title,
