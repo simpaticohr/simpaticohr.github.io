@@ -41,7 +41,49 @@ function toggleNotifications() { openModal('notificationPanel'); loadNotificatio
 // ==========================================
 // DASHBOARD DATA LOADING
 // ==========================================
-async function loadDashboardData(companyId) {
+async function loadDashboardData(companyId) { const SB="https://cvkxtsvgnynxexmemfuy.supabase.co"; const KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN2a3h0c3ZnbnlueGV4bWVtZnV5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc0MjE2NTEsImV4cCI6MjA4Mjk5NzY1MX0.2mys8Cc-ucJ1uLThEGJubeDEg1TvfIAkW-xFsR4ecq4"; const hdr={"apikey":KEY,"Authorization":"Bearer "+localStorage.getItem("simpatico_token")}; const sbFetch=async(t,q)=>{const r=await fetch(SB+"/rest/v1/"+t+"?"+(q||""),{headers:hdr});return r.json();}; try{ const jobs=await sbFetch("jobs","select=id&is_active=eq.true"); document.getElementById("statActiveJobs").textContent=Array.isArray(jobs)?jobs.length:0; if(document.getElementById("badgeJobs"))document.getElementById("badgeJobs").textContent=Array.isArray(jobs)?jobs.length:0; const apps=await sbFetch("applications","select=*&order=created_at.desc&limit=100"); document.getElementById("statApplications").textContent=Array.isArray(apps)?apps.length:0; if(document.getElementById("badgeApplications"))document.getElementById("badgeApplications").textContent=Array.isArray(apps)?apps.length:0; if(document.getElementById("allApplicationsTable"))renderAllApplications(apps); if(document.getElementById("recentApplicationsTable"))renderRecentApplications(apps.slice(0,5)); const ints=await sbFetch("interviews","select=*&order=created_at.desc&limit=50"); document.getElementById("statInterviews").textContent=Array.isArray(ints)?ints.length:0; document.getElementById("statHired").textContent=Array.isArray(apps)?apps.filter(a=>a.status==="hired").length:0; if(document.getElementById("badgeInterviews"))document.getElementById("badgeInterviews").textContent=Array.isArray(ints)?ints.length:0; renderJobsTable(await sbFetch("jobs","select=*&order=created_at.desc&limit=50")); renderInterviewsTable(ints); }catch(e){console.error("[loadDashboardData]",e);} currentCompanyId=companyId;
+  const SB="https://cvkxtsvgnynxexmemfuy.supabase.co";
+  const KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN2a3h0c3ZnbnlueGV4bWVtZnV5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc0MjE2NTEsImV4cCI6MjA4Mjk5NzY1MX0.2mys8Cc-ucJ1uLThEGJubeDEg1TvfIAkW-xFsR4ecq4";
+  const hdr={"apikey":KEY,"Authorization":"Bearer "+localStorage.getItem("simpatico_token")};
+  const sbFetch=async(t,q="")=>{const r=await fetch(SB+"/rest/v1/"+t+"?"+q,{headers:hdr});return r.json();};
+  try{
+    const jobs=await sbFetch("jobs","select=id&is_active=eq.true");
+    document.getElementById("statActiveJobs").textContent=Array.isArray(jobs)?jobs.length:0;
+    if(document.getElementById("badgeJobs"))document.getElementById("badgeJobs").textContent=Array.isArray(jobs)?jobs.length:0;
+    const apps=await sbFetch("applications","select=*&order=created_at.desc&limit=100");
+    document.getElementById("statApplications").textContent=Array.isArray(apps)?apps.length:0;
+    if(document.getElementById("badgeApplications"))document.getElementById("badgeApplications").textContent=Array.isArray(apps)?apps.length:0;
+    if(document.getElementById("allApplicationsTable"))renderAllApplications(apps);
+    if(document.getElementById("recentApplicationsTable"))renderRecentApplications(apps.slice(0,5));
+    const ints=await sbFetch("interviews","select=*&order=created_at.desc&limit=50");
+    document.getElementById("statInterviews").textContent=Array.isArray(ints)?ints.length:0;
+    document.getElementById("statHired").textContent=Array.isArray(apps)?apps.filter(a=>a.status==="hired").length:0;
+    if(document.getElementById("badgeInterviews"))document.getElementById("badgeInterviews").textContent=Array.isArray(ints)?ints.length:0;
+    renderJobsTable(await sbFetch("jobs","select=*&order=created_at.desc&limit=50"));
+    renderInterviewsTable(ints);
+  }catch(e){console.error("[loadDashboardData]",e);}
+  //OLDBODY
+  const SB="https://cvkxtsvgnynxexmemfuy.supabase.co";
+  const KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN2a3h0c3ZnbnlueGV4bWVtZnV5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc0MjE2NTEsImV4cCI6MjA4Mjk5NzY1MX0.2mys8Cc-ucJ1uLThEGJubeDEg1TvfIAkW-xFsR4ecq4";
+  const hdr={"apikey":KEY,"Authorization":"Bearer "+localStorage.getItem("simpatico_token")};
+  const sbFetch=async(t,q="")=>{const r=await fetch(SB+"/rest/v1/"+t+"?"+q,{headers:hdr});return r.json();};
+  try{
+    const jobs=await sbFetch("jobs","select=id&is_active=eq.true");
+    document.getElementById("statActiveJobs").textContent=Array.isArray(jobs)?jobs.length:0;
+    if(document.getElementById("badgeJobs"))document.getElementById("badgeJobs").textContent=Array.isArray(jobs)?jobs.length:0;
+    const apps=await sbFetch("applications","select=*&order=created_at.desc&limit=100");
+    document.getElementById("statApplications").textContent=Array.isArray(apps)?apps.length:0;
+    if(document.getElementById("badgeApplications"))document.getElementById("badgeApplications").textContent=Array.isArray(apps)?apps.length:0;
+    if(document.getElementById("allApplicationsTable"))renderAllApplications(apps);
+    if(document.getElementById("recentApplicationsTable"))renderRecentApplications(apps.slice(0,5));
+    const ints=await sbFetch("interviews","select=*&order=created_at.desc&limit=50");
+    document.getElementById("statInterviews").textContent=Array.isArray(ints)?ints.length:0;
+    document.getElementById("statHired").textContent=Array.isArray(apps)?apps.filter(a=>a.status==="hired").length:0;
+    if(document.getElementById("badgeInterviews"))document.getElementById("badgeInterviews").textContent=Array.isArray(ints)?ints.length:0;
+    renderJobsTable(await sbFetch("jobs","select=*&order=created_at.desc&limit=50"));
+    renderInterviewsTable(ints);
+  }catch(e){console.error("[loadDashboardData]",e);}
+  //OLDBODY
   currentCompanyId = companyId;
 
   try {
@@ -56,7 +98,7 @@ async function loadDashboardData(companyId) {
     // Applications Count
     const { count: appsCount } = await SimpaticoDB.from('applications')
       .select('*', { count: 'exact', head: true })
-      ;
+      .eq('company_id', companyId);
     document.getElementById('statApplications').textContent = appsCount || 0;
     if(document.getElementById('badgeApplications')) document.getElementById('badgeApplications').textContent = appsCount || 0;
 
@@ -81,7 +123,7 @@ async function loadDashboardData(companyId) {
     // Recent Applications
     const { data: recentApps } = await SimpaticoDB.from('applications')
       .select('*, candidate:users!applications_candidate_id_fkey(full_name, email), job:jobs!applications_job_id_fkey(title)')
-      
+      .eq('company_id', companyId)
       .order('created_at', { ascending: false })
       .limit(10);
 
@@ -132,7 +174,7 @@ function renderRecentApplications(apps) {
           ${app.ai_match_score || '--'}%
         </span>
       </td>
-      <td><span class="badge badge-$${getStatusBadgeClass(app.status)}">$${formatStatus(app.status)}</span></td>
+      <td><span class="badge badge-${getStatusBadgeClass(app.status)}">${formatStatus(app.status)}</span></td>
       <td style="font-size:0.8rem;color:var(--gray-500);">${timeAgo(app.created_at)}</td>
       <td>
         <div style="display:flex;gap:4px;">
@@ -153,14 +195,14 @@ function renderUpcomingInterviews(interviews) {
   container.innerHTML = interviews.map(int => `
     <div style="display:flex;align-items:center;gap:12px;padding:12px;border:1px solid var(--gray-200);border-radius:var(--radius-sm);margin-bottom:8px;">
       <div style="width:40px;height:40px;border-radius:50%;background:${int.status === 'in_progress' ? 'var(--success-light)' : 'var(--info-light)'};display:flex;align-items:center;justify-content:center;">
-        <i class="fas fa-$${int.interview_type === 'ai_proctored' ? 'eye' : 'video'}" style="color:$${int.status === 'in_progress' ? 'var(--success)' : 'var(--info)'};"></i>
+        <i class="fas fa-${int.interview_type === 'ai_proctored' ? 'eye' : 'video'}" style="color:${int.status === 'in_progress' ? 'var(--success)' : 'var(--info)'};"></i>
       </div>
       <div style="flex:1;">
         <div style="font-weight:600;font-size:0.85rem;">${int.candidate?.full_name || 'Candidate'}</div>
-        <div style="font-size:0.75rem;color:var(--gray-500);">$${int.job?.title || ''} • $${formatDateTime(int.scheduled_at)}</div>
+        <div style="font-size:0.75rem;color:var(--gray-500);">${int.job?.title || ''} • ${formatDateTime(int.scheduled_at)}</div>
       </div>
       <div>
-        <span class="badge badge-$${int.status === 'in_progress' ? 'success' : 'info'}">$${int.status === 'in_progress' ? '🔴 Live' : int.interview_type}</span>
+        <span class="badge badge-${int.status === 'in_progress' ? 'success' : 'info'}">${int.status === 'in_progress' ? '🔴 Live' : int.interview_type}</span>
       </div>
       ${int.proctoring_enabled ? `
         <a href="../interview/proctored-room.html?id=${int.id}" class="btn btn-primary btn-sm" target="_blank">
@@ -589,10 +631,124 @@ function formatDate(dateStr) {
 }
 function loadAutomationRules() { console.log('Automation not yet implemented'); }
 function loadProctoringReports() { console.log('Proctoring not yet implemented'); }
-function loadAllApplications() { console.log('Loading all applications...'); }
+async function loadAllApplications() {
+  const tbody = document.getElementById('allApplicationsTable');
+  if (!tbody) return;
+  tbody.innerHTML = '<tr><td colspan="6" class="text-center text-gray" style="padding:2rem;">Loading applications...</td></tr>';
+
+  try {
+    const { data: apps, error } = await SimpaticoDB.from('applications')
+      .select('*, candidate:users!applications_candidate_id_fkey(full_name, email), job:jobs!applications_job_id_fkey(title)')
+      .eq('company_id', currentCompanyId)
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+
+    if (!apps.length) {
+      tbody.innerHTML = '<tr><td colspan="6" class="text-center text-gray" style="padding: 2rem;">No applications found for your company.</td></tr>';
+      return;
+    }
+
+    tbody.innerHTML = apps.map(app => `
+      <tr>
+        <td>
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <div style="width:32px;height:32px;border-radius:50%;background:var(--primary-100);display:flex;align-items:center;justify-content:center;font-weight:600;font-size:0.75rem;color:var(--primary);">
+              ${app.candidate?.full_name?.split(' ').map(n => n[0]).join('') || '?'}
+            </div>
+            <div>
+              <div style="font-weight:600;font-size:0.85rem;">${app.candidate?.full_name || 'Unknown'}</div>
+              <div style="font-size:0.75rem;color:var(--gray-500);">${app.candidate?.email || ''}</div>
+            </div>
+          </div>
+        </td>
+        <td style="font-size:0.85rem;">${app.job?.title || 'N/A'}</td>
+        <td>
+          <span class="match-score ${(app.ai_match_score || 0) >= 80 ? 'high' : (app.ai_match_score || 0) >= 50 ? 'medium' : 'low'}">
+            ${app.ai_match_score || '--'}%
+          </span>
+        </td>
+        <td><span class="badge badge-${getStatusBadgeClass(app.status)}">${formatStatus(app.status)}</span></td>
+        <td style="font-size:0.8rem;color:var(--gray-500);">${timeAgo(app.created_at)}</td>
+        <td>
+          <div style="display:flex;gap:4px;">
+            <button class="btn btn-ghost btn-sm" onclick="viewApplication('${app.id}')"><i class="fas fa-eye"></i></button>
+            <button class="btn btn-ghost btn-sm" onclick="moveApplication('${app.id}', 'shortlisted')"><i class="fas fa-star"></i></button>
+          </div>
+        </td>
+      </tr>
+    `).join('');
+  } catch (error) {
+    console.error('Error loading all applications:', error);
+    tbody.innerHTML = `<tr><td colspan="6" class="text-center text-danger" style="padding: 2rem;">Error: ${error.message}</td></tr>`;
+  }
+}
 function loadOnboarding() { console.log('Onboarding not yet implemented'); }
 
-function api(endpoint, options={}) { const token=localStorage.getItem('simpatico_token')||localStorage.getItem('sb_token')||''; const SB='https://cvkxtsvgnynxexmemfuy.supabase.co'; const SB_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN2a3h0c3ZnbnlueGV4bWVtZnV5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc0MjE2NTEsImV4cCI6MjA4Mjk5NzY1MX0.2mys8Cc-ucJ1uLThEGJubeDEg1TvfIAkW-xFsR4ecq4'; const map={'/client/applications':'applications','/client/jobs':'jobs','/client/stats':'applications','/client/pipeline':'applications','/client/interviews':'interviews','/client/onboarding':'onboarding_forms'}; const table=Object.entries(map).find(([k])=>endpoint.startsWith(k))?.[1]; if(table){ return fetch(SB+'/rest/v1/'+table+'?select=*&limit=100',{headers:{'apikey':SB_KEY,'Authorization':'Bearer '+token,'Content-Type':'application/json'}}).then(r=>r.json()).then(d=>({applications:d,jobs:d,interviews:d,data:d})); } return fetch(window.WORKER_URL+endpoint,{...options,headers:{'Content-Type':'application/json','Authorization':'Bearer '+token,...(options.headers||{})}}).then(r=>r.json()); }
+// ==========================================
+// HELPER FUNCTIONS
+// ==========================================
+
+function getStatusBadgeClass(status) {
+  switch (status) {
+    case 'hired': return 'success';
+    case 'interview_scheduled':
+    case 'selected':
+      return 'warning';
+    case 'shortlisted': return 'primary';
+    case 'screened': return 'info';
+    case 'rejected': return 'danger';
+    default: return 'gray';
+  }
+}
+
+function formatStatus(status) {
+  if (!status) return 'N/A';
+  return status.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+}
+
+function timeAgo(dateStr) {
+  if (!dateStr) return 'N/A';
+  const date = new Date(dateStr);
+  const seconds = Math.floor((new Date() - date) / 1000);
+  let interval = seconds / 31536000;
+  if (interval > 1) {
+    return Math.floor(interval) + " years ago";
+  }
+  interval = seconds / 2592000;
+  if (interval > 1) {
+    return Math.floor(interval) + " months ago";
+  }
+  interval = seconds / 86400;
+  if (interval > 1) {
+    return Math.floor(interval) + " days ago";
+  }
+  interval = seconds / 3600;
+  if (interval > 1) {
+    return Math.floor(interval) + " hours ago";
+  }
+  interval = seconds / 60;
+  if (interval > 1) {
+    return Math.floor(interval) + " minutes ago";
+  }
+  return Math.floor(seconds) + " seconds ago";
+}
+
+function formatDateTime(dateStr) {
+  if (!dateStr) return 'N/A';
+  return new Date(dateStr).toLocaleString('en-IN', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit'
+  });
+}
+
+
+
+
+
 
 
 
