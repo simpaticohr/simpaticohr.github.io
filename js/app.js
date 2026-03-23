@@ -477,7 +477,6 @@ function doLogout() {
 // STUBS
 // ==========================================
 function loadAutomationRules() { console.log('Automation not yet implemented'); }
-function loadProctoringReports() { console.log('Proctoring not yet implemented'); }
 function loadOnboarding() { console.log('Onboarding not yet implemented'); }
 function loadNotifications() { console.log('Notifications not yet implemented'); }
 function triggerAutomation(event, id, data) { console.log('Automation:', event, id, data); }
