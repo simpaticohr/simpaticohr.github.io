@@ -496,17 +496,32 @@ async function api(path, opts = {}) {
 // ═══════════════════════════════════════════════════════
 async function init() {
     try {
-        const interviews = await api('/api/interviews');
-        interviewMeta = (interviews || []).find(i => i.room_id === roomId);
-        if (interviewMeta) {
-            seconds = Math.min((interviewMeta.duration_minutes || 15), 15) * 60;
-            if (interviewMeta.job_id) {
-                const jRes = await api(`/api/jobs/${interviewMeta.job_id}`);
-                if (jRes && !jRes.error) job = jRes;
-            }
-            if (!job && interviewMeta.job) job = interviewMeta.job;
+        if (!magicToken) { alert('No interview token. Please use your invitation link.'); return; }
+        const SB_URL = 'https://cvkxtsvgnynxexmemfuy.supabase.co';
+        const SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN2a3h0c3ZnbnlueGV4bWVtZnV5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc0MjE2NTEsImV4cCI6MjA4Mjk5NzY1MX0.2mys8Cc-ucJ1uLThEGJubeDEg1TvfIAkW-xFsR4ecq4';
+        const r = await fetch(`${SB_URL}/rest/v1/interviews?token=eq.${encodeURIComponent(magicToken)}&select=*&limit=1`, {
+            headers: { 'apikey': SB_KEY, 'Authorization': 'Bearer ' + SB_KEY }
+        });
+        const data = await r.json();
+        interviewMeta = Array.isArray(data) ? data[0] : null;
+        if (!interviewMeta) { alert('Invalid or expired interview token.'); return; }
+        if (interviewMeta.status === 'completed') { alert('This interview has already been completed.'); return; }
+        if (interviewMeta.expires_at && new Date(interviewMeta.expires_at) < new Date()) { alert('Interview token has expired. Contact HR.'); return; }
+        token = magicToken;
+        user = {
+            id: interviewMeta.candidate_email || 'candidate',
+            full_name: interviewMeta.candidate_name || 'Candidate',
+            client_id: interviewMeta.client_id || null,
+        };
+        seconds = Math.min((interviewMeta.duration_minutes || 15), 15) * 60;
+        if (interviewMeta.job_id) {
+            const jRes = await fetch(`${SB_URL}/rest/v1/jobs?id=eq.${interviewMeta.job_id}&select=*&limit=1`, {
+                headers: { 'apikey': SB_KEY, 'Authorization': 'Bearer ' + SB_KEY }
+            });
+            const jData = await jRes.json();
+            job = Array.isArray(jData) ? jData[0] : null;
         }
-    } catch(e) { console.warn(e); }
+    } catch(e) { console.warn('Init error:', e); }
 
     if (job) {
         document.getElementById('sjcTitle').textContent = job.title || 'Interview';
@@ -1334,23 +1349,35 @@ async function endSession() {
 
     const score = calculateOverallScore(convoState);
 
-    if (interviewMeta?.id) {
-        await api(`/api/interviews/${interviewMeta.id}/end`, { method:'POST', body:JSON.stringify({
-            overall_score: score,
-            feedback: {
-                total_questions: convoState.questionCount,
-                skill_scores: convoState.skillScores,
-                overall_scores: convoState.overallScores,
-                strong_areas: convoState.strongAreas,
-                weak_areas: convoState.weakAreas,
+    try {
+        const SB_URL = 'https://cvkxtsvgnynxexmemfuy.supabase.co';
+        const SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN2a3h0c3ZnbnlueGV4bWVtZnV5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc0MjE2NTEsImV4cCI6MjA4Mjk5NzY1MX0.2mys8Cc-ucJ1uLThEGJubeDEg1TvfIAkW-xFsR4ecq4';
+        await fetch(`${SB_URL}/rest/v1/interviews?token=eq.${encodeURIComponent(magicToken)}`, {
+            method: 'PATCH',
+            headers: {
+                'apikey': SB_KEY, 'Authorization': 'Bearer ' + SB_KEY,
+                'Content-Type': 'application/json', 'Prefer': 'return=representation'
+            },
+            body: JSON.stringify({
+                status: 'completed',
+                overall_score: score,
                 trust_score: trust,
-                history: convoState.history,
-                skills_tested: Object.keys(convoState.skillScores),
-                job_title: convoState.jobTitle,
-                level: convoState.level
-            }
-        })}).catch(()=>{});
-    }
+                violation_count: procLogs.filter(l => l.level === 'danger').length,
+                violation_log: procLogs,
+                completed_at: new Date().toISOString(),
+                client_id: user.client_id || interviewMeta?.client_id || null,
+                feedback: {
+                    total_questions: convoState.questionCount,
+                    skill_scores: convoState.skillScores,
+                    strong_areas: convoState.strongAreas,
+                    weak_areas: convoState.weakAreas,
+                    job_title: convoState.jobTitle,
+                    level: convoState.level,
+                },
+            })
+        });
+        console.log('Results saved ✅');
+    } catch(e) { console.warn('Save error:', e); }
 
     if (mediaStream) mediaStream.getTracks().forEach(t=>t.stop());
     if (audioCtx) audioCtx.close().catch(()=>{});

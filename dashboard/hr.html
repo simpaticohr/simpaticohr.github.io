@@ -441,16 +441,58 @@
 
       <!-- Proctoring Reports Page -->
       <div class="page-content hidden" id="page-proctoring">
-        <div class="page-header">
-          <div>
-            <h1><i class="fas fa-eye" style="color: var(--danger);"></i> Proctoring Reports</h1>
-            <p class="subtitle">Review AI proctoring results, eye tracking data, and cheating flags</p>
-          </div>
-        </div>
-        <div id="proctoringReports">
-          <p class="text-gray text-center" style="padding: 2rem;">Select an interview to view proctoring report</p>
-        </div>
+  <div class="page-header">
+    <div>
+      <h1><i class="fas fa-eye" style="color: var(--danger);"></i> Proctoring Reports</h1>
+      <p class="subtitle">AI proctoring results for your interviews</p>
+    </div>
+    <button class="btn btn-secondary btn-sm" onclick="loadProctoringReports()">
+      <i class="fas fa-sync"></i> Refresh
+    </button>
+  </div>
+  <div class="stats-grid" style="grid-template-columns:repeat(4,1fr);">
+    <div class="stat-card">
+      <div class="stat-info"><h4>Total Interviews</h4><div class="value" id="prTotal">0</div></div>
+      <div class="stat-icon" style="background:var(--primary-50);color:var(--primary);"><i class="fas fa-video"></i></div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-info"><h4>Completed</h4><div class="value" id="prCompleted">0</div></div>
+      <div class="stat-icon" style="background:var(--success-light);color:var(--success);"><i class="fas fa-check-circle"></i></div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-info"><h4>Flagged</h4><div class="value" id="prFlagged">0</div></div>
+      <div class="stat-icon" style="background:var(--danger-light);color:var(--danger);"><i class="fas fa-flag"></i></div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-info"><h4>Avg Trust Score</h4><div class="value" id="prAvgTrust">--</div></div>
+      <div class="stat-icon" style="background:var(--warning-light);color:var(--warning);"><i class="fas fa-shield-halved"></i></div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-body" style="padding:0;">
+      <table>
+        <thead>
+          <tr>
+            <th>Candidate</th><th>Job</th><th>Score</th><th>Trust</th>
+            <th>Violations</th><th>Status</th><th>Date</th><th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="proctoringTable">
+          <tr><td colspan="8" class="text-center text-gray" style="padding:2rem;">Loading...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+  <div class="modal-overlay" id="procReportModal" style="display:none;">
+    <div class="modal" style="max-width:700px;max-height:90vh;overflow-y:auto;">
+      <div class="modal-header">
+        <h3><i class="fas fa-shield-halved" style="color:var(--danger);"></i> Proctoring Report</h3>
+        <button class="btn btn-ghost btn-icon" onclick="closeModal('procReportModal')">&times;</button>
       </div>
+      <div class="modal-body" id="procReportBody"></div>
+    </div>
+  </div>
+</div>
 
       <!-- Automation Page -->
       <div class="page-content hidden" id="page-automation">
@@ -1026,6 +1068,279 @@ function siSendEmail() {
     alert("Failed to create job: " + err.message);
 
   }
+}
+// ══════════════════════════════════════
+// PROCTORING REPORTS
+// ══════════════════════════════════════
+async function loadProctoringReports() {
+  const tbody = document.getElementById('proctoringTable');
+  if (!tbody) return;
+  tbody.innerHTML = '<tr><td colspan="8" class="text-center text-gray" style="padding:2rem;">Loading...</td></tr>';
+  try {
+    const res = await api('/client/interviews', { method: 'GET' });
+    const interviews = res.interviews || [];
+    const completed = interviews.filter(i => i.status === 'completed');
+    const flagged   = interviews.filter(i => (i.violation_count || 0) >= 3);
+    const avgTrust  = completed.length
+      ? Math.round(completed.reduce((s, i) => s + (i.trust_score || 100), 0) / completed.length)
+      : '--';
+    document.getElementById('prTotal').textContent     = interviews.length;
+    document.getElementById('prCompleted').textContent = completed.length;
+    document.getElementById('prFlagged').textContent   = flagged.length;
+    document.getElementById('prAvgTrust').textContent  = avgTrust !== '--' ? avgTrust + '%' : '--';
+    if (!interviews.length) {
+      tbody.innerHTML = '<tr><td colspan="8" class="text-center text-gray" style="padding:2rem;">No interviews yet.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = interviews.map(iv => {
+      const score      = iv.overall_score != null ? iv.overall_score : '--';
+      const trust      = iv.trust_score   != null ? iv.trust_score   : '--';
+      const violations = iv.violation_count || 0;
+      const scoreColor = score >= 70 ? 'var(--success)' : score >= 40 ? 'var(--warning)' : 'var(--danger)';
+      const trustColor = trust >= 70 ? 'var(--success)' : trust >= 40 ? 'var(--warning)' : 'var(--danger)';
+      const flagColor  = violations >= 3 ? 'var(--danger)' : violations > 0 ? 'var(--warning)' : 'var(--success)';
+      const date       = iv.created_at ? new Date(iv.created_at).toLocaleDateString('en-IN', { day:'2-digit', month:'short', year:'numeric' }) : '--';
+      const statusColor = { pending:'var(--warning)', in_progress:'var(--info)', completed:'var(--success)' }[iv.status] || 'var(--gray-400)';
+      return `<tr>
+        <td><strong>${iv.candidate_name || iv.candidate_email || '--'}</strong>
+          <div style="font-size:0.75rem;color:var(--gray-500);">${iv.candidate_email || ''}</div></td>
+        <td style="font-size:0.85rem;">${iv.interview_role || '--'}</td>
+        <td><span style="font-weight:700;color:${scoreColor}">${score}${score !== '--' ? '%' : ''}</span></td>
+        <td><span style="font-weight:700;color:${trustColor}">${trust}${trust !== '--' ? '%' : ''}</span></td>
+        <td><span style="font-weight:700;color:${flagColor}">${violations} ${violations >= 3 ? '🚨' : violations > 0 ? '⚠️' : '✅'}</span></td>
+        <td><span class="badge" style="background:${statusColor}22;color:${statusColor};border:1px solid ${statusColor}44">${iv.status || 'pending'}</span></td>
+        <td style="font-size:0.8rem;color:var(--gray-500);">${date}</td>
+        <td>${iv.status === 'completed'
+          ? `<button class="btn btn-secondary btn-sm" onclick="viewProcReport('${iv.token}')"><i class="fas fa-eye"></i> Report</button>`
+          : `<button class="btn btn-ghost btn-sm" onclick="copyInterviewLink('${iv.token}')"><i class="fas fa-link"></i> Link</button>`
+        }</td>
+      </tr>`;
+    }).join('');
+  } catch(e) {
+    tbody.innerHTML = `<tr><td colspan="8" class="text-center" style="color:var(--danger);padding:2rem;">Error: ${e.message}</td></tr>`;
+  }
+}
+
+async function viewProcReport(token) {
+  const modal = document.getElementById('procReportModal');
+  const body  = document.getElementById('procReportBody');
+  modal.style.display = 'flex';
+  body.innerHTML = '<p class="text-gray text-center" style="padding:2rem;">Loading report...</p>';
+  try {
+    const res = await api('/client/interviews', { method: 'GET' });
+    const iv  = (res.interviews || []).find(i => i.token === token);
+    if (!iv) throw new Error('Report not found');
+    const violations = iv.violation_log || [];
+    const feedback   = iv.feedback || {};
+    const score      = iv.overall_score || 0;
+    const trust      = iv.trust_score   || 0;
+    const scoreColor = score >= 70 ? '#10b981' : score >= 40 ? '#f59e0b' : '#ef4444';
+    const trustColor = trust >= 70 ? '#10b981' : trust >= 40 ? '#f59e0b' : '#ef4444';
+    body.innerHTML = `
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:1rem;margin-bottom:1.5rem;">
+        <div class="stat-card" style="text-align:center;">
+          <div style="font-size:2rem;font-weight:800;color:${scoreColor}">${score}%</div>
+          <div style="font-size:0.75rem;color:var(--gray-500);">Overall Score</div>
+        </div>
+        <div class="stat-card" style="text-align:center;">
+          <div style="font-size:2rem;font-weight:800;color:${trustColor}">${trust}%</div>
+          <div style="font-size:0.75rem;color:var(--gray-500);">Trust Score</div>
+        </div>
+        <div class="stat-card" style="text-align:center;">
+          <div style="font-size:2rem;font-weight:800;color:${violations.length >= 3 ? '#ef4444' : '#10b981'}">${violations.length}</div>
+          <div style="font-size:0.75rem;color:var(--gray-500);">Violations</div>
+        </div>
+      </div>
+      <div style="margin-bottom:1rem;">
+        <h4 style="margin-bottom:0.5rem;">Candidate</h4>
+        <p>${iv.candidate_name || '--'} · ${iv.candidate_email || '--'}</p>
+        <p style="font-size:0.85rem;color:var(--gray-500);">Role: ${iv.interview_role || '--'} · Level: ${iv.interview_level || '--'}</p>
+      </div>
+      ${feedback.skill_scores && Object.keys(feedback.skill_scores).length ? `
+      <div style="margin-bottom:1rem;">
+        <h4 style="margin-bottom:0.75rem;">Skill Scores</h4>
+        ${Object.entries(feedback.skill_scores).map(([skill, scores]) => {
+          const avg = Math.round(scores.reduce((a,b)=>a+b,0)/scores.length);
+          const c   = avg >= 70 ? '#10b981' : avg >= 40 ? '#f59e0b' : '#ef4444';
+          return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+            <span style="min-width:120px;font-size:0.85rem;">${skill}</span>
+            <div style="flex:1;height:8px;background:var(--gray-100);border-radius:4px;overflow:hidden;">
+              <div style="width:${avg}%;height:100%;background:${c};border-radius:4px;"></div>
+            </div>
+            <span style="font-weight:700;color:${c};min-width:40px;text-align:right;">${avg}%</span>
+          </div>`;
+        }).join('')}
+      </div>` : ''}
+      ${violations.length ? `
+      <div style="margin-bottom:1rem;">
+        <h4 style="margin-bottom:0.75rem;color:#ef4444;">⚠️ Violations Log</h4>
+        ${violations.map(v => `
+          <div style="display:flex;gap:8px;padding:6px 10px;background:#fef2f2;
+            border-radius:6px;margin-bottom:4px;font-size:0.8rem;">
+            <span style="color:var(--gray-500);min-width:60px;">${v.time || '--'}</span>
+            <span style="color:#ef4444;font-weight:600;">${v.msg || v.event_type || '--'}</span>
+          </div>`).join('')}
+      </div>` : '<p style="color:#10b981;margin-bottom:1rem;">✅ No violations recorded</p>'}
+      ${feedback.strong_areas?.length ? `
+      <div style="margin-bottom:1rem;">
+        <h4 style="margin-bottom:0.5rem;">💪 Strong Areas</h4>
+        ${feedback.strong_areas.map(s => `<span class="badge" style="background:#d1fae5;color:#059669;margin:2px;">${s}</span>`).join('')}
+      </div>` : ''}
+      ${feedback.weak_areas?.length ? `
+      <div>
+        <h4 style="margin-bottom:0.5rem;">📈 Areas to Improve</h4>
+        ${feedback.weak_areas.map(s => `<span class="badge" style="background:#fef3c7;color:#b45309;margin:2px;">${s}</span>`).join('')}
+      </div>` : ''}
+    `;
+  } catch(e) {
+    body.innerHTML = `<p style="color:var(--danger);padding:1rem;">Error: ${e.message}</p>`;
+  }
+}
+
+function copyInterviewLink(token) {
+  const link = `https://simpaticohr.in/interview/proctored-room.html?token=${token}`;
+  navigator.clipboard.writeText(link)
+    .then(() => showToast('📋 Interview link copied!', 'success'))
+    .catch(() => showToast('Copy failed', 'error'));
+}
+```
+
+Then also find `showPage` function and add proctoring trigger. Press **`Ctrl+H`**:
+
+**Find:**
+```
+if (p === 'interviews') loadInterviews?.();
+if (p === 'proctoring') loadProctoringReports();
+async function loadProctoringReports() {
+  const tbody = document.getElementById('proctoringTable');
+  if (!tbody) return;
+  tbody.innerHTML = '<tr><td colspan="8" class="text-center text-gray" style="padding:2rem;">Loading...</td></tr>';
+  try {
+    const res = await api('/client/interviews', { method: 'GET' });
+    const interviews = res.interviews || [];
+    const completed = interviews.filter(i => i.status === 'completed');
+    const flagged   = interviews.filter(i => (i.violation_count || 0) >= 3);
+    const avgTrust  = completed.length
+      ? Math.round(completed.reduce((s, i) => s + (i.trust_score || 100), 0) / completed.length)
+      : '--';
+    document.getElementById('prTotal').textContent     = interviews.length;
+    document.getElementById('prCompleted').textContent = completed.length;
+    document.getElementById('prFlagged').textContent   = flagged.length;
+    document.getElementById('prAvgTrust').textContent  = avgTrust !== '--' ? avgTrust + '%' : '--';
+    if (!interviews.length) {
+      tbody.innerHTML = '<tr><td colspan="8" class="text-center text-gray" style="padding:2rem;">No interviews yet.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = interviews.map(iv => {
+      const score      = iv.overall_score != null ? iv.overall_score : '--';
+      const trust      = iv.trust_score   != null ? iv.trust_score   : '--';
+      const violations = iv.violation_count || 0;
+      const scoreColor = score >= 70 ? 'var(--success)' : score >= 40 ? 'var(--warning)' : 'var(--danger)';
+      const trustColor = trust >= 70 ? 'var(--success)' : trust >= 40 ? 'var(--warning)' : 'var(--danger)';
+      const flagColor  = violations >= 3 ? 'var(--danger)' : violations > 0 ? 'var(--warning)' : 'var(--success)';
+      const date       = iv.created_at ? new Date(iv.created_at).toLocaleDateString('en-IN', { day:'2-digit', month:'short', year:'numeric' }) : '--';
+      const statusColor = { pending:'var(--warning)', in_progress:'var(--info)', completed:'var(--success)' }[iv.status] || 'var(--gray-400)';
+      return `<tr>
+        <td><strong>${iv.candidate_name || iv.candidate_email || '--'}</strong>
+          <div style="font-size:0.75rem;color:var(--gray-500);">${iv.candidate_email || ''}</div></td>
+        <td style="font-size:0.85rem;">${iv.interview_role || '--'}</td>
+        <td><span style="font-weight:700;color:${scoreColor}">${score}${score !== '--' ? '%' : ''}</span></td>
+        <td><span style="font-weight:700;color:${trustColor}">${trust}${trust !== '--' ? '%' : ''}</span></td>
+        <td><span style="font-weight:700;color:${flagColor}">${violations} ${violations >= 3 ? '🚨' : violations > 0 ? '⚠️' : '✅'}</span></td>
+        <td><span class="badge" style="background:${statusColor}22;color:${statusColor};border:1px solid ${statusColor}44">${iv.status || 'pending'}</span></td>
+        <td style="font-size:0.8rem;color:var(--gray-500);">${date}</td>
+        <td>${iv.status === 'completed'
+          ? `<button class="btn btn-secondary btn-sm" onclick="viewProcReport('${iv.token}')"><i class="fas fa-eye"></i> Report</button>`
+          : `<button class="btn btn-ghost btn-sm" onclick="copyInterviewLink('${iv.token}')"><i class="fas fa-link"></i> Link</button>`
+        }</td>
+      </tr>`;
+    }).join('');
+  } catch(e) {
+    tbody.innerHTML = `<tr><td colspan="8" class="text-center" style="color:var(--danger);padding:2rem;">Error: ${e.message}</td></tr>`;
+  }
+}
+
+async function viewProcReport(token) {
+  const modal = document.getElementById('procReportModal');
+  const body  = document.getElementById('procReportBody');
+  modal.style.display = 'flex';
+  body.innerHTML = '<p class="text-gray text-center" style="padding:2rem;">Loading report...</p>';
+  try {
+    const res = await api('/client/interviews', { method: 'GET' });
+    const iv  = (res.interviews || []).find(i => i.token === token);
+    if (!iv) throw new Error('Report not found');
+    const violations = iv.violation_log || [];
+    const feedback   = iv.feedback || {};
+    const score      = iv.overall_score || 0;
+    const trust      = iv.trust_score   || 0;
+    const scoreColor = score >= 70 ? '#10b981' : score >= 40 ? '#f59e0b' : '#ef4444';
+    const trustColor = trust >= 70 ? '#10b981' : trust >= 40 ? '#f59e0b' : '#ef4444';
+    body.innerHTML = `
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:1rem;margin-bottom:1.5rem;">
+        <div class="stat-card" style="text-align:center;">
+          <div style="font-size:2rem;font-weight:800;color:${scoreColor}">${score}%</div>
+          <div style="font-size:0.75rem;color:var(--gray-500);">Overall Score</div>
+        </div>
+        <div class="stat-card" style="text-align:center;">
+          <div style="font-size:2rem;font-weight:800;color:${trustColor}">${trust}%</div>
+          <div style="font-size:0.75rem;color:var(--gray-500);">Trust Score</div>
+        </div>
+        <div class="stat-card" style="text-align:center;">
+          <div style="font-size:2rem;font-weight:800;color:${violations.length >= 3 ? '#ef4444' : '#10b981'}">${violations.length}</div>
+          <div style="font-size:0.75rem;color:var(--gray-500);">Violations</div>
+        </div>
+      </div>
+      <div style="margin-bottom:1rem;">
+        <h4 style="margin-bottom:0.5rem;">Candidate</h4>
+        <p>${iv.candidate_name || '--'} · ${iv.candidate_email || '--'}</p>
+        <p style="font-size:0.85rem;color:var(--gray-500);">Role: ${iv.interview_role || '--'} · Level: ${iv.interview_level || '--'}</p>
+      </div>
+      ${feedback.skill_scores && Object.keys(feedback.skill_scores).length ? `
+      <div style="margin-bottom:1rem;">
+        <h4 style="margin-bottom:0.75rem;">Skill Scores</h4>
+        ${Object.entries(feedback.skill_scores).map(([skill, scores]) => {
+          const avg = Math.round(scores.reduce((a,b)=>a+b,0)/scores.length);
+          const c   = avg >= 70 ? '#10b981' : avg >= 40 ? '#f59e0b' : '#ef4444';
+          return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+            <span style="min-width:120px;font-size:0.85rem;">${skill}</span>
+            <div style="flex:1;height:8px;background:var(--gray-100);border-radius:4px;overflow:hidden;">
+              <div style="width:${avg}%;height:100%;background:${c};border-radius:4px;"></div>
+            </div>
+            <span style="font-weight:700;color:${c};min-width:40px;text-align:right;">${avg}%</span>
+          </div>`;
+        }).join('')}
+      </div>` : ''}
+      ${violations.length ? `
+      <div style="margin-bottom:1rem;">
+        <h4 style="margin-bottom:0.75rem;color:#ef4444;">⚠️ Violations Log</h4>
+        ${violations.map(v => `
+          <div style="display:flex;gap:8px;padding:6px 10px;background:#fef2f2;
+            border-radius:6px;margin-bottom:4px;font-size:0.8rem;">
+            <span style="color:var(--gray-500);min-width:60px;">${v.time || '--'}</span>
+            <span style="color:#ef4444;font-weight:600;">${v.msg || v.event_type || '--'}</span>
+          </div>`).join('')}
+      </div>` : '<p style="color:#10b981;margin-bottom:1rem;">✅ No violations recorded</p>'}
+      ${feedback.strong_areas?.length ? `
+      <div style="margin-bottom:1rem;">
+        <h4 style="margin-bottom:0.5rem;">💪 Strong Areas</h4>
+        ${feedback.strong_areas.map(s => `<span class="badge" style="background:#d1fae5;color:#059669;margin:2px;">${s}</span>`).join('')}
+      </div>` : ''}
+      ${feedback.weak_areas?.length ? `
+      <div>
+        <h4 style="margin-bottom:0.5rem;">📈 Areas to Improve</h4>
+        ${feedback.weak_areas.map(s => `<span class="badge" style="background:#fef3c7;color:#b45309;margin:2px;">${s}</span>`).join('')}
+      </div>` : ''}
+    `;
+  } catch(e) {
+    body.innerHTML = `<p style="color:var(--danger);padding:1rem;">Error: ${e.message}</p>`;
+  }
+}
+
+function copyInterviewLink(token) {
+  const link = `https://simpaticohr.in/interview/proctored-room.html?token=${token}`;
+  navigator.clipboard.writeText(link)
+    .then(() => showToast('📋 Interview link copied!', 'success'))
+    .catch(() => showToast('Copy failed', 'error'));
 }
   </script>
 </body>
