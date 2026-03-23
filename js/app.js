@@ -476,15 +476,12 @@ function doLogout() {
 // ==========================================
 // STUBS
 // ==========================================
-function loadAutomationRules() { console.log('Automation not yet implemented'); }
-function loadOnboarding() { console.log('Onboarding not yet implemented'); }
 function loadNotifications() { console.log('Notifications not yet implemented'); }
 function triggerAutomation(event, id, data) { console.log('Automation:', event, id, data); }
 function setupRealtimeSubscriptions(companyId) { console.log('Realtime subscriptions not yet implemented'); }
 
 function searchCandidates() { alert('Candidate Sourcing coming soon!'); }
 
-function openCreateAutomationModal() { alert('Automation Rule Creator coming soon!'); }
 
 function api(endpoint, options) {
   const token = localStorage.getItem('simpatico_token') || '';
