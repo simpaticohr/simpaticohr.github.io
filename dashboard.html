@@ -5,88 +5,293 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Dashboard | Simpatico HR</title>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
   <link rel="stylesheet" href="css/shared.css">
+  <style>
+    .interview-card {
+      display:flex;justify-content:space-between;align-items:center;
+      padding:12px;border:1px solid var(--border);border-radius:10px;
+      margin-bottom:8px;background:rgba(255,255,255,.03);
+    }
+    .interview-card:hover { border-color:rgba(99,102,241,.3); }
+    .modal-overlay {
+      position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:1000;
+      display:flex;align-items:center;justify-content:center;padding:20px;
+    }
+    .modal-box {
+      background:#0f172a;border:1px solid rgba(99,102,241,.25);border-radius:20px;
+      padding:28px;width:100%;max-width:560px;max-height:90vh;overflow-y:auto;
+    }
+    .modal-box h3 { margin-bottom:16px;font-size:1.1rem;font-weight:700; }
+    .form-group { margin-bottom:14px; }
+    .form-group label { display:block;font-size:0.78rem;color:var(--muted);margin-bottom:5px;font-weight:600; }
+    .form-group input, .form-group select, .form-group textarea {
+      width:100%;padding:10px 12px;background:rgba(255,255,255,.04);
+      border:1px solid var(--border);border-radius:10px;color:var(--text);
+      font-size:0.88rem;outline:none;font-family:inherit;
+    }
+    .form-group input:focus, .form-group select:focus { border-color:rgba(99,102,241,.45); }
+    .form-row { display:grid;grid-template-columns:1fr 1fr;gap:12px; }
+    .result-box {
+      margin-top:14px;padding:14px;background:rgba(16,185,129,.06);
+      border:1px solid rgba(16,185,129,.2);border-radius:10px;display:none;
+    }
+    .result-box .link-text {
+      font-family:monospace;font-size:0.75rem;color:#34d399;word-break:break-all;
+      background:rgba(0,0,0,.2);padding:8px;border-radius:6px;margin:8px 0;
+    }
+    .badge-status {
+      padding:3px 10px;border-radius:20px;font-size:0.72rem;font-weight:700;display:inline-block;
+    }
+    .badge-pending { background:rgba(245,158,11,.15);color:#f59e0b; }
+    .badge-completed { background:rgba(16,185,129,.15);color:#10b981; }
+    .badge-in_progress { background:rgba(59,130,246,.15);color:#3b82f6; }
+  </style>
 </head>
 <body>
 
+<!-- TOP NAV -->
 <nav class="top-nav">
-  <a class="top-logo" href="index.html"><img src="favicon-96x96.png" style="width:28px;height:28px;border-radius:6px;margin-right:8px;vertical-align:middle;">SIMPATICO <span>HR</span></a>
+  <a class="top-logo" href="index.html">
+    <img src="favicon-96x96.png" style="width:28px;height:28px;border-radius:6px;margin-right:8px;vertical-align:middle;">
+    SIMPATICO <span>HR</span>
+  </a>
   <div class="top-links">
-    <a class="top-link active" href="dashboard.html">?? Dashboard</a>
-    <a class="top-link" href="pipeline.html">?? Pipeline</a>
-    <a class="top-link" href="analytics.html">?? Analytics</a>
-    <a class="top-link" href="settings.html">?? Settings</a>
-    <a class="top-link" href="#" onclick="API.logout();return false;">?? Logout</a>
+    <a class="top-link active" href="dashboard.html"><i class="fas fa-chart-pie"></i> Dashboard</a>
+    <a class="top-link" href="pipeline.html"><i class="fas fa-columns"></i> Pipeline</a>
+    <a class="top-link" href="analytics.html"><i class="fas fa-chart-bar"></i> Analytics</a>
+    <a class="top-link" href="dashboard/hr.html"><i class="fas fa-briefcase"></i> ATS</a>
+    <a class="top-link" href="#" onclick="doLogout();return false;" style="color:#f87171;">
+      <i class="fas fa-sign-out-alt"></i> Logout
+    </a>
   </div>
 </nav>
 
 <div class="container">
+  <!-- HEADER -->
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;flex-wrap:wrap;gap:12px;">
     <div>
       <h1 style="font-size:1.6rem;font-weight:800;background:linear-gradient(135deg,#fff,#94a3b8);-webkit-background-clip:text;-webkit-text-fill-color:transparent;" id="welcomeTitle">Dashboard</h1>
       <p style="color:var(--muted);font-size:0.88rem;" id="welcomeSub">Loading...</p>
     </div>
-    <div style="display:flex;gap:8px;">
-      <button class="btn btn-primary" onclick="showPostJob()">+ Post Job</button>
-      <button class="btn btn-green" onclick="location.href='pipeline.html'">?? Pipeline</button>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+      <button class="btn btn-primary" onclick="showPostJob()">
+        <i class="fas fa-plus"></i> Post Job
+      </button>
+      <button class="btn btn-green" onclick="openScheduleModal()">
+        <i class="fas fa-calendar-plus"></i> Schedule Interview
+      </button>
+      <button class="btn" style="background:rgba(99,102,241,.15);color:#a5b4fc;" onclick="location.href='pipeline.html'">
+        <i class="fas fa-columns"></i> Pipeline
+      </button>
     </div>
   </div>
 
-  <!-- Stats -->
+  <!-- STATS -->
   <div class="stat-grid" id="statsGrid">
-    <div class="stat-card"><div class="stat-num" style="color:var(--blue);" id="sJobs">-</div><div class="stat-lbl">Active Jobs</div></div>
-    <div class="stat-card"><div class="stat-num" style="color:var(--accent);" id="sApps">-</div><div class="stat-lbl">Applications</div></div>
-    <div class="stat-card"><div class="stat-num" style="color:var(--yellow);" id="sNew">-</div><div class="stat-lbl">New This Week</div></div>
-    <div class="stat-card"><div class="stat-num" style="color:var(--green);" id="sShort">-</div><div class="stat-lbl">Shortlisted</div></div>
-    <div class="stat-card"><div class="stat-num" style="color:var(--red);" id="sInterviews">-</div><div class="stat-lbl">Interviews</div></div>
-    <div class="stat-card"><div class="stat-num" style="color:#10b981;" id="sHired">-</div><div class="stat-lbl">Hired</div></div>
+    <div class="stat-card">
+      <div class="stat-num" style="color:var(--blue);" id="sJobs">-</div>
+      <div class="stat-lbl">Active Jobs</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-num" style="color:var(--accent);" id="sApps">-</div>
+      <div class="stat-lbl">Applications</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-num" style="color:var(--yellow);" id="sNew">-</div>
+      <div class="stat-lbl">New This Week</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-num" style="color:var(--green);" id="sShort">-</div>
+      <div class="stat-lbl">Shortlisted</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-num" style="color:var(--red);" id="sInterviews">-</div>
+      <div class="stat-lbl">Interviews</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-num" style="color:#10b981;" id="sHired">-</div>
+      <div class="stat-lbl">Hired</div>
+    </div>
   </div>
 
-  <!-- Pipeline Summary -->
+  <!-- PIPELINE SUMMARY -->
   <div class="card">
-    <h3>?? Pipeline Summary</h3>
+    <h3><i class="fas fa-filter" style="color:var(--accent);margin-right:8px;"></i>Pipeline Summary</h3>
     <div id="pipelineSummary" style="display:flex;gap:6px;flex-wrap:wrap;"></div>
   </div>
 
-  <!-- Recent Applications -->
+  <!-- INTERVIEWS -->
   <div class="card">
-    <h3>?? Recent Applications</h3>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+      <h3 style="margin:0;"><i class="fas fa-video" style="color:#f59e0b;margin-right:8px;"></i>Interviews</h3>
+      <button class="btn btn-sm btn-green" onclick="openScheduleModal()">
+        <i class="fas fa-plus"></i> Schedule
+      </button>
+    </div>
+    <div id="interviewsList"><span class="loading"></span> Loading...</div>
+  </div>
+
+  <!-- RECENT APPLICATIONS -->
+  <div class="card">
+    <h3><i class="fas fa-file-alt" style="color:var(--accent);margin-right:8px;"></i>Recent Applications</h3>
     <div id="recentApps"><span class="loading"></span> Loading...</div>
   </div>
 
-  <!-- Active Jobs -->
+  <!-- ACTIVE JOBS -->
   <div class="card">
-    <h3>?? Active Jobs</h3>
+    <h3><i class="fas fa-briefcase" style="color:var(--blue);margin-right:8px;"></i>Active Jobs</h3>
     <div id="activeJobs"><span class="loading"></span> Loading...</div>
   </div>
+</div>
 
-  <!-- Post Job Modal -->
-  <div id="postJobModal" class="hidden" style="position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:1000;display:flex;align-items:center;justify-content:center;padding:20px;">
-    <div class="card" style="max-width:600px;width:100%;max-height:90vh;overflow-y:auto;">
-      <div style="display:flex;justify-content:space-between;align-items:center;">
-        <h3>?? Post New Job</h3>
-        <button class="btn btn-sm btn-red" onclick="hidePostJob()">?</button>
-      </div>
-      <label>Title *</label>
+<!-- ══ POST JOB MODAL ══ -->
+<div id="postJobModal" class="modal-overlay hidden">
+  <div class="modal-box">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+      <h3 style="margin:0;"><i class="fas fa-briefcase" style="color:var(--accent);margin-right:8px;"></i>Post New Job</h3>
+      <button class="btn btn-sm btn-red" onclick="hidePostJob()"><i class="fas fa-times"></i></button>
+    </div>
+    <div class="form-group">
+      <label>Job Title *</label>
       <input type="text" id="jTitle" placeholder="e.g. Senior Frontend Developer">
-      <div class="row2">
-        <div><label>Type</label><select id="jType"><option value="full-time">Full Time</option><option value="part-time">Part Time</option><option value="contract">Contract</option><option value="internship">Internship</option><option value="remote">Remote</option></select></div>
-        <div><label>Location</label><input type="text" id="jLocation" placeholder="e.g. Kochi, Kerala"></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Type</label>
+        <select id="jType">
+          <option value="full-time">Full Time</option>
+          <option value="part-time">Part Time</option>
+          <option value="contract">Contract</option>
+          <option value="internship">Internship</option>
+          <option value="remote">Remote</option>
+        </select>
       </div>
-      <div class="row2">
-        <div><label>Department</label><input type="text" id="jDept" placeholder="Engineering"></div>
-        <div><label>Level</label><select id="jLevel"><option value="Fresher">Fresher</option><option value="Junior">Junior</option><option value="Mid-Level" selected>Mid-Level</option><option value="Senior">Senior</option><option value="Lead">Lead</option></select></div>
+      <div class="form-group">
+        <label>Location</label>
+        <input type="text" id="jLocation" placeholder="e.g. Kochi, Kerala">
       </div>
-      <div class="row2">
-        <div><label>Min Salary (?)</label><input type="number" id="jSalMin" placeholder="0"></div>
-        <div><label>Max Salary (?)</label><input type="number" id="jSalMax" placeholder="0"></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Department</label>
+        <input type="text" id="jDept" placeholder="Engineering">
       </div>
+      <div class="form-group">
+        <label>Level</label>
+        <select id="jLevel">
+          <option value="Fresher">Fresher</option>
+          <option value="Junior">Junior</option>
+          <option value="Mid-Level" selected>Mid-Level</option>
+          <option value="Senior">Senior</option>
+          <option value="Lead">Lead</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Min Salary (₹)</label>
+        <input type="number" id="jSalMin" placeholder="0">
+      </div>
+      <div class="form-group">
+        <label>Max Salary (₹)</label>
+        <input type="number" id="jSalMax" placeholder="0">
+      </div>
+    </div>
+    <div class="form-group">
       <label>Skills (comma separated)</label>
       <input type="text" id="jSkills" placeholder="React, Node.js, TypeScript">
+    </div>
+    <div class="form-group">
       <label>Description</label>
       <textarea id="jDesc" placeholder="Job description..." style="min-height:120px;"></textarea>
-      <button class="btn btn-primary btn-full" onclick="submitJob()">?? Publish Job</button>
     </div>
+    <button class="btn btn-primary btn-full" onclick="submitJob()">
+      <i class="fas fa-rocket"></i> Publish Job
+    </button>
+  </div>
+</div>
+
+<!-- ══ SCHEDULE INTERVIEW MODAL ══ -->
+<div id="scheduleModal" class="modal-overlay hidden">
+  <div class="modal-box">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+      <h3 style="margin:0;"><i class="fas fa-calendar-plus" style="color:var(--accent);margin-right:8px;"></i>Schedule Interview</h3>
+      <button class="btn btn-sm btn-red" onclick="closeScheduleModal()"><i class="fas fa-times"></i></button>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Candidate Name *</label>
+        <input type="text" id="siName" placeholder="John Doe">
+      </div>
+      <div class="form-group">
+        <label>Candidate Email *</label>
+        <input type="email" id="siEmail" placeholder="john@email.com">
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Phone (WhatsApp)</label>
+        <input type="tel" id="siPhone" placeholder="+91 98765 43210">
+      </div>
+      <div class="form-group">
+        <label>Select Job</label>
+        <select id="siJob">
+          <option value="">Loading jobs...</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Job Role *</label>
+        <input type="text" id="siRole" placeholder="Senior Developer">
+      </div>
+      <div class="form-group">
+        <label>Level</label>
+        <select id="siLevel">
+          <option value="Fresher">Fresher</option>
+          <option value="Junior">Junior</option>
+          <option value="Mid-Level" selected>Mid-Level</option>
+          <option value="Senior">Senior</option>
+          <option value="Lead">Lead</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Questions</label>
+        <select id="siQuestions">
+          <option value="5">5</option>
+          <option value="8">8</option>
+          <option value="10" selected>10</option>
+          <option value="15">15</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Expires In</label>
+        <select id="siExpiry">
+          <option value="24">24 Hours</option>
+          <option value="48">48 Hours</option>
+          <option value="72" selected>72 Hours</option>
+          <option value="168">7 Days</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- Result box -->
+    <div id="siResult" class="result-box">
+      <p style="color:#10b981;font-weight:700;margin-bottom:6px;">✅ Interview Link Generated!</p>
+      <div class="link-text" id="siLink"></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">
+        <button class="btn btn-sm btn-primary" onclick="siCopy()"><i class="fas fa-copy"></i> Copy</button>
+        <button class="btn btn-sm" style="background:rgba(37,211,102,.15);color:#25d366;" onclick="siWA()"><i class="fab fa-whatsapp"></i> WhatsApp</button>
+        <button class="btn btn-sm" style="background:rgba(99,102,241,.15);color:#a5b4fc;" onclick="siEmail()"><i class="fas fa-envelope"></i> Email</button>
+      </div>
+    </div>
+
+    <button class="btn btn-primary btn-full" id="siBtn" onclick="generateInterviewLink()" style="margin-top:14px;">
+      <i class="fas fa-link"></i> Generate Interview Link
+    </button>
   </div>
 </div>
 
@@ -94,121 +299,277 @@
 <script>
   if (!requireAuth(["client_admin", "hr"])) throw "Unauthorized";
 
-  const user = API.user;
+  const user   = API.user;
   const client = API.client;
+  const WORKER = window.WORKER_URL || 'https://evalis-ai.simpaticohrconsultancy.workers.dev';
+  let _lastInvite = null;
 
-  document.getElementById("welcomeTitle").textContent = `Welcome, ${user?.name || "User"}!`;
-  document.getElementById("welcomeSub").textContent = `${client?.company_name || "Company"} � ${user?.role === "client_admin" ? "Admin" : "HR"} Dashboard`;
+  document.getElementById("welcomeTitle").textContent = `Welcome, ${user?.name || "User"}! 👋`;
+  document.getElementById("welcomeSub").textContent   = `${client?.company_name || "Company"} — ${user?.role === "client_admin" ? "Admin" : "HR"} Dashboard`;
 
+  // ── Logout ──
+  function doLogout() {
+    if (!confirm('Sign out?')) return;
+    ['simpatico_token','simpatico_user','simpatico_refresh','simpatico_client'].forEach(k => {
+      localStorage.removeItem(k); sessionStorage.removeItem(k);
+    });
+    window.location.href = '/auth/login.html';
+  }
+
+  // ── Worker API helper ──
+  async function workerApi(endpoint, opts = {}) {
+    const t = localStorage.getItem('simpatico_token') || '';
+    const r = await fetch(WORKER + endpoint, {
+      ...opts,
+      headers: { 'Content-Type':'application/json', 'Authorization':'Bearer '+t, ...((opts.headers)||{}) }
+    });
+    return r.json();
+  }
+
+  // ── Load Dashboard ──
   async function loadDashboard() {
     try {
       const data = await API.clientStats();
       const s = data.stats || data;
-
-      document.getElementById("sJobs").textContent = s.jobs?.active ?? s.activeJobs ?? 0;
-      document.getElementById("sApps").textContent = s.applications?.total ?? s.totalApps ?? 0;
-      document.getElementById("sNew").textContent = s.applications?.thisWeek ?? s.newApps ?? 0;
-      document.getElementById("sShort").textContent = s.applications?.byStatus?.shortlisted ?? s.shortlisted ?? 0;
+      document.getElementById("sJobs").textContent      = s.jobs?.active ?? 0;
+      document.getElementById("sApps").textContent      = s.applications?.total ?? 0;
+      document.getElementById("sNew").textContent       = s.applications?.thisWeek ?? 0;
+      document.getElementById("sShort").textContent     = s.applications?.pipeline?.shortlisted ?? 0;
       document.getElementById("sInterviews").textContent = s.interviews?.total ?? 0;
-      document.getElementById("sHired").textContent = s.applications?.byStatus?.hired ?? s.hired ?? 0;
+      document.getElementById("sHired").textContent     = s.applications?.pipeline?.hired ?? 0;
 
       // Pipeline summary
-      const statuses = s.applications?.byStatus || s.byStatus || {};
+      const statuses = s.applications?.pipeline || s.applications?.byStatus || {};
       const el = document.getElementById("pipelineSummary");
-      const labels = { applied: "?? Applied", screened: "?? Screened", shortlisted: "? Shortlisted",
-        interview_scheduled: "?? Scheduled", interviewed: "?? Interviewed", offered: "?? Offered",
-        hired: "? Hired", onboarding: "?? Onboarding", rejected: "? Rejected" };
-      el.innerHTML = Object.entries(labels).map(([k, v]) =>
-        `<span class="pill pill-${k === 'hired' ? 'green' : k === 'rejected' ? 'red' : k === 'shortlisted' ? 'blue' : 'yellow'}" style="padding:6px 14px;font-size:0.82rem;">${v}: <strong>${statuses[k] || 0}</strong></span>`
-      ).join("");
+      const labels = {
+        applied:'Applied', screened:'Screened', shortlisted:'Shortlisted',
+        interview_scheduled:'Scheduled', interviewed:'Interviewed',
+        offered:'Offered', hired:'Hired', rejected:'Rejected'
+      };
+      el.innerHTML = Object.entries(labels).map(([k,v]) =>
+        `<span class="pill pill-${k==='hired'?'green':k==='rejected'?'red':k==='shortlisted'?'blue':'yellow'}" style="padding:6px 14px;font-size:0.82rem;">${v}: <strong>${statuses[k]||0}</strong></span>`
+      ).join('');
+    } catch(e) { console.error('Stats error:', e.message); }
 
-    } catch (e) { toast("? " + e.message, "error"); }
+    // Interviews
+    try {
+      const r = await workerApi('/client/interviews');
+      const ints = (r.interviews || []).slice(0, 8);
+      const el = document.getElementById('interviewsList');
+      if (!ints.length) {
+        el.innerHTML = '<div class="empty"><div class="empty-icon">🎤</div>No interviews yet. <a href="#" onclick="openScheduleModal()" style="color:var(--accent);">Schedule one!</a></div>';
+      } else {
+        el.innerHTML = ints.map(i => {
+          const statusCls = {'pending':'badge-pending','completed':'badge-completed','in_progress':'badge-in_progress'}[i.status]||'badge-pending';
+          const link = `https://simpaticohr.in/interview/proctored-room.html?token=${i.token}`;
+          return `<div class="interview-card">
+            <div>
+              <strong style="font-size:0.9rem;">${i.candidate_name||'Candidate'}</strong>
+              <div style="font-size:0.75rem;color:var(--muted);">${i.interview_role||'—'} · ${i.interview_level||'—'}</div>
+              ${i.overall_score!=null?`<div style="font-size:0.75rem;color:#10b981;margin-top:2px;">Score: ${i.overall_score}%</div>`:''}
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;">
+              <span class="badge-status ${statusCls}">${i.status}</span>
+              ${i.status==='completed'
+                ?`<button class="btn btn-sm" style="background:rgba(99,102,241,.15);color:#a5b4fc;" onclick="viewReport('${i.token}')"><i class="fas fa-chart-bar"></i></button>`
+                :`<button class="btn btn-sm" style="background:rgba(255,255,255,.06);color:var(--muted);" onclick="navigator.clipboard.writeText('${link}').then(()=>toast('Link copied!','success'))"><i class="fas fa-link"></i></button>`
+              }
+            </div>
+          </div>`;
+        }).join('');
+      }
+    } catch(e) { document.getElementById('interviewsList').innerHTML = `<p style="color:var(--red);">${e.message}</p>`; }
 
     // Recent apps
     try {
       const r = await API.clientApplications();
       const apps = (r.applications || []).slice(0, 10);
       const el = document.getElementById("recentApps");
-      if (!apps.length) { el.innerHTML = '<div class="empty"><div class="empty-icon">??</div>No applications yet</div>'; return; }
-
+      if (!apps.length) {
+        el.innerHTML = '<div class="empty"><div class="empty-icon">📋</div>No applications yet</div>';
+        return;
+      }
       el.innerHTML = `<table class="data-table"><thead><tr><th>Name</th><th>Job</th><th>ATS</th><th>Status</th><th>Date</th></tr></thead><tbody>${
         apps.map(a => {
           const sc = a.ats_score;
-          const scClass = sc >= 70 ? "score-high" : sc >= 50 ? "score-mid" : sc != null ? "score-low" : "";
-          const stClass = { applied:"pill-yellow", screened:"pill-blue", shortlisted:"pill-blue", interviewed:"pill-purple", hired:"pill-green", rejected:"pill-red" }[a.status] || "pill-gray";
+          const scClass = sc>=70?'score-high':sc>=50?'score-mid':sc!=null?'score-low':'';
+          const stClass = {applied:'pill-yellow',screened:'pill-blue',shortlisted:'pill-blue',interviewed:'pill-purple',hired:'pill-green',rejected:'pill-red'}[a.status]||'pill-gray';
           return `<tr>
-            <td><strong>${a.candidate_name || "?"}</strong><br><span style="font-size:0.72rem;color:var(--muted);">${a.candidate_email || ""}</span></td>
-            <td style="font-size:0.82rem;">${a.job_title || "N/A"}</td>
-            <td>${sc != null ? `<span class="score ${scClass}">${sc}</span>` : "�"}</td>
+            <td><strong>${a.candidate_name||'?'}</strong><br><span style="font-size:0.72rem;color:var(--muted);">${a.candidate_email||''}</span></td>
+            <td style="font-size:0.82rem;">${a.job_title||'N/A'}</td>
+            <td>${sc!=null?`<span class="score ${scClass}">${sc}</span>`:'—'}</td>
             <td><span class="pill ${stClass}">${a.status}</span></td>
-            <td style="font-size:0.78rem;color:var(--muted);">${a.created_at ? new Date(a.created_at).toLocaleDateString() : "?"}</td>
+            <td style="font-size:0.78rem;color:var(--muted);">${a.created_at?new Date(a.created_at).toLocaleDateString():'?'}</td>
           </tr>`;
-        }).join("")
+        }).join('')
       }</tbody></table>`;
-    } catch (e) { document.getElementById("recentApps").innerHTML = `<p style="color:var(--red);">${e.message}</p>`; }
+    } catch(e) { document.getElementById("recentApps").innerHTML = `<p style="color:var(--red);">${e.message}</p>`; }
 
     // Active jobs
     try {
       const r = await API.clientJobs();
       const jobs = (r.jobs || []).filter(j => j.is_active);
       const el = document.getElementById("activeJobs");
-      if (!jobs.length) { el.innerHTML = '<div class="empty"><div class="empty-icon">??</div>No active jobs. <a href="#" onclick="showPostJob()" style="color:var(--accent);">Post one!</a></div>'; return; }
-
+      if (!jobs.length) {
+        el.innerHTML = '<div class="empty"><div class="empty-icon">💼</div>No active jobs. <a href="#" onclick="showPostJob()" style="color:var(--accent);">Post one!</a></div>';
+        return;
+      }
       el.innerHTML = jobs.map(j => `
         <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--border);flex-wrap:wrap;gap:8px;">
           <div>
             <strong style="color:var(--accent);">${j.title}</strong>
-            <div style="font-size:0.75rem;color:var(--muted);">${j.location || "Remote"} � ${j.job_type || "Full Time"} � ${j.level || ""}</div>
+            <div style="font-size:0.75rem;color:var(--muted);">${j.location||'Remote'} · ${j.job_type||'Full Time'} · ${j.level||''}</div>
           </div>
           <div style="display:flex;gap:8px;align-items:center;">
-            <span class="pill pill-blue">${j.app_count || 0} apps</span>
-            ${j.new_count ? `<span class="pill pill-yellow">${j.new_count} new</span>` : ""}
+            <span class="pill pill-blue">${j.app_count||0} apps</span>
+            ${j.new_count?`<span class="pill pill-yellow">${j.new_count} new</span>`:''}
             <button class="btn btn-sm btn-red" onclick="toggleJob('${j.id}',false)">Pause</button>
           </div>
         </div>
-      `).join("");
-    } catch (e) { document.getElementById("activeJobs").innerHTML = `<p style="color:var(--red);">${e.message}</p>`; }
+      `).join('');
+    } catch(e) { document.getElementById("activeJobs").innerHTML = `<p style="color:var(--red);">${e.message}</p>`; }
   }
 
+  // ── Post Job ──
   function showPostJob() { document.getElementById("postJobModal").classList.remove("hidden"); }
   function hidePostJob() { document.getElementById("postJobModal").classList.add("hidden"); }
 
   async function submitJob() {
     const title = document.getElementById("jTitle").value.trim();
-    if (!title) { toast("? Enter job title", "error"); return; }
-
+    if (!title) { toast("Enter job title", "error"); return; }
     try {
       await API.createJob({
         title,
-        job_type: document.getElementById("jType").value,
-        location: document.getElementById("jLocation").value.trim(),
-        department: document.getElementById("jDept").value.trim(),
-        level: document.getElementById("jLevel").value,
-        salary_min: parseInt(document.getElementById("jSalMin").value) || 0,
-        salary_max: parseInt(document.getElementById("jSalMax").value) || 0,
-        skills: document.getElementById("jSkills").value.trim(),
+        job_type:    document.getElementById("jType").value,
+        location:    document.getElementById("jLocation").value.trim(),
+        department:  document.getElementById("jDept").value.trim(),
+        level:       document.getElementById("jLevel").value,
+        salary_min:  parseInt(document.getElementById("jSalMin").value)||0,
+        salary_max:  parseInt(document.getElementById("jSalMax").value)||0,
+        skills:      document.getElementById("jSkills").value.trim(),
         description: document.getElementById("jDesc").value.trim()
       });
-      toast("? Job published!", "success");
+      toast("✅ Job published!", "success");
       hidePostJob();
-      document.getElementById("jTitle").value = "";
-      document.getElementById("jDesc").value = "";
-      document.getElementById("jSkills").value = "";
+      ['jTitle','jLocation','jDept','jSkills','jDesc'].forEach(id => document.getElementById(id).value = '');
       loadDashboard();
-    } catch (e) { toast("? " + e.message, "error"); }
+    } catch(e) { toast("❌ " + e.message, "error"); }
   }
 
   async function toggleJob(id, active) {
     try {
       await API.updateJob(id, { is_active: active });
-      toast(active ? "? Activated" : "?? Paused", "success");
+      toast(active ? "✅ Activated" : "⏸️ Paused", "success");
       loadDashboard();
-    } catch (e) { toast("? " + e.message, "error"); }
+    } catch(e) { toast("❌ " + e.message, "error"); }
   }
 
+  // ── Schedule Interview ──
+  async function openScheduleModal() {
+    document.getElementById('scheduleModal').classList.remove('hidden');
+    document.getElementById('siResult').style.display = 'none';
+    // Load jobs into dropdown
+    try {
+      const r = await API.clientJobs();
+      const jobs = r.jobs || [];
+      const sel = document.getElementById('siJob');
+      sel.innerHTML = '<option value="">— No specific job —</option>';
+      jobs.forEach(j => {
+        const opt = document.createElement('option');
+        opt.value = j.id;
+        opt.dataset.title = j.title;
+        opt.dataset.level = j.level || 'Mid-Level';
+        opt.textContent = j.title + (j.location ? ' · ' + j.location : '');
+        sel.appendChild(opt);
+      });
+      sel.onchange = () => {
+        const opt = sel.options[sel.selectedIndex];
+        if (opt.dataset.title) {
+          document.getElementById('siRole').value  = opt.dataset.title;
+          document.getElementById('siLevel').value = opt.dataset.level || 'Mid-Level';
+        }
+      };
+    } catch(e) { console.warn('Jobs load failed:', e.message); }
+  }
+
+  function closeScheduleModal() { document.getElementById('scheduleModal').classList.add('hidden'); }
+
+  async function generateInterviewLink() {
+    const name  = document.getElementById('siName').value.trim();
+    const email = document.getElementById('siEmail').value.trim();
+    const phone = document.getElementById('siPhone').value.trim();
+    const role  = document.getElementById('siRole').value.trim();
+    const level = document.getElementById('siLevel').value;
+    const qs    = document.getElementById('siQuestions').value;
+    const exp   = document.getElementById('siExpiry').value;
+    const jobId = document.getElementById('siJob').value || null;
+
+    if (!name || !email || !role) { toast('Name, Email and Role required', 'error'); return; }
+
+    const btn = document.getElementById('siBtn');
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Generating...';
+
+    try {
+      const res = await workerApi('/client/interviews/create', {
+        method: 'POST',
+        body: JSON.stringify({
+          candidate_name:  name,
+          candidate_email: email,
+          candidate_phone: phone || null,
+          job_id:          jobId || null,
+          role, level,
+          questions:    parseInt(qs) || 10,
+          expires_hours: parseInt(exp) || 72,
+          type: 'real',
+        })
+      });
+      if (res.error) throw new Error(res.error);
+      const token = res.token || res.interview?.token;
+      if (!token) throw new Error('No token returned');
+      const link = `https://simpaticohr.in/interview/proctored-room.html?token=${token}`;
+      _lastInvite = { name, email, phone, role, level, link, expires: new Date(Date.now() + parseInt(exp)*3600000) };
+      document.getElementById('siLink').textContent = link;
+      document.getElementById('siResult').style.display = 'block';
+      navigator.clipboard.writeText(link).catch(()=>{});
+      toast('✅ Interview link generated!', 'success');
+      loadDashboard();
+    } catch(e) {
+      toast('❌ ' + e.message, 'error');
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = '<i class="fas fa-link"></i> Generate Interview Link';
+    }
+  }
+
+  function siCopy() {
+    if (!_lastInvite) return;
+    navigator.clipboard.writeText(_lastInvite.link).then(() => toast('📋 Copied!', 'success'));
+  }
+
+  function siWA() {
+    if (!_lastInvite) return;
+    const d = _lastInvite;
+    const phone = (d.phone||'').replace(/[^0-9]/g,'');
+    if (!phone) { toast('No phone number', 'error'); return; }
+    const msg = encodeURIComponent(`Hi ${d.name}! 👋\n\nYou've been invited for an AI interview for *${d.role}* (${d.level}).\n\n🔗 Interview Link:\n${d.link}\n\n⏰ Expires: ${d.expires.toLocaleString()}\n\nGood luck! 🚀`);
+    window.open(`https://wa.me/${phone.replace(/^\+/,'')}?text=${msg}`, '_blank');
+  }
+
+  function siEmail() {
+    if (!_lastInvite) return;
+    const d = _lastInvite;
+    const subject = encodeURIComponent(`Interview Invitation — ${d.role}`);
+    const body    = encodeURIComponent(`Dear ${d.name},\n\nYou are invited to an AI-powered interview for ${d.role} (${d.level}).\n\n🔗 Interview Link:\n${d.link}\n\n⏰ Expires: ${d.expires.toLocaleString()}\n\nBest of luck!\nSimpatico HR Team`);
+    window.open(`mailto:${d.email}?subject=${subject}&body=${body}`, '_blank');
+  }
+
+  function viewReport(token) {
+    window.open(`/interview/results.html?token=${token}`, '_blank');
+  }
+
+  // ── Init ──
   loadDashboard();
 </script>
 </body>
 </html>
-
-
