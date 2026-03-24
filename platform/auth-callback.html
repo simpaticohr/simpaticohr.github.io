@@ -8,7 +8,8 @@
 <style>@keyframes spin{to{transform:rotate(360deg)}}</style>
 <script>
 const SB_URL = 'https://cvkxtsvgnynxexmemfuy.supabase.co';
-const SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN2a3h0c3ZnbnlueGV4bWVtZnV5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc0MjE2NTEsImV4cCI6MjA4Mjk5NzY1MX0.2mys8Cc-ucJ1uLThEGJubeDEg1TvfIAkW-xFsR4ecq4';
+// Note: It is generally okay to have the Anon key public, but ensure RLS is on in your database!
+const SB_KEY = 'YOUR_SUPABASE_KEY_HERE'; 
 
 const ROLE_ROUTES = {
     hr: '../dashboard/hr.html',
@@ -28,10 +29,15 @@ const TAB_ALLOWED = {
 function showError(msg) {
     document.getElementById('msg').textContent = msg;
     document.querySelector('div > div').style.display = 'none';
-    setTimeout(() => { window.location.href = 'login.html'; }, 3000);
+    setTimeout(() => { window.location.href = 'login.html'; }, 4000);
 }
 
 async function init() {
+    // FIX 1: IMMEDIATELY WIPE OLD CACHE
+    // This stops the new user from seeing the previous user's dashboard data
+    localStorage.clear();
+    sessionStorage.clear();
+
     const hash = Object.fromEntries(new URLSearchParams(window.location.hash.slice(1)));
     const params = new URLSearchParams(window.location.search);
     const selectedRole = params.get('role') || 'candidate';
@@ -46,7 +52,7 @@ async function init() {
     const authUser = await r.json();
     if (!authUser.id) { showError('Authentication failed. Redirecting...'); return; }
 
-    // Check users table
+    // Check custom users table to see if they are registered/invited
     const ur = await fetch(SB_URL + '/rest/v1/users?email=eq.' + encodeURIComponent(authUser.email) + '&select=*&limit=1', {
         headers: { 'apikey': SB_KEY, 'Authorization': 'Bearer ' + token }
     });
@@ -62,36 +68,55 @@ async function init() {
             return;
         }
     } else {
-        // New user — assign role based on tab
-        // Block Google signup for super_admin
+        // FIX 2: STRICT SAAS AUTHORIZATION FOR NEW USERS
+        
+        // Block Google signup for Super Admins entirely
         if (selectedRole === 'super_admin') {
             showError('Super Admin accounts cannot be created via Google. Redirecting...');
             return;
         }
-        role = selectedRole === 'hr' ? 'hr' : 'candidate';
-        await fetch(SB_URL + '/rest/v1/users', {
-            method: 'POST',
-            headers: {
-                'apikey': SB_KEY,
-                'Authorization': 'Bearer ' + token,
-                'Content-Type': 'application/json',
-                'Prefer': 'return=representation'
-            },
-            body: JSON.stringify({
-                name: authUser.user_metadata?.full_name || authUser.email,
-                email: authUser.email,
-                role,
-                is_active: true,
-                created_at: new Date().toISOString()
-            })
-        });
+
+        // If they are trying to log in as HR, but aren't in the database yet: DENY THEM.
+        // In Enterprise SaaS, HR users must be invited by an admin first.
+        if (selectedRole === 'hr') {
+            showError('Access Denied: Unregistered Email. Please ask your company administrator to invite you to the platform first.');
+            
+            // Optional: Sign them out of Supabase auth completely so they aren't lurking as an orphaned auth user
+            await fetch(SB_URL + '/auth/v1/logout', {
+                method: 'POST',
+                headers: { 'apikey': SB_KEY, 'Authorization': 'Bearer ' + token }
+            });
+            return; 
+        }
+
+        // If you allow OPEN signups for Candidates, let them create an account here
+        if (selectedRole === 'candidate') {
+            role = 'candidate';
+            await fetch(SB_URL + '/rest/v1/users', {
+                method: 'POST',
+                headers: {
+                    'apikey': SB_KEY,
+                    'Authorization': 'Bearer ' + token,
+                    'Content-Type': 'application/json',
+                    'Prefer': 'return=representation'
+                },
+                body: JSON.stringify({
+                    name: authUser.user_metadata?.full_name || authUser.email,
+                    email: authUser.email,
+                    role: role,
+                    is_active: true,
+                    created_at: new Date().toISOString()
+                })
+            });
+        }
     }
 
+    // Finally, set the fresh tokens and route them to the dashboard
     localStorage.setItem('simpatico_token', token);
     localStorage.setItem('simpatico_user', JSON.stringify({
         id: authUser.id,
         email: authUser.email,
-        role,
+        role: role,
         name: authUser.user_metadata?.full_name || authUser.email
     }));
 
