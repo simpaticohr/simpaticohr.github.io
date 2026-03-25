@@ -46,17 +46,24 @@ async function loadEmployees() {
 
 async function loadDepartments() {
   var companyId = await getCompanyId();
-  var query = window.SimpaticoDB.from('employees').select('department');
-  if (companyId) { query = query.eq('company_id', companyId); } else { console.warn('No company ID - loading all employees'); }
-  var res = await window.SimpaticoDB.from('employees').select('*').order('created_at', { ascending: false });
-  var depts = [];
-  (res.data || []).forEach(function(e) {
-    if (e.department && depts.indexOf(e.department) === -1) depts.push(e.department);
-  });
+  var query = window.SimpaticoDB.from('departments').select('id, name');
+  if (companyId) {
+    query = query.eq('company_id', companyId);
+  }
+  var res = await query;
+  if (res.error) {
+    console.error('Load departments:', res.error);
+    return;
+  }
+  var depts = res.data || [];
   var select = document.getElementById('dept-filter');
   if (!select) return;
   select.innerHTML = '<option value="">All Departments</option>' +
-    depts.map(function(d) { return '<option value="' + d + '">' + d + '</option>'; }).join('');
+    depts.map(function(d) { return '<option value="' + d.id + '">' + d.name + '</option>'; }).join('');
+  var empDeptSelect = document.getElementById('emp-dept');
+  if (!empDeptSelect) return;
+  empDeptSelect.innerHTML = '<option value="">Select</option>' +
+    depts.map(function(d) { return '<option value="' + d.id + '">' + d.name + '</option>'; }).join('');
 }
 
 function renderEmployees() {
@@ -153,7 +160,12 @@ function editEmployee(id) {
   editingId = id;
   var title = document.getElementById('modal-title');
   if (title) title.textContent = 'Edit Employee';
-  var fields = ['email','phone','job_title','department','status','hire_date','salary','location','employment_type'];
+  var fields = ['email','phone','department','status','location','employment_type'];
+    document.getElementById('emp-first').value = emp.first_name || '';
+    document.getElementById('emp-last').value = emp.last_name || '';
+    document.getElementById('emp-title').value = emp.job_title || '';
+    document.getElementById('emp-start').value = emp.hire_date || '';
+    document.getElementById('emp-salary').value = emp.salary || '';
   fields.forEach(function(f) {
     var el = document.getElementById('emp-' + f.replace(/_/g, '-'));
     if (el) el.value = emp[f] || '';
@@ -169,8 +181,15 @@ function closeModal() {
 
 async function saveEmployee() {
   var companyId = await getCompanyId();
-  var fields = ['email','phone','job_title','department','status','hire_date','salary','location','employment_type'];
-  var data = { company_id: companyId }; data['first_name'] = (document.getElementById('emp-first')||{}).value||''; data['last_name'] = (document.getElementById('emp-last')||{}).value||'';
+  var fields = ['email','phone','department','status','location','employment_type'];
+  var data = { 
+      company_id: companyId,
+      first_name: getEmployeeFormFieldValueById('emp-first'),
+      last_name: getEmployeeFormFieldValueById('emp-last'),
+      job_title: getEmployeeFormFieldValueById('emp-title'),
+      hire_date: getEmployeeFormFieldValueById('emp-start'),
+      salary: getEmployeeFormFieldValueById('emp-salary')
+  };
   fields.forEach(function(f) {
     var el = document.getElementById('emp-' + f.replace(/_/g, '-'));
     if (el) data[f] = el.value || null;
@@ -205,6 +224,16 @@ function exportEmployees() {
   a.href = 'data:text/csv,' + encodeURIComponent(csv.join('\n'));
   a.download = 'employees.csv';
   a.click();
+}
+
+function getEmployeeFormFieldValueById(id) {
+    const element = document.getElementById(id);
+
+    if (element) {
+        return element.value || '';
+    }
+
+    return '';
 }
 
 
