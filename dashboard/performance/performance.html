@@ -5,9 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Performance | Simpatico HR</title>
   <style>
-    /* Base Styles */
+    /* Enterprise Base Styles */
     body { font-family: 'Segoe UI', system-ui, sans-serif; background: #f1f5f9; color: #1e293b; margin: 0; padding: 20px; }
-    svg { width: 1em; height: 1em; }
+    svg { width: 1em; height: 1em; } 
     .hr-page-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; }
     .hr-page-title { font-size: 1.5rem; font-weight: 700; }
     .hr-page-title small { display: block; font-size: 0.85rem; color: #64748b; font-weight: 400; margin-top: 4px; }
@@ -20,11 +20,31 @@
     .hr-tabs { display: flex; gap: 0; border-bottom: 2px solid #e2e8f0; margin-bottom: 20px; }
     .hr-tab { padding: 10px 20px; background: transparent; border: none; border-bottom: 2px solid transparent; cursor: pointer; font-weight: 500; color: #64748b; margin-bottom: -2px; }
     .hr-tab.active { color: #4f46e5; border-bottom-color: #4f46e5; }
+    .hr-table-wrap { background: white; border-radius: 12px; border: 1px solid #e2e8f0; overflow: hidden; }
+    .hr-table { width: 100%; border-collapse: collapse; text-align: left; }
+    .hr-table th { padding: 12px 16px; background: #f8fafc; font-size: 0.8rem; text-transform: uppercase; color: #64748b; border-bottom: 1px solid #e2e8f0; }
+    .hr-table td { padding: 12px 16px; border-bottom: 1px solid #e2e8f0; font-size: 0.9rem; }
     .hr-btn { padding: 8px 16px; border-radius: 8px; font-weight: 500; cursor: pointer; border: none; font-size: 0.88rem; transition: 0.2s; }
     .hr-btn-primary { background: #4f46e5; color: white; }
     .hr-btn-primary:hover { background: #3730a3; }
-    .review-card { background: white; border: 1px solid #e2e8f0; border-radius: 12px; padding: 20px; cursor: pointer; }
+    .hr-btn-ghost { background: transparent; color: #4f46e5; }
+    .hr-btn-sm { padding: 4px 10px; font-size: 0.8rem; }
+    .hr-badge { padding: 4px 8px; border-radius: 12px; font-size: 0.75rem; font-weight: 600; display: inline-block; }
+    .hr-badge-active { background: #dcfce3; color: #166534; }
+    .hr-badge-info { background: #e0f2fe; color: #0284c7; }
+    .review-card { background: white; border: 1px solid #e2e8f0; border-radius: 12px; padding: 20px; cursor: pointer; transition: 0.2s; }
+    .review-card:hover { border-color: #4f46e5; box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
+    .rc-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
   </style>
+  <script>
+    // Hide shell when loaded inside dashboard iframe
+    if (window.self !== window.top) {
+      document.addEventListener("DOMContentLoaded", function() {
+        var shell = document.querySelector(".hr-shell");
+        if (shell) { shell.style.gridTemplateColumns = "1fr"; shell.style.gridTemplateRows = "1fr"; }
+      });
+    }
+  </script>
 </head>
 <body>
 <div class="hr-shell">
@@ -40,29 +60,148 @@
 
     <div class="hr-stats-grid">
       <div class="hr-stat-card" style="--card-accent:#00c4ff">
-        <div class="label">Active Cycles</div><div class="value" id="stat-cycles">1</div>
+        <div class="label">Active Cycles</div><div class="value" id="stat-cycles">0</div>
         <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg></div>
       </div>
       <div class="hr-stat-card" style="--card-accent:#10b981">
-        <div class="label">Avg Score</div><div class="value" id="stat-avg-score">85%</div>
+        <div class="label">Avg Score</div><div class="value" id="stat-avg-score">--</div>
         <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg></div>
+      </div>
+      <div class="hr-stat-card" style="--card-accent:#f59e0b">
+        <div class="label">Pending Reviews</div><div class="value" id="stat-pending">0</div>
+        <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></div>
       </div>
     </div>
 
     <div class="hr-tabs" id="perf-tabs">
-      <button class="hr-tab active">Reviews</button>
-      <button class="hr-tab">Goals</button>
+      <button class="hr-tab active" onclick="window.switchPerfTab(this, 'tab-reviews')">Reviews</button>
+      <button class="hr-tab" onclick="window.switchPerfTab(this, 'tab-goals')">Goals</button>
     </div>
 
     <div id="tab-reviews">
       <div id="reviews-list" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:16px">
-        <div class="review-card">
-          <div style="font-weight:bold; margin-bottom:10px;">Q1 Performance Review</div>
-          <p style="color:#64748b; font-size:14px;">All reviews are currently up to date.</p>
-        </div>
+        <div style="padding:40px; text-align:center; color:#64748b; grid-column: 1 / -1;">Loading performance reviews...</div>
       </div>
+    </div>
+
+    <div id="tab-goals" style="display:none;">
+        <div class="hr-table-wrap">
+          <table class="hr-table">
+            <thead><tr><th>Employee ID</th><th>Goal</th><th>Period</th><th>Progress</th><th>Status</th><th>Actions</th></tr></thead>
+            <tbody id="goals-tbody">
+              <tr><td colspan="6" style="text-align:center;padding:40px;color:#64748b">Loading goals...</td></tr>
+            </tbody>
+          </table>
+        </div>
     </div>
   </main>
 </div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+<script>
+    /* =========================================================================
+       ENTERPRISE BACKEND LOGIC (Supabase)
+       ========================================================================= */
+    const PERF_CONFIG = {
+      supabaseUrl: window.SIMPATICO_CONFIG?.supabaseUrl || 'https://cvkxtsvgnynxexmemfuy.supabase.co',
+      supabaseKey: window.SIMPATICO_CONFIG?.supabaseAnonKey || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN2a3h0c3ZnbnlueGV4bWVtZnV5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc0MjE2NTEsImV4cCI6MjA4Mjk5NzY1MX0.2mys8Cc-ucJ1uLThEGJubeDEg1TvfIAkW-xFsR4ecq4',
+    };
+
+    let _sb = null;
+    function sb() {
+      if (_sb) return _sb;
+      if (window.supabase) { _sb = window.supabase.createClient(PERF_CONFIG.supabaseUrl, PERF_CONFIG.supabaseKey); return _sb; }
+      return null;
+    }
+
+    document.addEventListener('DOMContentLoaded', async () => {
+      await loadPerformanceData();
+    });
+
+    async function loadPerformanceData() {
+      const client = sb(); if (!client) return;
+      try {
+        // Query explicitly avoids ambiguous 'employees(*)' join that caused PGRST201 error
+        const { data: reviews, error: rErr } = await client.from('performance_reviews').select('*').limit(50);
+        if (rErr) throw rErr;
+
+        const { data: goals, error: gErr } = await client.from('employee_goals').select('*').limit(50);
+        if (gErr) throw gErr;
+
+        // Calculate Stats
+        const validScores = (reviews || []).map(r => r.overall_score).filter(s => s != null);
+        const avgScore = validScores.length > 0 ? (validScores.reduce((a,b)=>a+b,0) / validScores.length).toFixed(1) + '%' : '--';
+        
+        document.getElementById('stat-cycles').textContent = '1'; // Assuming 1 active cycle for demo
+        document.getElementById('stat-avg-score').textContent = avgScore;
+        document.getElementById('stat-pending').textContent = (reviews || []).filter(r => r.status === 'pending').length;
+
+        renderReviews(reviews || []);
+        renderGoals(goals || []);
+      } catch (err) {
+        console.error('Performance Data Error:', err);
+        document.getElementById('reviews-list').innerHTML = `<div style="color:#ef4444; padding:20px;">Failed to load reviews from database.</div>`;
+      }
+    }
+
+    function renderReviews(reviews) {
+      const list = document.getElementById('reviews-list');
+      if (!list) return;
+      if (reviews.length === 0) {
+        list.innerHTML = '<p style="color:#64748b; padding:20px;">No performance reviews found.</p>';
+        return;
+      }
+      list.innerHTML = reviews.map(r => {
+        const badgeClass = r.status === 'completed' ? 'hr-badge-active' : 'hr-badge-info';
+        return `
+        <div class="review-card">
+          <div class="rc-head">
+            <strong style="color:#1e293b; font-size:1.05rem;">Employee ID: ${r.employee_id || 'Unknown'}</strong>
+            <span class="hr-badge ${badgeClass}">${(r.status || 'Draft').toUpperCase()}</span>
+          </div>
+          <div style="margin-top:16px; border-top:1px solid #e2e8f0; padding-top:12px;">
+            <p style="margin:0; font-size:0.85rem; color:#64748b;">Overall Score</p>
+            <strong style="font-size:1.5rem; color:#4f46e5;">${r.overall_score ? r.overall_score + '%' : 'N/A'}</strong>
+          </div>
+        </div>
+      `}).join('');
+    }
+
+    function renderGoals(goals) {
+      const tbody = document.getElementById('goals-tbody');
+      if (!tbody) return;
+      if (goals.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; padding:40px; color:#64748b">No active goals found.</td></tr>';
+        return;
+      }
+      tbody.innerHTML = goals.map(g => `
+        <tr>
+          <td><span style="font-weight:500;">${g.employee_id || 'Unknown'}</span></td>
+          <td><strong>${g.title || 'Untitled Goal'}</strong></td>
+          <td>${g.period || 'Current'}</td>
+          <td>
+            <div style="display:flex; align-items:center; gap:8px;">
+              <div style="flex:1; height:6px; background:#e2e8f0; border-radius:3px; overflow:hidden;">
+                <div style="width:${g.progress || 0}%; height:100%; background:#4f46e5;"></div>
+              </div>
+              <span style="font-size:0.8rem; font-weight:600;">${g.progress || 0}%</span>
+            </div>
+          </td>
+          <td><span class="hr-badge hr-badge-active">${g.status || 'Active'}</span></td>
+          <td><button class="hr-btn hr-btn-sm hr-btn-ghost">View</button></td>
+        </tr>
+      `).join('');
+    }
+
+    window.switchPerfTab = function(btn, tabId) {
+      document.querySelectorAll('#perf-tabs .hr-tab').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      ['tab-reviews','tab-goals'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.style.display = id === tabId ? 'block' : 'none';
+      });
+    };
+</script>
 </body>
 </html>
