@@ -1732,14 +1732,21 @@
                         <div class="col-md-12">
                             <div class="form-group">
                                 <label>Interviewer <span style="color:var(--danger)">*</span></label>
-                                <select class="form-control-custom" id="intInterviewer" required>
-                                    <option value="">Select Interviewer</option>
-                                    <option>Rajesh Kumar (Tech Lead)</option>
-                                    <option>Meera Iyer (Design Head)</option>
-                                    <option>Sneha Reddy (HR Manager)</option>
-                                    <option>Vikram Singh (CTO)</option>
-                                    <option>Deepa Nair (Product Head)</option>
-                                </select>
+                                <input
+                                    type="text"
+                                    class="form-control-custom"
+                                    id="intInterviewer"
+                                    placeholder="Type interviewer name & role, e.g. John Smith (HR Manager)"
+                                    list="interviewerSuggestions"
+                                    autocomplete="off"
+                                    required
+                                >
+                                <datalist id="interviewerSuggestions">
+                                    <!-- Add your team members here -->
+                                </datalist>
+                                <small style="color:var(--text-secondary);font-size:0.78rem;margin-top:4px;display:block;">
+                                    Type any name — your entries are saved for next time
+                                </small>
                             </div>
                         </div>
                     </div>
@@ -1864,7 +1871,7 @@
 </div>
 
 <!-- ===== SCRIPTS ===== -->
-<script data-cfasync="false" src="/cdn-cgi/scripts/5c5dd728/cloudflare-static/email-decode.min.js"></script><script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 <script>
 // ===========================================================================
 // SIMPATICO HR - CORE APPLICATION LOGIC (FULLY FIXED)
@@ -1979,10 +1986,32 @@ function initApp() {
         dateInput.addEventListener('change', refreshTimeSlots);
     }
 
+    // Load saved interviewers into datalist
+    loadInterviewerSuggestions();
+
     console.log('✅ Simpatico HR initialized. Data:', {
         jobs: appData.jobs.length,
         interviews: appData.interviews.length
     });
+}
+
+// ===== INTERVIEWER SUGGESTIONS (saved to localStorage) =====
+function loadInterviewerSuggestions() {
+    const datalist = document.getElementById('interviewerSuggestions');
+    if (!datalist) return;
+    const saved = JSON.parse(localStorage.getItem('simpaticoHR_interviewers') || '[]');
+    datalist.innerHTML = saved.map(name => `<option value="${name}">`).join('');
+}
+
+function saveInterviewerSuggestion(name) {
+    if (!name || name.length < 2) return;
+    const saved = JSON.parse(localStorage.getItem('simpaticoHR_interviewers') || '[]');
+    if (!saved.includes(name)) {
+        saved.unshift(name);
+        // Keep last 20 unique names
+        localStorage.setItem('simpaticoHR_interviewers', JSON.stringify(saved.slice(0, 20)));
+        loadInterviewerSuggestions();
+    }
 }
 
 // ===== LOGO HANDLING (fallback always shown - no logo.png needed) =====
@@ -2096,6 +2125,7 @@ function openModal(modalId) {
     if (modalId === 'scheduleInterviewModal') {
         populatePositionDropdown();
         refreshTimeSlots();
+        loadInterviewerSuggestions();
         // Reset mode selection
         selectedInterviewMode = '';
         document.getElementById('intMode').value = '';
@@ -2650,12 +2680,21 @@ function handleScheduleInterview(e) {
     const notes          = document.getElementById('intNotes')?.value.trim();
     const sendEmail      = document.getElementById('intSendEmail')?.checked;
 
-    if (!candidateName || !candidateEmail || !position || !round || !date || !startTime || !endTime || !interviewer) {
-        showToast('Please fill in all required fields', 'error');
+    const missing = [];
+    if (!candidateName)  missing.push('Candidate Name');
+    if (!candidateEmail) missing.push('Candidate Email');
+    if (!position)       missing.push('Position');
+    if (!round)          missing.push('Interview Round');
+    if (!date)           missing.push('Date');
+    if (!startTime)      missing.push('Start Time');
+    if (!endTime)        missing.push('End Time');
+    if (!interviewer)    missing.push('Interviewer');
+    if (missing.length > 0) {
+        showToast('Missing: ' + missing.join(', '), 'error');
         return;
     }
     if (!mode) {
-        showToast('Please select an interview mode', 'error');
+        showToast('Please select an Interview Mode (Video / In-Person / Phone / Proctored)', 'error');
         return;
     }
 
@@ -2707,6 +2746,9 @@ function handleScheduleInterview(e) {
     document.getElementById('proctoredSettings').classList.remove('visible');
     document.querySelectorAll('.time-slot').forEach(s => s.classList.remove('selected'));
     selectedInterviewMode = '';
+
+    // Remember this interviewer for next time
+    saveInterviewerSuggestion(interviewer);
 
     if (mode === 'proctored') {
         showToast('🔒 Proctored interview scheduled! Secure link will be sent to candidate.');
