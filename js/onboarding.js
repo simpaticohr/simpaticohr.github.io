@@ -1,12 +1,12 @@
 /**
- * onboarding.js � Simpatico HR Platform
+ * onboarding.js — Simpatico HR Platform
  * Onboarding module: Supabase + Cloudflare Workers + AI task suggestions
  */
 
 const OB_CONFIG = {
-  supabaseUrl: window.SIMPATICO_CONFIG?.supabaseUrl    || 'https://cvkxtsvgnynxexmemfuy.supabase.co',
-  supabaseKey: window.SIMPATICO_CONFIG?.supabaseAnonKey || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN2a3h0c3ZnbnlueGV4bWVtZnV5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc0MjE2NTEsImV4cCI6MjA4Mjk5NzY1MX0.2mys8Cc-ucJ1uLThEGJubeDEg1TvfIAkW-xFsR4ecq4',
-  workerUrl:   window.SIMPATICO_CONFIG?.workerUrl       || 'https://evalis-ai.simpaticohrconsultancy.workers.dev',
+  supabaseUrl: window.SIMPATICO_CONFIG?.supabaseUrl    || 'https://YOUR_PROJECT.supabase.co',
+  supabaseKey: window.SIMPATICO_CONFIG?.supabaseAnonKey || 'YOUR_ANON_KEY',
+  workerUrl:   window.SIMPATICO_CONFIG?.workerUrl       || 'https://hr-api.YOUR_SUBDOMAIN.workers.dev',
 };
 
 let _sb = null;
@@ -32,7 +32,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 });
 
 async function loadUser() {
-  const client = window.SimpaticoDB; if (!client) return;
+  const client = sb(); if (!client) return;
   const { data: { user } } = await client.auth.getUser();
   if (user) {
     const el = document.getElementById('user-avatar');
@@ -41,7 +41,7 @@ async function loadUser() {
 }
 
 async function loadEmployeeSelects() {
-  const client = window.SimpaticoDB; if (!client) return;
+  const client = sb(); if (!client) return;
   const { data } = await client
     .from('employees')
     .select('id, first_name, last_name')
@@ -60,7 +60,7 @@ async function loadEmployeeSelects() {
 }
 
 async function loadTemplates() {
-  const client = window.SimpaticoDB; if (!client) return;
+  const client = sb(); if (!client) return;
   const { data } = await client
     .from('onboarding_templates')
     .select('id, name')
@@ -75,7 +75,7 @@ async function loadTemplates() {
 }
 
 async function loadOnboarding() {
-  const client = window.SimpaticoDB; if (!client) return;
+  const client = sb(); if (!client) return;
   const { data, error } = await client
     .from('onboarding_records')
     .select(`
@@ -134,10 +134,10 @@ function renderOnboardCard(r) {
     <div class="hr-emp-avatar" style="background:${color};color:#fff;width:38px;height:38px;font-size:13px">${initials}</div>
     <div class="emp-info">
       <h4>${name}</h4>
-      <div class="sub">${role}${dept ? ` � ${dept}` : ''}</div>
+      <div class="sub">${role}${dept ? ` · ${dept}` : ''}</div>
       <div style="margin-top:8px">
         <div class="hr-progress-bar"><div class="hr-progress-fill" style="width:${pct}%"></div></div>
-        <div style="font-size:11px;color:var(--hr-text-muted);margin-top:4px">${done}/${tasks.length} tasks${overdue ? ` � <span style="color:var(--hr-warning)">${overdue} overdue</span>` : ''}</div>
+        <div style="font-size:11px;color:var(--hr-text-muted);margin-top:4px">${done}/${tasks.length} tasks${overdue ? ` · <span style="color:var(--hr-warning)">${overdue} overdue</span>` : ''}</div>
       </div>
     </div>
     <div class="progress-col">
@@ -158,7 +158,7 @@ window.startOnboarding = async function() {
 
   if (!empId) { showToast('Please select an employee', 'error'); return; }
 
-  showToast('Starting onboarding�', 'info');
+  showToast('Starting onboarding…', 'info');
   try {
     const res = await fetch(`${OB_CONFIG.workerUrl}/onboarding/start`, {
       method: 'POST',
@@ -183,7 +183,7 @@ window.startOnboarding = async function() {
 window.openStartModal    = () => openModal('start-modal');
 window.openTemplateModal = () => showToast('Template manager coming soon', 'info');
 
-// -- AI-generated checklist suggestions via Cloudflare AI --
+// ── AI-generated checklist suggestions via Cloudflare AI ──
 window.generateAIChecklist = async function(role, department) {
   try {
     const res = await fetch(`${OB_CONFIG.workerUrl}/ai/onboarding-checklist`, {
@@ -196,8 +196,8 @@ window.generateAIChecklist = async function(role, department) {
   } catch { return []; }
 };
 
-async function authHeaders() {
-  const token = (await window.SimpaticoDB.auth.getSession())?.data?.session?.access_token || localStorage.getItem('sb-token') || '';
+function authHeaders() {
+  const token = sb()?.auth?.session()?.access_token || localStorage.getItem('sb-token') || '';
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 function avatarColor(id) {
@@ -215,8 +215,3 @@ window.showToast  = (msg, type='info') => {
   t.textContent = msg; c.appendChild(t);
   setTimeout(() => t.remove(), 3800);
 };
-
-
-
-
-

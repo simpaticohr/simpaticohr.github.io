@@ -1,12 +1,12 @@
 /**
- * hr-ops.js � Simpatico HR Platform
+ * hr-ops.js — Simpatico HR Platform
  * Leave management, policies (R2), HR tickets, org chart
  */
 
 const OPS_CONFIG = {
   supabaseUrl: window.SIMPATICO_CONFIG?.supabaseUrl    || 'https://YOUR_PROJECT.supabase.co',
   supabaseKey: window.SIMPATICO_CONFIG?.supabaseAnonKey || 'YOUR_ANON_KEY',
-  workerUrl:   window.WORKER_URL || 'https://evalis-ai.simpaticohrconsultancy.workers.dev',
+  workerUrl:   window.SIMPATICO_CONFIG?.workerUrl       || 'https://hr-api.YOUR_SUBDOMAIN.workers.dev',
   r2PublicUrl: window.SIMPATICO_CONFIG?.r2PublicUrl     || 'https://files.YOUR_DOMAIN.com',
 };
 
@@ -25,7 +25,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 });
 
 async function loadUser() {
-  const client = window.SimpaticoDB; if (!client) return;
+  const client = sb(); if (!client) return;
   const { data: { user } } = await client.auth.getUser();
   if (user) {
     const el = document.getElementById('user-avatar');
@@ -34,7 +34,7 @@ async function loadUser() {
 }
 
 async function loadEmployeeSelect() {
-  const client = window.SimpaticoDB; if (!client) return;
+  const client = sb(); if (!client) return;
   const { data } = await client.from('employees').select('id,first_name,last_name').eq('status','active').order('first_name');
   const sel = document.getElementById('leave-employee'); if (!sel) return;
   (data||[]).forEach(e => {
@@ -44,9 +44,9 @@ async function loadEmployeeSelect() {
   });
 }
 
-// -- Leave --
+// ── Leave ──
 async function loadLeave() {
-  const client = window.SimpaticoDB; if (!client) return;
+  const client = sb(); if (!client) return;
   const today = new Date().toISOString().slice(0,10);
   const thirtyDaysAgo = new Date(Date.now()-30*24*60*60*1000).toISOString().slice(0,10);
 
@@ -54,7 +54,8 @@ async function loadLeave() {
     .from('leave_requests')
     .select(`
       id, type, from_date, to_date, days, reason, status, created_at,
-      employees(first_name, last_name)
+      employees(first_name, last_name),
+      approver:employees!approver_id(first_name, last_name)
     `)
     .order('created_at', { ascending: false });
 
@@ -79,7 +80,7 @@ function renderLeaveTable(list) {
   }
   tbody.innerHTML = list.map(l => {
     const emp  = l.employees;
-    const name = emp ? `${emp.first_name} ${emp.last_name}` : '�';
+    const name = emp ? `${emp.first_name} ${emp.last_name}` : '—';
     const type = l.type?.replace('_',' ');
     const badgeClass = { pending:'hr-badge-pending', approved:'hr-badge-active', rejected:'hr-badge-danger' }[l.status] || 'hr-badge-inactive';
     const actions = l.status === 'pending'
@@ -89,10 +90,10 @@ function renderLeaveTable(list) {
     return `<tr>
       <td><span class="primary-text">${name}</span></td>
       <td>${type}</td>
-      <td>${l.from_date || '�'}</td>
-      <td>${l.to_date || '�'}</td>
-      <td>${l.days || '�'}</td>
-      <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${l.reason || '�'}</td>
+      <td>${l.from_date || '—'}</td>
+      <td>${l.to_date || '—'}</td>
+      <td>${l.days || '—'}</td>
+      <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${l.reason || '—'}</td>
       <td><span class="hr-badge ${badgeClass}">${l.status}</span></td>
       <td>${actions}</td>
     </tr>`;
@@ -108,7 +109,15 @@ window.filterLeave = () => {
 window.approveLeave = async (id) => updateLeaveStatus(id, 'approved');
 window.rejectLeave  = async (id) => updateLeaveStatus(id, 'rejected');
 
-async function updateLeaveStatus(id, status) { try { const { error } = await window.SimpaticoDB.from('leave_requests').update({ status }).eq('id', id); if (error) throw error; showToast('Leave ' + status, 'success'); await loadLeave(); } catch (err) { showToast(err.message, 'error'); }
+async function updateLeaveStatus(id, status) {
+  try {
+    const res = await fetch(`${OPS_CONFIG.workerUrl}/leave/${id}/${status}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    });
+    if (!res.ok) throw new Error('Failed to update leave');
+    showToast(`Leave ${status}`, 'success');
+    await loadLeave();
+  } catch (err) { showToast(err.message, 'error'); }
 }
 
 window.openLeaveRequestModal = () => openModal('leave-modal');
@@ -125,18 +134,21 @@ window.submitLeaveRequest = async function() {
   const days = Math.round((new Date(to) - new Date(from)) / (1000*60*60*24)) + 1;
 
   try {
-    const { error: leaveErr } = await window.SimpaticoDB.from('leave_requests').insert({ employee_id: empId, type, from_date: from, to_date: to, days, reason, status: 'pending' });
-    if (leaveErr) throw leaveErr;
-
+    const res = await fetch(`${OPS_CONFIG.workerUrl}/leave`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify({ employee_id: empId, type, from_date: from, to_date: to, days, reason }),
+    });
+    if (!res.ok) throw new Error('Failed to submit request');
     showToast('Leave request submitted', 'success');
     closeModal('leave-modal');
     await loadLeave();
   } catch (err) { showToast(err.message, 'error'); }
 };
 
-// -- Policies --
+// ── Policies ──
 async function loadPolicies() {
-  const client = window.SimpaticoDB; if (!client) return;
+  const client = sb(); if (!client) return;
   const { data } = await client
     .from('hr_policies')
     .select('id, name, category, version, file_key, updated_at')
@@ -161,7 +173,7 @@ async function loadPolicies() {
         </div>
         <div style="flex:1">
           <div style="font-weight:600;font-size:14px">${p.name}</div>
-          <div style="font-size:12px;color:var(--hr-text-muted);margin-top:3px">v${p.version} � Updated ${updated}</div>
+          <div style="font-size:12px;color:var(--hr-text-muted);margin-top:3px">v${p.version} · Updated ${updated}</div>
           <span class="hr-chip" style="margin-top:8px">${p.category || 'General'}</span>
         </div>
       </div>
@@ -184,7 +196,7 @@ window.uploadPolicy = async function() {
     const file = e.target.files[0]; if (!file) return;
     const name = prompt('Policy name:', file.name.replace(/\.[^.]+$/,''));
     if (!name) return;
-    showToast('Uploading policy�', 'info');
+    showToast('Uploading policy…', 'info');
     const formData = new FormData();
     formData.append('file', file);
     formData.append('name', name);
@@ -200,9 +212,9 @@ window.uploadPolicy = async function() {
   input.click();
 };
 
-// -- HR Tickets --
+// ── HR Tickets ──
 async function loadTickets() {
-  const client = window.SimpaticoDB; if (!client) return;
+  const client = sb(); if (!client) return;
   const { data, error } = await client
     .from('hr_tickets')
     .select(`
@@ -231,8 +243,8 @@ function renderTickets(list) {
     const sBadge = { open:'hr-badge-info', in_progress:'hr-badge-pending', resolved:'hr-badge-active', closed:'hr-badge-inactive' }[t.status] || 'hr-badge-inactive';
     return `<tr>
       <td><span class="primary-text hr-font-mono">${t.ticket_number || t.id.slice(0,8).toUpperCase()}</span></td>
-      <td>${emp ? `${emp.first_name} ${emp.last_name}` : '�'}</td>
-      <td>${t.category || '�'}</td>
+      <td>${emp ? `${emp.first_name} ${emp.last_name}` : '—'}</td>
+      <td>${t.category || '—'}</td>
       <td>${t.subject}</td>
       <td><span class="hr-badge ${pBadge}">${t.priority}</span></td>
       <td><span class="hr-badge ${sBadge}">${t.status?.replace('_',' ')}</span></td>
@@ -241,11 +253,11 @@ function renderTickets(list) {
   }).join('');
 }
 
-window.openTicketModal = () => showToast('New ticket modal � coming soon', 'info');
+window.openTicketModal = () => showToast('New ticket modal — coming soon', 'info');
 
-// -- Org Chart (simple tree) --
+// ── Org Chart (simple tree) ──
 window.loadOrgChart = async function() {
-  const client = window.SimpaticoDB; if (!client) return;
+  const client = sb(); if (!client) return;
   const { data } = await client
     .from('employees')
     .select('id, first_name, last_name, job_title, manager_id, departments(name)')
@@ -302,8 +314,8 @@ function hexToRgb(hex) {
   const r = parseInt(hex.slice(1,3),16), g = parseInt(hex.slice(3,5),16), b = parseInt(hex.slice(5,7),16);
   return `${r},${g},${b}`;
 }
-async function authHeaders() {
-  const token = (await window.SimpaticoDB.auth.getSession())?.data?.session?.access_token || localStorage.getItem('sb-token') || '';
+function authHeaders() {
+  const token = sb()?.auth?.session()?.access_token || localStorage.getItem('sb-token') || '';
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 function avatarColor(id) {
@@ -312,20 +324,10 @@ function avatarColor(id) {
   return c[Math.abs(h)%c.length];
 }
 function setText(id,v) { const el=document.getElementById(id); if(el) el.textContent=v; }
-window.openModal = id => { var m = document.getElementById(id); if(m){ m.classList.add('open'); m.style.display='flex'; m.style.opacity='1'; m.style.pointerEvents='all'; } };
+window.openModal  = id => document.getElementById(id)?.classList.add('open');
 window.closeModal = id => document.getElementById(id)?.classList.remove('open');
 window.showToast  = (msg,type='info') => {
   const c=document.getElementById('toasts'); if(!c) return;
   const t=document.createElement('div'); t.className=`hr-toast ${type}`; t.textContent=msg;
   c.appendChild(t); setTimeout(()=>t.remove(),3800);
 };
-
-
-
-
-
-
-
-
-
-

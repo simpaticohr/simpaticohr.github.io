@@ -1,14 +1,18 @@
 /**
  * ai-assistant.js — Simpatico HR Platform
- * Fixed: no streaming, uses window.SimpaticoDB
+ * AI chat: Cloudflare AI (llama-3.1-8b) + Vectorize RAG + live Supabase HR context injection
  */
 
-function sb() { return window.SimpaticoDB || null; }
+// ── Use existing Supabase client ──
+function sb() {
+  return window.SimpaticoDB || null;
+}
 
 const AI_CONFIG = {
   workerUrl: window.WORKER_URL || 'https://evalis-ai.simpaticohrconsultancy.workers.dev',
 };
 
+// ── State ──
 let conversations       = [];
 let currentConvId       = null;
 let messages            = [];
@@ -16,26 +20,27 @@ let activeContexts      = new Set(['employees']);
 let isStreaming         = false;
 let currentUserInitials = 'U';
 
+// ── Init ──
 document.addEventListener('DOMContentLoaded', async () => {
   await loadUser();
   loadConversations();
 });
 
 async function loadUser() {
-  const client = window.SimpaticoDB; if (!client) return;
-  try {
-    const { data: { user } } = await client.auth.getUser();
-    if (user) {
-      currentUserInitials = user.email?.slice(0,2).toUpperCase() || 'U';
-      const el = document.getElementById('user-avatar');
-      if (el) el.textContent = currentUserInitials;
-    }
-  } catch(e) { console.warn('loadUser:', e.message); }
+  const client = sb(); if (!client) return;
+  const { data: { user } } = await client.auth.getUser();
+  if (user) {
+    currentUserInitials = user.email?.slice(0,2).toUpperCase() || 'U';
+    const el = document.getElementById('user-avatar');
+    if (el) el.textContent = currentUserInitials;
+  }
 }
 
-async async function authHeaders() {
+// ── Auth headers (Supabase v2 compatible) ──
+async function authHeaders() {
   try {
-    const client = window.SimpaticoDB; if (!client) return {};
+    const client = sb();
+    if (!client) return {};
     const { data } = await client.auth.getSession();
     const token = data?.session?.access_token || localStorage.getItem('simpatico_token') || '';
     return token ? { Authorization: `Bearer ${token}` } : {};
@@ -45,33 +50,33 @@ async async function authHeaders() {
   }
 }
 
+// ── Conversations ──
 function loadConversations() {
-  try {
-    const stored = localStorage.getItem('hr-ai-conversations');
-    conversations = stored ? JSON.parse(stored) : [];
-  } catch { conversations = []; }
+  const stored = localStorage.getItem('hr-ai-conversations');
+  conversations = stored ? JSON.parse(stored) : [];
   renderConversationList();
 }
 
 function saveConversations() {
-  try { localStorage.setItem('hr-ai-conversations', JSON.stringify(conversations.slice(0,50))); } catch {}
+  localStorage.setItem('hr-ai-conversations', JSON.stringify(conversations.slice(0, 50)));
 }
 
 function renderConversationList() {
   const container = document.getElementById('chat-history'); if (!container) return;
-  if (!conversations.length) {
+  if (conversations.length === 0) {
     container.innerHTML = '<div style="padding:16px;text-align:center;color:var(--hr-text-muted);font-size:13px">No conversations yet</div>';
     return;
   }
   container.innerHTML = conversations.map(c => `
     <div class="ai-history-item ${c.id === currentConvId ? 'active' : ''}" onclick="loadConversation('${c.id}')">
-      <div class="hi-title">${escHtml(c.title || 'New conversation')}</div>
+      <div class="hi-title">${c.title || 'New conversation'}</div>
       <div class="hi-date">${new Date(c.updated_at).toLocaleDateString()}</div>
     </div>`).join('');
 }
 
 function loadConversation(id) {
-  const conv = conversations.find(c => c.id === id); if (!conv) return;
+  const conv = conversations.find(c => c.id === id);
+  if (!conv) return;
   currentConvId = id;
   messages = conv.messages || [];
   document.getElementById('chat-title').textContent = conv.title || 'HR AI Assistant';
@@ -80,16 +85,21 @@ function loadConversation(id) {
 }
 
 window.newChat = function() {
-  currentConvId = null; messages = [];
+  currentConvId = null;
+  messages = [];
   document.getElementById('chat-title').textContent = 'HR AI Assistant';
   const welcome = document.getElementById('welcome-screen');
   if (welcome) welcome.style.display = 'flex';
-  const mc = document.getElementById('messages-container');
-  if (mc) Array.from(mc.children).forEach(c => { if (c.id !== 'welcome-screen') c.remove(); });
+  const msgContainer = document.getElementById('messages-container');
+  if (msgContainer) {
+    Array.from(msgContainer.children).forEach(c => {
+      if (!c.id || c.id !== 'welcome-screen') c.remove();
+    });
+  }
   renderConversationList();
 };
 
-// ── Send message (NO streaming) ──
+// ── Send message ──
 window.sendMessage = async function() {
   const input = document.getElementById('ai-input');
   const text  = input?.value.trim();
@@ -126,27 +136,64 @@ window.sendMessage = async function() {
         messages: messages.slice(-12).map(m => ({ role: m.role, content: m.content })),
         system:   systemContext,
         contexts: [...activeContexts],
-        stream:   false,
+        stream:   true,
       }),
     });
 
     removeTyping(typingId);
 
-    // Read body ONCE as text, then parse
-    const rawText = await response.text();
-    let result = {};
-    try { result = JSON.parse(rawText); } catch { result = { response: rawText }; }
+    if (response.ok && response.body) {
+      const assistantMsg = { role: 'assistant', content: '', timestamp: new Date().toISOString() };
+      messages.push(assistantMsg);
+      const el = appendMessageEl(assistantMsg, true);
+      const bubble = el?.querySelector('.msg-bubble');
 
-    const aiText = result.response || result.content || result.error || 'Sorry, I could not get a response.';
-    const assistantMsg = { role: 'assistant', content: aiText, timestamp: new Date().toISOString() };
-    messages.push(assistantMsg);
-    appendMessageEl(assistantMsg);
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let full = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const chunk = decoder.decode(value, { stream: true });
+        const lines = chunk.split('\n').filter(l => l.startsWith('data: '));
+        for (const line of lines) {
+          try {
+            const data = JSON.parse(line.slice(6));
+            if (data.text) {
+              full += data.text;
+              assistantMsg.content = full;
+              if (bubble) bubble.innerHTML = markdownToHtml(full);
+              scrollToBottom();
+            }
+          } catch { /* partial chunk */ }
+        }
+      }
+
+      if (!full) {
+        const result = await response.json();
+        full = result.response || result.content || 'No response.';
+        assistantMsg.content = full;
+        if (bubble) bubble.innerHTML = markdownToHtml(full);
+      }
+
+    } else {
+      removeTyping(typingId);
+      const result = await response.json().catch(() => ({}));
+      const assistantMsg = {
+        role: 'assistant',
+        content: result.response || result.error || 'Sorry, I encountered an error.',
+        timestamp: new Date().toISOString()
+      };
+      messages.push(assistantMsg);
+      appendMessageEl(assistantMsg);
+    }
 
   } catch (err) {
     removeTyping(typingId);
     const errorMsg = {
       role: 'assistant',
-      content: `I couldn't connect to the AI service.\n\n\`Error: ${err.message}\``,
+      content: `I couldn't connect to the AI service. Please check your Cloudflare Worker configuration.\n\n\`Error: ${err.message}\``,
       timestamp: new Date().toISOString()
     };
     messages.push(errorMsg);
@@ -162,57 +209,96 @@ window.sendMessage = async function() {
   }
 };
 
+// ── Context builder ──
 async function buildHRContext() {
-  const client = window.SimpaticoDB; if (!client) return defaultSystemPrompt();
+  const client = sb();
+  if (!client) return defaultSystemPrompt();
+
   const contextParts = [];
+
   try {
     if (activeContexts.has('employees')) {
       const { data } = await client.from('employees').select('status').limit(200);
       const active = (data||[]).filter(e=>e.status==='active').length;
-      contextParts.push(`Workforce: ${active} active employees out of ${(data||[]).length} total.`);
+      const total  = (data||[]).length;
+      contextParts.push(`Current workforce: ${active} active employees out of ${total} total.`);
     }
+
     if (activeContexts.has('payroll')) {
       const month = new Date().toISOString().slice(0,7);
-      const { data } = await client.from('payslips').select('net_pay').like('period',`${month}%`);
+      const { data } = await client.from('payslips').select('net_pay').like('period', `${month}%`);
       const total = (data||[]).reduce((s,p)=>s+(p.net_pay||0),0);
-      if (total) contextParts.push(`Payroll this month: ₹${Math.round(total).toLocaleString()}.`);
+      contextParts.push(`Current month payroll (net): ₹${Math.round(total).toLocaleString()}.`);
     }
+
+    if (activeContexts.has('performance')) {
+      const { data } = await client.from('performance_reviews').select('score').not('score','is',null).limit(100);
+      const scores = (data||[]).map(r=>r.score);
+      const avg = scores.length ? Math.round(scores.reduce((a,b)=>a+b,0)/scores.length) : null;
+      if (avg) contextParts.push(`Average performance score: ${avg}/100 across ${scores.length} reviews.`);
+    }
+
+    if (activeContexts.has('training')) {
+      const { data } = await client.from('training_enrollments').select('status').limit(300);
+      const all  = (data||[]).length;
+      const done = (data||[]).filter(e=>e.status==='completed').length;
+      contextParts.push(`Training: ${done}/${all} enrollments completed (${all>0?Math.round(done/all*100):0}%).`);
+    }
+
     if (activeContexts.has('leave')) {
       const { data } = await client.from('leave_requests').select('status').eq('status','pending');
-      contextParts.push(`${(data||[]).length} leave requests pending approval.`);
+      contextParts.push(`Leave requests: ${(data||[]).length} pending approval.`);
     }
-  } catch(e) { console.warn('Context error:', e.message); }
+  } catch(e) {
+    console.warn('Context build error:', e);
+  }
 
-  return `${defaultSystemPrompt()}\n\n## Live HR Data\n${contextParts.length ? contextParts.join('\n') : 'No live data yet — tables may not be set up.'}\n\nToday: ${new Date().toLocaleDateString('en-IN',{weekday:'long',year:'numeric',month:'long',day:'numeric'})}.`;
+  return `${defaultSystemPrompt()}
+
+## Live HR Data Context
+${contextParts.length ? contextParts.join('\n') : 'No live data available yet.'}
+
+Today's date: ${new Date().toLocaleDateString('en-IN', { weekday:'long', year:'numeric', month:'long', day:'numeric' })}.
+Always answer based on the live data provided. Be concise, professional, and actionable.`;
 }
 
 function defaultSystemPrompt() {
-  return `You are an expert HR AI assistant for Simpatico HR Platform. You help with HR management, workforce analytics, payroll, performance management, training, compliance, and HR best practices. Be professional, concise, and actionable. Format responses with markdown.`;
+  return `You are an expert HR AI assistant for Simpatico HR Platform. You have deep knowledge of:
+- Human Resources management, employment law, and HR best practices
+- Workforce analytics, performance management, and talent development
+- Payroll, compensation, and benefits
+- Employee onboarding, training, and development
+- Compliance, leave management, and HR operations
+
+You can analyze HR data, generate documents (policies, templates, letters), provide strategic guidance, and answer HR-related questions. Format responses clearly using markdown. Be professional, empathetic, and evidence-based.`;
 }
 
+// ── Markdown renderer ──
 function markdownToHtml(text) {
-  return (text||'')
+  return text
     .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
     .replace(/\*(.+?)\*/g, '<em>$1</em>')
     .replace(/`(.+?)`/g, '<code>$1</code>')
-    .replace(/^### (.+)$/gm, '<h4 style="font-size:14px;font-weight:600;margin:10px 0 4px;color:var(--hr-primary)">$1</h4>')
-    .replace(/^## (.+)$/gm,  '<h3 style="font-size:15px;font-weight:700;margin:12px 0 6px">$1</h3>')
-    .replace(/^# (.+)$/gm,   '<h2 style="font-size:17px;font-weight:700;margin:14px 0 8px">$1</h2>')
-    .replace(/^[-*] (.+)$/gm, '<li style="margin:3px 0">$1</li>')
-    .replace(/(<li[^>]*>.*<\/li>\n?)+/g, m => `<ul style="padding-left:20px;margin:8px 0">${m}</ul>`)
-    .replace(/\n\n/g, '</p><p style="margin:8px 0">')
+    .replace(/^### (.+)$/gm, '<h4 style="font-family:var(--hr-font-display);font-size:14px;font-weight:600;margin:12px 0 6px;color:var(--hr-primary)">$1</h4>')
+    .replace(/^## (.+)$/gm,  '<h3 style="font-family:var(--hr-font-display);font-size:15px;font-weight:700;margin:14px 0 6px">$1</h3>')
+    .replace(/^# (.+)$/gm,   '<h2 style="font-family:var(--hr-font-display);font-size:17px;font-weight:700;margin:16px 0 8px">$1</h2>')
+    .replace(/^[-*] (.+)$/gm, '<li>$1</li>')
+    .replace(/(<li>.*<\/li>\n?)+/g, m => `<ul>${m}</ul>`)
+    .replace(/\n\n/g, '</p><p>')
     .replace(/\n/g, '<br>');
 }
 
+// ── DOM helpers ──
 function appendMessageEl(msg, streaming=false) {
   const container = document.getElementById('messages-container'); if (!container) return null;
   const isUser = msg.role === 'user';
   const wrap = document.createElement('div');
   wrap.className = `ai-msg ${isUser ? 'user' : 'assistant'}`;
-  wrap.id = `msg-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  wrap.id = `msg-${Date.now()}`;
   const time = new Date(msg.timestamp).toLocaleTimeString('en-IN', { hour:'2-digit', minute:'2-digit' });
+  const avatarLabel = isUser ? currentUserInitials : '✦';
   wrap.innerHTML = `
-    <div class="msg-avatar ${isUser ? 'user-av' : 'ai-av'}">${isUser ? currentUserInitials : '✦'}</div>
+    <div class="msg-avatar ${isUser ? 'user-av' : 'ai-av'}">${avatarLabel}</div>
     <div>
       <div class="msg-bubble">${isUser ? escHtml(msg.content) : markdownToHtml(msg.content || (streaming ? '…' : ''))}</div>
       <div class="msg-time">${time}</div>
@@ -228,25 +314,35 @@ function showTyping() {
   const wrap = document.createElement('div');
   wrap.className = 'ai-msg assistant'; wrap.id = id;
   wrap.innerHTML = `<div class="msg-avatar ai-av">✦</div><div class="typing-indicator"><div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div></div>`;
-  container.appendChild(wrap); scrollToBottom();
+  container.appendChild(wrap);
+  scrollToBottom();
   return id;
 }
 
-function removeTyping(id) { if (id) document.getElementById(id)?.remove(); }
+function removeTyping(id) {
+  if (id) document.getElementById(id)?.remove();
+}
 
 function renderMessages() {
   const container = document.getElementById('messages-container'); if (!container) return;
   container.innerHTML = '';
-  if (!messages.length) {
-    const w = document.createElement('div'); w.id = 'welcome-screen'; w.className = 'ai-welcome';
-    w.innerHTML = `<div style="color:var(--hr-text-muted);font-size:14px">Start typing below.</div>`;
-    container.appendChild(w); return;
+  if (messages.length === 0) {
+    const welcome = document.createElement('div');
+    welcome.id = 'welcome-screen';
+    welcome.className = 'ai-welcome';
+    welcome.innerHTML = `<div style="color:var(--hr-text-muted);font-size:14px">This conversation is empty. Start typing below.</div>`;
+    container.appendChild(welcome);
+    return;
   }
   messages.forEach(m => appendMessageEl(m));
 }
 
-function scrollToBottom() { const c = document.getElementById('messages-container'); if (c) c.scrollTop = c.scrollHeight; }
+function scrollToBottom() {
+  const c = document.getElementById('messages-container');
+  if (c) c.scrollTop = c.scrollHeight;
+}
 
+// ── Context toggles ──
 window.toggleContext = function(ctx) {
   const btn = document.getElementById(`ctx-${ctx}`);
   if (activeContexts.has(ctx)) { activeContexts.delete(ctx); btn?.classList.remove('active'); }
@@ -270,12 +366,16 @@ window.autoResize = function(el) {
 window.clearChat = function() {
   if (!confirm('Clear this conversation?')) return;
   messages = [];
-  if (currentConvId) { conversations = conversations.filter(c => c.id !== currentConvId); currentConvId = null; saveConversations(); }
+  if (currentConvId) {
+    conversations = conversations.filter(c => c.id !== currentConvId);
+    currentConvId = null;
+    saveConversations();
+  }
   newChat();
 };
 
 window.exportChat = function() {
-  if (!messages.length) { showToast('No messages to export', 'info'); return; }
+  if (messages.length === 0) { showToast('No messages to export', 'info'); return; }
   const text = messages.map(m => `[${m.role.toUpperCase()}] ${m.content}`).join('\n\n---\n\n');
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([text], { type: 'text/plain' }));
@@ -290,9 +390,6 @@ function escHtml(s) {
 
 window.showToast = (msg, type='info') => {
   const c = document.getElementById('toasts'); if (!c) return;
-  const t = document.createElement('div'); t.className = `hr-toast ${type}`; t.textContent = msg;
-  c.appendChild(t); setTimeout(() => t.remove(), 3800);
+  const t = document.createElement('div'); t.className=`hr-toast ${type}`; t.textContent=msg;
+  c.appendChild(t); setTimeout(()=>t.remove(),3800);
 };
-
-
-

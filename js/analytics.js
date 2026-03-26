@@ -1,12 +1,12 @@
 /**
- * analytics.js — Simpatico HR Platform
+ * analytics.js â€” Simpatico HR Platform
  * Analytics: Supabase aggregations + Cloudflare Workers analytics API + Chart.js
  */
 
 const AN_CONFIG = {
-  supabaseUrl: window.SIMPATICO_CONFIG?.supabaseUrl    || 'https://YOUR_PROJECT.supabase.co',
-  supabaseKey: window.SIMPATICO_CONFIG?.supabaseAnonKey || 'YOUR_ANON_KEY',
-  workerUrl:   window.SIMPATICO_CONFIG?.workerUrl       || 'https://evalis-ai.simpaticohrconsultancy.workers.dev',
+  supabaseUrl: window.SIMPATICO_CONFIG?.supabaseUrl    || 'https://cvkxtsvgnynxexmemfuy.supabase.coupabase.co',
+  supabaseKey: window.SIMPATICO_CONFIG?.supabaseAnonKey || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN2a3h0c3ZnbnlueGV4bWVtZnV5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc0MjE2NTEsImV4cCI6MjA4Mjk5NzY1MX0.2mys8Cc-ucJ1uLThEGJubeDEg1TvfIAkW-xFsR4ecq4',
+  workerUrl:   window.SIMPATICO_CONFIG?.workerUrl       || 'https://hr-api.YOUR_SUBDOMAIN.workers.dev',
 };
 
 let _sb = null;
@@ -33,7 +33,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 });
 
 async function loadUser() {
-  const client = window.SimpaticoDB; if (!client) return;
+  const client = sb(); if (!client) return;
   const { data: { user } } = await client.auth.getUser();
   if (user) {
     const el = document.getElementById('user-avatar');
@@ -44,7 +44,7 @@ async function loadUser() {
 async function loadAnalytics() {
   const days = parseInt(document.getElementById('period-selector')?.value || '90');
   const since = new Date(Date.now() - days * 24*60*60*1000).toISOString();
-  const client = window.SimpaticoDB; if (!client) return;
+  const client = sb(); if (!client) return;
 
   // Run all Supabase queries in parallel
   const [
@@ -84,7 +84,7 @@ async function loadAnalytics() {
   setText('m-headcount-c', `${active.filter(e=>e.status==='active').length} active`);
   document.getElementById('m-turnover').innerHTML = `${turnover}<span style="font-size:16px">%</span>`;
   setText('m-turnover-c', `${termCount} left in period`);
-  setText('m-perf-score', avgScore || '—');
+  setText('m-perf-score', avgScore || 'â€”');
   document.getElementById('m-training').innerHTML = `${trainingPct}<span style="font-size:16px">%</span>`;
   setText('m-training-c', `${doneEnrol}/${allEnrol} completed`);
 
@@ -93,8 +93,8 @@ async function loadAnalytics() {
     const res = await fetch(`${AN_CONFIG.workerUrl}/analytics/summary?days=${days}`, { headers: authHeaders() });
     if (res.ok) {
       const { time_to_hire, absenteeism } = await res.json();
-      document.getElementById('m-time-to-hire').innerHTML = `${time_to_hire||'—'}<span style="font-size:16px">d</span>`;
-      document.getElementById('m-absentee').innerHTML = `${absenteeism||'—'}<span style="font-size:16px">%</span>`;
+      document.getElementById('m-time-to-hire').innerHTML = `${time_to_hire||'â€”'}<span style="font-size:16px">d</span>`;
+      document.getElementById('m-absentee').innerHTML = `${absenteeism||'â€”'}<span style="font-size:16px">%</span>`;
     }
   } catch { /* Worker optional */ }
 
@@ -207,14 +207,14 @@ function renderLeaveChart(leaveData) {
 }
 
 function renderPerfDistChart(scores) {
-  const bins = { '0–49':0, '50–59':0, '60–69':0, '70–79':0, '80–89':0, '90–100':0 };
+  const bins = { '0â€“49':0, '50â€“59':0, '60â€“69':0, '70â€“79':0, '80â€“89':0, '90â€“100':0 };
   scores.forEach(s => {
-    if (s<50) bins['0–49']++;
-    else if (s<60) bins['50–59']++;
-    else if (s<70) bins['60–69']++;
-    else if (s<80) bins['70–79']++;
-    else if (s<90) bins['80–89']++;
-    else bins['90–100']++;
+    if (s<50) bins['0â€“49']++;
+    else if (s<60) bins['50â€“59']++;
+    else if (s<70) bins['60â€“69']++;
+    else if (s<80) bins['70â€“79']++;
+    else if (s<90) bins['80â€“89']++;
+    else bins['90â€“100']++;
   });
 
   destroyChart('perf-dist-chart');
@@ -236,7 +236,7 @@ function renderPerfDistChart(scores) {
 
 async function renderHiringChart(since) {
   // Try to load from existing pipeline/candidates
-  const client = window.SimpaticoDB; if (!client) return;
+  const client = sb(); if (!client) return;
   const { data } = await client.from('candidates')
     .select('stage').gte('created_at', since).limit(500);
 
@@ -282,15 +282,15 @@ function renderDeptBreakdown(active, reviews, departments) {
     return;
   }
   tbody.innerHTML = rows.map(d => {
-    const avgTenure = d.count > 0 ? (d.totalTenure/d.count).toFixed(1) : '—';
-    const avgScore  = d.scores.length > 0 ? Math.round(d.scores.reduce((a,b)=>a+b,0)/d.scores.length) : '—';
+    const avgTenure = d.count > 0 ? (d.totalTenure/d.count).toFixed(1) : 'â€”';
+    const avgScore  = d.scores.length > 0 ? Math.round(d.scores.reduce((a,b)=>a+b,0)/d.scores.length) : 'â€”';
     return `<tr>
       <td><span class="primary-text">${d.name}</span></td>
       <td>${d.count}</td>
-      <td style="color:var(--hr-text-muted)">—</td>
+      <td style="color:var(--hr-text-muted)">â€”</td>
       <td>${avgTenure}y</td>
-      <td style="color:var(--hr-text-muted)">—%</td>
-      <td>${avgScore !== '—' ? `<span style="color:var(--hr-primary);font-weight:600">${avgScore}</span>` : '—'}</td>
+      <td style="color:var(--hr-text-muted)">â€”%</td>
+      <td>${avgScore !== 'â€”' ? `<span style="color:var(--hr-primary);font-weight:600">${avgScore}</span>` : 'â€”'}</td>
     </tr>`;
   }).join('');
 }
@@ -298,7 +298,7 @@ function renderDeptBreakdown(active, reviews, departments) {
 window.changePeriod = () => loadAnalytics();
 
 window.exportReport = async function() {
-  showToast('Generating report…', 'info');
+  showToast('Generating reportâ€¦', 'info');
   try {
     const days = document.getElementById('period-selector')?.value || '90';
     const res = await fetch(`${AN_CONFIG.workerUrl}/analytics/report?days=${days}&format=csv`, { headers: authHeaders() });
@@ -309,14 +309,14 @@ window.exportReport = async function() {
     a.download = `hr-analytics-${new Date().toISOString().slice(0,10)}.csv`;
     a.click();
     showToast('Report downloaded', 'success');
-  } catch { showToast('Export failed — check worker', 'error'); }
+  } catch { showToast('Export failed â€” check worker', 'error'); }
 };
 
 function destroyChart(id) {
   if (charts[id]) { charts[id].destroy(); delete charts[id]; }
 }
-async function authHeaders() {
-  const token = (await window.SimpaticoDB.auth.getSession())?.data?.session?.access_token || localStorage.getItem('sb-token') || '';
+function authHeaders() {
+  const token = sb()?.auth?.session()?.access_token || localStorage.getItem('sb-token') || '';
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 function setText(id, v) { const el=document.getElementById(id); if(el) el.textContent=v; }
@@ -325,8 +325,3 @@ window.showToast = (msg, type='info') => {
   const t=document.createElement('div'); t.className=`hr-toast ${type}`; t.textContent=msg;
   c.appendChild(t); setTimeout(()=>t.remove(),3800);
 };
-
-
-
-
-

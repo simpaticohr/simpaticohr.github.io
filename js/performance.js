@@ -1,12 +1,12 @@
 /**
- * performance.js � Simpatico HR Platform
+ * performance.js — Simpatico HR Platform
  * Performance reviews, goals, 9-box grid, AI-assisted feedback
  */
 
 const PERF_CONFIG = {
-  supabaseUrl: window.SIMPATICO_CONFIG?.supabaseUrl    || 'https://cvkxtsvgnynxexmemfuy.supabase.co',
-  supabaseKey: window.SIMPATICO_CONFIG?.supabaseAnonKey || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN2a3h0c3ZnbnlueGV4bWVtZnV5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc0MjE2NTEsImV4cCI6MjA4Mjk5NzY1MX0.2mys8Cc-ucJ1uLThEGJubeDEg1TvfIAkW-xFsR4ecq4',
-  workerUrl:   window.SIMPATICO_CONFIG?.workerUrl       || 'https://evalis-ai.simpaticohrconsultancy.workers.dev',
+  supabaseUrl: window.SIMPATICO_CONFIG?.supabaseUrl    || 'https://YOUR_PROJECT.supabase.co',
+  supabaseKey: window.SIMPATICO_CONFIG?.supabaseAnonKey || 'YOUR_ANON_KEY',
+  workerUrl:   window.SIMPATICO_CONFIG?.workerUrl       || 'https://hr-api.YOUR_SUBDOMAIN.workers.dev',
 };
 
 let _sb = null;
@@ -26,7 +26,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 });
 
 async function loadUser() {
-  const client = window.SimpaticoDB; if (!client) return;
+  const client = sb(); if (!client) return;
   const { data: { user } } = await client.auth.getUser();
   if (user) {
     const el = document.getElementById('user-avatar');
@@ -35,7 +35,7 @@ async function loadUser() {
 }
 
 async function loadCycles() {
-  const client = window.SimpaticoDB; if (!client) return;
+  const client = sb(); if (!client) return;
   const { data } = await client
     .from('review_cycles')
     .select('id, name, type, start_date, end_date, status')
@@ -54,7 +54,7 @@ async function loadCycles() {
 }
 
 async function loadReviews() {
-  const client = window.SimpaticoDB; if (!client) return;
+  const client = sb(); if (!client) return;
   const { data, error } = await client
     .from('performance_reviews')
     .select(`
@@ -72,7 +72,7 @@ async function loadReviews() {
   const avgScore = scores.length ? Math.round(scores.reduce((a,b)=>a+b,0)/scores.length) : 0;
 
   setText('stat-pending', pending);
-  setText('stat-avg-score', avgScore || '�');
+  setText('stat-avg-score', avgScore || '—');
   if (avgScore) setText('stat-avg-sub', `${avgScore}/100 average`);
 
   renderReviews(allReviews);
@@ -100,7 +100,7 @@ function renderReviews(list) {
           <div class="hr-emp-avatar" style="background:${color};color:#fff;width:38px;height:38px;font-size:13px">${initials}</div>
           <div>
             <div style="font-weight:600;font-size:14px">${name}</div>
-            <div style="font-size:12px;color:var(--hr-text-muted)">${role}${dept?' � '+dept:''}</div>
+            <div style="font-size:12px;color:var(--hr-text-muted)">${role}${dept?' · '+dept:''}</div>
           </div>
         </div>
         ${r.score ? `<div class="score-display">${r.score}<small>/100</small></div>` : '<div style="color:var(--hr-text-muted);font-size:13px">No score yet</div>'}
@@ -113,14 +113,14 @@ function renderReviews(list) {
         <button class="hr-btn hr-btn-ghost hr-btn-sm hr-w-full" onclick="event.stopPropagation();openReview('${r.id}')">
           ${r.status === 'completed' ? 'View' : 'Continue'}
         </button>
-        <button class="hr-btn hr-btn-ghost hr-btn-sm" onclick="event.stopPropagation();generateAIFeedback('${r.id}')">? AI</button>
+        <button class="hr-btn hr-btn-ghost hr-btn-sm" onclick="event.stopPropagation();generateAIFeedback('${r.id}')">✨ AI</button>
       </div>
     </div>`;
   }).join('');
 }
 
 async function loadGoals() {
-  const client = window.SimpaticoDB; if (!client) return;
+  const client = sb(); if (!client) return;
   const { data, error } = await client
     .from('performance_goals')
     .select(`
@@ -147,13 +147,13 @@ function renderGoals(list) {
   }
   tbody.innerHTML = list.map(g => {
     const emp  = g.employees;
-    const name = emp ? `${emp.first_name} ${emp.last_name}` : '�';
+    const name = emp ? `${emp.first_name} ${emp.last_name}` : '—';
     const pct  = g.progress || (g.status === 'achieved' ? 100 : 0);
     const badgeClass = { achieved:'hr-badge-active', in_progress:'hr-badge-info', not_started:'hr-badge-inactive', cancelled:'hr-badge-danger' }[g.status] || 'hr-badge-pending';
     return `<tr>
       <td><span class="primary-text">${name}</span></td>
       <td><div style="font-weight:500">${g.title}</div><div style="font-size:12px;color:var(--hr-text-muted)">${g.description?.slice(0,60) || ''}</div></td>
-      <td>${g.period || '�'}</td>
+      <td>${g.period || '—'}</td>
       <td>
         <div style="display:flex;align-items:center;gap:8px">
           <div class="hr-progress-bar" style="width:80px"><div class="hr-progress-fill" style="width:${pct}%"></div></div>
@@ -168,7 +168,7 @@ function renderGoals(list) {
   }).join('');
 }
 
-// -- 9-Box Grid --
+// ── 9-Box Grid ──
 function renderNineBox() {
   const grid = document.getElementById('nine-box-grid'); if (!grid) return;
   const boxes = [
@@ -201,12 +201,12 @@ function renderNineBox() {
       const emp = r.employees;
       const initials = `${emp.first_name[0]}${emp.last_name[0]}`;
       const color = avatarColor(emp.id);
-      cell.innerHTML += `<div title="${emp.first_name} ${emp.last_name}" class="hr-emp-avatar" style="background:${color};color:#fff;width:26px;height:26px;font-size:9px;cursor:pointer" onclick="location.href='employee-profile.html?id=${emp.id}'">${initials}</div>`;
+      cell.innerHTML += `<div title="${emp.first_name} ${emp.last_name}" class="hr-emp-avatar" style="background:${color};color:#fff;width:26px;height:26px;font-size:9px;cursor:pointer" onclick="location.href='../employees/employee-profile.html?id=${emp.id}'">${initials}</div>`;
     }
   });
 }
 
-// -- Review Cycle --
+// ── Review Cycle ──
 window.openReviewCycleModal = () => openModal('review-cycle-modal');
 
 window.createReviewCycle = async function() {
@@ -231,9 +231,9 @@ window.createReviewCycle = async function() {
   } catch (err) { showToast(err.message, 'error'); }
 };
 
-// -- AI Feedback via Cloudflare AI --
+// ── AI Feedback via Cloudflare AI ──
 window.generateAIFeedback = async function(reviewId) {
-  showToast('Generating AI feedback suggestions�', 'info');
+  showToast('Generating AI feedback suggestions…', 'info');
   try {
     const res = await fetch(`${PERF_CONFIG.workerUrl}/ai/performance-feedback`, {
       method: 'POST',
@@ -252,14 +252,14 @@ window.openReview = function(id) {
   location.href = `review-form.html?id=${id}`;
 };
 window.openGoalsModal   = () => openModal('goals-modal');
-window.openAddGoalModal = () => showToast('Add goal � coming soon', 'info');
-window.updateGoalProgress = (id) => showToast('Update goal � coming soon', 'info');
+window.openAddGoalModal = () => showToast('Add goal — coming soon', 'info');
+window.updateGoalProgress = (id) => showToast('Update goal — coming soon', 'info');
 window.filterReviews = () => {
   const q  = (document.getElementById('review-search')?.value || '').toLowerCase();
   const cy = document.getElementById('cycle-filter')?.value || '';
   const st = document.getElementById('review-status-filter')?.value || '';
   const filtered = allReviews.filter(r => {
-    const name = `${r.employees?.first_name||''} ${r.employees?.last_name||''}`.toLowerCase();
+    const name = `${r.employees?.first_name||''} ${r.employees?.last_name||}`.toLowerCase();
     return (!q || name.includes(q)) && (!cy || r.cycle_id === cy) && (!st || r.status === st);
   });
   renderReviews(filtered);
@@ -275,8 +275,8 @@ window.switchPerfTab = function(btn, tabId) {
   if (tabId === 'tab-nine-box') renderNineBox();
 };
 
-async function authHeaders() {
-  const token = (await window.SimpaticoDB.auth.getSession())?.data?.session?.access_token || localStorage.getItem('sb-token') || '';
+function authHeaders() {
+  const token = sb()?.auth?.session()?.access_token || localStorage.getItem('sb-token') || '';
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 function avatarColor(id) {
@@ -292,9 +292,3 @@ window.showToast  = (msg, type='info') => {
   const t = document.createElement('div'); t.className = `hr-toast ${type}`; t.textContent = msg;
   c.appendChild(t); setTimeout(() => t.remove(), 3800);
 };
-
-
-
-
-
-
