@@ -1,11 +1,11 @@
 /**
- * onboarding.js — Simpatico HR Platform
+ * onboarding.js ï¿½ Simpatico HR Platform
  * Onboarding module: Supabase + Cloudflare Workers + AI task suggestions
  */
 
 const OB_CONFIG = {
-  supabaseUrl: window.SIMPATICO_CONFIG?.supabaseUrl    || 'https://YOUR_PROJECT.supabase.co',
-  supabaseKey: window.SIMPATICO_CONFIG?.supabaseAnonKey || 'YOUR_ANON_KEY',
+  supabaseUrl: window.SIMPATICO_CONFIG?.supabaseUrl    || 'https://cvkxtsvgnynxexmemfuy.supabase.co',
+  supabaseKey: window.SIMPATICO_CONFIG?.supabaseAnonKey || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN2a3h0c3ZnbnlueGV4bWVtZnV5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc0MjE2NTEsImV4cCI6MjA4Mjk5NzY1MX0.2mys8Cc-ucJ1uLThEGJubeDEg1TvfIAkW-xFsR4ecq4',
   workerUrl:   window.SIMPATICO_CONFIG?.workerUrl       || 'https://evalis-ai.simpaticohrconsultancy.workers.dev',
 };
 
@@ -134,10 +134,10 @@ function renderOnboardCard(r) {
     <div class="hr-emp-avatar" style="background:${color};color:#fff;width:38px;height:38px;font-size:13px">${initials}</div>
     <div class="emp-info">
       <h4>${name}</h4>
-      <div class="sub">${role}${dept ? ` · ${dept}` : ''}</div>
+      <div class="sub">${role}${dept ? ` ï¿½ ${dept}` : ''}</div>
       <div style="margin-top:8px">
         <div class="hr-progress-bar"><div class="hr-progress-fill" style="width:${pct}%"></div></div>
-        <div style="font-size:11px;color:var(--hr-text-muted);margin-top:4px">${done}/${tasks.length} tasks${overdue ? ` · <span style="color:var(--hr-warning)">${overdue} overdue</span>` : ''}</div>
+        <div style="font-size:11px;color:var(--hr-text-muted);margin-top:4px">${done}/${tasks.length} tasks${overdue ? ` ï¿½ <span style="color:var(--hr-warning)">${overdue} overdue</span>` : ''}</div>
       </div>
     </div>
     <div class="progress-col">
@@ -158,7 +158,7 @@ window.startOnboarding = async function() {
 
   if (!empId) { showToast('Please select an employee', 'error'); return; }
 
-  showToast('Starting onboarding…', 'info');
+  showToast('Starting onboardingï¿½', 'info');
   try {
     const res = await fetch(`${OB_CONFIG.workerUrl}/onboarding/start`, {
       method: 'POST',

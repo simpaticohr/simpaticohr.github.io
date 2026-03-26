@@ -1,11 +1,11 @@
 /**
- * performance.js — Simpatico HR Platform
+ * performance.js ï¿½ Simpatico HR Platform
  * Performance reviews, goals, 9-box grid, AI-assisted feedback
  */
 
 const PERF_CONFIG = {
-  supabaseUrl: window.SIMPATICO_CONFIG?.supabaseUrl    || 'https://YOUR_PROJECT.supabase.co',
-  supabaseKey: window.SIMPATICO_CONFIG?.supabaseAnonKey || 'YOUR_ANON_KEY',
+  supabaseUrl: window.SIMPATICO_CONFIG?.supabaseUrl    || 'https://cvkxtsvgnynxexmemfuy.supabase.co',
+  supabaseKey: window.SIMPATICO_CONFIG?.supabaseAnonKey || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN2a3h0c3ZnbnlueGV4bWVtZnV5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc0MjE2NTEsImV4cCI6MjA4Mjk5NzY1MX0.2mys8Cc-ucJ1uLThEGJubeDEg1TvfIAkW-xFsR4ecq4',
   workerUrl:   window.SIMPATICO_CONFIG?.workerUrl       || 'https://evalis-ai.simpaticohrconsultancy.workers.dev',
 };
 
@@ -72,7 +72,7 @@ async function loadReviews() {
   const avgScore = scores.length ? Math.round(scores.reduce((a,b)=>a+b,0)/scores.length) : 0;
 
   setText('stat-pending', pending);
-  setText('stat-avg-score', avgScore || '—');
+  setText('stat-avg-score', avgScore || 'ï¿½');
   if (avgScore) setText('stat-avg-sub', `${avgScore}/100 average`);
 
   renderReviews(allReviews);
@@ -100,7 +100,7 @@ function renderReviews(list) {
           <div class="hr-emp-avatar" style="background:${color};color:#fff;width:38px;height:38px;font-size:13px">${initials}</div>
           <div>
             <div style="font-weight:600;font-size:14px">${name}</div>
-            <div style="font-size:12px;color:var(--hr-text-muted)">${role}${dept?' · '+dept:''}</div>
+            <div style="font-size:12px;color:var(--hr-text-muted)">${role}${dept?' ï¿½ '+dept:''}</div>
           </div>
         </div>
         ${r.score ? `<div class="score-display">${r.score}<small>/100</small></div>` : '<div style="color:var(--hr-text-muted);font-size:13px">No score yet</div>'}
@@ -147,13 +147,13 @@ function renderGoals(list) {
   }
   tbody.innerHTML = list.map(g => {
     const emp  = g.employees;
-    const name = emp ? `${emp.first_name} ${emp.last_name}` : '—';
+    const name = emp ? `${emp.first_name} ${emp.last_name}` : 'ï¿½';
     const pct  = g.progress || (g.status === 'achieved' ? 100 : 0);
     const badgeClass = { achieved:'hr-badge-active', in_progress:'hr-badge-info', not_started:'hr-badge-inactive', cancelled:'hr-badge-danger' }[g.status] || 'hr-badge-pending';
     return `<tr>
       <td><span class="primary-text">${name}</span></td>
       <td><div style="font-weight:500">${g.title}</div><div style="font-size:12px;color:var(--hr-text-muted)">${g.description?.slice(0,60) || ''}</div></td>
-      <td>${g.period || '—'}</td>
+      <td>${g.period || 'ï¿½'}</td>
       <td>
         <div style="display:flex;align-items:center;gap:8px">
           <div class="hr-progress-bar" style="width:80px"><div class="hr-progress-fill" style="width:${pct}%"></div></div>
@@ -233,7 +233,7 @@ window.createReviewCycle = async function() {
 
 // -- AI Feedback via Cloudflare AI --
 window.generateAIFeedback = async function(reviewId) {
-  showToast('Generating AI feedback suggestions…', 'info');
+  showToast('Generating AI feedback suggestionsï¿½', 'info');
   try {
     const res = await fetch(`${PERF_CONFIG.workerUrl}/ai/performance-feedback`, {
       method: 'POST',
@@ -252,8 +252,8 @@ window.openReview = function(id) {
   location.href = `review-form.html?id=${id}`;
 };
 window.openGoalsModal   = () => openModal('goals-modal');
-window.openAddGoalModal = () => showToast('Add goal — coming soon', 'info');
-window.updateGoalProgress = (id) => showToast('Update goal — coming soon', 'info');
+window.openAddGoalModal = () => showToast('Add goal ï¿½ coming soon', 'info');
+window.updateGoalProgress = (id) => showToast('Update goal ï¿½ coming soon', 'info');
 window.filterReviews = () => {
   const q  = (document.getElementById('review-search')?.value || '').toLowerCase();
   const cy = document.getElementById('cycle-filter')?.value || '';
