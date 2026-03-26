@@ -5,9 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Payroll | Simpatico HR</title>
   <style>
-    /* Base Styles to fix missing CSS and giant icons */
+    /* Enterprise Base Styles */
     body { font-family: 'Segoe UI', system-ui, sans-serif; background: #f1f5f9; color: #1e293b; margin: 0; padding: 20px; }
-    svg { width: 1em; height: 1em; } /* Prevents SVGs from exploding */
+    svg { width: 1em; height: 1em; } 
     .hr-page-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; }
     .hr-page-title { font-size: 1.5rem; font-weight: 700; }
     .hr-page-title small { display: block; font-size: 0.85rem; color: #64748b; font-weight: 400; margin-top: 4px; }
@@ -20,11 +20,11 @@
     .hr-tabs { display: flex; gap: 0; border-bottom: 2px solid #e2e8f0; margin-bottom: 20px; }
     .hr-tab { padding: 10px 20px; background: transparent; border: none; border-bottom: 2px solid transparent; cursor: pointer; font-weight: 500; color: #64748b; margin-bottom: -2px; }
     .hr-tab.active { color: #4f46e5; border-bottom-color: #4f46e5; }
-    .hr-table-wrap { background: white; border-radius: 12px; border: 1px solid #e2e8f0; overflow: hidden; }
+    .hr-table-wrap { background: white; border-radius: 12px; border: 1px solid #e2e8f0; overflow: hidden; overflow-x: auto;}
     .hr-table { width: 100%; border-collapse: collapse; text-align: left; }
-    .hr-table th { padding: 12px 16px; background: #f8fafc; font-size: 0.8rem; text-transform: uppercase; color: #64748b; border-bottom: 1px solid #e2e8f0; }
+    .hr-table th { padding: 12px 16px; background: #f8fafc; font-size: 0.8rem; text-transform: uppercase; color: #64748b; border-bottom: 1px solid #e2e8f0; white-space: nowrap;}
     .hr-table td { padding: 12px 16px; border-bottom: 1px solid #e2e8f0; font-size: 0.9rem; }
-    .hr-btn { padding: 8px 16px; border-radius: 8px; font-weight: 500; cursor: pointer; border: none; font-size: 0.88rem; transition: 0.2s; }
+    .hr-btn { padding: 8px 16px; border-radius: 8px; font-weight: 500; cursor: pointer; border: none; font-size: 0.88rem; transition: 0.2s; white-space: nowrap;}
     .hr-btn-primary { background: #4f46e5; color: white; }
     .hr-btn-primary:hover { background: #3730a3; }
     .hr-btn-secondary { background: white; border: 1px solid #e2e8f0; color: #4f46e5; }
@@ -35,6 +35,7 @@
     .hr-badge-active { background: #dcfce3; color: #166534; }
     .hr-badge-pending { background: #fef9c3; color: #a16207; }
     .hr-badge-danger { background: #fee2e2; color: #991b1b; }
+    .hr-badge-inactive { background: #f1f5f9; color: #64748b; }
     .hr-modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); justify-content: center; align-items: center; z-index: 100; }
     .hr-modal-overlay.open { display: flex; }
     .hr-modal { background: white; padding: 24px; border-radius: 16px; width: 90%; max-width: 500px; }
@@ -47,7 +48,18 @@
     .hr-grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
     .hr-toast-container { position: fixed; top: 20px; right: 20px; z-index: 1000; }
     .hr-toast { background: white; border-left: 4px solid #10b981; padding: 12px 20px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); margin-bottom: 10px; }
+    .hr-toast.error { border-left-color: #ef4444; }
+    .hr-font-mono { font-family: monospace; }
   </style>
+  <script>
+    // Hide shell when loaded inside dashboard iframe
+    if (window.self !== window.top) {
+      document.addEventListener("DOMContentLoaded", function() {
+        var shell = document.querySelector(".hr-shell");
+        if (shell) { shell.style.gridTemplateColumns = "1fr"; shell.style.gridTemplateRows = "1fr"; }
+      });
+    }
+  </script>
 </head>
 <body>
   <div class="hr-shell">
@@ -77,20 +89,35 @@
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
           </div>
         </div>
+        <div class="hr-stat-card" style="--card-accent:#f59e0b">
+          <div class="label">Pending Payslips</div>
+          <div class="value" id="stat-pending-payslips">0</div>
+          <div class="icon" style="--icon-bg:rgba(245,158,11,.1)">
+             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/></svg>
+          </div>
+        </div>
       </div>
 
       <div class="hr-tabs" id="payroll-tabs">
         <button class="hr-tab active" onclick="window.switchPayrollTab(this, 'tab-payslips')">Payslips</button>
         <button class="hr-tab" onclick="window.switchPayrollTab(this, 'tab-salary')">Salary Register</button>
         <button class="hr-tab" onclick="window.switchPayrollTab(this, 'tab-runs')">Payroll Runs</button>
+        <button class="hr-tab" onclick="window.switchPayrollTab(this, 'tab-deductions')">Deductions</button>
       </div>
 
       <div id="tab-payslips">
+        <div style="display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap;">
+            <input type="text" class="hr-input" style="width:250px" placeholder="Search employee" id="payslip-search" oninput="window.filterPayslips()">
+            <select class="hr-select" id="payslip-period" onchange="window.filterPayslips()" style="width:auto;min-width:160px">
+              <option value="">All Periods</option>
+            </select>
+            <button class="hr-btn hr-btn-secondary" onclick="window.sendAllPayslips()">Send All Unsent</button>
+        </div>
         <div class="hr-table-wrap">
           <table class="hr-table">
-            <thead><tr><th>Employee</th><th>Period</th><th>Gross Pay</th><th>Net Pay</th><th>Status</th><th>Actions</th></tr></thead>
+            <thead><tr><th>Employee</th><th>Period</th><th>Gross Pay</th><th>Deductions</th><th>Net Pay</th><th>Status</th><th>Actions</th></tr></thead>
             <tbody id="payslips-tbody">
-              <tr><td colspan="6" style="text-align:center;padding:40px;color:#64748b">No payslips found. Run payroll to generate them.</td></tr>
+              <tr><td colspan="7" style="text-align:center;padding:40px;color:#64748b">Loading payslips...</td></tr>
             </tbody>
           </table>
         </div>
@@ -99,9 +126,9 @@
       <div id="tab-salary" style="display:none;">
         <div class="hr-table-wrap">
           <table class="hr-table">
-            <thead><tr><th>Employee</th><th>Department</th><th>Role</th><th>Base Salary</th><th>Actions</th></tr></thead>
+            <thead><tr><th>Employee</th><th>Department</th><th>Role</th><th>Type</th><th>Base Salary</th><th>Cur</th><th>Effective Date</th><th>Actions</th></tr></thead>
             <tbody id="salary-tbody">
-              <tr><td colspan="5" style="text-align:center;padding:40px;color:#64748b">No salary records found.</td></tr>
+              <tr><td colspan="8" style="text-align:center;padding:40px;color:#64748b">Loading salary data...</td></tr>
             </tbody>
           </table>
         </div>
@@ -110,13 +137,25 @@
       <div id="tab-runs" style="display:none;">
         <div class="hr-table-wrap">
           <table class="hr-table">
-            <thead><tr><th>Period</th><th>Total Gross</th><th>Total Net</th><th>Status</th></tr></thead>
+            <thead><tr><th>Period</th><th>Type</th><th>Total Gross</th><th>Total Net</th><th>Employees</th><th>Status</th><th>Run By</th><th>Actions</th></tr></thead>
             <tbody id="runs-tbody">
-              <tr><td colspan="4" style="text-align:center;padding:40px;color:#64748b">No payroll runs yet.</td></tr>
+              <tr><td colspan="8" style="text-align:center;padding:40px;color:#64748b">Loading payroll runs...</td></tr>
             </tbody>
           </table>
         </div>
       </div>
+      
+      <div id="tab-deductions" style="display:none;">
+        <div class="hr-table-wrap">
+          <table class="hr-table">
+            <thead><tr><th>Employee</th><th>Type</th><th>Amount</th><th>Frequency</th><th>Start</th><th>End</th><th>Status</th></tr></thead>
+            <tbody id="deductions-tbody">
+              <tr><td colspan="7" style="text-align:center;padding:40px;color:#64748b">Loading deductions...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
     </main>
   </div>
 
@@ -126,9 +165,26 @@
         <h2>Run Payroll</h2>
         <button class="hr-modal-close" onclick="window.closeModal('run-payroll-modal')">×</button>
       </div>
+      <div class="hr-grid-2">
+          <div class="hr-form-group">
+            <label class="hr-label">Pay Period (YYYY-MM)</label>
+            <input type="month" class="hr-input" id="run-period">
+          </div>
+          <div class="hr-form-group">
+            <label class="hr-label">Pay Date</label>
+            <input type="date" class="hr-input" id="run-pay-date">
+          </div>
+      </div>
       <div class="hr-form-group">
-        <label class="hr-label">Pay Period (YYYY-MM)</label>
-        <input type="month" class="hr-input" id="run-period">
+        <label class="hr-label">Type</label>
+        <select class="hr-select" id="run-type">
+          <option value="regular">Regular</option>
+          <option value="off_cycle">Off-cycle / Bonus</option>
+        </select>
+      </div>
+      <div class="hr-form-group">
+        <label class="hr-label">Notes</label>
+        <input type="text" class="hr-input" id="run-notes" placeholder="Optional notes for this run">
       </div>
       <div style="background:#f8fafc;padding:16px;border-radius:8px;margin-bottom:20px;border:1px dashed #cbd5e1;" id="run-preview">
         <p style="color:#64748b;text-align:center;font-size:14px;margin:0;">Click "Calculate Preview" to see estimated totals</p>
@@ -142,39 +198,327 @@
 
   <div class="hr-toast-container" id="toasts"></div>
 
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  
   <script>
-    // Embedded Payroll Javascript (With the syntax error fixed)
-    const PAY_CONFIG = { workerUrl: 'https://hr-api.YOUR_SUBDOMAIN.workers.dev' };
-    
+    /* =========================================================================
+       ENTERPRISE BACKEND LOGIC (Supabase + Cloudflare Workers)
+       ========================================================================= */
+    const PAY_CONFIG = {
+      supabaseUrl: window.SIMPATICO_CONFIG?.supabaseUrl || 'https://cvkxtsvgnynxexmemfuy.supabase.co',
+      supabaseKey: window.SIMPATICO_CONFIG?.supabaseAnonKey || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN2a3h0c3ZnbnlueGV4bWVtZnV5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc0MjE2NTEsImV4cCI6MjA4Mjk5NzY1MX0.2mys8Cc-ucJ1uLThEGJubeDEg1TvfIAkW-xFsR4ecq4',
+      workerUrl:   window.SIMPATICO_CONFIG?.workerUrl   || 'https://evalis-ai.simpaticohrconsultancy.workers.dev',
+    };
+
+    let _sb = null;
+    function sb() {
+      if (_sb) return _sb;
+      if (window.supabase) { _sb = window.supabase.createClient(PAY_CONFIG.supabaseUrl, PAY_CONFIG.supabaseKey); return _sb; }
+      return null;
+    }
+
+    let allPayslips   = [];
+    let allSalaries   = [];
+    let allRuns       = [];
+    let allDeductions = [];
+
+    document.addEventListener('DOMContentLoaded', async () => {
+      await Promise.all([loadPayslips(), loadSalaryRegister(), loadPayrollRuns(), loadDeductions()]);
+    });
+
+    // ── Payslips ──
+    async function loadPayslips() {
+      const client = sb(); if (!client) return;
+      const { data, error } = await client
+        .from('payslips')
+        .select('id, period, gross_pay, deductions_total, net_pay, status, payslip_key, paid_at, employees(id, first_name, last_name, departments(name))')
+        .order('created_at', { ascending: false });
+
+      if (error) { console.error('Error loading payslips:', error); return; }
+      allPayslips = data || [];
+
+      const currentMonth = new Date().toISOString().slice(0,7);
+      const thisMonth = allPayslips.filter(p => p.period?.startsWith(currentMonth));
+      const totalGross = thisMonth.reduce((s, p) => s + (p.gross_pay || 0), 0);
+      const pending    = allPayslips.filter(p => p.status === 'generated').length;
+
+      setText('stat-total-payroll', formatCurrency(totalGross));
+      setText('stat-on-payroll', allPayslips.length > 0 ? new Set(allPayslips.map(p=>p.employees?.id)).size : '0');
+      setText('stat-pending-payslips', pending);
+
+      const periods = [...new Set(allPayslips.map(p => p.period).filter(Boolean))];
+      const sel = document.getElementById('payslip-period');
+      if (sel) {
+        sel.innerHTML = '<option value="">All Periods</option>';
+        periods.forEach(p => {
+          const opt = document.createElement('option'); opt.value = p; opt.textContent = p; sel.appendChild(opt);
+        });
+      }
+      renderPayslips(allPayslips);
+    }
+
+    function renderPayslips(list) {
+      const tbody = document.getElementById('payslips-tbody'); if (!tbody) return;
+      if (list.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:40px;color:var(--hr-text-muted)">No payslips found. Run payroll to generate them.</td></tr>';
+        return;
+      }
+      tbody.innerHTML = list.map(p => {
+        const emp  = p.employees;
+        const name = emp ? `${emp.first_name} ${emp.last_name}` : '—';
+        const badgeClass = { generated:'hr-badge-info', sent:'hr-badge-active', paid:'hr-badge-active' }[p.status] || 'hr-badge-inactive';
+        return `<tr>
+          <td><span class="primary-text" style="font-weight:500">${name}</span></td>
+          <td>${p.period || '—'}</td>
+          <td class="hr-font-mono">${formatCurrency(p.gross_pay)}</td>
+          <td class="hr-font-mono" style="color:#ef4444">-${formatCurrency(p.deductions_total)}</td>
+          <td class="hr-font-mono" style="color:#10b981;font-weight:600">${formatCurrency(p.net_pay)}</td>
+          <td><span class="hr-badge ${badgeClass}">${p.status}</span></td>
+          <td>
+            <div style="display:flex;gap:6px">
+              ${p.payslip_key ? `<button class="hr-btn hr-btn-ghost hr-btn-sm" onclick="downloadPayslip('${p.payslip_key}')">Download</button>` : ''}
+              ${p.status === 'generated' ? `<button class="hr-btn hr-btn-primary hr-btn-sm" onclick="sendPayslip('${p.id}')">Send</button>` : ''}
+            </div>
+          </td>
+        </tr>`;
+      }).join('');
+    }
+
+    window.filterPayslips = () => {
+      const q  = (document.getElementById('payslip-search')?.value || '').toLowerCase();
+      const pr = document.getElementById('payslip-period')?.value || '';
+      renderPayslips(allPayslips.filter(p => {
+        const name = `${p.employees?.first_name||''} ${p.employees?.last_name||''}`.toLowerCase();
+        return (!q||name.includes(q)) && (!pr||p.period===pr);
+      }));
+    };
+
+    // ── Salary Register ──
+    async function loadSalaryRegister() {
+      const client = sb(); if (!client) return;
+      const { data, error } = await client
+        .from('employee_salaries')
+        .select('id, base_salary, currency, employment_type, effective_date, employees(id, first_name, last_name, job_title, departments(name))')
+        .order('effective_date', { ascending: false });
+
+      if (error) { console.error('Error loading salaries', error); return; }
+      allSalaries = data || [];
+      renderSalaryRegister(allSalaries);
+    }
+
+    function renderSalaryRegister(list) {
+      const tbody = document.getElementById('salary-tbody'); if (!tbody) return;
+      if (list.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:40px;color:var(--hr-text-muted)">No salary records found.</td></tr>';
+        return;
+      }
+      tbody.innerHTML = list.map(s => {
+        const emp = s.employees;
+        const name = emp ? `${emp.first_name} ${emp.last_name}` : '—';
+        return `<tr>
+          <td><span class="primary-text" style="font-weight:500">${name}</span></td>
+          <td>${emp?.departments?.name || '—'}</td>
+          <td>${emp?.job_title || '—'}</td>
+          <td>${formatEnum(s.employment_type)}</td>
+          <td class="hr-font-mono" style="font-weight:600">${formatCurrency(s.base_salary, s.currency)}</td>
+          <td>${s.currency || 'USD'}</td>
+          <td>${s.effective_date ? new Date(s.effective_date).toLocaleDateString() : '—'}</td>
+          <td><button class="hr-btn hr-btn-ghost hr-btn-sm" onclick="showToast('Edit feature coming soon')">Edit</button></td>
+        </tr>`;
+      }).join('');
+    }
+
+    // ── Payroll Runs ──
+    async function loadPayrollRuns() {
+      const client = sb(); if (!client) return;
+      const { data, error } = await client
+        .from('payroll_runs')
+        .select('id, period, type, total_gross, total_net, employee_count, status, pay_date, notes, created_at, run_by:employees!run_by_id(first_name, last_name)')
+        .order('created_at', { ascending: false });
+
+      if (error) { console.error('Error loading runs', error); return; }
+      allRuns = data || [];
+      renderPayrollRuns(allRuns);
+    }
+
+    function renderPayrollRuns(list) {
+      const tbody = document.getElementById('runs-tbody'); if (!tbody) return;
+      if (list.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:40px;color:var(--hr-text-muted)">No payroll runs yet.</td></tr>';
+        return;
+      }
+      tbody.innerHTML = list.map(r => {
+        const badgeClass = { processing:'hr-badge-info', completed:'hr-badge-active', failed:'hr-badge-danger' }[r.status] || 'hr-badge-pending';
+        const runBy = r.run_by ? `${r.run_by.first_name} ${r.run_by.last_name}` : '—';
+        return `<tr>
+          <td><span class="primary-text" style="font-weight:500">${r.period}</span></td>
+          <td>${formatEnum(r.type)}</td>
+          <td class="hr-font-mono">${formatCurrency(r.total_gross)}</td>
+          <td class="hr-font-mono" style="color:#10b981;font-weight:600">${formatCurrency(r.total_net)}</td>
+          <td>${r.employee_count || '—'}</td>
+          <td><span class="hr-badge ${badgeClass}">${r.status}</span></td>
+          <td>${runBy}</td>
+          <td><button class="hr-btn hr-btn-ghost hr-btn-sm" onclick="showToast('Details coming soon')">Details</button></td>
+        </tr>`;
+      }).join('');
+    }
+
+    // ── Deductions ──
+    async function loadDeductions() {
+      const client = sb(); if (!client) return;
+      const { data, error } = await client
+        .from('payroll_deductions')
+        .select('id, type, amount, frequency, start_date, end_date, status, employees(first_name, last_name)')
+        .order('created_at', { ascending: false });
+
+      if (error) { console.error('Error loading deductions', error); return; }
+      allDeductions = data || [];
+      renderDeductions(allDeductions);
+    }
+
+    function renderDeductions(list) {
+      const tbody = document.getElementById('deductions-tbody'); if (!tbody) return;
+      if (list.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:40px;color:var(--hr-text-muted)">No deductions configured.</td></tr>';
+        return;
+      }
+      tbody.innerHTML = list.map(d => {
+        const emp = d.employees;
+        const name = emp ? `${emp.first_name} ${emp.last_name}` : '—';
+        const badgeClass = d.status === 'active' ? 'hr-badge-active' : 'hr-badge-inactive';
+        return `<tr>
+          <td><span class="primary-text" style="font-weight:500">${name}</span></td>
+          <td>${formatEnum(d.type)}</td>
+          <td class="hr-font-mono">${formatCurrency(d.amount)}</td>
+          <td>${formatEnum(d.frequency)}</td>
+          <td>${d.start_date || '—'}</td>
+          <td>${d.end_date || 'Ongoing'}</td>
+          <td><span class="hr-badge ${badgeClass}">${d.status}</span></td>
+        </tr>`;
+      }).join('');
+    }
+
+    // ── Cloudflare Worker Actions ──
     window.openRunPayrollModal = function() {
+      const payDateInput = document.getElementById('run-pay-date');
+      if (payDateInput) payDateInput.valueAsDate = new Date();
       window.openModal('run-payroll-modal');
     };
 
-    window.calculatePayroll = function() {
-      const period = document.getElementById('run-period')?.value;
+    window.calculatePayroll = async function() {
+      const period = document.getElementById('run-period')?.value.trim();
       if (!period) { window.showToast('Enter a pay period first', 'error'); return; }
-      document.getElementById('run-preview').innerHTML = `<strong>12</strong> employees &nbsp;|&nbsp; Gross: <strong>$84,000</strong> &nbsp;|&nbsp; Net: <strong style="color:#166534">$68,500</strong>`;
+      setText('run-preview', 'Calculating with Cloudflare Worker…');
+      try {
+        const res = await fetch(`${PAY_CONFIG.workerUrl}/payroll/calculate`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...authHeaders() },
+          body: JSON.stringify({ period }),
+        });
+        if(!res.ok) throw new Error("Worker responded with error");
+        const { total_gross, total_net, employee_count, deductions_total } = await res.json();
+        document.getElementById('run-preview').innerHTML = `
+          <strong>${employee_count}</strong> employees &nbsp;|&nbsp;
+          Gross: <strong>${formatCurrency(total_gross)}</strong> &nbsp;|&nbsp;
+          Deductions: <span style="color:#ef4444">-${formatCurrency(deductions_total)}</span> &nbsp;|&nbsp;
+          Net: <strong style="color:#10b981">${formatCurrency(total_net)}</strong>`;
+      } catch(e) { 
+        console.error(e);
+        document.getElementById('run-preview').innerHTML = `<span style="color:#ef4444">Calculation failed. Ensure Cloudflare Worker is deployed.</span>`; 
+      }
     };
 
-    window.executePayroll = function() {
-      window.showToast('Payroll processed successfully!', 'success');
-      window.closeModal('run-payroll-modal');
+    window.executePayroll = async function() {
+      const period  = document.getElementById('run-period')?.value.trim();
+      const payDate = document.getElementById('run-pay-date')?.value;
+      const type    = document.getElementById('run-type')?.value;
+      const notes   = document.getElementById('run-notes')?.value.trim();
+      if (!period) { window.showToast('Pay period required', 'error'); return; }
+
+      window.showToast('Processing payroll via Worker…', 'info');
+      try {
+        const res = await fetch(`${PAY_CONFIG.workerUrl}/payroll/run`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...authHeaders() },
+          body: JSON.stringify({ period, pay_date: payDate, type, notes }),
+        });
+        const result = await res.json();
+        if (!res.ok) throw new Error(result.error || 'Payroll run failed');
+        window.showToast(`Payroll run complete — ${result.employee_count} payslips generated`, 'success');
+        window.closeModal('run-payroll-modal');
+        await Promise.all([loadPayslips(), loadPayrollRuns()]);
+      } catch (err) { window.showToast(err.message, 'error'); }
     };
 
+    window.downloadPayslip = async function(key) {
+      try {
+        const res = await fetch(`${PAY_CONFIG.workerUrl}/r2/signed-url?key=${encodeURIComponent(key)}`, { headers: authHeaders() });
+        const { url } = await res.json();
+        window.open(url, '_blank');
+      } catch { window.showToast('Failed to download payslip', 'error'); }
+    };
+
+    window.sendPayslip = async function(payslipId) {
+      try {
+        const res = await fetch(`${PAY_CONFIG.workerUrl}/payroll/payslips/${payslipId}/send`, { method: 'POST', headers: authHeaders() });
+        if (!res.ok) throw new Error('Send failed');
+        window.showToast('Payslip sent to employee', 'success');
+        await loadPayslips();
+      } catch (err) { window.showToast(err.message, 'error'); }
+    };
+
+    window.sendAllPayslips = async function() {
+      const unsent = allPayslips.filter(p => p.status === 'generated');
+      if (unsent.length === 0) { window.showToast('No unsent payslips', 'info'); return; }
+      window.showToast(`Sending ${unsent.length} payslips…`, 'info');
+      try {
+        const res = await fetch(`${PAY_CONFIG.workerUrl}/payroll/payslips/send-all`, { method: 'POST', headers: authHeaders() });
+        if (!res.ok) throw new Error('Bulk send failed');
+        window.showToast(`${unsent.length} payslips sent`, 'success');
+        await loadPayslips();
+      } catch (err) { window.showToast(err.message, 'error'); }
+    };
+
+    window.exportPayroll = function() {
+      const headers = ['Employee','Period','Gross Pay','Deductions','Net Pay','Status'];
+      const rows = allPayslips.map(p => [
+        p.employees ? `${p.employees.first_name} ${p.employees.last_name}` : '',
+        p.period, p.gross_pay, p.deductions_total, p.net_pay, p.status,
+      ]);
+      const csv = [headers,...rows].map(r=>r.map(c=>`"${c}"`).join(',')).join('\n');
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(new Blob([csv],{type:'text/csv'}));
+      a.download = `payroll-${new Date().toISOString().slice(0,10)}.csv`;
+      a.click();
+      window.showToast('Export downloaded', 'success');
+    };
+
+    // ── Utilities ──
     window.switchPayrollTab = function(btn, tabId) {
       document.querySelectorAll('#payroll-tabs .hr-tab').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
-      ['tab-payslips','tab-salary','tab-runs'].forEach(id => {
+      ['tab-payslips','tab-salary','tab-runs','tab-deductions'].forEach(id => {
         const el = document.getElementById(id);
         if (el) el.style.display = id === tabId ? 'block' : 'none';
       });
     };
 
+    function formatCurrency(amount, currency='USD') {
+      if (!amount && amount !== 0) return '—';
+      return new Intl.NumberFormat('en-US', { style:'currency', currency, maximumFractionDigits:0 }).format(amount);
+    }
+    function formatEnum(s) { return (s||'').replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase()); }
+    function authHeaders() {
+      const token = sb()?.auth?.session()?.access_token || localStorage.getItem('sb-token') || '';
+      return token ? { Authorization: `Bearer ${token}` } : {};
+    }
+    function setText(id, v) { const el=document.getElementById(id); if(el) el.textContent=v; }
     window.openModal  = id => document.getElementById(id)?.classList.add('open');
     window.closeModal = id => document.getElementById(id)?.classList.remove('open');
     window.showToast  = (msg, type='info') => {
       const c = document.getElementById('toasts'); if(!c) return;
       const t = document.createElement('div'); t.className = `hr-toast ${type}`; t.textContent = msg;
+      t.style.borderLeftColor = type === 'error' ? '#ef4444' : '#10b981';
       c.appendChild(t); setTimeout(()=>t.remove(),3800);
     };
   </script>
