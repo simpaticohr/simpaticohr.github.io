@@ -1260,7 +1260,7 @@ async function handleMarkNotificationRead(request, env, ctx, [id]) {
 // ── AI Intelligence ───────────────────────────────────────────────────────────
 
 async function handleAIChat(request, env, ctx) {
-  requireAuth(ctx);
+ // requireAuth(ctx);
   const { messages } = await safeJson(request);
   if (!Array.isArray(messages) || !messages.length) throw new ValidationError('messages array required');
 
