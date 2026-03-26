@@ -500,7 +500,7 @@ route('POST',   '/recruitment/applications',        handleCreateApplication);
 route('GET',    '/recruitment/applications',        handleListApplications);
 route('PATCH',  '/recruitment/applications/:id',    handleUpdateApplication);
 route('POST',   '/ai/generate-jd',                  handleGenerateJD);
-
+route('POST',   '/email/interview-invite',          handleInterviewEmail);
 // Notifications
 route('GET',    '/notifications',                   handleListNotifications);
 route('PATCH',  '/notifications/:id/read',          handleMarkNotificationRead);
@@ -1385,7 +1385,50 @@ Use engaging, modern language. Avoid jargon. Max 500 words.`;
   const result = await env.AI.run('@cf/meta/llama-3.1-8b-instruct', { messages: [{ role: 'user', content: prompt }], max_tokens: 700 });
   return apiResponse({ jd: result.response, generated_at: new Date().toISOString() });
 }
+async function handleInterviewEmail(request, env) {
+    try {
+        const data = await request.json();
+        
+        const resendResponse = await fetch('https://api.resend.com/emails', {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${env.RESEND_API_KEY}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                from: 'Simpatico HR <onboarding@resend.dev>', 
+                to: data.candidateEmail,
+                subject: `Interview Invitation: ${data.position} at Simpatico`,
+                html: `
+                    <div style="font-family: sans-serif; padding: 20px; color: #1f2937;">
+                        <h2 style="color: #4f46e5;">Interview Invitation</h2>
+                        <p>Hi ${data.candidateName},</p>
+                        <p>You have been invited to an interview for the <strong>${data.position}</strong> role.</p>
+                        <div style="background-color: #f3f4f6; padding: 15px; border-radius: 8px; margin: 20px 0;">
+                            <ul style="list-style: none; padding: 0; margin: 0;">
+                                <li style="margin-bottom: 8px;"><strong>📅 Date:</strong> ${data.date}</li>
+                                <li style="margin-bottom: 8px;"><strong>⏰ Time:</strong> ${data.startTime}</li>
+                                <li><strong>📍 Mode:</strong> ${data.mode.toUpperCase()}</li>
+                            </ul>
+                        </div>
+                        ${data.meetingLink ? `<p><strong>Link/Location:</strong> <a href="${data.meetingLink}" style="color: #4f46e5;">${data.meetingLink}</a></p>` : ''}
+                        <p>Best regards,<br>Simpatico HR Team</p>
+                    </div>
+                `
+            })
+        });
 
+        if (!resendResponse.ok) throw new Error("Resend API rejected the request");
+
+        return new Response(JSON.stringify({ success: true }), { 
+            headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' } 
+        });
+    } catch (error) {
+        return new Response(JSON.stringify({ success: false, error: error.message }), { 
+            status: 500, headers: { 'Access-Control-Allow-Origin': '*' } 
+        });
+    }
+}
 async function handleOnboardingChecklist(request, env, ctx) {
   requireRole(ctx, 'hr', 'admin', 'superadmin');
   const { role, department } = await safeJson(request);
