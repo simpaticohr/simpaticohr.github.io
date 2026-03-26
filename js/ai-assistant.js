@@ -9,7 +9,7 @@ function sb() {
 }
 
 const AI_CONFIG = {
-  workerUrl: window.WORKER_URL || 'https://evalis-ai.simpaticohrconsultancy.workers.dev',
+  workerUrl: window.WORKER_URL || 'https://simpatico-hr-ats.simpaticohrconsultancy.workers.dev',
 };
 
 // ── State ──
@@ -99,7 +99,7 @@ window.newChat = function() {
   renderConversationList();
 };
 
-// ── Send message ──
+// ── Send message (Updated for v5.0 Enterprise Engine) ──
 window.sendMessage = async function() {
   const input = document.getElementById('ai-input');
   const text  = input?.value.trim();
@@ -126,78 +126,63 @@ window.sendMessage = async function() {
   if (btn) btn.disabled = true;
 
   try {
+    // 1. Build the HR context and Auth headers
     const systemContext = await buildHRContext();
     const headers = await authHeaders();
 
-    const response = await fetch(`${AI_CONFIG.workerUrl}/ai/chat`, {
+    // 2. Format the messages for the v5.0 Worker
+    const apiMessages = [
+      { role: 'system', content: systemContext },
+      ...messages.slice(-12).map(m => ({ role: m.role, content: m.content }))
+    ];
+
+    // 3. Ensure we use the correct Config URL
+    const targetUrl = window.SIMPATICO_CONFIG?.workerUrl || AI_CONFIG.workerUrl;
+
+    // 4. Fetch the data
+    const response = await fetch(`${targetUrl}/ai/chat`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...headers },
-      body: JSON.stringify({
-        messages: messages.slice(-12).map(m => ({ role: m.role, content: m.content })),
-        system:   systemContext,
-        contexts: [...activeContexts],
-        stream:   true,
-      }),
+      headers: { 
+        'Content-Type': 'application/json', 
+        'X-Tenant-ID': window.SIMPATICO_CONFIG?.tenantId || 'SIMP_PRO_MAIN',
+        ...headers 
+      },
+      body: JSON.stringify({ messages: apiMessages }),
     });
 
+    // 5. Read the response exactly ONCE
+    const responseText = await response.text();
     removeTyping(typingId);
 
-    if (response.ok && response.body) {
-      const assistantMsg = { role: 'assistant', content: '', timestamp: new Date().toISOString() };
-      messages.push(assistantMsg);
-      const el = appendMessageEl(assistantMsg, true);
-      const bubble = el?.querySelector('.msg-bubble');
-
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let full = '';
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        const chunk = decoder.decode(value, { stream: true });
-        const lines = chunk.split('\n').filter(l => l.startsWith('data: '));
-        for (const line of lines) {
-          try {
-            const data = JSON.parse(line.slice(6));
-            if (data.text) {
-              full += data.text;
-              assistantMsg.content = full;
-              if (bubble) bubble.innerHTML = markdownToHtml(full);
-              scrollToBottom();
-            }
-          } catch { /* partial chunk */ }
-        }
-      }
-
-      if (!full) {
-        const result = await response.json();
-        full = result.response || result.content || 'No response.';
-        assistantMsg.content = full;
-        if (bubble) bubble.innerHTML = markdownToHtml(full);
-      }
-
-    } else {
-      removeTyping(typingId);
-      const result = await response.json().catch(() => ({}));
-      const assistantMsg = {
-        role: 'assistant',
-        content: result.response || result.error || 'Sorry, I encountered an error.',
-        timestamp: new Date().toISOString()
-      };
-      messages.push(assistantMsg);
-      appendMessageEl(assistantMsg);
+    if (!response.ok) {
+      throw new Error(`Worker Error: ${response.status} - ${responseText}`);
     }
+
+    // 6. Safely parse the JSON and extract the AI's reply
+    const data = JSON.parse(responseText);
+    const aiReply = data.data ? data.data.response : data.response;
+
+    // 7. Add AI message to UI
+    const assistantMsg = { role: 'assistant', content: aiReply || 'No response.', timestamp: new Date().toISOString() };
+    messages.push(assistantMsg);
+    
+    const el = appendMessageEl(assistantMsg);
+    const bubble = el?.querySelector('.msg-bubble');
+    if (bubble) bubble.innerHTML = markdownToHtml(assistantMsg.content);
 
   } catch (err) {
     removeTyping(typingId);
+    console.error(err);
     const errorMsg = {
       role: 'assistant',
       content: `I couldn't connect to the AI service. Please check your Cloudflare Worker configuration.\n\n\`Error: ${err.message}\``,
       timestamp: new Date().toISOString()
     };
     messages.push(errorMsg);
-    appendMessageEl(errorMsg);
+    
+    const el = appendMessageEl(errorMsg);
+    const bubble = el?.querySelector('.msg-bubble');
+    if (bubble) bubble.innerHTML = markdownToHtml(errorMsg.content);
   } finally {
     isStreaming = false;
     if (btn) btn.disabled = false;
@@ -208,7 +193,6 @@ window.sendMessage = async function() {
     scrollToBottom();
   }
 };
-
 // ── Context builder ──
 async function buildHRContext() {
   const client = sb();
