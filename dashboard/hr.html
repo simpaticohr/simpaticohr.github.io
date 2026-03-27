@@ -2638,7 +2638,47 @@ function handleScheduleInterview(e) {
     document.querySelectorAll('.time-slot').forEach(s => s.classList.remove('selected'));
     selectedInterviewMode = '';
 
-    saveInterviewerSuggestion(interviewer);
+ saveInterviewerSuggestion(interviewer);
+
+    if (sendEmail) {
+        const workerUrl = (window.SIMPATICO_CONFIG?.workerUrl || 'https://simpatico-hr-ats.simpaticohrconsultancy.workers.dev/').replace(/\/$/, '');
+        if (!workerUrl) {
+            console.warn('[Simpatico] SIMPATICO_CONFIG.workerUrl not set — email skipped');
+        } else {
+            fetch(`${workerUrl}/interviews/schedule`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Tenant-ID': window.SIMPATICO_CONFIG?.tenantId || 'default',
+                },
+                body: JSON.stringify({
+                    candidateName,
+                    candidateEmail,
+                    position,
+                    round,
+                    date,
+                    startTime,
+                    endTime,
+                    interviewer,
+                    mode,
+                    meetingLink,
+                    notes,
+                    interviewerEmail: document.getElementById('intInterviewerEmail')?.value?.trim() || '',
+                }),
+            })
+            .then(async res => {
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) {
+                    console.error('[Simpatico] Email API error:', data);
+                    showToast('⚠️ Interview saved but email failed — check worker logs', 'error');
+                }
+            })
+            .catch(err => {
+                console.error('[Simpatico] Email fetch failed:', err);
+                showToast('⚠️ Interview saved but email could not be sent', 'error');
+            });
+        }
+    }
 
     if (mode === 'proctored') {
         showToast('🔒 Proctored interview scheduled! Secure link will be sent to candidate.');
@@ -2758,7 +2798,7 @@ async function generateJD() {
     }
 
     try {
-        const workerUrl = window.SIMPATICO_CONFIG?.workerUrl || '';
+        const workerUrl = window.SIMPATICO_CONFIG?.workerUrl || 'https://simpatico-hr-ats.simpaticohrconsultancy.workers.dev/';
         if (!workerUrl) throw new Error('Worker not configured');
 
         const res = await fetch(`${workerUrl}/ai/generate-jd`, {

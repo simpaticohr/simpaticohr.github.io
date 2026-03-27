@@ -497,6 +497,7 @@ route('GET',    '/payroll/payslips/:employeeId',    handleGetPayslips);
 route('POST',   '/recruitment/jobs',                handleCreateJob);
 route('GET',    '/recruitment/jobs',                handleListJobs);
 route('POST',   '/recruitment/applications',        handleCreateApplication);
+route('POST',   '/interviews/schedule',             handleScheduleInterviewEmail);
 route('GET',    '/recruitment/applications',        handleListApplications);
 route('PATCH',  '/recruitment/applications/:id',    handleUpdateApplication);
 route('POST',   '/ai/generate-jd',                  handleGenerateJD);
@@ -1733,4 +1734,139 @@ function payslipEmailHtml(ps) {
  * ║  AI Binding:    AI       (Workers AI)                                       ║
  * ║  Vectorize:     VECTORIZE (semantic search index)                           ║
  * ╚══════════════════════════════════════════════════════════════════════════════╝
- */
+ */// ── ADD THIS ROUTE to your ROUTES declarations (§12) ──────────────────────────
+// route('POST', '/interviews/schedule', handleScheduleInterviewEmail);
+
+// ── ADD THIS HANDLER (paste into § 14) ────────────────────────────────────────
+
+async function handleScheduleInterviewEmail(request, env, ctx) {
+  const body = await safeJson(request);
+
+  const {
+    candidateName, candidateEmail,
+    position, round,
+    date, startTime, endTime,
+    interviewer, mode,
+    meetingLink, notes,
+    interviewerEmail,   // optional — cc the interviewer if provided
+  } = body;
+
+  if (!candidateName || !candidateEmail || !position || !date || !startTime) {
+    throw new ValidationError('candidateName, candidateEmail, position, date, startTime are required');
+  }
+
+  const formattedDate = new Date(date + 'T00:00:00')
+    .toLocaleDateString('en-IN', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' });
+
+  const formattedStart = formatTimeStr(startTime);
+  const formattedEnd   = formatTimeStr(endTime);
+
+  const modeLabel = {
+    video:     '📹 Video Call',
+    inperson:  '🏢 In-Person',
+    phone:     '📞 Phone Call',
+    proctored: '🔒 Proctored (AI-Monitored)',
+  }[mode] || mode;
+
+  const meetingSection = meetingLink
+    ? `<tr><td style="padding:8px 0;color:#6b7280;font-size:14px;">Meeting Link / Location</td>
+       <td style="padding:8px 0;font-size:14px;"><a href="${meetingLink}" style="color:#4f46e5;">${meetingLink}</a></td></tr>`
+    : '';
+
+  const notesSection = notes
+    ? `<div style="margin-top:20px;background:#fef3c7;border-left:4px solid #f59e0b;padding:12px 16px;border-radius:6px;font-size:14px;color:#92400e;">
+        <strong>📝 Notes:</strong> ${notes}
+       </div>`
+    : '';
+
+  const candidateHtml = `
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"></head>
+<body style="margin:0;padding:0;background:#f4f5f7;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="padding:40px 20px;">
+    <tr><td align="center">
+      <table width="600" cellpadding="0" cellspacing="0" style="background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08);">
+        <tr><td style="background:linear-gradient(135deg,#4f46e5,#7c3aed);padding:36px;text-align:center;">
+          <h1 style="color:white;margin:0;font-size:24px;font-weight:700;">Interview Scheduled 🎉</h1>
+          <p style="color:rgba(255,255,255,0.85);margin:8px 0 0;font-size:15px;">You have been invited for an interview</p>
+        </td></tr>
+        <tr><td style="padding:36px;">
+          <p style="font-size:16px;color:#374151;">Hi <strong>${candidateName}</strong>,</p>
+          <p style="font-size:15px;color:#6b7280;line-height:1.6;">
+            We're pleased to invite you for an interview at <strong>Simpatico</strong>. Please find the details below.
+          </p>
+
+          <div style="background:#f9fafb;border-radius:10px;padding:24px;margin:24px 0;border:1px solid #e5e7eb;">
+            <table width="100%" cellpadding="0" cellspacing="0">
+              <tr><td style="padding:8px 0;color:#6b7280;font-size:14px;width:180px;">Position</td>
+                  <td style="padding:8px 0;font-weight:600;font-size:14px;">${position}</td></tr>
+              <tr><td style="padding:8px 0;color:#6b7280;font-size:14px;">Round</td>
+                  <td style="padding:8px 0;font-weight:600;font-size:14px;">${round}</td></tr>
+              <tr><td style="padding:8px 0;color:#6b7280;font-size:14px;">Date</td>
+                  <td style="padding:8px 0;font-weight:600;font-size:14px;">${formattedDate}</td></tr>
+              <tr><td style="padding:8px 0;color:#6b7280;font-size:14px;">Time</td>
+                  <td style="padding:8px 0;font-weight:600;font-size:14px;">${formattedStart} – ${formattedEnd}</td></tr>
+              <tr><td style="padding:8px 0;color:#6b7280;font-size:14px;">Mode</td>
+                  <td style="padding:8px 0;font-weight:600;font-size:14px;">${modeLabel}</td></tr>
+              <tr><td style="padding:8px 0;color:#6b7280;font-size:14px;">Interviewer</td>
+                  <td style="padding:8px 0;font-weight:600;font-size:14px;">${interviewer}</td></tr>
+              ${meetingSection}
+            </table>
+          </div>
+
+          ${mode === 'proctored' ? `
+          <div style="background:#ede9fe;border-left:4px solid #7c3aed;padding:14px 16px;border-radius:6px;margin-bottom:20px;font-size:14px;color:#5b21b6;">
+            <strong>🔒 This is a Proctored Interview.</strong><br>
+            Your session will be AI-monitored. Please ensure your camera and microphone are working, and take the interview from a quiet, well-lit location.
+          </div>` : ''}
+
+          ${notesSection}
+
+          <p style="font-size:14px;color:#6b7280;margin-top:24px;line-height:1.6;">
+            If you need to reschedule or have any questions, please reply to this email or contact our HR team.
+          </p>
+
+          <p style="font-size:15px;color:#374151;margin-top:20px;">Best of luck! 🙌<br><strong>Simpatico HR Team</strong></p>
+        </td></tr>
+        <tr><td style="background:#f9fafb;padding:20px;text-align:center;border-top:1px solid #e5e7eb;">
+          <p style="margin:0;font-size:12px;color:#9ca3af;">© ${new Date().getFullYear()} Simpatico HR · interviews@simpaticohr.in</p>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
+
+  // Send to candidate
+  await sendEmail(env, {
+    to:      candidateEmail,
+    subject: `Interview Scheduled: ${position} — ${formattedDate}`,
+    html:    candidateHtml,
+  });
+
+  // Optionally CC interviewer
+  if (interviewerEmail) {
+    await sendEmail(env, {
+      to:      interviewerEmail,
+      subject: `[Action Required] You are interviewing ${candidateName} — ${formattedDate}`,
+      html:    candidateHtml.replace(
+        `Hi <strong>${candidateName}</strong>`,
+        `Hi <strong>${interviewer}</strong>, you have an upcoming interview with <strong>${candidateName}</strong>`
+      ),
+    });
+  }
+
+  await audit(env, ctx, 'interview.email_sent', 'interviews', null, { candidateEmail, position });
+
+  return apiResponse({ sent: true, to: candidateEmail });
+}
+
+// Helper used inside this handler only
+function formatTimeStr(timeStr) {
+  if (!timeStr) return '';
+  const [h, m] = timeStr.split(':').map(Number);
+  const ampm = h >= 12 ? 'PM' : 'AM';
+  const hour = h % 12 || 12;
+  return `${hour}:${String(m).padStart(2, '0')} ${ampm}`;
+}
