@@ -2209,20 +2209,65 @@ function navigateTo(sectionId, navEl) {
     if (dd) dd.classList.remove('open');
 }
 
-function loadExternalModule(sectionId, href) {
+async function loadExternalModule(sectionId, href) {
     const container = document.getElementById(sectionId + '-module-container');
     if (!container || loadedModules[sectionId]) return;
+    
+    // Mark as loading
     loadedModules[sectionId] = true;
     container.innerHTML = `
         <div id="loading-${sectionId}" style="display:flex;justify-content:center;align-items:center;height:400px;">
             <i class="fas fa-circle-notch fa-spin" style="font-size:2rem;color:var(--primary);"></i>
         </div>
-        <iframe src="${href.replace(/^\//, '')}" class="module-frame"
-            onload="document.getElementById('loading-${sectionId}').style.display='none'"
-            frameborder="0"></iframe>
     `;
-}
 
+    try {
+        // 1. Fetch the raw HTML file
+        const res = await fetch(href.replace(/^\//, ''));
+        if (!res.ok) throw new Error('Module not found');
+        const html = await res.text();
+
+        // 2. Parse the HTML into a virtual document
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(html, 'text/html');
+
+        // 3. Extract ONLY the main content area (Ignore the duplicate sidebar!)
+        const mainContent = doc.querySelector('.hr-main');
+        const innerContent = mainContent ? mainContent.innerHTML : doc.body.innerHTML;
+        
+        // 4. Extract any modals hiding at the bottom of the sub-page
+        let modalsHtml = '';
+        doc.querySelectorAll('.hr-modal-overlay, .modal').forEach(m => modalsHtml += m.outerHTML);
+
+        // 5. Inject the clean content directly into the dashboard
+        container.innerHTML = innerContent + modalsHtml;
+
+        // 6. Manually re-attach scripts so buttons keep working
+        doc.querySelectorAll('script').forEach(oldScript => {
+            // Skip Supabase & Config scripts since the main dashboard already loaded them!
+            if (oldScript.src && (oldScript.src.includes('supabase') || oldScript.src.includes('hr-config'))) return;
+            
+            // Skip the old annoying iframe hack if it's still in there
+            if (!oldScript.src && oldScript.textContent.includes('window.self !== window.top')) return;
+
+            const newScript = document.createElement('script');
+            if (oldScript.src) newScript.src = oldScript.src;
+            else newScript.textContent = oldScript.textContent;
+            document.body.appendChild(newScript);
+        });
+
+    } catch (error) {
+        console.error("Fetch Error:", error);
+        container.innerHTML = `
+            <div class="empty-state">
+                <i class="fas fa-exclamation-triangle" style="color:var(--danger)"></i>
+                <h5 style="margin-top:10px;">Failed to load module</h5>
+                <p>Could not load ${href}. Check the console for details.</p>
+            </div>
+        `;
+        loadedModules[sectionId] = false; // Allow them to click and try again
+    }
+}
 function toggleSidebar() { document.getElementById('sidebar').classList.toggle('open'); }
 
 function toggleUserDropdown(e) {
