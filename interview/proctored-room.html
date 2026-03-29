@@ -634,7 +634,7 @@ ${Object.entries(this.skillsCovered).map(([s,d]) => `- ${s}: Score ${d.score}/10
 - Weak: ${this.weakAreas.join(', ') || 'TBD'}`;
     },
 
-    async generateNextQuestion(candidateAnswer, answerAnalysis) {
+  async generateNextQuestion(candidateAnswer, answerAnalysis) {
         if (candidateAnswer) {
             this.history.push({
                 role: 'user',
@@ -656,26 +656,20 @@ ${Object.entries(this.skillsCovered).map(([s,d]) => `- ${s}: Score ${d.score}/10
             })),
             {
                 role: 'user',
-                content: `[INTERVIEWER INSTRUCTION — NOT SPOKEN TO CANDIDATE]
-
-${phaseInstructions}
-
-${answerAnalysis ? `Last answer scored ${answerAnalysis.score}/100. Words: ${answerAnalysis.words}. Flags: ${answerAnalysis.flags.join(', ')}.` : ''}
-
-Respond directly to the candidate — 1 to 3 natural spoken sentences, ask exactly ONE question:${this.phase === 'closing' ? ' Wrap up warmly and ask if they have any questions.' : ''}`
+                content: `[INTERVIEWER INSTRUCTION — NOT SPOKEN TO CANDIDATE]\n\n${phaseInstructions}\n\n${answerAnalysis ? `Last answer scored ${answerAnalysis.score}/100. Words: ${answerAnalysis.words}. Flags: ${answerAnalysis.flags.join(', ')}.` : ''}\n\nRespond directly to the candidate — 1 to 3 natural spoken sentences, ask exactly ONE question:${this.phase === 'closing' ? ' Wrap up warmly and ask if they have any questions.' : ''}`
             }
         ];
 
-      try {
+        try {
             console.log("🚀 Sending prompt to AI backend...");
             
-            // Pointing to the correct interview endpoint
             const res = await fetch(`${API}/api/ai/interview-question`, {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({ messages: messages })
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ 
+                    messages: messages,
+                    token: magicToken  // <-- CRITICAL: Tells backend to fetch the Job Description!
+                })
             });
 
             if (!res.ok) {
@@ -700,11 +694,10 @@ Respond directly to the candidate — 1 to 3 natural spoken sentences, ask exact
             return question;
 
         } catch (err) {
-            // 🔥 IF YOU SEE THE FALLBACK QUESTION, PRESS F12 AND LOOK FOR THIS RED TEXT:
             console.error('🔥 AI API crashed. Using fallback. Reason:', err);
             return this.getFallbackQuestion();
         }
-
+    }, // <-- This comma is vital!
     updatePhase(analysis) {
         const q   = this.questionCount;
         const max = this.maxQuestions;
