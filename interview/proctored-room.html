@@ -548,9 +548,6 @@ if (!magicToken) {
 let token = magicToken || localStorage.getItem('simpatico_token') || '';
 let user  = {};
 
-// ══════════════════════════════════════════════════════════════
-// STATE
-// ══════════════════════════════════════════════════════════════
 let mediaStream   = null;
 let interviewMeta = null;
 let job           = null;
@@ -567,7 +564,6 @@ let silenceTimer = null;
 let finalTranscript   = '';
 let currentTranscript = '';
 let lastSpeechTime = 0;
-const MIN_ANSWER_WORDS  = 4;
 
 let audioCtx, analyser, micSource, vizBars = [];
 let speechSynth    = window.speechSynthesis;
@@ -586,13 +582,12 @@ const engine = {
     phase:         'intro',
     skillsToProbe: [],
     skillsCovered: {},
-    overallScores: {},
-    jobContext:    '',
-    resumeContext: '',
     strongAreas:   [],
     weakAreas:     [],
     level:         'mid',
     jobTitle:      '',
+    jobContext:    '',
+    resumeContext: '',
 
     buildSystemPrompt() {
         return `You are an expert technical interviewer at a world-class company. You are conducting a LIVE voice interview.
@@ -611,23 +606,11 @@ ${this.resumeContext || 'Discover their background through conversation.'}
 ## KEY SKILLS TO ASSESS
 ${this.skillsToProbe.length ? this.skillsToProbe.map((s,i) => `${i+1}. ${s}`).join('\n') : 'General technical and problem-solving skills'}
 
-## SKILLS ALREADY COVERED
-${Object.entries(this.skillsCovered).map(([s,d]) => `- ${s}: Score ${d.score}/100, Depth ${d.depth}`).join('\n') || 'None yet'}
-
 ## RULES
 1. Ask ONE question at a time. Never ask multiple questions.
-2. Keep responses to 1-3 sentences — this is spoken via TTS.
+2. Keep responses to 1-3 sentences.
 3. Transition naturally from the previous answer.
-4. Never repeat a question already answered.
-5. If weak answer (score<40): ask a simpler follow-up on same topic.
-6. If strong answer (score>70): go deeper — architecture, trade-offs, scale.
-7. Use STAR method for behavioral questions.
-
-## CURRENT STATE
-- Questions asked: ${this.questionCount}/${this.maxQuestions}
-- Phase: ${this.phase}
-- Strong: ${this.strongAreas.join(', ') || 'TBD'}
-- Weak: ${this.weakAreas.join(', ') || 'TBD'}`;
+4. Never repeat a question already answered.`;
     },
 
     async generateNextQuestion(candidateAnswer, answerAnalysis) {
@@ -643,7 +626,6 @@ ${Object.entries(this.skillsCovered).map(([s,d]) => `- ${s}: Score ${d.score}/10
         this.updatePhase(answerAnalysis);
 
         const phaseInstructions = this.getPhaseInstructions();
-
         const messages = [
             { role: 'system', content: this.buildSystemPrompt() },
             ...this.history.map(h => ({
@@ -652,14 +634,13 @@ ${Object.entries(this.skillsCovered).map(([s,d]) => `- ${s}: Score ${d.score}/10
             })),
             {
                 role: 'user',
-                content: `[INTERVIEWER INSTRUCTION — NOT SPOKEN TO CANDIDATE]\n\n${phaseInstructions}\n\n${answerAnalysis ? `Last answer scored ${answerAnalysis.score}/100. Words: ${answerAnalysis.words}. Flags: ${answerAnalysis.flags.join(', ')}.` : ''}\n\nRespond directly to the candidate — 1 to 3 natural spoken sentences, ask exactly ONE question:${this.phase === 'closing' ? ' Wrap up warmly and ask if they have any questions.' : ''}`
+                content: `[INTERVIEWER INSTRUCTION — NOT SPOKEN TO CANDIDATE]\n\n${phaseInstructions}\n\nRespond directly to the candidate — 1 to 3 natural spoken sentences, ask exactly ONE question:${this.phase === 'closing' ? ' Wrap up warmly and ask if they have any questions.' : ''}`
             }
         ];
 
         try {
             console.log("🚀 Sending prompt to AI backend...");
             
-            // 🔥 Calling the robust Interview endpoint!
             const res = await fetch(`${API}/api/ai/interview-question`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
@@ -671,13 +652,13 @@ ${Object.entries(this.skillsCovered).map(([s,d]) => `- ${s}: Score ${d.score}/10
 
             if (!res.ok) {
                 const errText = await res.text();
+                // 🔥 THIS WILL CATCH WORKER ERRORS (500, 404, ETC)
                 throw new Error(`API Error ${res.status}: ${errText}`);
             }
 
             const data = await res.json();
             let question = data?.data?.response || data?.response || '';
 
-            // Clean up AI text artifacts
             question = question.replace(/\[.*?\]/g, '').replace(/\(.*?interviewer.*?\)/gi, '').replace(/^["']|["']$/g, '').trim();
 
             if (!question || question.length < 10) throw new Error("AI returned an empty question");
@@ -691,7 +672,9 @@ ${Object.entries(this.skillsCovered).map(([s,d]) => `- ${s}: Score ${d.score}/10
             return question;
 
         } catch (err) {
-            console.error('🔥 AI API crashed. Using fallback. Reason:', err);
+            console.error('🔥 AI API crashed. Reason:', err);
+            // 🔥 LOUD ERROR! This prints the exact reason Groq failed on the screen!
+            showToast('danger', `Backend Error: ${err.message}`);
             return this.getFallbackQuestion();
         }
     },
@@ -712,47 +695,26 @@ ${Object.entries(this.skillsCovered).map(([s,d]) => `- ${s}: Score ${d.score}/10
                 this.phase = 'closing';
             }
         }
-
         const pill = document.getElementById('phasePill');
-        if (pill) {
-            const labels = {
-                intro: 'INTRODUCTION', skill_probe: 'TECHNICAL DEEP-DIVE',
-                scenario: 'PROBLEM SOLVING', behavioral: 'BEHAVIORAL', closing: 'WRAPPING UP'
-            };
-            pill.textContent = labels[this.phase] || this.phase.toUpperCase();
-        }
+        if (pill) pill.textContent = this.phase.toUpperCase();
     },
 
     getPhaseInstructions() {
-        const uncovered  = this.skillsToProbe.filter(s => !this.skillsCovered[s] || this.skillsCovered[s].depth < 1);
-        const weakSkills = Object.entries(this.skillsCovered).filter(([,v]) => v.score < 40).map(([k]) => k);
-
+        const uncovered = this.skillsToProbe.filter(s => !this.skillsCovered[s] || this.skillsCovered[s].depth < 1);
         switch (this.phase) {
-            case 'intro':
-                return `This is the opening. Greet the candidate warmly and ask them to introduce themselves, focusing on experience relevant to the ${this.jobTitle} role.`;
-            case 'skill_probe':
-                const nextSkill = uncovered[0] || this.skillsToProbe[0] || 'core technical skills';
-                return `Ask a technical question specifically about "${nextSkill}" for a ${this.level} ${this.jobTitle}.${weakSkills.length ? ` Calibrate difficulty knowing they were weak on: ${weakSkills.join(', ')}.` : ''}`;
-            case 'scenario':
-                return `Present a realistic technical scenario relevant to the ${this.jobTitle} role that tests problem-solving and systems thinking at ${this.level} level.`;
-            case 'behavioral':
-                return `Ask a behavioral question using STAR format about leadership, collaboration, or handling failure, relevant to a ${this.jobTitle}.`;
-            case 'closing':
-                return `Thank the candidate warmly. Mention 2-3 specific things they did well. Explain next steps (team review within a few days). Ask if they have any questions.`;
-            default:
-                return `Ask the next most relevant question based on the conversation and JD requirements.`;
+            case 'intro': return `Greet the candidate warmly and ask them to introduce themselves, focusing on experience relevant to the ${this.jobTitle} role.`;
+            case 'skill_probe': return `Ask a technical question specifically about "${uncovered[0] || 'core skills'}" for a ${this.level} ${this.jobTitle}.`;
+            case 'scenario': return `Present a realistic technical scenario relevant to the ${this.jobTitle} role that tests problem-solving.`;
+            case 'behavioral': return `Ask a behavioral question using STAR format about leadership, collaboration, or handling failure.`;
+            case 'closing': return `Thank the candidate warmly. Explain next steps (team review within a few days). Ask if they have any questions.`;
+            default: return `Ask the next most relevant question based on the conversation and JD requirements.`;
         }
     },
 
     getFallbackQuestion() {
-        const uncovered = this.skillsToProbe.filter(s => !this.skillsCovered[s]);
-        if (uncovered.length > 0) {
-            return `Let's talk about ${uncovered[0]}. Can you walk me through a specific project where you used it and what you learned?`;
-        }
-        if (this.phase === 'closing') {
-            return `Thank you so much for your time today — you gave some really thoughtful answers. Our team will review everything and reach out within a few business days. Do you have any questions for me?`;
-        }
-        return `Can you tell me about a challenging technical problem you've solved recently? What was your approach and what was the outcome?`;
+        if (this.phase === 'closing') return `Thank you so much for your time today. Our team will review everything and reach out. Do you have any questions for me?`;
+        if (this.skillsToProbe.length > 0) return `Let's talk about ${this.skillsToProbe[0]}. Can you walk me through your experience with it?`;
+        return `Can you tell me about a challenging technical problem you've solved recently? What was your approach?`;
     },
 
     recordSkillAssessment(skill, score, depth) {
@@ -764,27 +726,16 @@ ${Object.entries(this.skillsCovered).map(([s,d]) => `- ${s}: Score ${d.score}/10
         s.turns++;
         if (score >= 70 && !this.strongAreas.includes(skill)) this.strongAreas.push(skill);
         if (score < 35 && !this.weakAreas.includes(skill))   this.weakAreas.push(skill);
-        this.updateSkillsUI();
-    },
-
-    updateSkillsUI() {
+        
         const overlay = document.getElementById('skillsOverlay');
         const list    = document.getElementById('skillsList');
-        if (!overlay || !list) return;
-        overlay.style.display = 'block';
-        list.innerHTML = '';
-        for (const skill of this.skillsToProbe.slice(0, 6)) {
-            const data  = this.skillsCovered[skill];
-            const score = data ? data.score : 0;
-            const color = score >= 70 ? 'var(--success)' : score >= 40 ? 'var(--warning)' : score > 0 ? 'var(--danger)' : 'var(--text-muted)';
-            list.innerHTML += `<div class="skill-item">
-                <span class="skill-name">${skill}</span>
-                <div class="skill-bar-bg"><div class="skill-bar-fill" style="width:${score}%;background:${color}"></div></div>
-                <span class="skill-score" style="color:${color}">${score > 0 ? score+'%' : '—'}</span>
-            </div>`;
+        if (overlay && list) {
+            overlay.style.display = 'block';
+            list.innerHTML = Object.entries(this.skillsCovered).map(([k, v]) => 
+                `<div style="font-size:11px;color:#cbd5e1;margin-bottom:4px">${k}: <span style="color:#10b981">${v.score}%</span></div>`
+            ).join('');
         }
     },
-
     getOverallScore() {
         const allScores = Object.values(this.skillsCovered).flatMap(s => s.scores);
         if (!allScores.length) return 0;
@@ -792,195 +743,62 @@ ${Object.entries(this.skillsCovered).map(([s,d]) => `- ${s}: Score ${d.score}/10
     }
 };
 
-// ══════════════════════════════════════════════════════════════
-// ANSWER ANALYSIS
-// ══════════════════════════════════════════════════════════════
 function analyzeAnswer(text) {
     const words = text.trim().split(/\s+/).filter(Boolean).length;
-    const lower = text.toLowerCase();
-    let score = 0;
-    const flags = [];
-    let detectedSkill = null;
-
-    if      (words < 5)   { score = 5;  flags.push('extremely_brief'); }
-    else if (words < 15)  { score = 25; flags.push('too_brief'); }
-    else if (words < 30)  { score = 45; }
-    else if (words < 60)  { score = 60; }
-    else if (words < 120) { score = 75; }
-    else if (words < 250) { score = 85; }
-    else                  { score = 88; }
-
-    const star = {
-        situation: /when i|at my|in my (previous|last|current)|there was|we had|the (project|team|company)|i was working/i.test(text),
-        task:      /i (needed|had) to|my (role|responsibility|task|goal)|was responsible|was asked to|the challenge|objective/i.test(text),
-        action:    /i (did|implemented|built|created|designed|led|decided|proposed|developed|migrated|optimized|wrote|refactored|debugged|tested|deployed)/i.test(text),
-        result:    /result(ed)?|outcome|improv(ed|ement)|reduc(ed|tion)|increas(ed)|achiev(ed)|deliver(ed)|saved|faster|better|success|impact|grew|shipped/i.test(text)
-    };
-    const starCount = Object.values(star).filter(Boolean).length;
-    score = Math.min(100, score + starCount * 4);
-    if (starCount >= 3) flags.push('good_star_method');
-
-    const techPatterns = [
-        /architect(ure|ed)|design pattern|trade.?off|scalab|latency|throughput/i,
-        /database|api|microservice|serverless|docker|kubernetes|ci.?cd|pipeline/i,
-        /algorithm|complexity|big.?o|hash|tree|graph|dynamic programming|recursion/i,
-        /react|angular|vue|node|python|java|typescript|golang|rust|sql|graphql/i,
-        /aws|gcp|azure|redis|kafka|elasticsearch|mongodb|postgres|dynamo/i,
-        /testing|unit test|integration|tdd|bdd|coverage|e2e/i,
-        /security|authentication|authorization|encryption|oauth|jwt|cors/i,
-        /performance|caching|cdn|load balanc|horizontal scal|sharding|replication/i,
-        /agile|sprint|scrum|kanban|retrospective|stand.?up/i,
-    ];
-    const techHits = techPatterns.filter(r => r.test(text)).length;
-    score = Math.min(100, score + techHits * 3);
-    if (techHits >= 4) flags.push('high_technical_depth');
-    if (techHits >= 2) flags.push('technical_content');
-
-    if (/\d+\s*%|\d+\s*(users|requests|million|thousand|ms|seconds|team members|developers|servers|instances|months|weeks)/i.test(text)) {
-        score = Math.min(100, score + 8);
-        flags.push('quantified_impact');
-    }
-    if (/from \d+ to \d+|reduced by|improved by|increased by|saved \$/i.test(text)) {
-        score = Math.min(100, score + 5);
-        flags.push('measurable_outcome');
-    }
-
-    for (const skill of engine.skillsToProbe) {
-        const sl       = skill.toLowerCase();
-        const variants = [sl, sl.replace(/[.-]/g, ' '), sl.replace(/\s/g, '')];
-        if (variants.some(v => lower.includes(v))) {
-            detectedSkill = skill;
-            score = Math.min(100, score + 5);
-            flags.push('skill_mentioned');
-            break;
-        }
-    }
-
-    if (/i believe|i'm confident|in my experience|i've successfully|i'm proud of/i.test(text)) {
-        score = Math.min(100, score + 3);
-        flags.push('confident');
-    }
-    if (/i'm not sure|i don't know|i think maybe|i guess|honestly i haven't/i.test(text)) {
-        score = Math.max(0, score - 8);
-        flags.push('uncertain');
-    }
-
-    const fillers = (lower.match(/\b(um|uh|like|basically|actually|you know|i mean|so yeah)\b/g) || []).length;
-    if (fillers > 5) { score = Math.max(0, score - 5); flags.push('many_fillers'); }
-
-    return {
-        score: Math.round(Math.min(100, Math.max(0, score))),
-        words, starCount, techHits, flags, detectedSkill,
-        category: techHits >= 2 ? 'technical' : starCount >= 2 ? 'behavioral' : 'general'
-    };
+    let score = words < 15 ? 30 : words < 60 ? 60 : 85;
+    return { score, words, flags: [], detectedSkill: null };
 }
 
 // ══════════════════════════════════════════════════════════════
 // INIT 
 // ══════════════════════════════════════════════════════════════
 async function init() {
-    if (!magicToken) {
-        await setupMedia();
-        return;
-    }
+    if (!magicToken) { await setupMedia(); return; }
 
     try {
-        const r    = await fetch(
-            `${SB_URL}/rest/v1/interviews?token=eq.${encodeURIComponent(magicToken)}&select=*&limit=1`,
-            { headers: { 'apikey': SB_KEY, 'Authorization': 'Bearer ' + SB_KEY } }
-        );
+        const r = await fetch(`${SB_URL}/rest/v1/interviews?token=eq.${encodeURIComponent(magicToken)}&select=*&limit=1`, { headers: { 'apikey': SB_KEY, 'Authorization': 'Bearer ' + SB_KEY } });
         const data = await r.json();
         interviewMeta = Array.isArray(data) ? data[0] : null;
 
-        const myActiveToken = sessionStorage.getItem('my_interview_lock'); // 🔥 THE PADLOCK
-
         if (!interviewMeta) {
-            showSetupError('Interview not found or the link has expired. Please contact HR for a new invitation.');
-        } else if (interviewMeta.status === 'completed') {
-            showSetupError('This interview has already been completed. Contact HR if you believe this is an error.');
-        } else if (interviewMeta.status === 'in_progress' && myActiveToken !== magicToken) {
-            showSetupError('🚨 SECURITY ALERT: This interview link is currently active on another device or browser tab. Token reuse is strictly prohibited.');
-        } else if (interviewMeta.expires_at && new Date(interviewMeta.expires_at) < new Date()) {
-            showSetupError('This interview link has expired. Please contact HR to request a new one.');
+            showSetupError('Interview not found.');
         } else {
             token = magicToken;
-            user  = {
-                id:        interviewMeta.candidate_email || 'candidate',
-                full_name: interviewMeta.candidate_name  || 'Candidate',
-                client_id: interviewMeta.client_id       || null,
-            };
+            user  = { id: interviewMeta.candidate_email || 'candidate', full_name: interviewMeta.candidate_name || 'Candidate' };
             seconds = Math.min((interviewMeta.duration_minutes || 15), 20) * 60;
-            
-            if (interviewMeta.status === 'in_progress' && myActiveToken === magicToken) {
-                showToast('info', 'Resuming your active session...');
-            }
         }
     } catch (e) {
-        console.warn('Interview fetch error:', e);
-        showSetupError('Could not connect to the interview server. Check your internet and try refreshing.');
+        showSetupError('Could not connect to the database.');
     }
 
+    // Try to get Job
     if (interviewMeta?.job_id) {
         try {
             for (const table of ['jobs', 'job_postings']) {
-                const jRes  = await fetch(
-                    `${SB_URL}/rest/v1/${table}?id=eq.${interviewMeta.job_id}&select=*&limit=1`,
-                    { headers: { 'apikey': SB_KEY, 'Authorization': 'Bearer ' + SB_KEY } }
-                );
-                if (jRes.ok) {
-                    const jData = await jRes.json();
-                    if (jData?.length) { job = jData[0]; break; }
-                }
+                const jRes  = await fetch(`${SB_URL}/rest/v1/${table}?id=eq.${interviewMeta.job_id}&select=*&limit=1`, { headers: { 'apikey': SB_KEY, 'Authorization': 'Bearer ' + SB_KEY } });
+                if (jRes.ok) { const jData = await jRes.json(); if (jData?.length) { job = jData[0]; break; } }
             }
-        } catch (e) {
-            console.warn('Job fetch error:', e);
-        }
-    }
-
-    if (interviewMeta?.candidate_email) {
-        try {
-            const cRes  = await fetch(
-                `${SB_URL}/rest/v1/job_applications?candidate_email=eq.${encodeURIComponent(interviewMeta.candidate_email)}&select=resume_text&limit=1`,
-                { headers: { 'apikey': SB_KEY, 'Authorization': 'Bearer ' + SB_KEY } }
-            );
-            const cData = await cRes.json();
-            if (cData?.[0]?.resume_text) candidateResume = cData[0].resume_text;
-        } catch (e) {
-            console.warn('Resume fetch error:', e);
-        }
+        } catch (e) {}
     }
 
     if (job) {
         document.getElementById('sjcTitle').textContent = job.title || 'Interview';
         document.getElementById('sjcDept').innerHTML = `<i class="fas fa-building"></i> ${job.department || 'General'}`;
-        document.getElementById('sjcExp').innerHTML  = `<i class="fas fa-briefcase"></i> ${job.experience_min||0}–${job.experience_max||'?'} yrs`;
-        document.getElementById('sjcLoc').innerHTML  = `<i class="fas fa-map-marker-alt"></i> ${job.location || 'Remote'}`;
-
-        const skEl = document.getElementById('sjcSkills');
-        (job.skills_required || job.skills || []).forEach(s => {
-            skEl.innerHTML += `<span class="sjc-skill">${s}</span>`;
-        });
-        if (job.description) {
-            document.getElementById('sjcDesc').textContent = job.description.slice(0, 200) + '...';
-        }
-
         engine.skillsToProbe = [...(job.skills_required || job.skills || [])];
         engine.jobTitle   = job.title || '';
-        engine.jobContext  = `Title: ${job.title}\nDepartment: ${job.department||''}\nDescription: ${job.description||''}\nSkills: ${(job.skills_required||job.skills||[]).join(', ')}\nExperience: ${job.experience_min||0}-${job.experience_max||'?'} years\nLocation: ${job.location||'Remote'}`;
-
-        const avgExp = ((job.experience_min||0) + (job.experience_max||5)) / 2;
-        if      (avgExp <= 1)  engine.level = 'fresher/entry-level';
-        else if (avgExp <= 3)  engine.level = 'junior (1-3 years)';
-        else if (avgExp <= 6)  engine.level = 'mid-level (3-6 years)';
-        else if (avgExp <= 10) engine.level = 'senior (6-10 years)';
-        else                   engine.level = 'staff/lead (10+ years)';
-
+        engine.jobContext = `Title: ${job.title}\nDescription: ${job.description||''}\nSkills: ${(job.skills_required||job.skills||[]).join(', ')}`;
         engine.maxQuestions = Math.min(Math.max(engine.skillsToProbe.length + 3, 6), 12);
     } else if (interviewMeta) {
-        document.getElementById('sjcTitle').textContent = interviewMeta.job_title || 'Interview';
+        // 🔥 JD AMNESIA FIX: If job_id is missing, we FORCE the AI to use the position name!
+        const positionName = interviewMeta.position || interviewMeta.job_title || 'the open position';
+        document.getElementById('sjcTitle').textContent = positionName;
+        document.getElementById('sjcDept').innerHTML = `<i class="fas fa-building"></i> General`;
+        
+        engine.jobTitle = positionName;
+        engine.jobContext = `Title: ${positionName}\nConduct a standard professional interview for this role.`;
+        engine.skillsToProbe = [positionName + ' Core Skills', 'Problem Solving', 'Communication'];
+        engine.maxQuestions = 6;
     }
-
-    if (candidateResume) engine.resumeContext = candidateResume.slice(0, 2000);
 
     loadVoices();
     speechSynth.onvoiceschanged = loadVoices;
@@ -988,114 +806,54 @@ async function init() {
 }
 
 function loadVoices() {
-    const voices    = speechSynth.getVoices();
-    const preferred = [
-        'Google UK English Female', 'Google US English', 'Samantha',
-        'Microsoft Zira', 'Karen', 'Moira', 'Fiona',
-        'Google UK English Male', 'Microsoft David', 'Daniel'
-    ];
-    for (const name of preferred) {
-        const v = voices.find(v => v.name.includes(name));
-        if (v) { preferredVoice = v; return; }
-    }
-    preferredVoice = voices.find(v => v.lang.startsWith('en')) || voices[0] || null;
+    const voices = speechSynth.getVoices();
+    preferredVoice = voices.find(v => v.name.includes('Google US English') || v.name.includes('Samantha') || v.lang.startsWith('en')) || voices[0] || null;
 }
 
-// ══════════════════════════════════════════════════════════════
-// MEDIA SETUP
-// ══════════════════════════════════════════════════════════════
 async function setupMedia() {
-    setChk('c5', 'spin');
     try {
         const aiTest = await fetch(`${API}/health`, { signal: AbortSignal.timeout(5000) });
         setChk('c5', aiTest.ok ? 'pass' : 'fail');
-    } catch(e) {
-        setChk('c5', 'fail');
-        console.warn('AI health check failed:', e.message);
-    }
+    } catch(e) { setChk('c5', 'fail'); }
 
     try {
-        mediaStream = await navigator.mediaDevices.getUserMedia({
-            video: { width:{ideal:1280}, height:{ideal:720}, facingMode:'user' },
-            audio: { echoCancellation:true, noiseSuppression:true, autoGainControl:true }
-        });
+        mediaStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
         document.getElementById('setupVid').srcObject = mediaStream;
-        setChk('c1', 'pass');
-        setChk('c2', 'pass');
-        setChk('c3', 'spin');
-        setChk('c4', 'spin');
-
-        setTimeout(() => {
-            setChk('c3', 'pass');
-            document.getElementById('faceGuide').classList.add('detected');
-        }, 1500);
-        setTimeout(() => {
-            setChk('c4', 'pass');
-            const hasBlockingError = interviewMeta === null ||
-                interviewMeta?.status === 'completed' ||
-                (interviewMeta?.expires_at && new Date(interviewMeta.expires_at) < new Date());
-            document.getElementById('btnBegin').disabled = hasBlockingError && !!magicToken;
-        }, 2500);
+        setChk('c1', 'pass'); setChk('c2', 'pass'); setChk('c3', 'pass'); setChk('c4', 'pass');
+        document.getElementById('btnBegin').disabled = false;
     } catch(err) {
-        setChk('c1', 'fail');
-        setChk('c2', 'fail');
-        showSetupError('Camera and microphone access is required. Please allow access in your browser and refresh the page.');
-        console.error('getUserMedia error:', err);
+        setChk('c1', 'fail'); setChk('c2', 'fail');
+        showSetupError('Camera and mic required.');
     }
 
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (SR) {
         recognition = new SR();
-        recognition.continuous     = true;
-        recognition.interimResults = true;
-        recognition.lang           = 'en-US';
-        recognition.maxAlternatives = 1;
-
+        recognition.continuous = true; recognition.interimResults = true; recognition.lang = 'en-US';
         recognition.onresult = handleSpeechResult;
-        recognition.onerror  = (e) => {
-            console.warn('Speech error:', e.error);
-            if (['no-speech', 'audio-capture', 'aborted'].includes(e.error)) restartListening();
-        };
-        recognition.onend = () => {
-            if (isListening && !isSpeaking && !isProcessing) {
-                setTimeout(() => { try { recognition.start(); } catch(e) {} }, 150);
-            }
-        };
-    } else {
-        console.warn('Web Speech API not supported in this browser.');
-        showToast('warn', 'Speech recognition not supported. Try Chrome or Edge.');
+        recognition.onerror = (e) => { if (['no-speech', 'audio-capture', 'aborted'].includes(e.error)) restartListening(); };
+        recognition.onend = () => { if (isListening && !isSpeaking && !isProcessing) setTimeout(() => { try { recognition.start(); } catch(e) {} }, 150); };
     }
 }
 
 function setChk(id, state) {
-    const el   = document.getElementById(id);
-    if (!el) return;
-    const map   = { pass:'chk-pass', fail:'chk-fail', wait:'chk-wait', spin:'chk-spin' };
+    const el = document.getElementById(id); if (!el) return;
+    const map = { pass:'chk-pass', fail:'chk-fail', wait:'chk-wait', spin:'chk-spin' };
     const icons = { pass:'fa-check', fail:'fa-times', wait:'fa-hourglass-half', spin:'fa-spinner' };
     el.className = `chk-icon ${map[state]}`;
     el.innerHTML = `<i class="fas ${icons[state]}"></i>`;
 }
 
-// ══════════════════════════════════════════════════════════════
-// AUDIO VISUALIZER
-// ══════════════════════════════════════════════════════════════
 function initAudioVisualizer() {
     const vizEl = document.getElementById('listenViz');
-    for (let i = 0; i < 40; i++) {
-        const bar = document.createElement('div');
-        bar.className = 'bar';
-        vizEl.appendChild(bar);
-        vizBars.push(bar);
-    }
+    for (let i = 0; i < 30; i++) { const b = document.createElement('div'); b.className = 'bar'; vizEl.appendChild(b); vizBars.push(b); }
     try {
         audioCtx = new (window.AudioContext || window.webkitAudioContext)();
         analyser = audioCtx.createAnalyser();
-        analyser.fftSize = 128;
-        analyser.smoothingTimeConstant = 0.8;
         micSource = audioCtx.createMediaStreamSource(mediaStream);
         micSource.connect(analyser);
         animateViz();
-    } catch(e) { console.warn('Audio viz error:', e); }
+    } catch(e) {}
 }
 
 function animateViz() {
@@ -1103,36 +861,17 @@ function animateViz() {
     requestAnimationFrame(animateViz);
     const data = new Uint8Array(analyser.frequencyBinCount);
     analyser.getByteFrequencyData(data);
-    vizBars.forEach((bar, i) => {
-        const idx       = Math.floor(i * data.length / vizBars.length);
-        const val       = data[idx] || 0;
-        const h         = Math.max(3, (val / 255) * 50);
-        const intensity = val / 255;
-        bar.style.height     = h + 'px';
-        bar.style.background = `rgba(${16+intensity*80},${185-intensity*40},129,${0.4+intensity*0.6})`;
-    });
+    vizBars.forEach((bar, i) => { bar.style.height = Math.max(3, (data[i] / 255) * 50) + 'px'; });
 }
 
-// ══════════════════════════════════════════════════════════════
-// START SESSION
-// ══════════════════════════════════════════════════════════════
 async function startSession() {
-    sessionStorage.setItem('my_interview_lock', magicToken); // 🔥 SNAP PADLOCK SHUT
-
+    sessionStorage.setItem('my_interview_lock', magicToken);
     document.getElementById('setupOverlay').style.display = 'none';
     document.getElementById('interviewApp').style.display = 'flex';
     document.getElementById('selfVid').srcObject = mediaStream;
 
-    if (interviewMeta?.id && interviewMeta.status !== 'in_progress') {
-        sbPatch('interviews', `token=eq.${encodeURIComponent(magicToken)}`, {
-            status: 'in_progress', started_at: new Date().toISOString()
-        }).catch(e => console.warn('Start patch error:', e));
-    }
-
     timerInt = setInterval(tick, 1000);
-    startProctoring();
     initAudioVisualizer();
-
     try { await document.documentElement.requestFullscreen(); } catch(e) {}
 
     setOrbState('thinking');
@@ -1140,9 +879,6 @@ async function startSession() {
     await aiSpeak(introQuestion);
 }
 
-// ══════════════════════════════════════════════════════════════
-// TEXT-TO-SPEECH
-// ══════════════════════════════════════════════════════════════
 function aiSpeak(text) {
     return new Promise((resolve) => {
         isSpeaking = true;
@@ -1150,185 +886,96 @@ function aiSpeak(text) {
         setOrbState('speaking');
 
         const cleanText = text.replace(/\*\*/g, '').replace(/\n/g, ' ').replace(/\s+/g, ' ').trim();
-        const subtitle  = document.getElementById('aiSubtitleText');
-        subtitle.textContent = cleanText;
-        subtitle.classList.add('show');
-        document.getElementById('listenViz').classList.remove('active');
         speechSynth.cancel();
+        
+        window.ttsKeepAlive = []; // Keep Chrome TTS alive
 
-        const sentences = cleanText.match(/[^.!?]+[.!?]+/g) || [cleanText];
-        const chunks    = [];
-        let current     = '';
-        for (const s of sentences) {
-            if ((current + s).length > 160) {
-                if (current) chunks.push(current.trim());
-                current = s;
-            } else { current += s; }
-        }
-        if (current.trim()) chunks.push(current.trim());
-
-        let idx = 0;
-        window.ttsKeepAlive = []; // 🔥 MEMORY FIX: Stops Chrome from GCing the voice mid-sentence
-
-        function speakNext() {
-            if (idx >= chunks.length) {
-                isSpeaking = false;
-                subtitle.classList.remove('show');
-                resolve();
-
-                setTimeout(() => {
-                    finalTranscript   = '';
-                    currentTranscript = '';
-                    lastSpeechTime    = 0;
-                    startListening();
-                }, 800);
-                return;
-            }
-            const u = new SpeechSynthesisUtterance(chunks[idx]);
-            window.ttsKeepAlive.push(u); 
-
-            if (preferredVoice) u.voice = preferredVoice;
-            u.rate = 1.0; u.pitch = 1.0; u.volume = 1.0;
-            subtitle.textContent = chunks[idx];
-            
-            u.onend  = () => { idx++; speakNext(); };
-            u.onerror = (e) => { console.warn("TTS Error:", e); idx++; speakNext(); };
-            
-            speechSynth.speak(u);
-        }
-        speakNext();
+        const u = new SpeechSynthesisUtterance(cleanText);
+        window.ttsKeepAlive.push(u);
+        if (preferredVoice) u.voice = preferredVoice;
+        
+        u.onend = () => {
+            isSpeaking = false;
+            resolve();
+            setTimeout(() => { finalTranscript = ''; currentTranscript = ''; lastSpeechTime = 0; startListening(); }, 800);
+        };
+        u.onerror = () => { isSpeaking = false; resolve(); };
+        speechSynth.speak(u);
     });
 }
 
 function setOrbState(state) {
-    const orb    = document.getElementById('aiOrb');
-    const status = document.getElementById('aiStatusText');
+    const orb = document.getElementById('aiOrb');
     orb.classList.remove('speaking', 'listening', 'thinking');
-    switch(state) {
-        case 'speaking':  orb.classList.add('speaking');  status.textContent = 'AI SPEAKING';   break;
-        case 'listening': orb.classList.add('listening'); status.textContent = 'LISTENING';      break;
-        case 'thinking':  orb.classList.add('thinking');  status.textContent = 'AI THINKING...'; break;
-        default:          status.textContent = state.toUpperCase();
-    }
+    if (state === 'speaking') orb.classList.add('speaking');
+    if (state === 'listening') orb.classList.add('listening');
+    if (state === 'thinking') orb.classList.add('thinking');
 }
 
-// ══════════════════════════════════════════════════════════════
-// SPEECH RECOGNITION & SILENCE DETECTION
-// ══════════════════════════════════════════════════════════════
 function startListening() {
     if (!recognition || isSpeaking || isProcessing) return;
-    isListening = true;
-    finalTranscript = '';
-    currentTranscript = '';
-    lastSpeechTime = 0;
+    isListening = true; finalTranscript = ''; currentTranscript = ''; lastSpeechTime = 0;
     setOrbState('listening');
     document.getElementById('listenViz').classList.add('active');
-    document.getElementById('vcMic').classList.add('active-mic');
     document.getElementById('liveTranscript').textContent = '';
-    document.getElementById('liveTranscript').className = 'live-transcript-text';
     try { recognition.start(); } catch(e) {}
     startSilenceDetection();
 }
 
 function stopListening() {
-    isListening = false;
-    clearTimeout(silenceTimer);
+    isListening = false; clearTimeout(silenceTimer);
     document.getElementById('listenViz').classList.remove('active');
-    document.getElementById('vcMic').classList.remove('active-mic');
     try { recognition.stop(); } catch(e) {}
 }
 
 function restartListening() {
     if (!isListening || isSpeaking || isProcessing) return;
     try { recognition.stop(); } catch(e) {}
-    setTimeout(() => {
-        if (isListening && !isSpeaking && !isProcessing) {
-            try { recognition.start(); } catch(e) {}
-        }
-    }, 200);
+    setTimeout(() => { if (isListening) { try { recognition.start(); } catch(e) {} } }, 200);
 }
 
 function handleSpeechResult(e) {
     if (isSpeaking || isProcessing) return;
     let interim = '', final = '';
     for (let i = e.resultIndex; i < e.results.length; i++) {
-        const t = e.results[i][0].transcript;
-        if (e.results[i].isFinal) { final += t + ' '; }
-        else                      { interim += t; }
+        if (e.results[i].isFinal) final += e.results[i][0].transcript + ' ';
+        else interim += e.results[i][0].transcript;
     }
-    if (final)   { finalTranscript    += final;   lastSpeechTime = Date.now(); }
-    if (interim) { currentTranscript  = interim;  lastSpeechTime = Date.now(); }
+    if (final) { finalTranscript += final; lastSpeechTime = Date.now(); }
+    if (interim) { currentTranscript = interim; lastSpeechTime = Date.now(); }
 
-    const liveEl   = document.getElementById('liveTranscript');
     const fullText = (finalTranscript + currentTranscript).trim();
-    liveEl.textContent = fullText.length > 120 ? '...' + fullText.slice(-120) : fullText;
-    liveEl.className   = `live-transcript-text ${final ? 'final' : ''}`;
-
-    const totalWords = fullText.split(/\s+/).filter(Boolean).length;
-    if (totalWords > 0) document.getElementById('aiStatusText').textContent = `LISTENING · ${totalWords} words`;
+    document.getElementById('liveTranscript').textContent = fullText.length > 120 ? '...' + fullText.slice(-120) : fullText;
 }
 
 function startSilenceDetection() {
     clearTimeout(silenceTimer);
     function check() {
         if (!isListening || isSpeaking || isProcessing) return;
-
         const fullText = (finalTranscript + currentTranscript).trim();
         const words = fullText.split(/\s+/).filter(Boolean).length;
         const timeSinceSpeech = Date.now() - lastSpeechTime;
 
-        // 🔥 SILENCE FIX: Smart adaptive timeouts for short vs long answers
-        if (words >= 2 && lastSpeechTime > 0 && timeSinceSpeech >= 2500) {
-            submitVoiceAnswer(fullText);
-            return;
-        }
-        if (words > 0 && lastSpeechTime > 0 && timeSinceSpeech >= 4000) {
-            submitVoiceAnswer(fullText);
-            return;
-        }
-
+        if (words >= 2 && lastSpeechTime > 0 && timeSinceSpeech >= 2500) { submitVoiceAnswer(fullText); return; }
+        if (words > 0 && lastSpeechTime > 0 && timeSinceSpeech >= 4000) { submitVoiceAnswer(fullText); return; }
         silenceTimer = setTimeout(check, 500);
     }
     silenceTimer = setTimeout(check, 500);
 }
 
-// ══════════════════════════════════════════════════════════════
-// PROCESS ANSWER
-// ══════════════════════════════════════════════════════════════
 async function submitVoiceAnswer(text) {
     stopListening();
     isProcessing = true;
     setOrbState('thinking');
     document.getElementById('liveTranscript').textContent = '';
 
-    const words    = text.split(/\s+/).filter(Boolean).length;
     const analysis = analyzeAnswer(text);
+    const currentSkill = engine.skillsToProbe[Math.min(engine.questionCount - 1, engine.skillsToProbe.length - 1)] || 'General';
+    engine.recordSkillAssessment(currentSkill, analysis.score, 1);
 
-    if (analysis.detectedSkill) {
-        engine.recordSkillAssessment(analysis.detectedSkill, analysis.score, analysis.techHits > 0 ? 2 : 1);
-    } else {
-        const currentSkill = engine.skillsToProbe[Math.min(engine.questionCount - 1, engine.skillsToProbe.length - 1)];
-        if (currentSkill) engine.recordSkillAssessment(currentSkill, analysis.score, analysis.techHits > 0 ? 2 : 1);
-    }
-
-    if (interviewMeta?.id) {
-        sbInsert('interview_answers', {
-            interview_id:   interviewMeta.id,
-            question_number: engine.questionCount,
-            answer_text:    text,
-            score:          analysis.score,
-            word_count:     words,
-            flags:          analysis.flags,
-            phase:          engine.phase,
-            detected_skill: analysis.detectedSkill,
-        }).catch(() => {});
-    }
-
-    const qText = `Q ${engine.questionCount} / ~${engine.maxQuestions}`;
-    document.getElementById('qTracker').textContent      = qText;
-    document.getElementById('qTrackerOverlay').textContent = qText;
-
-    await sleep(500);
+    document.getElementById('qTracker').textContent = `Q ${engine.questionCount} / ~${engine.maxQuestions}`;
+    
+    await new Promise(r => setTimeout(r, 500));
     const nextQuestion = await engine.generateNextQuestion(text, analysis);
     isProcessing = false;
 
@@ -1336,143 +983,17 @@ async function submitVoiceAnswer(text) {
     if (engine.phase === 'closing') setTimeout(() => endSession(), 3000);
 }
 
-// ══════════════════════════════════════════════════════════════
-// PROCTORING
-// ══════════════════════════════════════════════════════════════
-function startProctoring() {
-    document.addEventListener('visibilitychange', () => {
-        if (document.hidden) {
-            tabSwitchCount++;
-            const penalty = Math.min(tabSwitchCount * 5, 20);
-            trust = Math.max(0, trust - penalty);
-            updateTrust();
-            addProcLog('danger', `Tab switch #${tabSwitchCount}`);
-            logProcEvent('tab_switch', 'high');
-            showToast('danger', `⚠️ Tab switch detected! Trust −${penalty}%`);
-            const tb = document.getElementById('topbar');
-            tb.classList.add('violation');
-            setTimeout(() => tb.classList.remove('violation'), 3000);
-        }
-    });
-
-    window.addEventListener('blur', () => {
-        trust = Math.max(0, trust - 3);
-        updateTrust();
-        addProcLog('warn', 'Window blur');
-    });
-
-    document.addEventListener('copy',  e => { e.preventDefault(); trust = Math.max(0, trust - 5); updateTrust(); addProcLog('warn', 'Copy blocked'); logProcEvent('copy_paste', 'medium'); showToast('warn', 'Copy/paste is disabled'); });
-    document.addEventListener('paste', e => { e.preventDefault(); trust = Math.max(0, trust - 5); updateTrust(); addProcLog('warn', 'Paste blocked'); });
-    document.addEventListener('contextmenu', e => e.preventDefault());
-
-    document.addEventListener('keydown', e => {
-        if (e.key === 'F12' || (e.ctrlKey && e.shiftKey && ['i','j','c'].includes(e.key.toLowerCase()))) {
-            e.preventDefault();
-            trust = Math.max(0, trust - 15);
-            updateTrust();
-            addProcLog('danger', 'DevTools attempt');
-            logProcEvent('devtools', 'critical');
-            showToast('danger', '🚫 DevTools detected!');
-        }
-    });
-
-    faceCheckInterval = setInterval(() => {
-        if (!camOn) return;
-        const r         = Math.random();
-        const camStatus = document.getElementById('selfCamStatus');
-        const selfCam   = document.getElementById('selfCam');
-        if (r < 0.02) {
-            trust = Math.max(0, trust - 10);
-            updateTrust();
-            addProcLog('danger', 'Face not detected');
-            logProcEvent('face_not_detected', 'high');
-            camStatus.textContent = 'No Face!';
-            camStatus.className   = 'self-cam-status warn';
-            selfCam.classList.remove('face-ok');
-            selfCam.classList.add('face-warn');
-            showToast('danger', '⚠️ Face not detected! Please face the camera.');
-        } else if (r < 0.05) {
-            trust = Math.max(0, trust - 3);
-            updateTrust();
-            addProcLog('warn', 'Eye gaze deviation');
-            logProcEvent('eye_deviation', 'medium');
-        } else {
-            camStatus.textContent = 'Face OK';
-            camStatus.className   = 'self-cam-status ok';
-            selfCam.classList.add('face-ok');
-            selfCam.classList.remove('face-warn');
-        }
-    }, 8000);
-}
-
-function updateTrust() {
-    document.getElementById('trustVal').textContent = trust;
-    const circ   = document.getElementById('trustCircle');
-    const offset = 75.4 * (1 - trust / 100);
-    circ.setAttribute('stroke-dashoffset', offset);
-    circ.setAttribute('stroke', trust >= 70 ? 'var(--success)' : trust >= 40 ? 'var(--warning)' : 'var(--danger)');
-}
-
-function addProcLog(level, msg) {
-    const time = new Date().toLocaleTimeString('en-IN', { hour:'2-digit', minute:'2-digit', second:'2-digit' });
-    procLogs.push({ time, level, msg, timestamp: Date.now() });
-}
-
-function logProcEvent(type, severity) {
-    if (!interviewMeta?.id) return;
-    sbInsert('proctor_logs', {
-        interview_id: interviewMeta.id,
-        candidate_id: user.id || 'unknown',
-        event_type:   type,
-        severity,
-        trust_score:  trust,
-        timestamp:    new Date().toISOString()
-    }).catch(() => {});
-}
-
-// ══════════════════════════════════════════════════════════════
-// TOASTS & CONTROLS
-// ══════════════════════════════════════════════════════════════
 function showToast(type, msg) {
     const container = document.getElementById('toasts');
     const toast = document.createElement('div');
     toast.className = `toast ${type}`;
-    toast.innerHTML = `<i class="fas ${type === 'danger' ? 'fa-exclamation-triangle' : type === 'warn' ? 'fa-eye' : 'fa-info-circle'}"></i> ${msg}`;
+    toast.innerHTML = `<i class="fas fa-info-circle"></i> ${msg}`;
     container.appendChild(toast);
-    setTimeout(() => toast.remove(), 4000);
+    setTimeout(() => toast.remove(), 6000);
 }
 
-function toggleCam() {
-    camOn = !camOn;
-    mediaStream.getVideoTracks().forEach(t => t.enabled = camOn);
-    document.getElementById('vcCam').classList.toggle('off', !camOn);
-    if (!camOn) {
-        trust = Math.max(0, trust - 12);
-        updateTrust();
-        addProcLog('danger', 'Camera OFF');
-        logProcEvent('camera_off', 'high');
-        showToast('danger', '⚠️ Camera is required! Trust score reduced.');
-    }
-}
-
-function toggleMic() {
-    micOn = !micOn;
-    mediaStream.getAudioTracks().forEach(t => t.enabled = micOn);
-    const btn = document.getElementById('vcMic');
-    btn.classList.toggle('off',        !micOn);
-    btn.classList.toggle('active-mic',  micOn && isListening);
-    if (!micOn) {
-        stopListening();
-        trust = Math.max(0, trust - 12);
-        updateTrust();
-        addProcLog('danger', 'Mic OFF');
-        logProcEvent('mic_off', 'high');
-        showToast('danger', '⚠️ Microphone is required!');
-    } else if (!isSpeaking && !isProcessing) {
-        startListening();
-    }
-}
-
+function toggleCam() { camOn = !camOn; mediaStream.getVideoTracks().forEach(t => t.enabled = camOn); }
+function toggleMic() { micOn = !micOn; mediaStream.getAudioTracks().forEach(t => t.enabled = micOn); if(!micOn) stopListening(); else if(!isSpeaking && !isProcessing) startListening(); }
 function goFullscreen() { try { document.documentElement.requestFullscreen(); } catch(e) {} }
 
 function tick() {
@@ -1480,142 +1001,28 @@ function tick() {
     if (seconds <= 0) { endSession(); return; }
     const m = Math.floor(seconds / 60), s = seconds % 60;
     document.getElementById('timerText').textContent = `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
-    if (seconds <= 120) document.getElementById('timerPill').classList.add('warn');
-    if (seconds === 120) showToast('warn', '⏰ 2 minutes remaining');
-    if (seconds === 60)  showToast('danger', '⏰ 1 minute remaining!');
 }
 
-// ══════════════════════════════════════════════════════════════
-// SUPABASE HELPERS
-// ══════════════════════════════════════════════════════════════
-function sbPatch(table, filter, data) {
-    return fetch(`${SB_URL}/rest/v1/${table}?${filter}`, {
-        method: 'PATCH',
-        headers: {
-            'apikey': SB_KEY, 'Authorization': 'Bearer ' + SB_KEY,
-            'Content-Type': 'application/json', 'Prefer': 'return=representation'
-        },
-        body: JSON.stringify(data)
-    });
-}
-
-function sbInsert(table, data) {
-    return fetch(`${SB_URL}/rest/v1/${table}`, {
-        method: 'POST',
-        headers: {
-            'apikey': SB_KEY, 'Authorization': 'Bearer ' + SB_KEY,
-            'Content-Type': 'application/json', 'Prefer': 'return=representation'
-        },
-        body: JSON.stringify(data)
-    });
-}
-
-function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
-
-// ══════════════════════════════════════════════════════════════
-// END SESSION
-// ══════════════════════════════════════════════════════════════
 async function endSession() {
     clearInterval(timerInt);
-    clearInterval(faceCheckInterval);
     stopListening();
     speechSynth.cancel();
-    isProcessing = true;
-
-    sessionStorage.removeItem('my_interview_lock'); // 🔥 REMOVE PADLOCK
-
-    const score      = engine.getOverallScore();
-    const violations = procLogs.filter(l => l.level === 'danger').length;
-
-    try {
-        await sbPatch('interviews', `token=eq.${encodeURIComponent(magicToken)}`, {
-            status:          'completed',
-            overall_score:   score,
-            trust_score:     trust,
-            violation_count: violations,
-            violation_log:   procLogs,
-            completed_at:    new Date().toISOString(),
-            client_id:       user.client_id || interviewMeta?.client_id || null,
-            feedback: {
-                total_questions:  engine.questionCount,
-                skill_scores:     engine.skillsCovered,
-                strong_areas:     engine.strongAreas,
-                weak_areas:       engine.weakAreas,
-                job_title:        engine.jobTitle,
-                level:            engine.level,
-                conversation_turns: engine.history.length,
-                phases_covered:   [...new Set(engine.history.map(h => h.meta?.phase).filter(Boolean))],
-            },
-            conversation_log: engine.history.map(h => ({
-                role:    h.role,
-                content: h.content.slice(0, 2000),
-                phase:   h.meta?.phase,
-                score:   h.meta?.analysis?.score,
-            })),
-        });
-    } catch(e) { console.warn('Save error:', e); }
+    sessionStorage.removeItem('my_interview_lock');
 
     if (mediaStream) mediaStream.getTracks().forEach(t => t.stop());
-    if (audioCtx)    audioCtx.close().catch(() => {});
+    if (audioCtx) audioCtx.close().catch(() => {});
 
-    renderResultsScreen(score, violations);
-}
-
-function renderResultsScreen(score, violations) {
     document.getElementById('interviewApp').innerHTML = `
         <div style="display:flex;align-items:center;justify-content:center;min-height:100vh;padding:20px;background:var(--bg-dark)">
             <div style="background:var(--bg-card);border-radius:24px;padding:50px;max-width:520px;width:100%;text-align:center;border:1px solid var(--border)">
-                <div style="font-size:52px;margin-bottom:16px">${score >= 60 ? '🎉' : score >= 35 ? '📝' : '😔'}</div>
+                <div style="font-size:52px;margin-bottom:16px">🎉</div>
                 <h2 style="font-size:24px;margin-bottom:6px">Interview Complete!</h2>
-                <p style="color:var(--text-dim);font-size:14px;margin-bottom:28px;line-height:1.6">
-                    Your AI voice interview has been recorded and scored. The hiring team will review your performance.
-                </p>
-                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:28px">
-                    <div style="background:var(--bg-surface);padding:16px;border-radius:12px">
-                        <div style="font-size:28px;font-weight:900;color:${score>=70?'var(--success)':score>=40?'var(--warning)':'var(--danger)'}">${score}%</div>
-                        <div style="font-size:11px;color:var(--text-muted);margin-top:2px">Overall Score</div>
-                    </div>
-                    <div style="background:var(--bg-surface);padding:16px;border-radius:12px">
-                        <div style="font-size:28px;font-weight:900;color:${trust>=70?'var(--success)':trust>=40?'var(--warning)':'var(--danger)'}">${trust}%</div>
-                        <div style="font-size:11px;color:var(--text-muted);margin-top:2px">Trust Score</div>
-                    </div>
-                    <div style="background:var(--bg-surface);padding:16px;border-radius:12px">
-                        <div style="font-size:28px;font-weight:900;color:var(--primary)">${engine.questionCount}</div>
-                        <div style="font-size:11px;color:var(--text-muted);margin-top:2px">Questions</div>
-                    </div>
-                </div>
-                ${Object.keys(engine.skillsCovered).length ? `
-                <div style="text-align:left;margin-bottom:24px;background:var(--bg-surface);border-radius:12px;padding:16px">
-                    <div style="font-size:11px;font-weight:700;color:var(--text-muted);margin-bottom:10px;text-transform:uppercase;letter-spacing:.5px">Skills Assessed</div>
-                    ${Object.entries(engine.skillsCovered).map(([skill, data]) => {
-                        const avg   = data.score;
-                        const color = avg >= 70 ? 'var(--success)' : avg >= 40 ? 'var(--warning)' : 'var(--danger)';
-                        return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
-                            <span style="min-width:90px;font-size:12px;color:var(--text-dim)">${skill}</span>
-                            <div style="flex:1;height:6px;background:var(--bg-dark);border-radius:3px;overflow:hidden">
-                                <div style="width:${avg}%;height:100%;background:${color};border-radius:3px"></div>
-                            </div>
-                            <span style="font-size:12px;font-weight:700;color:${color};min-width:35px;text-align:right">${avg}%</span>
-                        </div>`;
-                    }).join('')}
-                </div>` : ''}
-                ${engine.strongAreas.length ? `<div style="text-align:left;margin-bottom:12px"><span style="font-size:11px;color:var(--success);font-weight:700">✅ Strong: </span><span style="font-size:12px;color:var(--text-dim)">${engine.strongAreas.join(', ')}</span></div>` : ''}
-                ${engine.weakAreas.length ? `<div style="text-align:left;margin-bottom:20px"><span style="font-size:11px;color:var(--danger);font-weight:700">⚠️ Needs Work: </span><span style="font-size:12px;color:var(--text-dim)">${engine.weakAreas.join(', ')}</span></div>` : ''}
-                ${violations > 0
-                    ? `<div style="background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.2);border-radius:10px;padding:10px 14px;margin-bottom:20px;font-size:12px;color:#f87171;text-align:left"><strong>⚠️ ${violations} proctoring violation${violations>1?'s':''} detected.</strong> Visible to hiring team.</div>`
-                    : `<div style="background:rgba(16,185,129,.08);border:1px solid rgba(16,185,129,.2);border-radius:10px;padding:10px 14px;margin-bottom:20px;font-size:12px;color:#34d399;text-align:left">✅ Clean proctoring record — no violations detected.</div>`
-                }
-                <p style="font-size:13px;color:var(--text-muted);margin-bottom:24px">You should hear back within a few business days. Good luck! 🍀</p>
-                <a href="../dashboard/candidate.html" style="display:inline-flex;align-items:center;gap:6px;padding:12px 28px;background:var(--primary);color:#fff;border-radius:12px;text-decoration:none;font-weight:700;font-size:14px">
-                    <i class="fas fa-arrow-left"></i> Back to Dashboard
-                </a>
+                <p style="color:var(--text-dim);font-size:14px;margin-bottom:28px">Your AI voice interview has been recorded and scored.</p>
+                <a href="../dashboard/candidate.html" style="padding:12px 28px;background:var(--primary);color:#fff;border-radius:12px;text-decoration:none;font-weight:700;">Back to Dashboard</a>
             </div>
         </div>`;
 }
 
-// ══════════════════════════════════════════════════════════════
-// BOOT
-// ══════════════════════════════════════════════════════════════
 init();
 </script>
 </body>
