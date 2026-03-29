@@ -2227,34 +2227,69 @@ async function loadExternalModule(sectionId, href) {
         if (!res.ok) throw new Error('Module not found');
         const html = await res.text();
 
-        // 2. Parse the HTML into a virtual document
+        // 2. Parse the HTML
         const parser = new DOMParser();
         const doc = parser.parseFromString(html, 'text/html');
 
-        // 3. Extract ONLY the main content area (Ignore the duplicate sidebar!)
+        // 3. SMART CSS FIX: Extract and inject missing stylesheets
+        doc.querySelectorAll('link[rel="stylesheet"]').forEach(link => {
+            const linkHref = link.getAttribute('href');
+            // Only add the CSS if we haven't already added it
+            if (linkHref && !document.querySelector(`link[href*="${linkHref.split('/').pop()}"]`)) {
+                const newLink = document.createElement('link');
+                newLink.rel = 'stylesheet';
+                newLink.href = linkHref;
+                document.head.appendChild(newLink);
+            }
+        });
+        
+        // Also grab any custom <style> blocks from the sub-page
+        doc.querySelectorAll('style').forEach(style => {
+            document.head.appendChild(style.cloneNode(true));
+        });
+
+        // 4. Extract Main Content & Modals
         const mainContent = doc.querySelector('.hr-main');
         const innerContent = mainContent ? mainContent.innerHTML : doc.body.innerHTML;
-        
-        // 4. Extract any modals hiding at the bottom of the sub-page
         let modalsHtml = '';
         doc.querySelectorAll('.hr-modal-overlay, .modal').forEach(m => modalsHtml += m.outerHTML);
 
-        // 5. Inject the clean content directly into the dashboard
+        // Inject content
         container.innerHTML = innerContent + modalsHtml;
 
-        // 6. Manually re-attach scripts so buttons keep working
-        doc.querySelectorAll('script').forEach(oldScript => {
-            // Skip Supabase & Config scripts since the main dashboard already loaded them!
-            if (oldScript.src && (oldScript.src.includes('supabase') || oldScript.src.includes('hr-config'))) return;
-            
-            // Skip the old annoying iframe hack if it's still in there
-            if (!oldScript.src && oldScript.textContent.includes('window.self !== window.top')) return;
+        // 5. SMART JS FIX: Prevent collisions and redeclarations
+        window.loadedScripts = window.loadedScripts || new Set();
 
-            const newScript = document.createElement('script');
-            if (oldScript.src) newScript.src = oldScript.src;
-            else newScript.textContent = oldScript.textContent;
-            document.body.appendChild(newScript);
-        });
+        for (const oldScript of doc.querySelectorAll('script')) {
+            if (oldScript.src) {
+                const scriptName = oldScript.src.split('/').pop();
+                
+                // Skip global scripts that the dashboard already has
+                if (scriptName.includes('supabase') || scriptName.includes('hr-config')) continue;
+                
+                // Prevent loading the exact same script twice
+                if (window.loadedScripts.has(scriptName)) continue; 
+                window.loadedScripts.add(scriptName);
+
+                // Fetch the script code manually
+                const scriptRes = await fetch(oldScript.src);
+                let jsCode = await scriptRes.text();
+                
+                // Magic Fix: Convert "const _sb" to "var _sb" so it doesn't crash the SPA
+                jsCode = jsCode.replace(/const\s+_sb/g, 'var _sb').replace(/let\s+_sb/g, 'var _sb');
+
+                const newScript = document.createElement('script');
+                newScript.textContent = jsCode;
+                document.body.appendChild(newScript);
+            } else {
+                // Ignore the old iframe hiding script
+                if (oldScript.textContent.includes('window.self !== window.top')) continue;
+                
+                const newScript = document.createElement('script');
+                newScript.textContent = oldScript.textContent;
+                document.body.appendChild(newScript);
+            }
+        }
 
     } catch (error) {
         console.error("Fetch Error:", error);
@@ -2265,7 +2300,7 @@ async function loadExternalModule(sectionId, href) {
                 <p>Could not load ${href}. Check the console for details.</p>
             </div>
         `;
-        loadedModules[sectionId] = false; // Allow them to click and try again
+        loadedModules[sectionId] = false; 
     }
 }
 function toggleSidebar() { document.getElementById('sidebar').classList.toggle('open'); }
