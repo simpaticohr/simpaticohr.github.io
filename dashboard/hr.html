@@ -2213,7 +2213,6 @@ async function loadExternalModule(sectionId, href) {
     const container = document.getElementById(sectionId + '-module-container');
     if (!container || loadedModules[sectionId]) return;
     
-    // Mark as loading
     loadedModules[sectionId] = true;
     container.innerHTML = `
         <div id="loading-${sectionId}" style="display:flex;justify-content:center;align-items:center;height:400px;">
@@ -2229,69 +2228,61 @@ async function loadExternalModule(sectionId, href) {
         const parser = new DOMParser();
         const doc = parser.parseFromString(html, 'text/html');
 
-        // 1. Inject missing CSS
+        // 1. ABSOLUTE CSS FIX: Ensure stylesheets always load from the root domain
         doc.querySelectorAll('link[rel="stylesheet"]').forEach(link => {
-            const linkHref = link.getAttribute('href');
-            if (linkHref && !document.querySelector(`link[href*="${linkHref.split('/').pop()}"]`)) {
-                const newLink = document.createElement('link');
-                newLink.rel = 'stylesheet';
-                newLink.href = linkHref;
-                document.head.appendChild(newLink);
+            let linkHref = link.getAttribute('href');
+            if (linkHref && linkHref.includes('hr-modules.css')) {
+                // Force absolute URL so it never gets lost
+                const cssUrl = new URL('/hr-modules.css', window.location.origin).href; 
+                if (!document.querySelector(`link[href="${cssUrl}"]`)) {
+                    const newLink = document.createElement('link');
+                    newLink.rel = 'stylesheet';
+                    newLink.href = cssUrl;
+                    document.head.appendChild(newLink);
+                }
             }
         });
         doc.querySelectorAll('style').forEach(style => document.head.appendChild(style.cloneNode(true)));
 
-        // 2. Extract Content & Modals
+        // 2. Extract Content
         const mainContent = doc.querySelector('.hr-main');
-        const innerContent = mainContent ? mainContent.innerHTML : doc.body.innerHTML;
-        let modalsHtml = '';
-        doc.querySelectorAll('.hr-modal-overlay, .modal').forEach(m => modalsHtml += m.outerHTML);
+        container.innerHTML = (mainContent ? mainContent.innerHTML : doc.body.innerHTML);
+        doc.querySelectorAll('.hr-modal-overlay, .modal').forEach(m => container.innerHTML += m.outerHTML);
 
-        container.innerHTML = innerContent + modalsHtml;
-
-        // 3. Inject Scripts & Fix DOMContentLoaded
+        // 3. SUPER REGEX SCRIPT FIX: Prevent all global variable collisions
         window.loadedScripts = window.loadedScripts || new Set();
 
         for (const oldScript of doc.querySelectorAll('script')) {
+            let jsCode = "";
+            let scriptName = oldScript.src ? oldScript.src.split('/').pop() : "inline";
+
             if (oldScript.src) {
-                const scriptName = oldScript.src.split('/').pop();
-                // Skip global scripts to prevent multiple Supabase instances
-                if (scriptName.includes('supabase') || scriptName.includes('hr-config') || scriptName.includes('bootstrap')) continue;
+                if (scriptName.includes('supabase') || scriptName.includes('hr-config')) continue;
                 if (window.loadedScripts.has(scriptName)) continue; 
                 window.loadedScripts.add(scriptName);
-
-                const scriptRes = await fetch(oldScript.src);
-                let jsCode = await scriptRes.text();
                 
-                // MAGIC: Fix variables and translate DOMContentLoaded so SPA scripts wake up!
-                jsCode = jsCode.replace(/(const|let)\s+_sb\s*=/g, 'var _sb =');
-                jsCode = jsCode.replace(/document\.addEventListener\(\s*['"`]DOMContentLoaded['"`]/g, "window.addEventListener('SimpaticoSPA'");
-
-                const newScript = document.createElement('script');
-                newScript.textContent = jsCode;
-                document.body.appendChild(newScript);
+                const scriptRes = await fetch(oldScript.src);
+                jsCode = await scriptRes.text();
             } else {
                 if (oldScript.textContent.includes('window.self !== window.top')) continue;
-                
-                let jsCode = oldScript.textContent;
-                jsCode = jsCode.replace(/(const|let)\s+_sb\s*=/g, 'var _sb =');
-                jsCode = jsCode.replace(/document\.addEventListener\(\s*['"`]DOMContentLoaded['"`]/g, "window.addEventListener('SimpaticoSPA'");
-                
-                const newScript = document.createElement('script');
-                newScript.textContent = jsCode;
-                document.body.appendChild(newScript);
+                jsCode = oldScript.textContent;
             }
+
+            // MAGIC: Convert ALL common top-level const/let to var so the SPA never crashes!
+            jsCode = jsCode.replace(/(const|let)\s+(SB_URL|SB_ANON|TENANT|WORKER_URL|_sb|allEmployees|filtered|currentView|editingId|avatarColors|statusBadge|statusLabel|typeLabel)\s*=/g, 'var $2 =');
+            jsCode = jsCode.replace(/document\.addEventListener\(\s*['"`]DOMContentLoaded['"`]/g, "window.addEventListener('SimpaticoSPA'");
+
+            const newScript = document.createElement('script');
+            newScript.textContent = jsCode;
+            document.body.appendChild(newScript);
         }
 
-        // 4. FIRE THE ALARM: Wake up the scripts we just injected!
-        setTimeout(() => {
-            window.dispatchEvent(new Event('SimpaticoSPA'));
-            console.log(`✅ Module [${sectionId}] initialized perfectly.`);
-        }, 150);
+        // Fire the startup event
+        setTimeout(() => { window.dispatchEvent(new Event('SimpaticoSPA')); }, 150);
 
     } catch (error) {
         console.error("Fetch Error:", error);
-        container.innerHTML = `<div style="padding:40px;text-align:center;color:red;">Failed to load module. Check console.</div>`;
+        container.innerHTML = `<div style="padding:40px;text-align:center;color:red;">Failed to load module.</div>`;
         loadedModules[sectionId] = false; 
     }
 }
