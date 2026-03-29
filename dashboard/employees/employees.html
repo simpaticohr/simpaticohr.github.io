@@ -135,7 +135,6 @@
 
 <div class="page-wrap">
 
-  <!-- Page Header -->
   <div class="page-header">
     <div>
       <div class="page-title">Employees</div>
@@ -153,7 +152,6 @@
     </div>
   </div>
 
-  <!-- Stats -->
   <div class="stats-row">
     <div class="stat-card"><div class="label">Total Employees</div><div class="val" id="stat-total">—</div><div class="sub" id="stat-total-sub">Loading…</div><div class="bar" style="background:#0ea5e9"></div></div>
     <div class="stat-card"><div class="label">Active</div><div class="val" id="stat-active">—</div><div class="sub">Currently working</div><div class="bar" style="background:#10b981"></div></div>
@@ -162,7 +160,6 @@
     <div class="stat-card"><div class="label">New This Month</div><div class="val" id="stat-new">—</div><div class="sub">Recent hires</div><div class="bar" style="background:#f43f5e"></div></div>
   </div>
 
-  <!-- Filters -->
   <div class="filter-bar">
     <div class="search-wrap">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
@@ -170,8 +167,13 @@
     </div>
     <select class="fsel" id="dept-filter" onchange="filterEmployees()">
       <option value="">All Departments</option>
-      <option>Engineering</option><option>Design</option><option>Marketing</option>
-      <option>Sales</option><option>HR</option><option>Finance</option><option>Operations</option>
+      <option value="Engineering">Engineering</option>
+      <option value="Design">Design</option>
+      <option value="Marketing">Marketing</option>
+      <option value="Sales">Sales</option>
+      <option value="HR">HR</option>
+      <option value="Finance">Finance</option>
+      <option value="Operations">Operations</option>
     </select>
     <select class="fsel" id="status-filter" onchange="filterEmployees()">
       <option value="">All Statuses</option>
@@ -197,7 +199,6 @@
     </button>
   </div>
 
-  <!-- LIST VIEW -->
   <div id="view-list">
     <div class="table-wrap">
       <div class="table-header">
@@ -225,7 +226,6 @@
     </div>
   </div>
 
-  <!-- GRID VIEW -->
   <div id="view-grid" style="display:none">
     <div class="emp-grid" id="emp-grid"></div>
     <div id="grid-empty" class="empty-state" style="display:none">
@@ -237,7 +237,6 @@
 
 </div>
 
-<!-- ══════════ ADD / EDIT MODAL ══════════ -->
 <div class="modal-overlay" id="emp-modal">
   <div class="modal-box">
     <div class="modal-head">
@@ -251,12 +250,17 @@
     </div>
     <div class="form-group"><label class="form-label">Work Email *</label><input class="form-input" id="emp-email" type="email" placeholder="john@company.com"></div>
     <div class="form-row">
-      <div class="form-group"><label class="form-label">Job Title</label><input class="form-input" id="emp-title" placeholder="Software Engineer"></div>
+      <div class="form-group"><label class="form-label">Job Title *</label><input class="form-input" id="emp-title" placeholder="Software Engineer"></div>
       <div class="form-group"><label class="form-label">Department</label>
         <select class="form-input" id="emp-dept">
           <option value="">Select Department</option>
-          <option>Engineering</option><option>Design</option><option>Marketing</option>
-          <option>Sales</option><option>HR</option><option>Finance</option><option>Operations</option>
+          <option value="Engineering">Engineering</option>
+          <option value="Design">Design</option>
+          <option value="Marketing">Marketing</option>
+          <option value="Sales">Sales</option>
+          <option value="HR">HR</option>
+          <option value="Finance">Finance</option>
+          <option value="Operations">Operations</option>
         </select>
       </div>
     </div>
@@ -281,12 +285,11 @@
     <hr class="divider">
     <div class="modal-footer">
       <button class="btn btn-ghost" onclick="closeEmpModal()">Cancel</button>
-      <button class="btn btn-primary" id="save-emp-btn" onclick="saveEmployee()">Save Employee</button>
+      <button type="button" class="btn btn-primary" id="save-emp-btn" onclick="saveEmployee()">Save Employee</button>
     </div>
   </div>
 </div>
 
-<!-- ══════════ DETAIL DRAWER ══════════ -->
 <div class="drawer" id="emp-drawer">
   <div class="drawer-head">
     <h3>Employee Profile</h3>
@@ -304,6 +307,7 @@
 const SB_URL  = 'https://cvkxtsvgnynxexmemfuy.supabase.co';
 const SB_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN2a3h0c3ZnbnlueGV4bWVtZnV5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc0MjE2NTEsImV4cCI6MjA4Mjk5NzY1MX0.2mys8Cc-ucJ1uLThEGJubeDEg1TvfIAkW-xFsR4ecq4';
 const TENANT  = 'default';
+const WORKER_URL = window.SIMPATICO_CONFIG?.workerUrl || 'https://simpatico-hr-ats.simpaticohrconsultancy.workers.dev';
 
 if (window.self !== window.top) document.body.classList.add('embedded');
 
@@ -323,7 +327,7 @@ function initials(first, last) {
 }
 
 // ══════════════════════════════════════════════════════
-// SUPABASE HELPERS
+// SUPABASE GET HELPER (Reads stay direct to DB if RLS allows)
 // ══════════════════════════════════════════════════════
 const sbHeaders = { apikey: SB_ANON, Authorization: `Bearer ${SB_ANON}`, 'X-Tenant-ID': TENANT };
 
@@ -333,42 +337,13 @@ async function sbGet(table, params='') {
     return r.json();
 }
 
-async function sbPost(table, body) {
-    const r = await fetch(`${SB_URL}/rest/v1/${table}`, {
-        method: 'POST',
-        headers: { ...sbHeaders, 'Content-Type': 'application/json', Prefer: 'return=representation' },
-        body: JSON.stringify(body)
-    });
-    if (!r.ok) throw new Error(await r.text());
-    return r.json();
-}
-
-async function sbPatch(table, id, body) {
-    const r = await fetch(`${SB_URL}/rest/v1/${table}?id=eq.${id}`, {
-        method: 'PATCH',
-        headers: { ...sbHeaders, 'Content-Type': 'application/json', Prefer: 'return=representation' },
-        body: JSON.stringify(body)
-    });
-    if (!r.ok) throw new Error(await r.text());
-    return r.json();
-}
-
-async function sbDelete(table, id) {
-    const r = await fetch(`${SB_URL}/rest/v1/${table}?id=eq.${id}`, {
-        method: 'DELETE',
-        headers: sbHeaders
-    });
-    if (!r.ok) throw new Error(await r.text());
-}
-
 // ══════════════════════════════════════════════════════
 // LOAD
 // ══════════════════════════════════════════════════════
-document.addEventListener('DOMContentLoaded', loadEmployees);
+window.addEventListener('DOMContentLoaded', loadEmployees);
 
 async function loadEmployees() {
     showLoading(true);
-    // ✅ FIXED: correct PostgREST order syntax — no colon, no number suffix
     const data = await sbGet('employees',
         'select=id,employee_id,first_name,last_name,email,job_title,department,status,start_date,employment_type,phone,manager_id,avatar_url,location' +
         '&order=created_at.desc&limit=200');
@@ -598,39 +573,52 @@ function openEditModal(id) {
 
 function closeEmpModal() { document.getElementById('emp-modal').classList.remove('open'); }
 
+// ══════════════════════════════════════════════════════
+// SAVE EMPLOYEE (Using Cloudflare Worker for RLS bypass & Emails)
+// ══════════════════════════════════════════════════════
 async function saveEmployee() {
     const first = document.getElementById('emp-first').value.trim();
     const last  = document.getElementById('emp-last').value.trim();
     const email = document.getElementById('emp-email').value.trim();
-    if (!first || !last || !email) { toast('First name, last name, and email are required', 'error'); return; }
+    const jobTitle = document.getElementById('emp-title').value.trim();
+
+    if (!first || !last || !email || !jobTitle) { 
+        toast('First Name, Last Name, Email, and Job Title are required', 'error'); 
+        return; 
+    }
 
     const payload = {
         first_name:      first,
         last_name:       last,
-        email,
-        job_title:       document.getElementById('emp-title').value.trim()    || null,
-        department:      document.getElementById('emp-dept').value            || null,
-        employment_type: document.getElementById('emp-type').value            || null,
-        start_date:      document.getElementById('emp-start').value           || null,
-        phone:           document.getElementById('emp-phone').value.trim()    || null,
+        email:           email,
+        job_title:       jobTitle,
+        department:      document.getElementById('emp-dept').value || null,
+        employment_type: document.getElementById('emp-type').value || null,
+        start_date:      document.getElementById('emp-start').value || null,
+        phone:           document.getElementById('emp-phone').value.trim() || null,
         location:        document.getElementById('emp-location').value.trim() || null,
-        manager_id:      document.getElementById('emp-manager').value         || null,
-        tenant_id:       TENANT
+        manager_id:      document.getElementById('emp-manager').value || null
     };
 
     const btn = document.getElementById('save-emp-btn');
     btn.disabled = true; btn.textContent = 'Saving…';
 
     try {
-        if (editingId) {
-            await sbPatch('employees', editingId, { ...payload, updated_at: new Date().toISOString() });
-            toast('✅ Employee updated!');
-        } else {
-            payload.status    = 'active';
-            payload.employee_id = 'EMP-' + Date.now().toString(36).toUpperCase();
-            await sbPost('employees', payload);
-            toast('✅ Employee added!');
+        const url = editingId ? `${WORKER_URL}/employees/${editingId}` : `${WORKER_URL}/employees`;
+        const method = editingId ? 'PATCH' : 'POST';
+
+        const r = await fetch(url, {
+            method: method,
+            headers: { 'Content-Type': 'application/json', 'X-Tenant-ID': TENANT },
+            body: JSON.stringify(payload)
+        });
+        
+        const resData = await r.json();
+        if (!r.ok || !resData.success) {
+            throw new Error(resData.error?.message || 'Failed to save');
         }
+
+        toast(editingId ? '✅ Employee updated!' : '✅ Employee added! Welcome email sent.');
         closeEmpModal();
         await loadEmployees();
     } catch (e) {
@@ -641,12 +629,16 @@ async function saveEmployee() {
 }
 
 // ══════════════════════════════════════════════════════
-// DELETE
+// DELETE (Using Cloudflare Worker)
 // ══════════════════════════════════════════════════════
 async function deleteEmployee(id, name) {
     if (!confirm(`Remove "${name}" from your organization? This cannot be undone.`)) return;
     try {
-        await sbDelete('employees', id);
+        const r = await fetch(`${WORKER_URL}/employees/${id}`, {
+            method: 'DELETE',
+            headers: { 'X-Tenant-ID': TENANT }
+        });
+        if (!r.ok) throw new Error('Delete failed');
         toast(`🗑️ ${name} removed`);
         await loadEmployees();
     } catch(e) { toast('Delete failed: ' + e.message, 'error'); }
