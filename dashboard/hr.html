@@ -2228,33 +2228,29 @@ async function loadExternalModule(sectionId, href) {
         const parser = new DOMParser();
         const doc = parser.parseFromString(html, 'text/html');
 
-        // 1. ABSOLUTE CSS FIX: Ensure stylesheets always load from the root domain
+        // 1. FORCE CSS TO LOAD: Grab any missing stylesheets
         doc.querySelectorAll('link[rel="stylesheet"]').forEach(link => {
-            let linkHref = link.getAttribute('href');
-            if (linkHref && linkHref.includes('hr-modules.css')) {
-                // Force absolute URL so it never gets lost
-                const cssUrl = new URL('/hr-modules.css', window.location.origin).href; 
-                if (!document.querySelector(`link[href="${cssUrl}"]`)) {
-                    const newLink = document.createElement('link');
-                    newLink.rel = 'stylesheet';
-                    newLink.href = cssUrl;
-                    document.head.appendChild(newLink);
-                }
+            const href = link.getAttribute('href');
+            if (href && !document.querySelector(`link[href*="${href.split('/').pop()}"]`)) {
+                const newLink = document.createElement('link');
+                newLink.rel = 'stylesheet';
+                newLink.href = href;
+                document.head.appendChild(newLink);
             }
         });
         doc.querySelectorAll('style').forEach(style => document.head.appendChild(style.cloneNode(true)));
 
-        // 2. Extract Content
+        // 2. INJECT CONTENT
         const mainContent = doc.querySelector('.hr-main');
         container.innerHTML = (mainContent ? mainContent.innerHTML : doc.body.innerHTML);
         doc.querySelectorAll('.hr-modal-overlay, .modal').forEach(m => container.innerHTML += m.outerHTML);
 
-        // 3. SUPER REGEX SCRIPT FIX: Prevent all global variable collisions
+        // 3. RUTHLESS JS FIX: Destroy variable collisions
         window.loadedScripts = window.loadedScripts || new Set();
 
         for (const oldScript of doc.querySelectorAll('script')) {
             let jsCode = "";
-            let scriptName = oldScript.src ? oldScript.src.split('/').pop() : "inline";
+            let scriptName = oldScript.src ? oldScript.src.split('/').pop() : "inline-" + Math.random().toString(36).substr(2, 5);
 
             if (oldScript.src) {
                 if (scriptName.includes('supabase') || scriptName.includes('hr-config')) continue;
@@ -2268,8 +2264,10 @@ async function loadExternalModule(sectionId, href) {
                 jsCode = oldScript.textContent;
             }
 
-            // MAGIC: Convert ALL common top-level const/let to var so the SPA never crashes!
-            jsCode = jsCode.replace(/(const|let)\s+(SB_URL|SB_ANON|TENANT|WORKER_URL|_sb|allEmployees|filtered|currentView|editingId|avatarColors|statusBadge|statusLabel|typeLabel)\s*=/g, 'var $2 =');
+            // MAGIC FIX: Find any "const" or "let" causing crashes and force them to be "var"
+            jsCode = jsCode.replace(/(const|let)\s+(SB_URL|SB_ANON|TENANT|WORKER_URL|_sb|sbHeaders|allEmployees|filtered|currentView|editingId|avatarColors|statusBadge|statusLabel|typeLabel)\s*=/g, 'var $2 =');
+            
+            // Wake up DOMContentLoaded events
             jsCode = jsCode.replace(/document\.addEventListener\(\s*['"`]DOMContentLoaded['"`]/g, "window.addEventListener('SimpaticoSPA'");
 
             const newScript = document.createElement('script');
@@ -2277,12 +2275,12 @@ async function loadExternalModule(sectionId, href) {
             document.body.appendChild(newScript);
         }
 
-        // Fire the startup event
+        // 4. Wake up the injected scripts
         setTimeout(() => { window.dispatchEvent(new Event('SimpaticoSPA')); }, 150);
 
     } catch (error) {
         console.error("Fetch Error:", error);
-        container.innerHTML = `<div style="padding:40px;text-align:center;color:red;">Failed to load module.</div>`;
+        container.innerHTML = `<div style="padding:40px;text-align:center;color:var(--danger);">Failed to load module. Check console.</div>`;
         loadedModules[sectionId] = false; 
     }
 }
