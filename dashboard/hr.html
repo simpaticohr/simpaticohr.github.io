@@ -2222,19 +2222,16 @@ async function loadExternalModule(sectionId, href) {
     `;
 
     try {
-        // 1. Fetch the raw HTML file
         const res = await fetch(href.replace(/^\//, ''));
         if (!res.ok) throw new Error('Module not found');
         const html = await res.text();
 
-        // 2. Parse the HTML
         const parser = new DOMParser();
         const doc = parser.parseFromString(html, 'text/html');
 
-        // 3. SMART CSS FIX: Extract and inject missing stylesheets
+        // 1. Inject missing CSS
         doc.querySelectorAll('link[rel="stylesheet"]').forEach(link => {
             const linkHref = link.getAttribute('href');
-            // Only add the CSS if we haven't already added it
             if (linkHref && !document.querySelector(`link[href*="${linkHref.split('/').pop()}"]`)) {
                 const newLink = document.createElement('link');
                 newLink.rel = 'stylesheet';
@@ -2242,64 +2239,59 @@ async function loadExternalModule(sectionId, href) {
                 document.head.appendChild(newLink);
             }
         });
-        
-        // Also grab any custom <style> blocks from the sub-page
-        doc.querySelectorAll('style').forEach(style => {
-            document.head.appendChild(style.cloneNode(true));
-        });
+        doc.querySelectorAll('style').forEach(style => document.head.appendChild(style.cloneNode(true)));
 
-        // 4. Extract Main Content & Modals
+        // 2. Extract Content & Modals
         const mainContent = doc.querySelector('.hr-main');
         const innerContent = mainContent ? mainContent.innerHTML : doc.body.innerHTML;
         let modalsHtml = '';
         doc.querySelectorAll('.hr-modal-overlay, .modal').forEach(m => modalsHtml += m.outerHTML);
 
-        // Inject content
         container.innerHTML = innerContent + modalsHtml;
 
-        // 5. SMART JS FIX: Prevent collisions and redeclarations
+        // 3. Inject Scripts & Fix DOMContentLoaded
         window.loadedScripts = window.loadedScripts || new Set();
 
         for (const oldScript of doc.querySelectorAll('script')) {
             if (oldScript.src) {
                 const scriptName = oldScript.src.split('/').pop();
-                
-                // Skip global scripts that the dashboard already has
-                if (scriptName.includes('supabase') || scriptName.includes('hr-config')) continue;
-                
-                // Prevent loading the exact same script twice
+                // Skip global scripts to prevent multiple Supabase instances
+                if (scriptName.includes('supabase') || scriptName.includes('hr-config') || scriptName.includes('bootstrap')) continue;
                 if (window.loadedScripts.has(scriptName)) continue; 
                 window.loadedScripts.add(scriptName);
 
-                // Fetch the script code manually
                 const scriptRes = await fetch(oldScript.src);
                 let jsCode = await scriptRes.text();
                 
-                // Magic Fix: Convert "const _sb" to "var _sb" so it doesn't crash the SPA
-                jsCode = jsCode.replace(/const\s+_sb/g, 'var _sb').replace(/let\s+_sb/g, 'var _sb');
+                // MAGIC: Fix variables and translate DOMContentLoaded so SPA scripts wake up!
+                jsCode = jsCode.replace(/(const|let)\s+_sb\s*=/g, 'var _sb =');
+                jsCode = jsCode.replace(/document\.addEventListener\(\s*['"`]DOMContentLoaded['"`]/g, "window.addEventListener('SimpaticoSPA'");
 
                 const newScript = document.createElement('script');
                 newScript.textContent = jsCode;
                 document.body.appendChild(newScript);
             } else {
-                // Ignore the old iframe hiding script
                 if (oldScript.textContent.includes('window.self !== window.top')) continue;
                 
+                let jsCode = oldScript.textContent;
+                jsCode = jsCode.replace(/(const|let)\s+_sb\s*=/g, 'var _sb =');
+                jsCode = jsCode.replace(/document\.addEventListener\(\s*['"`]DOMContentLoaded['"`]/g, "window.addEventListener('SimpaticoSPA'");
+                
                 const newScript = document.createElement('script');
-                newScript.textContent = oldScript.textContent;
+                newScript.textContent = jsCode;
                 document.body.appendChild(newScript);
             }
         }
 
+        // 4. FIRE THE ALARM: Wake up the scripts we just injected!
+        setTimeout(() => {
+            window.dispatchEvent(new Event('SimpaticoSPA'));
+            console.log(`✅ Module [${sectionId}] initialized perfectly.`);
+        }, 150);
+
     } catch (error) {
         console.error("Fetch Error:", error);
-        container.innerHTML = `
-            <div class="empty-state">
-                <i class="fas fa-exclamation-triangle" style="color:var(--danger)"></i>
-                <h5 style="margin-top:10px;">Failed to load module</h5>
-                <p>Could not load ${href}. Check the console for details.</p>
-            </div>
-        `;
+        container.innerHTML = `<div style="padding:40px;text-align:center;color:red;">Failed to load module. Check console.</div>`;
         loadedModules[sectionId] = false; 
     }
 }
