@@ -1194,8 +1194,22 @@ function aiSpeak(text) {
             if (idx >= chunks.length) {
                 isSpeaking = false;
                 subtitle.classList.remove('show');
-                startListening();
                 resolve();
+
+                // ── FIX: wait 800 ms after TTS ends before opening the mic ──
+                // Without this delay, the Speech Recognition immediately picks up
+                // the tail-end of the TTS audio through the device speaker,
+                // transcribes the AI's own words as candidate speech (≥ 4 words),
+                // and triggers submitVoiceAnswer() — causing the first question
+                // to be "answered" by the AI itself and then repeated.
+                setTimeout(() => {
+                    // Discard any transcript that accumulated during the TTS
+                    finalTranscript   = '';
+                    currentTranscript = '';
+                    lastSpeechTime    = 0;
+                    startListening();
+                }, 800);
+
                 return;
             }
             const u = new SpeechSynthesisUtterance(chunks[idx]);
