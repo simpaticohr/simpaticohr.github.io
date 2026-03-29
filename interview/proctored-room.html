@@ -181,8 +181,10 @@
             color:rgba(255,255,255,.7); text-shadow:0 2px 8px rgba(0,0,0,.5);
             letter-spacing:1px; text-transform:uppercase;
         }
+        
+        /* 🔥 HIDDEN SUBTITLES FOR ENTERPRISE INTEGRITY */
         .ai-subtitle-text {
-            display: none !important; /* 🔥 THIS HIDES THE SUBTITLES */
+            display: none !important;
             margin-top:10px; font-size:17px; font-weight:500;
             color:rgba(255,255,255,.92); text-shadow:0 2px 12px rgba(0,0,0,.7);
             max-width:650px; text-align:center; line-height:1.55;
@@ -316,7 +318,7 @@
         .setup-card h1 span { color:#fcd34d; }
         .setup-sub { color:var(--text-dim); font-size:13px; margin-bottom:24px; }
 
-        /* Error banner — shown instead of alert() */
+        /* Error banner */
         .setup-error {
             display:none;
             padding:12px 16px; background:rgba(239,68,68,.1);
@@ -397,13 +399,11 @@
 </head>
 <body>
 
-<!-- ════════ SETUP OVERLAY ════════ -->
 <div class="setup-overlay" id="setupOverlay">
     <div class="setup-card">
         <h1>Simpatico<span>HR</span></h1>
         <p class="setup-sub">AI Voice Interview · Powered by Dynamic AI</p>
 
-        <!-- Inline error banner (replaces alert() calls) -->
         <div class="setup-error" id="setupError"></div>
 
         <div class="setup-job-card" id="setupJobCard">
@@ -445,7 +445,6 @@
     </div>
 </div>
 
-<!-- ════════ MAIN INTERVIEW APP ════════ -->
 <div class="app" id="interviewApp" style="display:none">
     <div class="topbar" id="topbar">
         <div class="tb-left">
@@ -535,7 +534,6 @@ const SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
 const urlParams  = new URLSearchParams(window.location.search);
 const magicToken = urlParams.get('token');
 
-// ── Show inline error instead of alert() ──────────────────────
 function showSetupError(msg) {
     const el = document.getElementById('setupError');
     el.innerHTML = `<i class="fas fa-exclamation-triangle" style="margin-right:6px"></i>${msg}`;
@@ -544,11 +542,9 @@ function showSetupError(msg) {
 }
 
 if (!magicToken) {
-    // Don't redirect — show the error inline so the user can see it
     showSetupError('No interview token found. Please use the link from your invitation email.');
 }
 
-// ── Auth: candidates use the magic token directly ──────────────
 let token = magicToken || localStorage.getItem('simpatico_token') || '';
 let user  = {};
 
@@ -571,7 +567,6 @@ let silenceTimer = null;
 let finalTranscript   = '';
 let currentTranscript = '';
 let lastSpeechTime = 0;
-const SILENCE_THRESHOLD = 2500;
 const MIN_ANSWER_WORDS  = 4;
 
 let audioCtx, analyser, micSource, vizBars = [];
@@ -635,7 +630,7 @@ ${Object.entries(this.skillsCovered).map(([s,d]) => `- ${s}: Score ${d.score}/10
 - Weak: ${this.weakAreas.join(', ') || 'TBD'}`;
     },
 
-  async generateNextQuestion(candidateAnswer, answerAnalysis) {
+    async generateNextQuestion(candidateAnswer, answerAnalysis) {
         if (candidateAnswer) {
             this.history.push({
                 role: 'user',
@@ -664,12 +659,13 @@ ${Object.entries(this.skillsCovered).map(([s,d]) => `- ${s}: Score ${d.score}/10
         try {
             console.log("🚀 Sending prompt to AI backend...");
             
+            // 🔥 Calling the robust Interview endpoint!
             const res = await fetch(`${API}/api/ai/interview-question`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
                 body: JSON.stringify({ 
                     messages: messages,
-                    token: magicToken  // <-- CRITICAL: Tells backend to fetch the Job Description!
+                    token: magicToken 
                 })
             });
 
@@ -698,7 +694,8 @@ ${Object.entries(this.skillsCovered).map(([s,d]) => `- ${s}: Score ${d.score}/10
             console.error('🔥 AI API crashed. Using fallback. Reason:', err);
             return this.getFallbackQuestion();
         }
-    }, // <-- This comma is vital!
+    },
+
     updatePhase(analysis) {
         const q   = this.questionCount;
         const max = this.maxQuestions;
@@ -879,18 +876,14 @@ function analyzeAnswer(text) {
 }
 
 // ══════════════════════════════════════════════════════════════
-// INIT  ← THE FIX: setupMedia() is ALWAYS called regardless of
-//         whether the interview/job fetch succeeds or fails.
-//         Errors are shown inline, never via alert()+return.
+// INIT 
 // ══════════════════════════════════════════════════════════════
 async function init() {
     if (!magicToken) {
-        // Error already shown above; still call setupMedia so checks work
         await setupMedia();
         return;
     }
 
-    // ── Step 1: Fetch interview metadata ──────────────────────
     try {
         const r    = await fetch(
             `${SB_URL}/rest/v1/interviews?token=eq.${encodeURIComponent(magicToken)}&select=*&limit=1`,
@@ -899,15 +892,16 @@ async function init() {
         const data = await r.json();
         interviewMeta = Array.isArray(data) ? data[0] : null;
 
+        const myActiveToken = sessionStorage.getItem('my_interview_lock'); // 🔥 THE PADLOCK
+
         if (!interviewMeta) {
             showSetupError('Interview not found or the link has expired. Please contact HR for a new invitation.');
-            // ✅ Do NOT return — fall through to setupMedia() below
         } else if (interviewMeta.status === 'completed') {
             showSetupError('This interview has already been completed. Contact HR if you believe this is an error.');
-            // ✅ Do NOT return
+        } else if (interviewMeta.status === 'in_progress' && myActiveToken !== magicToken) {
+            showSetupError('🚨 SECURITY ALERT: This interview link is currently active on another device or browser tab. Token reuse is strictly prohibited.');
         } else if (interviewMeta.expires_at && new Date(interviewMeta.expires_at) < new Date()) {
             showSetupError('This interview link has expired. Please contact HR to request a new one.');
-            // ✅ Do NOT return
         } else {
             token = magicToken;
             user  = {
@@ -916,17 +910,18 @@ async function init() {
                 client_id: interviewMeta.client_id       || null,
             };
             seconds = Math.min((interviewMeta.duration_minutes || 15), 20) * 60;
+            
+            if (interviewMeta.status === 'in_progress' && myActiveToken === magicToken) {
+                showToast('info', 'Resuming your active session...');
+            }
         }
     } catch (e) {
         console.warn('Interview fetch error:', e);
         showSetupError('Could not connect to the interview server. Check your internet and try refreshing.');
     }
 
-    // ── Step 2: Fetch job details ─────────────────────────────
-    // ✅ FIXED: try both 'jobs' and 'job_postings' table names
     if (interviewMeta?.job_id) {
         try {
-            // Try 'jobs' first (newer schema), fall back to 'job_postings'
             for (const table of ['jobs', 'job_postings']) {
                 const jRes  = await fetch(
                     `${SB_URL}/rest/v1/${table}?id=eq.${interviewMeta.job_id}&select=*&limit=1`,
@@ -942,7 +937,6 @@ async function init() {
         }
     }
 
-    // ── Step 3: Fetch candidate resume ────────────────────────
     if (interviewMeta?.candidate_email) {
         try {
             const cRes  = await fetch(
@@ -956,7 +950,6 @@ async function init() {
         }
     }
 
-    // ── Step 4: Populate UI ───────────────────────────────────
     if (job) {
         document.getElementById('sjcTitle').textContent = job.title || 'Interview';
         document.getElementById('sjcDept').innerHTML = `<i class="fas fa-building"></i> ${job.department || 'General'}`;
@@ -971,7 +964,6 @@ async function init() {
             document.getElementById('sjcDesc').textContent = job.description.slice(0, 200) + '...';
         }
 
-        // Feed the engine
         engine.skillsToProbe = [...(job.skills_required || job.skills || [])];
         engine.jobTitle   = job.title || '';
         engine.jobContext  = `Title: ${job.title}\nDepartment: ${job.department||''}\nDescription: ${job.description||''}\nSkills: ${(job.skills_required||job.skills||[]).join(', ')}\nExperience: ${job.experience_min||0}-${job.experience_max||'?'} years\nLocation: ${job.location||'Remote'}`;
@@ -985,17 +977,13 @@ async function init() {
 
         engine.maxQuestions = Math.min(Math.max(engine.skillsToProbe.length + 3, 6), 12);
     } else if (interviewMeta) {
-        // Fallback: use whatever the interview record has
         document.getElementById('sjcTitle').textContent = interviewMeta.job_title || 'Interview';
     }
 
     if (candidateResume) engine.resumeContext = candidateResume.slice(0, 2000);
 
-    // ── Step 5: Load TTS voices ───────────────────────────────
     loadVoices();
     speechSynth.onvoiceschanged = loadVoices;
-
-    // ── Step 6: Setup media ── ALWAYS runs ───────────────────
     await setupMedia();
 }
 
@@ -1017,7 +1005,6 @@ function loadVoices() {
 // MEDIA SETUP
 // ══════════════════════════════════════════════════════════════
 async function setupMedia() {
-    // AI Engine check
     setChk('c5', 'spin');
     try {
         const aiTest = await fetch(`${API}/health`, { signal: AbortSignal.timeout(5000) });
@@ -1027,7 +1014,6 @@ async function setupMedia() {
         console.warn('AI health check failed:', e.message);
     }
 
-    // Camera + Mic
     try {
         mediaStream = await navigator.mediaDevices.getUserMedia({
             video: { width:{ideal:1280}, height:{ideal:720}, facingMode:'user' },
@@ -1045,13 +1031,9 @@ async function setupMedia() {
         }, 1500);
         setTimeout(() => {
             setChk('c4', 'pass');
-            // ✅ Only enable Begin if no blocking error was shown
             const hasBlockingError = interviewMeta === null ||
                 interviewMeta?.status === 'completed' ||
                 (interviewMeta?.expires_at && new Date(interviewMeta.expires_at) < new Date());
-            if (!hasBlockingError || !magicToken) {
-                // Still allow camera test even with error, but disable begin
-            }
             document.getElementById('btnBegin').disabled = hasBlockingError && !!magicToken;
         }, 2500);
     } catch(err) {
@@ -1061,7 +1043,6 @@ async function setupMedia() {
         console.error('getUserMedia error:', err);
     }
 
-    // Speech Recognition
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (SR) {
         recognition = new SR();
@@ -1136,12 +1117,13 @@ function animateViz() {
 // START SESSION
 // ══════════════════════════════════════════════════════════════
 async function startSession() {
+    sessionStorage.setItem('my_interview_lock', magicToken); // 🔥 SNAP PADLOCK SHUT
+
     document.getElementById('setupOverlay').style.display = 'none';
     document.getElementById('interviewApp').style.display = 'flex';
     document.getElementById('selfVid').srcObject = mediaStream;
 
-    // Mark started in Supabase
-    if (interviewMeta?.id) {
+    if (interviewMeta?.id && interviewMeta.status !== 'in_progress') {
         sbPatch('interviews', `token=eq.${encodeURIComponent(magicToken)}`, {
             status: 'in_progress', started_at: new Date().toISOString()
         }).catch(e => console.warn('Start patch error:', e));
@@ -1186,7 +1168,7 @@ function aiSpeak(text) {
         if (current.trim()) chunks.push(current.trim());
 
         let idx = 0;
-        window.ttsKeepAlive = []; // 🔥 MAGIC FIX 1: This array stops Chrome from deleting the voice mid-sentence!
+        window.ttsKeepAlive = []; // 🔥 MEMORY FIX: Stops Chrome from GCing the voice mid-sentence
 
         function speakNext() {
             if (idx >= chunks.length) {
@@ -1203,7 +1185,7 @@ function aiSpeak(text) {
                 return;
             }
             const u = new SpeechSynthesisUtterance(chunks[idx]);
-            window.ttsKeepAlive.push(u); // 🔥 Push to global array to keep it alive
+            window.ttsKeepAlive.push(u); 
 
             if (preferredVoice) u.voice = preferredVoice;
             u.rate = 1.0; u.pitch = 1.0; u.volume = 1.0;
@@ -1217,6 +1199,7 @@ function aiSpeak(text) {
         speakNext();
     });
 }
+
 function setOrbState(state) {
     const orb    = document.getElementById('aiOrb');
     const status = document.getElementById('aiStatusText');
@@ -1230,7 +1213,7 @@ function setOrbState(state) {
 }
 
 // ══════════════════════════════════════════════════════════════
-// SPEECH RECOGNITION
+// SPEECH RECOGNITION & SILENCE DETECTION
 // ══════════════════════════════════════════════════════════════
 function startListening() {
     if (!recognition || isSpeaking || isProcessing) return;
@@ -1271,9 +1254,9 @@ function handleSpeechResult(e) {
     for (let i = e.resultIndex; i < e.results.length; i++) {
         const t = e.results[i][0].transcript;
         if (e.results[i].isFinal) { final += t + ' '; }
-        else                       { interim += t; }
+        else                      { interim += t; }
     }
-    if (final)   { finalTranscript   += final;   lastSpeechTime = Date.now(); }
+    if (final)   { finalTranscript    += final;   lastSpeechTime = Date.now(); }
     if (interim) { currentTranscript  = interim;  lastSpeechTime = Date.now(); }
 
     const liveEl   = document.getElementById('liveTranscript');
@@ -1289,14 +1272,22 @@ function startSilenceDetection() {
     clearTimeout(silenceTimer);
     function check() {
         if (!isListening || isSpeaking || isProcessing) return;
-        const fullText       = (finalTranscript + currentTranscript).trim();
-        const words          = fullText.split(/\s+/).filter(Boolean).length;
+
+        const fullText = (finalTranscript + currentTranscript).trim();
+        const words = fullText.split(/\s+/).filter(Boolean).length;
         const timeSinceSpeech = Date.now() - lastSpeechTime;
-        if (words >= MIN_ANSWER_WORDS && lastSpeechTime > 0 && timeSinceSpeech >= SILENCE_THRESHOLD) {
+
+        // 🔥 SILENCE FIX: Smart adaptive timeouts for short vs long answers
+        if (words >= 2 && lastSpeechTime > 0 && timeSinceSpeech >= 2500) {
             submitVoiceAnswer(fullText);
             return;
         }
-        silenceTimer = setTimeout(check, 300);
+        if (words > 0 && lastSpeechTime > 0 && timeSinceSpeech >= 4000) {
+            submitVoiceAnswer(fullText);
+            return;
+        }
+
+        silenceTimer = setTimeout(check, 500);
     }
     silenceTimer = setTimeout(check, 500);
 }
@@ -1530,6 +1521,8 @@ async function endSession() {
     stopListening();
     speechSynth.cancel();
     isProcessing = true;
+
+    sessionStorage.removeItem('my_interview_lock'); // 🔥 REMOVE PADLOCK
 
     const score      = engine.getOverallScore();
     const violations = procLogs.filter(l => l.level === 'danger').length;
