@@ -575,13 +575,14 @@ let tabSwitchCount    = 0;
 let faceCheckInterval = null;
 
 // ══════════════════════════════════════════════════════════════
-// 🧠 DYNAMIC INTERVIEW ENGINE
+// 🧠 ELITE DYNAMIC INTERVIEW ENGINE (MERCOR/ZARA STYLE)
 // ══════════════════════════════════════════════════════════════
 const engine = {
     history:       [],
     questionCount: 0,
     maxQuestions:  8,
     phase:         'intro',
+    currentSkill:  null,
     skillsToProbe: [],
     skillsCovered: {},
     strongAreas:   [],
@@ -592,27 +593,21 @@ const engine = {
     resumeContext: '',
 
     buildSystemPrompt() {
-        return `You are an expert technical interviewer at a world-class company. You are conducting a LIVE voice interview.
+        return `You are an elite, rigorous technical interviewer at a FAANG company. You are conducting a LIVE voice interview.
 
-## YOUR ROLE
-- You interview candidates for: "${this.jobTitle}"
-- Experience level expected: ${this.level}
-- Adapt questions dynamically based on the candidate's actual answers
+## YOUR PERSONA (CRITICAL)
+- Be ruthlessly professional, direct, and concise.
+- DO NOT use pleasantries. DO NOT say "Hello", "Welcome", "Great answer", "That's interesting", or "Thank you".
+- Ask exactly ONE question. Never ask multiple questions.
+- Keep your entire response to 1-3 spoken sentences.
 
-## JOB DESCRIPTION
-${this.jobContext || 'Ask general technical and behavioral questions relevant to the role.'}
+## CANDIDATE & ROLE
+- Candidate is applying for: "${this.jobTitle}" (${this.level} level)
+- Job Requirements: ${this.jobContext || 'Standard technical skills.'}
 
-## CANDIDATE BACKGROUND
-${this.resumeContext || 'Discover their background through conversation.'}
-
-## KEY SKILLS TO ASSESS
-${this.skillsToProbe.length ? this.skillsToProbe.map((s,i) => `${i+1}. ${s}`).join('\n') : 'General technical and problem-solving skills'}
-
-## RULES
-1. Ask ONE question at a time. Never ask multiple questions.
-2. Keep responses to 1-3 sentences.
-3. Transition naturally from the previous answer.
-4. Never repeat a question already answered.`;
+## INSTRUCTIONS
+- If the candidate's answer lacks technical depth, explicitly challenge them on it. Ask for "Why?", trade-offs, edge cases, or exact metrics.
+- Transition seamlessly from their previous answer directly into the next follow-up or new topic.`;
     },
 
     async generateNextQuestion(candidateAnswer, answerAnalysis) {
@@ -636,16 +631,14 @@ ${this.skillsToProbe.length ? this.skillsToProbe.map((s,i) => `${i+1}. ${s}`).jo
             })),
             {
                 role: 'user',
-                content: `[INTERVIEWER INSTRUCTION — NOT SPOKEN TO CANDIDATE]\n\n${phaseInstructions}\n\nRespond directly to the candidate — 1 to 3 natural spoken sentences, ask exactly ONE question:${this.phase === 'closing' ? ' Wrap up warmly and ask if they have any questions.' : ''}`
+                content: `[INTERVIEWER INSTRUCTION — NOT SPOKEN TO CANDIDATE]\n\n${phaseInstructions}\n\nRespond directly to the candidate — max 3 natural spoken sentences, ask exactly ONE question:${this.phase === 'closing' ? ' Wrap up and ask if they have any questions.' : ''}`
             }
         ];
 
         try {
             console.log("🚀 Sending prompt to AI backend...");
-            
             const res = await fetch(`${API}/api/ai/interview-question`, {
                 method: 'POST',
-                // 🔥 JWT HEADER REMOVED HERE TO FIX 401 AUTH ERROR
                 headers: { 'Content-Type': 'application/json' }, 
                 body: JSON.stringify({ 
                     messages: messages,
@@ -684,38 +677,59 @@ ${this.skillsToProbe.length ? this.skillsToProbe.map((s,i) => `${i+1}. ${s}`).jo
         const q   = this.questionCount;
         const max = this.maxQuestions;
 
-        if (q >= max) { this.phase = 'closing'; }
-        else if (q <= 1) { this.phase = 'intro'; }
-        else {
-            const uncovered = this.skillsToProbe.filter(s => !this.skillsCovered[s] || this.skillsCovered[s].depth < 1);
-            if (uncovered.length > 0 && q < max - 2) {
-                this.phase = 'skill_probe';
-            } else if (q >= max - 3 && q < max - 1) {
-                this.phase = Math.random() > 0.5 ? 'scenario' : 'behavioral';
-            } else if (q >= max - 1) {
-                this.phase = 'closing';
-            }
+        if (q >= max) { this.phase = 'closing'; return; }
+        if (q <= 1) { this.phase = 'intro'; return; }
+
+        // 🔥 DEEP FOLLOW-UP LOGIC: Find a skill that hasn't reached 2 turns yet
+        const activeSkill = this.skillsToProbe.find(s => !this.skillsCovered[s] || this.skillsCovered[s].turns < 2);
+
+        if (activeSkill) {
+            this.phase = 'skill_probe';
+            this.currentSkill = activeSkill;
+        } else if (q < max - 1) {
+            this.phase = 'scenario';
+        } else {
+            this.phase = 'closing';
         }
+
         const pill = document.getElementById('phasePill');
-        if (pill) pill.textContent = this.phase.toUpperCase();
+        if (pill) pill.textContent = this.phase.replace('_', ' ').toUpperCase();
     },
 
     getPhaseInstructions() {
-        const uncovered = this.skillsToProbe.filter(s => !this.skillsCovered[s] || this.skillsCovered[s].depth < 1);
+        const s = this.skillsCovered[this.currentSkill];
+        const turns = s ? s.turns : 0;
+
         switch (this.phase) {
-            case 'intro': return `Greet the candidate warmly and ask them to introduce themselves, focusing on experience relevant to the ${this.jobTitle} role.`;
-            case 'skill_probe': return `Ask a technical question specifically about "${uncovered[0] || 'core skills'}" for a ${this.level} ${this.jobTitle}.`;
-            case 'scenario': return `Present a realistic technical scenario relevant to the ${this.jobTitle} role that tests problem-solving.`;
-            case 'behavioral': return `Ask a behavioral question using STAR format about leadership, collaboration, or handling failure.`;
-            case 'closing': return `Thank the candidate warmly. Explain next steps (team review within a few days). Ask if they have any questions.`;
-            default: return `Ask the next most relevant question based on the conversation and JD requirements.`;
+            case 'intro': 
+                return `Start the interview immediately. Ask them to introduce their technical experience relevant to the ${this.jobTitle} role. Do not introduce yourself.`;
+            
+            case 'skill_probe': 
+                if (turns === 0) {
+                    return `Ask a direct, challenging technical question about "${this.currentSkill}". No pleasantries.`;
+                } else {
+                    // 🔥 DEEP FOLLOW UP: Force the AI to drill into their last answer
+                    return `CRITICAL: DO NOT change the subject yet. The candidate just answered about "${this.currentSkill}". Ask a highly specific follow-up question drilling into their last answer. Probe for architectural trade-offs, edge cases, exact metrics, or "Why they chose X over Y".`;
+                }
+
+            case 'scenario': 
+                return `Present a complex technical scenario relevant to the ${this.jobTitle} role. Test their system design and problem-solving.`;
+            
+            case 'behavioral': 
+                return `Ask a challenging behavioral question (leadership, failure, collaboration).`;
+            
+            case 'closing': 
+                return `The interview is over. Explain next steps (team review within a few days) and ask if they have any questions.`;
+            
+            default: 
+                return `Ask a challenging follow-up based on their last answer.`;
         }
     },
 
     getFallbackQuestion() {
-        if (this.phase === 'closing') return `Thank you so much for your time today. Our team will review everything and reach out. Do you have any questions for me?`;
-        if (this.skillsToProbe.length > 0) return `Let's talk about ${this.skillsToProbe[0]}. Can you walk me through your experience with it?`;
-        return `Can you tell me about a challenging technical problem you've solved recently? What was your approach?`;
+        if (this.phase === 'closing') return `Thank you for your time. The team will review and reach out. Do you have any questions for me?`;
+        if (this.skillsToProbe.length > 0) return `Let's discuss ${this.skillsToProbe[0]}. Walk me through a complex implementation involving it.`;
+        return `Describe a recent technical challenge you solved. What was the exact bottleneck and how did you resolve it?`;
     },
 
     recordSkillAssessment(skill, score, depth) {
@@ -806,8 +820,8 @@ async function init() {
         document.getElementById('sjcDept').innerHTML = `<i class="fas fa-building"></i> General`;
         
         engine.jobTitle = positionName;
-        engine.jobContext = `Title: ${positionName}\nConduct a standard professional interview for this role.`;
-        engine.skillsToProbe = [positionName + ' Core Skills', 'Problem Solving', 'Communication'];
+        engine.jobContext = `Title: ${positionName}\nConduct a standard professional technical interview.`;
+        engine.skillsToProbe = [positionName + ' Core Skills', 'System Design', 'Problem Solving'];
         engine.maxQuestions = 6;
     }
 
@@ -820,7 +834,7 @@ function loadVoices() {
     const voices = speechSynth.getVoices();
     if (!voices.length) return;
 
-    // 🔥 REGIONAL ACCENT UPGRADE
+    // 🔥 REGIONAL ACCENT UPGRADE (Indian/British priority)
     preferredVoice = voices.find(v => v.lang === 'en-IN' && (v.name.includes('Female') || v.name.includes('Neerja') || v.name.includes('Rishi')))
         || voices.find(v => v.lang === 'en-IN')
         || voices.find(v => v.lang === 'en-GB' && v.name.includes('Female'))
@@ -942,7 +956,7 @@ function aiSpeak(text) {
         const cleanText = text.replace(/\*\*/g, '').replace(/\n/g, ' ').replace(/\s+/g, ' ').trim();
         speechSynth.cancel();
         
-        window.ttsKeepAlive = []; 
+        window.ttsKeepAlive = []; // Chrome TTS fix
 
         const u = new SpeechSynthesisUtterance(cleanText);
         window.ttsKeepAlive.push(u);
@@ -1024,7 +1038,7 @@ async function submitVoiceAnswer(text) {
     document.getElementById('liveTranscript').textContent = '';
 
     const analysis = analyzeAnswer(text);
-    const currentSkill = engine.skillsToProbe[Math.min(engine.questionCount - 1, engine.skillsToProbe.length - 1)] || 'General';
+    const currentSkill = engine.currentSkill || engine.skillsToProbe[0] || 'General';
     engine.recordSkillAssessment(currentSkill, analysis.score, 1);
 
     document.getElementById('qTracker').textContent = `Q ${engine.questionCount} / ~${engine.maxQuestions}`;
