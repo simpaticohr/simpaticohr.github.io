@@ -184,7 +184,7 @@
         
         /* 🔥 HIDDEN SUBTITLES FOR ENTERPRISE INTEGRITY */
         .ai-subtitle-text {
-            display: none !important;
+            display: none !important; 
             margin-top:10px; font-size:17px; font-weight:500;
             color:rgba(255,255,255,.92); text-shadow:0 2px 12px rgba(0,0,0,.7);
             max-width:650px; text-align:center; line-height:1.55;
@@ -432,7 +432,7 @@
 
         <div class="setup-note">
             <i class="fas fa-shield-alt"></i>
-            <strong>Proctored interview.</strong> Camera, mic, tab switches, and eye gaze are monitored in real-time. Any violations reduce your trust score.
+            <strong>Proctored interview.</strong> Camera, mic, tab switches, screen sharing, and eye gaze are monitored in real-time. Any violations reduce your trust score.
         </div>
         <div class="setup-voice-note">
             <i class="fas fa-headset"></i>
@@ -514,6 +514,7 @@
             <div class="video-controls">
                 <button class="vc-btn" id="vcCam" onclick="toggleCam()"><i class="fas fa-video"></i></button>
                 <button class="vc-btn active-mic" id="vcMic" onclick="toggleMic()"><i class="fas fa-microphone"></i></button>
+                <button class="vc-btn" id="vcScreen" onclick="toggleScreenShare()"><i class="fas fa-desktop"></i></button>
                 <button class="vc-btn" onclick="goFullscreen()"><i class="fas fa-expand"></i></button>
                 <button class="vc-btn end" onclick="endSession()"><i class="fas fa-phone-slash"></i></button>
             </div>
@@ -549,6 +550,7 @@ let token = magicToken || localStorage.getItem('simpatico_token') || '';
 let user  = {};
 
 let mediaStream   = null;
+let screenStream  = null; // 🔥 For Screen Sharing
 let interviewMeta = null;
 let job           = null;
 let candidateResume = null;
@@ -652,7 +654,6 @@ ${this.skillsToProbe.length ? this.skillsToProbe.map((s,i) => `${i+1}. ${s}`).jo
 
             if (!res.ok) {
                 const errText = await res.text();
-                // 🔥 THIS WILL CATCH WORKER ERRORS (500, 404, ETC)
                 throw new Error(`API Error ${res.status}: ${errText}`);
             }
 
@@ -673,7 +674,6 @@ ${this.skillsToProbe.length ? this.skillsToProbe.map((s,i) => `${i+1}. ${s}`).jo
 
         } catch (err) {
             console.error('🔥 AI API crashed. Reason:', err);
-            // 🔥 LOUD ERROR! This prints the exact reason Groq failed on the screen!
             showToast('danger', `Backend Error: ${err.message}`);
             return this.getFallbackQuestion();
         }
@@ -760,12 +760,23 @@ async function init() {
         const data = await r.json();
         interviewMeta = Array.isArray(data) ? data[0] : null;
 
+        const myActiveToken = sessionStorage.getItem('my_interview_lock');
+
         if (!interviewMeta) {
             showSetupError('Interview not found.');
+        } else if (interviewMeta.status === 'completed') {
+            showSetupError('This interview has already been completed.');
+        } else if (interviewMeta.status === 'in_progress' && myActiveToken !== magicToken) {
+            showSetupError('🚨 SECURITY ALERT: This interview link is currently active on another device or browser tab. Token reuse is strictly prohibited.');
+        } else if (interviewMeta.expires_at && new Date(interviewMeta.expires_at) < new Date()) {
+            showSetupError('This interview link has expired.');
         } else {
             token = magicToken;
             user  = { id: interviewMeta.candidate_email || 'candidate', full_name: interviewMeta.candidate_name || 'Candidate' };
             seconds = Math.min((interviewMeta.duration_minutes || 15), 20) * 60;
+            if (interviewMeta.status === 'in_progress' && myActiveToken === magicToken) {
+                showToast('info', 'Resuming your active session...');
+            }
         }
     } catch (e) {
         showSetupError('Could not connect to the database.');
@@ -789,7 +800,6 @@ async function init() {
         engine.jobContext = `Title: ${job.title}\nDescription: ${job.description||''}\nSkills: ${(job.skills_required||job.skills||[]).join(', ')}`;
         engine.maxQuestions = Math.min(Math.max(engine.skillsToProbe.length + 3, 6), 12);
     } else if (interviewMeta) {
-        // 🔥 JD AMNESIA FIX: If job_id is missing, we FORCE the AI to use the position name!
         const positionName = interviewMeta.position || interviewMeta.job_title || 'the open position';
         document.getElementById('sjcTitle').textContent = positionName;
         document.getElementById('sjcDept').innerHTML = `<i class="fas fa-building"></i> General`;
@@ -820,7 +830,13 @@ async function setupMedia() {
         mediaStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
         document.getElementById('setupVid').srcObject = mediaStream;
         setChk('c1', 'pass'); setChk('c2', 'pass'); setChk('c3', 'pass'); setChk('c4', 'pass');
-        document.getElementById('btnBegin').disabled = false;
+        
+        const hasBlockingError = interviewMeta === null ||
+            interviewMeta?.status === 'completed' ||
+            (interviewMeta?.status === 'in_progress' && sessionStorage.getItem('my_interview_lock') !== magicToken) ||
+            (interviewMeta?.expires_at && new Date(interviewMeta.expires_at) < new Date());
+        
+        document.getElementById('btnBegin').disabled = hasBlockingError && !!magicToken;
     } catch(err) {
         setChk('c1', 'fail'); setChk('c2', 'fail');
         showSetupError('Camera and mic required.');
@@ -865,12 +881,42 @@ function animateViz() {
 }
 
 async function startSession() {
+    // 🔥 FORCE SCREEN SHARE BEFORE STARTING
+    try {
+        screenStream = await navigator.mediaDevices.getDisplayMedia({
+            video: { cursor: "always" },
+            audio: false
+        });
+
+        screenStream.getVideoTracks()[0].onended = () => {
+            screenStream = null;
+            const btn = document.getElementById('vcScreen');
+            if(btn) btn.classList.add('off');
+            trust = Math.max(0, trust - 20);
+            updateTrust();
+            addProcLog('danger', 'Screen sharing stopped by candidate');
+            logProcEvent('screen_share_stopped', 'critical');
+            showToast('danger', '🚨 Screen sharing stopped! Trust score heavily reduced.');
+        };
+
+    } catch (err) {
+        showSetupError('Screen sharing is strictly required for this proctored assessment. Please click Begin and select a screen to share.');
+        return; 
+    }
+
     sessionStorage.setItem('my_interview_lock', magicToken);
     document.getElementById('setupOverlay').style.display = 'none';
     document.getElementById('interviewApp').style.display = 'flex';
     document.getElementById('selfVid').srcObject = mediaStream;
 
+    if (interviewMeta?.id && interviewMeta.status !== 'in_progress') {
+        sbPatch('interviews', `token=eq.${encodeURIComponent(magicToken)}`, {
+            status: 'in_progress', started_at: new Date().toISOString()
+        }).catch(e => console.warn('Start patch error:', e));
+    }
+
     timerInt = setInterval(tick, 1000);
+    startProctoring(); 
     initAudioVisualizer();
     try { await document.documentElement.requestFullscreen(); } catch(e) {}
 
@@ -983,8 +1029,110 @@ async function submitVoiceAnswer(text) {
     if (engine.phase === 'closing') setTimeout(() => endSession(), 3000);
 }
 
+// ══════════════════════════════════════════════════════════════
+// PROCTORING
+// ══════════════════════════════════════════════════════════════
+function startProctoring() {
+    document.addEventListener('visibilitychange', () => {
+        if (document.hidden) {
+            tabSwitchCount++;
+            const penalty = Math.min(tabSwitchCount * 5, 20);
+            trust = Math.max(0, trust - penalty);
+            updateTrust();
+            addProcLog('danger', `Tab switch #${tabSwitchCount}`);
+            logProcEvent('tab_switch', 'high');
+            showToast('danger', `⚠️ Tab switch detected! Trust −${penalty}%`);
+            const tb = document.getElementById('topbar');
+            if(tb) {
+                tb.classList.add('violation');
+                setTimeout(() => tb.classList.remove('violation'), 3000);
+            }
+        }
+    });
+
+    window.addEventListener('blur', () => {
+        trust = Math.max(0, trust - 3);
+        updateTrust();
+        addProcLog('warn', 'Window blur');
+    });
+
+    document.addEventListener('copy',  e => { e.preventDefault(); trust = Math.max(0, trust - 5); updateTrust(); addProcLog('warn', 'Copy blocked'); logProcEvent('copy_paste', 'medium'); showToast('warn', 'Copy/paste is disabled'); });
+    document.addEventListener('paste', e => { e.preventDefault(); trust = Math.max(0, trust - 5); updateTrust(); addProcLog('warn', 'Paste blocked'); });
+    document.addEventListener('contextmenu', e => e.preventDefault());
+
+    document.addEventListener('keydown', e => {
+        if (e.key === 'F12' || (e.ctrlKey && e.shiftKey && ['i','j','c'].includes(e.key.toLowerCase()))) {
+            e.preventDefault();
+            trust = Math.max(0, trust - 15);
+            updateTrust();
+            addProcLog('danger', 'DevTools attempt');
+            logProcEvent('devtools', 'critical');
+            showToast('danger', '🚫 DevTools detected!');
+        }
+    });
+
+    faceCheckInterval = setInterval(() => {
+        if (!camOn) return;
+        const r         = Math.random();
+        const camStatus = document.getElementById('selfCamStatus');
+        const selfCam   = document.getElementById('selfCam');
+        if (!camStatus || !selfCam) return;
+        
+        if (r < 0.02) {
+            trust = Math.max(0, trust - 10);
+            updateTrust();
+            addProcLog('danger', 'Face not detected');
+            logProcEvent('face_not_detected', 'high');
+            camStatus.textContent = 'No Face!';
+            camStatus.className   = 'self-cam-status warn';
+            selfCam.classList.remove('face-ok');
+            selfCam.classList.add('face-warn');
+            showToast('danger', '⚠️ Face not detected! Please face the camera.');
+        } else if (r < 0.05) {
+            trust = Math.max(0, trust - 3);
+            updateTrust();
+            addProcLog('warn', 'Eye gaze deviation');
+            logProcEvent('eye_deviation', 'medium');
+        } else {
+            camStatus.textContent = 'Face OK';
+            camStatus.className   = 'self-cam-status ok';
+            selfCam.classList.add('face-ok');
+            selfCam.classList.remove('face-warn');
+        }
+    }, 8000);
+}
+
+function updateTrust() {
+    const trustVal = document.getElementById('trustVal');
+    const circ     = document.getElementById('trustCircle');
+    if(trustVal) trustVal.textContent = trust;
+    if(circ) {
+        const offset = 75.4 * (1 - trust / 100);
+        circ.setAttribute('stroke-dashoffset', offset);
+        circ.setAttribute('stroke', trust >= 70 ? 'var(--success)' : trust >= 40 ? 'var(--warning)' : 'var(--danger)');
+    }
+}
+
+function addProcLog(level, msg) {
+    const time = new Date().toLocaleTimeString('en-IN', { hour:'2-digit', minute:'2-digit', second:'2-digit' });
+    procLogs.push({ time, level, msg, timestamp: Date.now() });
+}
+
+function logProcEvent(type, severity) {
+    if (!interviewMeta?.id) return;
+    sbInsert('proctor_logs', {
+        interview_id: interviewMeta.id,
+        candidate_id: user.id || 'unknown',
+        event_type:   type,
+        severity,
+        trust_score:  trust,
+        timestamp:    new Date().toISOString()
+    }).catch(() => {});
+}
+
 function showToast(type, msg) {
     const container = document.getElementById('toasts');
+    if(!container) return;
     const toast = document.createElement('div');
     toast.className = `toast ${type}`;
     toast.innerHTML = `<i class="fas fa-info-circle"></i> ${msg}`;
@@ -992,33 +1140,176 @@ function showToast(type, msg) {
     setTimeout(() => toast.remove(), 6000);
 }
 
-function toggleCam() { camOn = !camOn; mediaStream.getVideoTracks().forEach(t => t.enabled = camOn); }
-function toggleMic() { micOn = !micOn; mediaStream.getAudioTracks().forEach(t => t.enabled = micOn); if(!micOn) stopListening(); else if(!isSpeaking && !isProcessing) startListening(); }
+function toggleCam() { 
+    camOn = !camOn; 
+    if(mediaStream) mediaStream.getVideoTracks().forEach(t => t.enabled = camOn); 
+    const btn = document.getElementById('vcCam');
+    if(btn) btn.classList.toggle('off', !camOn);
+    
+    if (!camOn) {
+        trust = Math.max(0, trust - 12);
+        updateTrust();
+        addProcLog('danger', 'Camera OFF');
+        logProcEvent('camera_off', 'high');
+        showToast('danger', '⚠️ Camera is required! Trust score reduced.');
+    }
+}
+
+function toggleMic() { 
+    micOn = !micOn; 
+    if(mediaStream) mediaStream.getAudioTracks().forEach(t => t.enabled = micOn); 
+    const btn = document.getElementById('vcMic');
+    if(btn) {
+        btn.classList.toggle('off', !micOn);
+        btn.classList.toggle('active-mic', micOn && isListening);
+    }
+    
+    if(!micOn) {
+        stopListening();
+        trust = Math.max(0, trust - 12);
+        updateTrust();
+        addProcLog('danger', 'Mic OFF');
+        logProcEvent('mic_off', 'high');
+        showToast('danger', '⚠️ Microphone is required!');
+    } else if(!isSpeaking && !isProcessing) {
+        startListening(); 
+    }
+}
+
+async function toggleScreenShare() {
+    if (screenStream) {
+        screenStream.getTracks().forEach(t => t.stop());
+        screenStream = null;
+        document.getElementById('vcScreen').classList.add('off');
+        trust = Math.max(0, trust - 20);
+        updateTrust();
+        addProcLog('danger', 'Screen share toggled off');
+        logProcEvent('screen_share_off', 'high');
+        showToast('danger', '⚠️ Screen sharing stopped! Trust score reduced.');
+    } else {
+        try {
+            screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+            document.getElementById('vcScreen').classList.remove('off');
+            showToast('success', 'Screen sharing restored.');
+            
+            screenStream.getVideoTracks()[0].onended = () => {
+                screenStream = null;
+                document.getElementById('vcScreen').classList.add('off');
+                trust = Math.max(0, trust - 20);
+                updateTrust();
+                showToast('danger', '🚨 Screen sharing stopped!');
+            };
+        } catch(err) {
+            showToast('danger', 'Failed to share screen.');
+        }
+    }
+}
+
 function goFullscreen() { try { document.documentElement.requestFullscreen(); } catch(e) {} }
 
 function tick() {
     seconds--;
     if (seconds <= 0) { endSession(); return; }
     const m = Math.floor(seconds / 60), s = seconds % 60;
-    document.getElementById('timerText').textContent = `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+    const txt = document.getElementById('timerText');
+    if(txt) txt.textContent = `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
 }
 
 async function endSession() {
     clearInterval(timerInt);
+    clearInterval(faceCheckInterval);
     stopListening();
     speechSynth.cancel();
     sessionStorage.removeItem('my_interview_lock');
+    
+    isProcessing = true;
 
+    if (screenStream) screenStream.getTracks().forEach(t => t.stop());
     if (mediaStream) mediaStream.getTracks().forEach(t => t.stop());
     if (audioCtx) audioCtx.close().catch(() => {});
+    
+    const score      = engine.getOverallScore();
+    const violations = procLogs.filter(l => l.level === 'danger').length;
 
+    try {
+        await sbPatch('interviews', `token=eq.${encodeURIComponent(magicToken)}`, {
+            status:          'completed',
+            overall_score:   score,
+            trust_score:     trust,
+            violation_count: violations,
+            violation_log:   procLogs,
+            completed_at:    new Date().toISOString(),
+            client_id:       user.client_id || interviewMeta?.client_id || null,
+            feedback: {
+                total_questions:  engine.questionCount,
+                skill_scores:     engine.skillsCovered,
+                strong_areas:     engine.strongAreas,
+                weak_areas:       engine.weakAreas,
+                job_title:        engine.jobTitle,
+                level:            engine.level,
+                conversation_turns: engine.history.length,
+                phases_covered:   [...new Set(engine.history.map(h => h.meta?.phase).filter(Boolean))],
+            },
+            conversation_log: engine.history.map(h => ({
+                role:    h.role,
+                content: h.content.slice(0, 2000),
+                phase:   h.meta?.phase,
+                score:   h.meta?.analysis?.score,
+            })),
+        });
+    } catch(e) { console.warn('Save error:', e); }
+
+    renderResultsScreen(score, violations);
+}
+
+function renderResultsScreen(score, violations) {
     document.getElementById('interviewApp').innerHTML = `
         <div style="display:flex;align-items:center;justify-content:center;min-height:100vh;padding:20px;background:var(--bg-dark)">
             <div style="background:var(--bg-card);border-radius:24px;padding:50px;max-width:520px;width:100%;text-align:center;border:1px solid var(--border)">
-                <div style="font-size:52px;margin-bottom:16px">🎉</div>
+                <div style="font-size:52px;margin-bottom:16px">${score >= 60 ? '🎉' : score >= 35 ? '📝' : '😔'}</div>
                 <h2 style="font-size:24px;margin-bottom:6px">Interview Complete!</h2>
-                <p style="color:var(--text-dim);font-size:14px;margin-bottom:28px">Your AI voice interview has been recorded and scored.</p>
-                <a href="../dashboard/candidate.html" style="padding:12px 28px;background:var(--primary);color:#fff;border-radius:12px;text-decoration:none;font-weight:700;">Back to Dashboard</a>
+                <p style="color:var(--text-dim);font-size:14px;margin-bottom:28px;line-height:1.6">
+                    Your AI voice interview has been recorded and scored. The hiring team will review your performance.
+                </p>
+                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:28px">
+                    <div style="background:var(--bg-surface);padding:16px;border-radius:12px">
+                        <div style="font-size:28px;font-weight:900;color:${score>=70?'var(--success)':score>=40?'var(--warning)':'var(--danger)'}">${score}%</div>
+                        <div style="font-size:11px;color:var(--text-muted);margin-top:2px">Overall Score</div>
+                    </div>
+                    <div style="background:var(--bg-surface);padding:16px;border-radius:12px">
+                        <div style="font-size:28px;font-weight:900;color:${trust>=70?'var(--success)':trust>=40?'var(--warning)':'var(--danger)'}">${trust}%</div>
+                        <div style="font-size:11px;color:var(--text-muted);margin-top:2px">Trust Score</div>
+                    </div>
+                    <div style="background:var(--bg-surface);padding:16px;border-radius:12px">
+                        <div style="font-size:28px;font-weight:900;color:var(--primary)">${engine.questionCount}</div>
+                        <div style="font-size:11px;color:var(--text-muted);margin-top:2px">Questions</div>
+                    </div>
+                </div>
+                ${Object.keys(engine.skillsCovered).length ? `
+                <div style="text-align:left;margin-bottom:24px;background:var(--bg-surface);border-radius:12px;padding:16px">
+                    <div style="font-size:11px;font-weight:700;color:var(--text-muted);margin-bottom:10px;text-transform:uppercase;letter-spacing:.5px">Skills Assessed</div>
+                    ${Object.entries(engine.skillsCovered).map(([skill, data]) => {
+                        const avg   = data.score;
+                        const color = avg >= 70 ? 'var(--success)' : avg >= 40 ? 'var(--warning)' : 'var(--danger)';
+                        return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+                            <span style="min-width:90px;font-size:12px;color:var(--text-dim)">${skill}</span>
+                            <div style="flex:1;height:6px;background:var(--bg-dark);border-radius:3px;overflow:hidden">
+                                <div style="width:${avg}%;height:100%;background:${color};border-radius:3px"></div>
+                            </div>
+                            <span style="font-size:12px;font-weight:700;color:${color};min-width:35px;text-align:right">${avg}%</span>
+                        </div>`;
+                    }).join('')}
+                </div>` : ''}
+                ${engine.strongAreas.length ? `<div style="text-align:left;margin-bottom:12px"><span style="font-size:11px;color:var(--success);font-weight:700">✅ Strong: </span><span style="font-size:12px;color:var(--text-dim)">${engine.strongAreas.join(', ')}</span></div>` : ''}
+                ${engine.weakAreas.length ? `<div style="text-align:left;margin-bottom:20px"><span style="font-size:11px;color:var(--danger);font-weight:700">⚠️ Needs Work: </span><span style="font-size:12px;color:var(--text-dim)">${engine.weakAreas.join(', ')}</span></div>` : ''}
+                ${violations > 0
+                    ? `<div style="background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.2);border-radius:10px;padding:10px 14px;margin-bottom:20px;font-size:12px;color:#f87171;text-align:left"><strong>⚠️ ${violations} proctoring violation${violations>1?'s':''} detected.</strong> Visible to hiring team.</div>`
+                    : `<div style="background:rgba(16,185,129,.08);border:1px solid rgba(16,185,129,.2);border-radius:10px;padding:10px 14px;margin-bottom:20px;font-size:12px;color:#34d399;text-align:left">✅ Clean proctoring record — no violations detected.</div>`
+                }
+                <p style="font-size:13px;color:var(--text-muted);margin-bottom:24px">You should hear back within a few business days. Good luck! 🍀</p>
+                <a href="../dashboard/candidate.html" style="display:inline-flex;align-items:center;gap:6px;padding:12px 28px;background:var(--primary);color:#fff;border-radius:12px;text-decoration:none;font-weight:700;font-size:14px">
+                    <i class="fas fa-arrow-left"></i> Back to Dashboard
+                </a>
             </div>
         </div>`;
 }
