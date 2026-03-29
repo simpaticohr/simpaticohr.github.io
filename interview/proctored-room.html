@@ -1185,40 +1185,37 @@ function aiSpeak(text) {
         if (current.trim()) chunks.push(current.trim());
 
         let idx = 0;
+        window.ttsKeepAlive = []; // 🔥 MAGIC FIX 1: This array stops Chrome from deleting the voice mid-sentence!
+
         function speakNext() {
             if (idx >= chunks.length) {
                 isSpeaking = false;
                 subtitle.classList.remove('show');
                 resolve();
 
-                // ── FIX: wait 800 ms after TTS ends before opening the mic ──
-                // Without this delay, the Speech Recognition immediately picks up
-                // the tail-end of the TTS audio through the device speaker,
-                // transcribes the AI's own words as candidate speech (≥ 4 words),
-                // and triggers submitVoiceAnswer() — causing the first question
-                // to be "answered" by the AI itself and then repeated.
                 setTimeout(() => {
-                    // Discard any transcript that accumulated during the TTS
                     finalTranscript   = '';
                     currentTranscript = '';
                     lastSpeechTime    = 0;
                     startListening();
                 }, 800);
-
                 return;
             }
             const u = new SpeechSynthesisUtterance(chunks[idx]);
+            window.ttsKeepAlive.push(u); // 🔥 Push to global array to keep it alive
+
             if (preferredVoice) u.voice = preferredVoice;
             u.rate = 1.0; u.pitch = 1.0; u.volume = 1.0;
             subtitle.textContent = chunks[idx];
+            
             u.onend  = () => { idx++; speakNext(); };
-            u.onerror = () => { idx++; speakNext(); };
+            u.onerror = (e) => { console.warn("TTS Error:", e); idx++; speakNext(); };
+            
             speechSynth.speak(u);
         }
         speakNext();
     });
 }
-
 function setOrbState(state) {
     const orb    = document.getElementById('aiOrb');
     const status = document.getElementById('aiStatusText');
