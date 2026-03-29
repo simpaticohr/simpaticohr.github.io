@@ -666,32 +666,30 @@ Respond directly to the candidate — 1 to 3 natural spoken sentences, ask exact
             }
         ];
 
-        try {
-            // ✅ FIXED: endpoint is /ai/chat (not /api/ai/chat)
-          const res = await fetch(`${API}/api/ai/interview-question`, {
+      try {
+            console.log("🚀 Sending prompt to AI backend...");
+            
+            // Pointing to the correct interview endpoint
+            const res = await fetch(`${API}/api/ai/interview-question`, {
                 method: 'POST',
                 headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${token}`
+                    'Content-Type': 'application/json'
                 },
-                body: JSON.stringify({ 
-                    messages: messages,
-                    token: magicToken 
-                })
+                body: JSON.stringify({ messages: messages })
             });
 
-            if (!res.ok) throw new Error(`AI API ${res.status}`);
+            if (!res.ok) {
+                const errText = await res.text();
+                throw new Error(`API Error ${res.status}: ${errText}`);
+            }
 
             const data = await res.json();
             let question = data?.data?.response || data?.response || '';
 
-            question = question
-                .replace(/\[.*?\]/g, '')
-                .replace(/\(.*?interviewer.*?\)/gi, '')
-                .replace(/^["']|["']$/g, '')
-                .trim();
+            // Clean up AI text artifacts
+            question = question.replace(/\[.*?\]/g, '').replace(/\(.*?interviewer.*?\)/gi, '').replace(/^["']|["']$/g, '').trim();
 
-            if (!question || question.length < 10) question = this.getFallbackQuestion();
+            if (!question || question.length < 10) throw new Error("AI returned an empty question");
 
             this.history.push({
                 role: 'ai',
@@ -700,11 +698,12 @@ Respond directly to the candidate — 1 to 3 natural spoken sentences, ask exact
             });
 
             return question;
+
         } catch (err) {
-            console.error('AI generation error:', err);
+            // 🔥 IF YOU SEE THE FALLBACK QUESTION, PRESS F12 AND LOOK FOR THIS RED TEXT:
+            console.error('🔥 AI API crashed. Using fallback. Reason:', err);
             return this.getFallbackQuestion();
         }
-    },
 
     updatePhase(analysis) {
         const q   = this.questionCount;
