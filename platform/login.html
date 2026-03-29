@@ -211,7 +211,6 @@
 </head>
 <body>
 
-<!-- Left Panel -->
 <div class="auth-left">
     <div class="auth-left-content">
         <h2>Welcome to<br><span>SimpaticoHR</span> Platform</h2>
@@ -227,7 +226,6 @@
     </div>
 </div>
 
-<!-- Right Panel -->
 <div class="auth-right">
     <div class="auth-form">
         <div class="logo">
@@ -240,13 +238,11 @@
         <h2>Sign In</h2>
         <p class="subtitle">Access your recruitment dashboard</p>
 
-        <!-- Alert Box -->
         <div class="alert-box error" id="alertBox">
             <p id="alertMsg">Login failed</p>
             <div class="alert-detail" id="alertDetail"></div>
         </div>
 
-        <!-- Role Tabs -->
         <div class="role-tabs">
             <button class="role-tab active" data-role="hr" onclick="switchRole(this)">HR / Company</button>
             <button class="role-tab" data-role="candidate" onclick="switchRole(this)">Candidate</button>
@@ -255,7 +251,6 @@
 
         <div class="divider">or continue with email</div>
 
-        <!-- Login Form -->
         <form id="loginForm" onsubmit="handleLogin(event)">
             <div class="form-group">
                 <label class="form-label">Email Address</label>
@@ -277,14 +272,14 @@
                 </div>
             </div>
             
+            <button type="button" onclick="signInWithGoogle()" style="width:100%;padding:11px;margin-bottom:12px;border:1px solid #dadce0;border-radius:8px;background:#fff;color:#3c4043;font-size:14px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:10px;font-family:inherit;">
+              <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" width="20">
+              Continue with Google
+            </button>
 
+            <div style="text-align:center;color:#9ca3af;font-size:13px;margin-bottom:12px;">— or continue with email —</div>
 
-<div style="text-align:center;color:#9ca3af;font-size:13px;margin-bottom:12px;"><button type="button" onclick="signInWithGoogle()" style="width:100%;padding:11px;margin-bottom:12px;border:1px solid #dadce0;border-radius:8px;background:#fff;color:#3c4043;font-size:14px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:10px;font-family:inherit;">
-  <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" width="20">
-  Continue with Google
-</button>
-<div style="text-align:center;color:#9ca3af;font-size:13px;margin-bottom:12px;">— or continue with email —</div>
-<button type="submit" class="submit-btn" id="submitBtn">
+            <button type="submit" class="submit-btn" id="submitBtn">
                 <span class="spinner" id="spinner"></span>
                 <i class="fas fa-sign-in-alt" id="btnIcon"></i>
                 <span id="btnText">Sign In</span>
@@ -301,27 +296,26 @@
     </div>
 </div>
 
-<!-- Debug Panel (Ctrl+Shift+D to toggle) -->
 <div class="debug-panel" id="debugPanel"></div>
 
 <script>
 // ═══════════════════════════════════════════════════════════════════
-// CONFIGURATION — fill these in from Supabase Dashboard → Settings → API
+// CONFIGURATION
 // ═══════════════════════════════════════════════════════════════════
 const SUPABASE_URL  = "https://cvkxtsvgnynxexmemfuy.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN2a3h0c3ZnbnlueGV4bWVtZnV5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc0MjE2NTEsImV4cCI6MjA4Mjk5NzY1MX0.2mys8Cc-ucJ1uLThEGJubeDEg1TvfIAkW-xFsR4ecq4";
-
-// Worker is used as fallback only
 const WORKER_URL = 'https://evalis-ai.simpaticohrconsultancy.workers.dev/api/auth/login';
 
-// Role → redirect routes
+// 🔥 SMART ROUTING: Automatically ensures paths start from root or /dashboard/
+const basePath = window.location.pathname.includes('/dashboard/') ? '/dashboard/' : '/';
+
 const ROLE_ROUTES = {
-    'super_admin':   'super-admin.html',
-    'company_admin': '../dashboard/company.html',
-    'hr':            '../dashboard/hr.html',
-    'hr_manager':    '../dashboard/hr.html',
-    'interviewer':   '../dashboard/interviewer.html',
-    'candidate':     '../dashboard/candidate.html',
+    'super_admin':   basePath + 'super_admin.html',
+    'company_admin': basePath + 'hr.html',
+    'hr':            basePath + 'hr.html',
+    'hr_manager':    basePath + 'hr.html',
+    'interviewer':   basePath + 'hr.html',
+    'candidate':     basePath + 'candidate.html',
 };
 
 // ═══════════════════════════════════════════════════════════════════
@@ -329,9 +323,6 @@ const ROLE_ROUTES = {
 // ═══════════════════════════════════════════════════════════════════
 let selectedRole = 'hr';
 
-// ═══════════════════════════════════════════════════════════════════
-// URL PARAMS — pre-select role from ?role=
-// ═══════════════════════════════════════════════════════════════════
 (function applyUrlRole() {
     const urlRole = new URLSearchParams(window.location.search).get('role');
     if (urlRole && ['hr', 'candidate', 'super_admin'].includes(urlRole)) {
@@ -343,55 +334,35 @@ let selectedRole = 'hr';
 })();
 
 // ═══════════════════════════════════════════════════════════════════
-// AUTO-LOGIN — if valid session token exists, skip login screen
+// AUTO-LOGIN
 // ═══════════════════════════════════════════════════════════════════
 (function checkExistingSession() {
     const token = localStorage.getItem('simpatico_token') || sessionStorage.getItem('simpatico_token');
     const user  = JSON.parse(localStorage.getItem('simpatico_user') || sessionStorage.getItem('simpatico_user') || '{}');
     if (!token || !user.role) return;
 
-    // Verify token is still valid via Supabase
-    const supabaseReady = SUPABASE_URL !== "https://YOUR_PROJECT_REF.supabase.co";
-    if (supabaseReady) {
-        fetch(`${SUPABASE_URL}/auth/v1/user`, {
-            headers: {
-                'apikey': SUPABASE_ANON_KEY,
-                'Authorization': `Bearer ${token}`
-            }
-        })
-        .then(r => r.json())
-        .then(data => {
-            if (data?.id && !data?.error) {
-                debug(`Existing session valid for ${user.email} — redirecting`);
-                const allowedRoles = {hr:['hr','hr_manager','interviewer','company_admin'],candidate:['candidate'],super_admin:['super_admin']};
-                if ((allowedRoles[selectedRole]||[]).includes(user.role)) { redirectByRole(user.role); }
-            } else {
-                // Token expired — clear
-                ['simpatico_token','simpatico_user','simpatico_refresh'].forEach(k => {
-                    localStorage.removeItem(k);
-                    sessionStorage.removeItem(k);
-                });
-            }
-        })
-        .catch(() => { /* Network error — stay on login */ });
-    }
+    fetch(`${SUPABASE_URL}/auth/v1/user`, {
+        headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${token}` }
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data?.id && !data?.error) {
+            debug(`Existing session valid for ${user.email} — redirecting`);
+            redirectByRole(user.role);
+        } else {
+            ['simpatico_token','simpatico_user','simpatico_refresh'].forEach(k => {
+                localStorage.removeItem(k); sessionStorage.removeItem(k);
+            });
+        }
+    })
+    .catch(() => {});
 })();
 
 // ═══════════════════════════════════════════════════════════════════
-// ROLE TABS
+// UI HELPERS
 // ═══════════════════════════════════════════════════════════════════
-function toast(msg) {
-    alert(msg);
-}
 function showAlert(msg, detail, type) {
     let box = document.getElementById('alertBox');
-    if (!box) {
-        box = document.createElement('div');
-        box.id = 'alertBox';
-        box.style.cssText = 'margin-top:12px;padding:12px 16px;border-radius:8px;font-size:14px;font-weight:500;';
-        const form = document.querySelector('form') || document.querySelector('.auth-form');
-        if (form) form.appendChild(box);
-    }
     const isError = !type || type === 'error';
     box.style.background = isError ? '#FEE2E2' : '#DCFCE7';
     box.style.color = isError ? '#DC2626' : '#16A34A';
@@ -407,48 +378,16 @@ function resetBtn(btn, spinner, btnIcon, btnText) {
     if (btnText) btnText.textContent = 'Sign In';
 }
 
-
 function mapError(msg) {
     const m = (msg || '').toLowerCase();
-    if (m.includes('invalid login credentials') || m.includes('invalid password'))
-        return 'Invalid email or password.';
-    if (m.includes('email not confirmed'))
-        return 'Please verify your email before signing in.';
-    if (m.includes('user not found'))
-        return 'No account found. Please register first.';
+    if (m.includes('invalid login credentials') || m.includes('invalid password')) return 'Invalid email or password.';
+    if (m.includes('email not confirmed')) return 'Please verify your email before signing in.';
+    if (m.includes('user not found')) return 'No account found. Please register first.';
     return msg || 'Login failed. Please try again.';
 }
 
-
-function signInWithGoogle() {
-    if (selectedRole === 'super_admin') {
-        alert('Super Admin must use email and password only.');
-        return;
-    }
-    const redirectTo = window.location.origin + '/platform/auth-callback.html';
-    fetch('https://cvkxtsvgnynxexmemfuy.supabase.co/auth/v1/authorize?provider=google&redirect_to=' + encodeURIComponent(redirectTo), {
-        method: 'GET',
-        headers: { 'apikey': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN2a3h0c3ZnbnlueGV4bWVtZnV5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc0MjE2NTEsImV4cCI6MjA4Mjk5NzY1MX0.2mys8Cc-ucJ1uLThEGJubeDEg1TvfIAkW-xFsR4ecq4' }
-    });
-    window.location.href = 'https://cvkxtsvgnynxexmemfuy.supabase.co/auth/v1/authorize?provider=google&redirect_to=' + encodeURIComponent(redirectTo);
-}
-
-
-function signInWithGoogle() {
-    const role = selectedRole || 'candidate';
-    const base = 'https://cvkxtsvgnynxexmemfuy.supabase.co';
-    const key = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN2a3h0c3ZnbnlueGV4bWVtZnV5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc0MjE2NTEsImV4cCI6MjA4Mjk5NzY1MX0.2mys8Cc-ucJ1uLThEGJubeDEg1TvfIAkW-xFsR4ecq4';
-    const callback = window.location.origin + '/platform/auth-callback.html?role=' + role;
-    window.location.href = base + '/auth/v1/authorize?provider=google&redirect_to=' + encodeURIComponent(callback);
-}
-
-function debug(msg) {
-    console.log('[Login]', msg);
-}
-function hideAlert() {
-    const el = document.getElementById('alertBox');
-    if (el) el.style.display = 'none';
-}
+function debug(msg) { console.log('[Login]', msg); }
+function hideAlert() { document.getElementById('alertBox').style.display = 'none'; }
 function switchRole(el) {
     document.querySelectorAll('.role-tab').forEach(t => t.classList.remove('active'));
     el.classList.add('active');
@@ -456,82 +395,54 @@ function switchRole(el) {
     hideAlert();
 }
 
-// ═══════════════════════════════════════════════════════════════════
-// PASSWORD TOGGLE
-// ═══════════════════════════════════════════════════════════════════
 function togglePassword() {
     const input = document.getElementById('password');
     const icon  = document.getElementById('pwToggleIcon');
     if (input.type === 'password') {
-        input.type = 'text';
-        icon.className = 'fas fa-eye-slash';
+        input.type = 'text'; icon.className = 'fas fa-eye-slash';
     } else {
-        input.type = 'password';
-        icon.className = 'fas fa-eye';
+        input.type = 'password'; icon.className = 'fas fa-eye';
     }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// GOOGLE AUTH
+// ═══════════════════════════════════════════════════════════════════
+function signInWithGoogle() {
+    if (selectedRole === 'super_admin') {
+        alert('Super Admin must use email and password only.');
+        return;
+    }
+    const callback = window.location.origin + basePath + 'auth-callback.html?role=' + selectedRole;
+    window.location.href = `${SUPABASE_URL}/auth/v1/authorize?provider=google&redirect_to=${encodeURIComponent(callback)}`;
 }
 
 // ═══════════════════════════════════════════════════════════════════
 // SUPABASE DIRECT AUTH
 // ═══════════════════════════════════════════════════════════════════
 async function loginWithSupabase(email, password) {
-    // Step 1: Authenticate
     const authRes = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=password`, {
         method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'apikey': SUPABASE_ANON_KEY,
-            'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
-        },
+        headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_ANON_KEY },
         body: JSON.stringify({ email, password })
     });
 
     const authData = await authRes.json();
+    if (!authRes.ok) throw new Error(authData?.error_description || authData?.message || 'Invalid email or password.');
 
-    if (!authRes.ok) {
-        const msg = authData?.error_description || authData?.msg || authData?.message || 'Invalid email or password.';
-        throw new Error(msg);
-    }
-
-    // Step 2: Fetch user profile
-    const profileRes = await fetch(
-        `${SUPABASE_URL}/rest/v1/users?auth_id=eq.${authData.user.id}&select=*,companies(*)&limit=1`,
-        {
-            headers: {
-                'apikey': SUPABASE_ANON_KEY,
-                'Authorization': `Bearer ${authData.access_token}`,
-                'Content-Type': 'application/json'
-            }
-        }
-    );
+    const profileRes = await fetch(`${SUPABASE_URL}/rest/v1/users?auth_id=eq.${authData.user.id}&select=*,companies(*)&limit=1`, {
+        headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${authData.access_token}` }
+    });
 
     const profiles = await profileRes.json();
     const profile  = profiles?.[0] ?? null;
 
-    if (!profile) {
-        throw new Error('User profile not found. Please contact your administrator.');
-    }
-
-    // Step 3: Update last_login (best-effort, non-blocking)
-    fetch(`${SUPABASE_URL}/rest/v1/users?auth_id=eq.${authData.user.id}`, {
-        method: 'PATCH',
-        headers: {
-            'apikey': SUPABASE_ANON_KEY,
-            'Authorization': `Bearer ${authData.access_token}`,
-            'Content-Type': 'application/json',
-            'Prefer': 'return=minimal'
-        },
-        body: JSON.stringify({ last_login: new Date().toISOString() })
-    }).catch(() => {});
+    if (!profile) throw new Error('User profile not found. Please contact your administrator.');
 
     return {
-        token:        authData.access_token,
+        token: authData.access_token,
         refreshToken: authData.refresh_token,
-        user: {
-            id:    authData.user.id,
-            email: authData.user.email,
-            role:  profile.role
-        },
+        user: { id: authData.user.id, email: authData.user.email, role: profile.role },
         profile
     };
 }
@@ -540,47 +451,14 @@ async function loginWithSupabase(email, password) {
 // WORKER FALLBACK AUTH
 // ═══════════════════════════════════════════════════════════════════
 async function loginWithWorker(email, password) {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 15000);
-
-    let res;
-    try {
-        res = await fetch(WORKER_URL, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ email, password, role: selectedRole }),
-            signal: controller.signal
-        });
-    } finally {
-        clearTimeout(timeout);
-    }
-
-    let data;
-    try   { data = await res.json(); }
-    catch { throw new Error('Server returned an unexpected response. Please try again.'); }
-
-    if (!res.ok || data?.error) {
-        throw new Error(data?.error?.message || data?.error || data?.message || `Server error (${res.status}). Please try again.`);
-    }
-
-    if (!data.token) throw new Error('No token received from server.');
-
-    return {
-        token:        data.token,
-        refreshToken: data.refresh_token || null,
-        user:         data.user || { email, role: selectedRole }
-    };
-}
-
-// ═══════════════════════════════════════════════════════════════════
-// PERSIST SESSION
-// ═══════════════════════════════════════════════════════════════════
-function persistSession(authData) {
-    localStorage.setItem('simpatico_token', authData.token);
-    localStorage.setItem('simpatico_user',  JSON.stringify(authData.user));
-    if (authData.refreshToken) {
-        localStorage.setItem('simpatico_refresh', authData.refreshToken);
-    }
+    const res = await fetch(WORKER_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password, role: selectedRole })
+    });
+    const data = await res.json();
+    if (!res.ok || data?.error) throw new Error(data?.error?.message || data?.message || `Server error.`);
+    return { token: data.token, refreshToken: data.refresh_token, user: data.user || { email, role: selectedRole } };
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -596,78 +474,32 @@ async function handleLogin(e) {
     const btnIcon  = document.getElementById('btnIcon');
     const btnText  = document.getElementById('btnText');
 
-    // Clear field errors
     document.querySelectorAll('.form-input').forEach(i => i.classList.remove('error-field'));
     hideAlert();
 
-    if (!email) {
-        showAlert('Please enter your email address.');
-        document.getElementById('email').classList.add('error-field');
-        return;
-    }
-    if (!password) {
-        showAlert('Please enter your password.');
-        document.getElementById('password').classList.add('error-field');
-        return;
-    }
-
-    // Loading state
-    btn.disabled = true;
-    spinner.style.display = 'inline-block';
-    btnIcon.style.display = 'none';
-    btnText.textContent = 'Signing in...';
-
-    debug(`Attempting login for: ${email} (role: ${selectedRole})`);
+    btn.disabled = true; spinner.style.display = 'inline-block'; btnIcon.style.display = 'none'; btnText.textContent = 'Signing in...';
 
     let authData = null;
 
-    // ① Try Supabase directly (bypasses the broken Worker)
-    const supabaseConfigured =
-        SUPABASE_URL     !== 'https://YOUR_PROJECT_REF.supabase.co' &&
-        SUPABASE_ANON_KEY !== 'YOUR_SUPABASE_ANON_KEY';
-
-    if (supabaseConfigured) {
-        try {
-            authData = await loginWithSupabase(email, password);
-            debug(`Supabase auth success. Role: ${authData.user?.role}`);
-        } catch (err) {
-            debug(`Supabase error: ${err.message}`);
-            // Credential errors — no point trying Worker
-            const credErrors = [
-                'invalid login credentials', 'invalid email', 'invalid password',
-                'email not confirmed', 'user not found', 'profile not found'
-            ];
-            const isCredErr = credErrors.some(s => err.message.toLowerCase().includes(s));
-            if (isCredErr) {
-                showAlert(mapError(err.message));
-                resetBtn(btn, spinner, btnIcon, btnText);
-                return;
-            }
-            // Non-credential error — fall through to Worker
-            console.warn('[Login] Supabase direct auth failed, trying Worker:', err.message);
+    try {
+        authData = await loginWithSupabase(email, password);
+    } catch (err) {
+        const isCredErr = ['invalid', 'confirmed', 'not found'].some(s => err.message.toLowerCase().includes(s));
+        if (isCredErr) {
+            showAlert(mapError(err.message));
+            resetBtn(btn, spinner, btnIcon, btnText);
+            return;
         }
-    } else {
-        debug('Supabase not configured — going straight to Worker');
-    }
-
-    // ② Fall back to Cloudflare Worker
-    if (!authData) {
+        
         try {
             authData = await loginWithWorker(email, password);
-            debug(`Worker auth success. Role: ${authData.user?.role}`);
-        } catch (err) {
-            debug(`Worker error: ${err.message}`);
-            showAlert(mapError(err.message), err.name === 'AbortError'
-                ? 'The server took too long to respond. Please try again.'
-                : err.message.includes('Failed to fetch')
-                    ? `Cannot connect to the authentication server. Check your internet connection.`
-                    : '');
+        } catch (workerErr) {
+            showAlert(mapError(workerErr.message));
             resetBtn(btn, spinner, btnIcon, btnText);
             return;
         }
     }
 
-    // ③ Role check (only enforce if user selected Super Admin tab)
     const userRole = authData.user?.role || '';
     if (selectedRole === 'super_admin' && userRole !== 'super_admin') {
         showAlert('This account does not have Super Admin privileges.');
@@ -675,52 +507,30 @@ async function handleLogin(e) {
         return;
     }
 
-    // ④ Role check
     const TAB_ROLES = {
         hr: ['hr','hr_manager','interviewer','company_admin'],
         candidate: ['candidate'],
         super_admin: ['super_admin'],
     };
+    
     if (!(TAB_ROLES[selectedRole] || []).includes(userRole)) {
         showAlert('Access denied.', 'Wrong portal. Use the correct login tab.');
         resetBtn(btn, spinner, btnIcon, btnText);
         return;
     }
-    // ⑤ Success — persist and redirect
-    persistSession(authData);
-    toast('Login successful! Redirecting...', 'success');
-    btnText.textContent = 'Redirecting...';
-    debug(`Redirecting for role: ${userRole}`);
 
+    localStorage.setItem('simpatico_token', authData.token);
+    localStorage.setItem('simpatico_user',  JSON.stringify(authData.user));
+    if (authData.refreshToken) localStorage.setItem('simpatico_refresh', authData.refreshToken);
+
+    btnText.textContent = 'Redirecting...';
     setTimeout(() => redirectByRole(userRole), 800);
 }
 
-// ═══════════════════════════════════════════════════════════════════
-// REDIRECT BY ROLE
-// ═══════════════════════════════════════════════════════════════════
 function redirectByRole(role) {
-    const TAB = {
-        hr: ['hr','hr_manager','interviewer','company_admin'],
-        candidate: ['candidate'],
-        super_admin: ['super_admin'],
-    };
-    if (!(TAB[selectedRole] || []).includes(role)) {
-        showAlert('Access denied.', 'Your account cannot access this portal. Select the correct login tab.');
-        resetBtn(
-            document.getElementById('submitBtn'),
-            document.getElementById('spinner'),
-            document.getElementById('btnIcon'),
-            document.getElementById('btnText')
-        );
-        return;
-    }
     const target = ROLE_ROUTES[role] || ROLE_ROUTES['hr'];
-    debug('-> ' + target);
     window.location.href = target;
 }
-
-
 </script>
 </body>
-</html
->
+</html>
