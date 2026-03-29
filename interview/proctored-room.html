@@ -593,7 +593,7 @@ const engine = {
     resumeContext: '',
 
     buildSystemPrompt() {
-        return `You are an elite, rigorous technical interviewer at a FAANG company. You are conducting a LIVE voice interview.
+        return `You are an elite, rigorous Lead Interviewer at a world-class company. You are conducting a LIVE voice interview.
 
 ## YOUR PERSONA (CRITICAL)
 - Be ruthlessly professional, direct, and concise.
@@ -603,10 +603,11 @@ const engine = {
 
 ## CANDIDATE & ROLE
 - Candidate is applying for: "${this.jobTitle}" (${this.level} level)
-- Job Requirements: ${this.jobContext || 'Standard technical skills.'}
+- Job Requirements: ${this.jobContext || 'Standard role skills.'}
 
 ## INSTRUCTIONS
-- If the candidate's answer lacks technical depth, explicitly challenge them on it. Ask for "Why?", trade-offs, edge cases, or exact metrics.
+- Tailor your questions strictly to the "${this.jobTitle}" role. If it is a non-technical role (like HR, Sales, or Management), DO NOT ask coding or software architecture questions. Ask domain-specific scenario questions.
+- If the candidate's answer lacks depth, explicitly challenge them on it. Ask for "Why?", methodologies, edge cases, or exact metrics.
 - Transition seamlessly from their previous answer directly into the next follow-up or new topic.`;
     },
 
@@ -639,6 +640,7 @@ const engine = {
             console.log("🚀 Sending prompt to AI backend...");
             const res = await fetch(`${API}/api/ai/interview-question`, {
                 method: 'POST',
+                // 🔥 JWT HEADER REMOVED HERE TO FIX 401 AUTH ERROR
                 headers: { 'Content-Type': 'application/json' }, 
                 body: JSON.stringify({ 
                     messages: messages,
@@ -680,7 +682,7 @@ const engine = {
         if (q >= max) { this.phase = 'closing'; return; }
         if (q <= 1) { this.phase = 'intro'; return; }
 
-        // 🔥 DEEP FOLLOW-UP LOGIC: Find a skill that hasn't reached 2 turns yet
+        // 🔥 DEEP FOLLOW-UP LOGIC
         const activeSkill = this.skillsToProbe.find(s => !this.skillsCovered[s] || this.skillsCovered[s].turns < 2);
 
         if (activeSkill) {
@@ -702,18 +704,17 @@ const engine = {
 
         switch (this.phase) {
             case 'intro': 
-                return `Start the interview immediately. Ask them to introduce their technical experience relevant to the ${this.jobTitle} role. Do not introduce yourself.`;
+                return `Start the interview immediately. Ask them to introduce their experience relevant to the ${this.jobTitle} role. Do not introduce yourself.`;
             
             case 'skill_probe': 
                 if (turns === 0) {
-                    return `Ask a direct, challenging technical question about "${this.currentSkill}". No pleasantries.`;
+                    return `Ask a direct, challenging question specifically about "${this.currentSkill}". No pleasantries.`;
                 } else {
-                    // 🔥 DEEP FOLLOW UP: Force the AI to drill into their last answer
-                    return `CRITICAL: DO NOT change the subject yet. The candidate just answered about "${this.currentSkill}". Ask a highly specific follow-up question drilling into their last answer. Probe for architectural trade-offs, edge cases, exact metrics, or "Why they chose X over Y".`;
+                    return `CRITICAL: DO NOT change the subject yet. The candidate just answered about "${this.currentSkill}". Ask a highly specific follow-up question drilling into their last answer. Probe for depth, methodologies, metrics, or trade-offs.`;
                 }
 
             case 'scenario': 
-                return `Present a complex technical scenario relevant to the ${this.jobTitle} role. Test their system design and problem-solving.`;
+                return `Present a complex, realistic scenario relevant to the ${this.jobTitle} role. Test their practical problem-solving.`;
             
             case 'behavioral': 
                 return `Ask a challenging behavioral question (leadership, failure, collaboration).`;
@@ -728,8 +729,8 @@ const engine = {
 
     getFallbackQuestion() {
         if (this.phase === 'closing') return `Thank you for your time. The team will review and reach out. Do you have any questions for me?`;
-        if (this.skillsToProbe.length > 0) return `Let's discuss ${this.skillsToProbe[0]}. Walk me through a complex implementation involving it.`;
-        return `Describe a recent technical challenge you solved. What was the exact bottleneck and how did you resolve it?`;
+        if (this.skillsToProbe.length > 0) return `Let's discuss ${this.skillsToProbe[0]}. Walk me through a complex situation involving it.`;
+        return `Describe a recent complex challenge you solved in your previous role. What was your exact approach?`;
     },
 
     recordSkillAssessment(skill, score, depth) {
@@ -810,18 +811,30 @@ async function init() {
     if (job) {
         document.getElementById('sjcTitle').textContent = job.title || 'Interview';
         document.getElementById('sjcDept').innerHTML = `<i class="fas fa-building"></i> ${job.department || 'General'}`;
-        engine.skillsToProbe = [...(job.skills_required || job.skills || [])];
+        
+        // 🔥 COMMA-SEPARATED SKILLS PARSER
+        let rawSkills = job.skills_required || job.skills || '';
+        let cleanSkillsArray = [];
+        if (typeof rawSkills === 'string') {
+            cleanSkillsArray = rawSkills.split(/[,.\n]+/).map(s => s.trim()).filter(Boolean);
+        } else if (Array.isArray(rawSkills)) {
+            cleanSkillsArray = rawSkills;
+        }
+        if (cleanSkillsArray.length === 0) cleanSkillsArray = ['Core Role Principles', 'Problem Solving'];
+
+        engine.skillsToProbe = cleanSkillsArray;
         engine.jobTitle   = job.title || '';
-        engine.jobContext = `Title: ${job.title}\nDescription: ${job.description||''}\nSkills: ${(job.skills_required||job.skills||[]).join(', ')}`;
+        engine.jobContext = `Title: ${job.title}\nDepartment: ${job.department||''}\nDescription: ${job.description||''}\nSkills: ${cleanSkillsArray.join(', ')}`;
         engine.maxQuestions = Math.min(Math.max(engine.skillsToProbe.length + 3, 6), 12);
+        
     } else if (interviewMeta) {
         const positionName = interviewMeta.position || interviewMeta.job_title || 'the open position';
         document.getElementById('sjcTitle').textContent = positionName;
         document.getElementById('sjcDept').innerHTML = `<i class="fas fa-building"></i> General`;
         
         engine.jobTitle = positionName;
-        engine.jobContext = `Title: ${positionName}\nConduct a standard professional technical interview.`;
-        engine.skillsToProbe = [positionName + ' Core Skills', 'System Design', 'Problem Solving'];
+        engine.jobContext = `Title: ${positionName}\nConduct a highly specific professional interview tailored strictly to a ${positionName} role.`;
+        engine.skillsToProbe = [positionName + ' Core Skills', 'Problem Solving', 'Communication'];
         engine.maxQuestions = 6;
     }
 
