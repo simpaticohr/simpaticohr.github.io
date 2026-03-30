@@ -62,18 +62,35 @@
         .modal-container {
             background: white; border-radius: 16px; padding: 30px; width: 100%; max-width: 500px; 
             box-shadow: 0 20px 40px rgba(0,0,0,0.2);
+            max-height: 90vh; overflow-y: auto;
         }
         .form-group { margin-bottom: 15px; }
         .form-group label { display: block; font-size: 0.85rem; font-weight: 600; margin-bottom: 5px; color: #374151; }
-        .form-group input, .form-group textarea { 
+        .form-group input[type="text"], .form-group input[type="email"], .form-group input[type="tel"], .form-group input[type="url"], .form-group textarea { 
             width: 100%; padding: 10px 14px; border: 1.5px solid #e5e7eb; border-radius: 8px; 
             font-family: inherit; font-size: 0.9rem; transition: 0.2s; outline: none;
         }
         .form-group input:focus, .form-group textarea:focus { border-color: #4f46e5; box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.1); }
+        
+        /* Custom File Input Styling */
+        .file-upload-wrapper {
+            border: 2px dashed #cbd5e1; border-radius: 8px; padding: 16px; text-align: center;
+            background: #f8fafc; cursor: pointer; transition: 0.2s; position: relative;
+        }
+        .file-upload-wrapper:hover { border-color: #4f46e5; background: #eef2ff; }
+        .file-upload-wrapper input[type="file"] {
+            position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer;
+        }
+        .file-upload-text { font-size: 0.85rem; color: #64748b; }
+        .file-upload-text i { font-size: 1.2rem; color: #4f46e5; margin-bottom: 4px; display: block; }
+
         .btn-submit { background: #4f46e5; color: white; border: none; padding: 10px 20px; border-radius: 8px; font-weight: 600; cursor: pointer; transition: 0.2s; }
         .btn-submit:hover { background: #4338ca; }
         .btn-cancel { background: white; color: #475569; border: 1px solid #cbd5e1; padding: 10px 20px; border-radius: 8px; font-weight: 600; cursor: pointer; transition: 0.2s; }
         .btn-cancel:hover { background: #f8fafc; }
+        
+        .radio-group { display: flex; gap: 16px; margin-bottom: 8px; }
+        .radio-group label { display: flex; align-items: center; gap: 6px; font-weight: 500; font-size: 0.85rem; cursor: pointer; }
     </style>
 </head>
 <body>
@@ -164,7 +181,7 @@
         </div>
 
         <div id="tab-interviews" class="tab-content">
-            <div class="panel"><div class="panel-body"><div class="empty-state"><p>No interviews found.</p></div></div></div>
+            <div class="panel"><div class="panel-body" id="fullInterviewsContainer"><div class="empty-state"><p>No interviews found.</p></div></div></div>
         </div>
 
         <div id="tab-profile" class="tab-content">
@@ -193,10 +210,26 @@
                 <label>Phone Number *</label>
                 <input type="tel" id="applyPhone" required>
             </div>
+            
             <div class="form-group">
-                <label>Resume / CV Link *</label>
-                <input type="url" id="applyResume" placeholder="e.g., Google Drive, Portfolio, or LinkedIn URL" required>
+                <label>Resume / CV *</label>
+                <div class="radio-group">
+                    <label><input type="radio" name="resumeType" value="file" checked onchange="toggleResumeInput()"> Upload File</label>
+                    <label><input type="radio" name="resumeType" value="link" onchange="toggleResumeInput()"> Provide Link</label>
+                </div>
+                
+                <div id="resumeFileWrap" class="file-upload-wrapper">
+                    <input type="file" id="applyResumeFile" accept=".pdf,.doc,.docx" onchange="updateFileName(this)" required>
+                    <div class="file-upload-text" id="fileUploadText">
+                        <i class="fas fa-cloud-upload-alt"></i>
+                        Click to upload PDF, DOC, or DOCX<br>
+                        <strong id="fileNameDisplay" style="color:#1e293b; display:block; margin-top:6px;"></strong>
+                    </div>
+                </div>
+
+                <input type="url" id="applyResumeLink" placeholder="e.g., Google Drive, Portfolio, or LinkedIn URL" style="display:none;">
             </div>
+
             <div class="form-group" style="margin-bottom:24px;">
                 <label>Cover Letter (Optional)</label>
                 <textarea id="applyCoverLetter" rows="3" placeholder="Tell us why you are a great fit..."></textarea>
@@ -233,38 +266,32 @@ if (!token) {
 function loadDashboardData() {
     const storedData = JSON.parse(localStorage.getItem('simpaticoHR_data') || '{"jobs":[], "applications":[], "interviews":[]}');
     
-    // Safely ensure arrays exist
     if (!storedData.applications) storedData.applications = [];
     if (!storedData.interviews) storedData.interviews = [];
 
-    // Filter data specifically for THIS candidate
     const openJobs = storedData.jobs.filter(j => j.status === 'open' || j.status === 'Active');
     const myApplications = storedData.applications.filter(app => app.candidateEmail === user.email);
     const myInterviews = storedData.interviews.filter(int => int.candidateEmail === user.email);
 
-    // Update Top Dashboard Stats
     document.getElementById('statAppsSent').textContent = myApplications.length;
     document.getElementById('statShortlisted').textContent = myApplications.filter(app => app.status === 'Shortlisted').length;
-    document.getElementById('statInterviews').textContent = myInterviews.filter(int => int.status === 'scheduled').length; // 🔥 Updates Scheduled count
+    document.getElementById('statInterviews').textContent = myInterviews.filter(int => int.status === 'scheduled').length;
 
-    // Render UI Elements
     renderJobs(openJobs, myApplications);
     renderApplications(myApplications);
-    renderCandidateInterviews(myInterviews); // 🔥 Renders the Interviews
+    renderCandidateInterviews(myInterviews); 
 }
 
 // ------------------------------------------
-// Render: Interviews (NEW)
+// Render: Interviews 
 // ------------------------------------------
 function renderCandidateInterviews(myInterviews) {
     const upcomingContainer = document.getElementById('upcomingInterviewsList');
-    const tabContainer = document.querySelector('#tab-interviews .panel-body');
+    const tabContainer = document.getElementById('fullInterviewsContainer');
     
-    // Get only scheduled ones for the dashboard widget
     const upcoming = myInterviews.filter(i => i.status === 'scheduled')
         .sort((a,b) => a.date.localeCompare(b.date) || a.startTime.localeCompare(b.startTime));
         
-    // 1. Render Dashboard Widget (Max 3)
     if(upcoming.length === 0) {
         upcomingContainer.innerHTML = `<div class="empty-state"><i class="fas fa-calendar-times"></i><p>No upcoming interviews scheduled right now.</p></div>`;
     } else {
@@ -274,19 +301,16 @@ function renderCandidateInterviews(myInterviews) {
         upcomingContainer.innerHTML = html;
     }
     
-    // 2. Render Full Interviews Tab (All history)
     if(myInterviews.length === 0) {
         tabContainer.innerHTML = `<div class="empty-state"><i class="fas fa-video"></i><p>No interview records found.</p></div>`;
     } else {
         let html = '<div style="display:flex; flex-direction:column; gap:12px;">';
-        // Sort newest first
         myInterviews.sort((a,b) => b.date.localeCompare(a.date)).forEach(int => { html += buildInterviewCard(int); });
         html += '</div>';
         tabContainer.innerHTML = html;
     }
 }
 
-// Helper to build the visual card for an interview
 function buildInterviewCard(int) {
     const isProctored = int.mode === 'proctored';
     const modeBadge = isProctored 
@@ -294,8 +318,6 @@ function buildInterviewCard(int) {
         : `<span style="color:#4f46e5; background:#e0e7ff; padding:4px 10px; border-radius:12px; font-size:0.75rem; font-weight:700;"><i class="fas fa-video"></i> ${int.mode}</span>`;
     
     let actionBtn = '';
-    
-    // If scheduled, give them the Join Link!
     if(int.status === 'scheduled' && int.interviewLink) {
         actionBtn = `<a href="${int.interviewLink}" target="_blank" style="background:#4f46e5; color:white; padding:10px 20px; border-radius:8px; text-decoration:none; font-size:0.85rem; font-weight:600; display:inline-block; transition:0.2s; box-shadow:0 2px 4px rgba(79,70,229,0.2);"><i class="fas fa-play" style="margin-right:6px;"></i> Join Interview</a>`;
     } else if (int.status === 'completed') {
@@ -317,9 +339,7 @@ function buildInterviewCard(int) {
                 </div>
                 ${modeBadge}
             </div>
-            <div>
-                ${actionBtn}
-            </div>
+            <div>${actionBtn}</div>
         </div>
     `;
 }
@@ -384,11 +404,18 @@ function renderApplications(myApplications) {
     let appsHtml = '<div style="display: grid; grid-template-columns: 1fr; gap: 12px;">';
     myApplications.forEach(app => {
         const badgeClass = app.status === 'Shortlisted' ? 'badge-active' : 'badge-review';
+        // Display file name or link icon
+        const isFile = app.resumeLink && !app.resumeLink.startsWith('http');
+        const resumeDisplay = isFile 
+            ? `<i class="fas fa-file-pdf" style="color:#ef4444; margin-right:4px;"></i> ${app.resumeLink}`
+            : `<i class="fas fa-link" style="color:#3b82f6; margin-right:4px;"></i> <a href="${app.resumeLink}" target="_blank" style="color:#3b82f6; text-decoration:none;">View Link</a>`;
+
         appsHtml += `
             <div style="border: 1px solid #e5e7eb; border-radius: 10px; padding: 16px; display: flex; justify-content: space-between; align-items: center; background: #fff;">
                 <div>
                     <h5 style="margin-bottom: 4px; font-size: 1rem; color: #1e293b;">${app.jobTitle}</h5>
-                    <div style="font-size: 0.8rem; color: #64748b;"><i class="fas fa-calendar" style="margin-right:4px;"></i> Applied on: ${new Date(app.dateApplied).toLocaleDateString()}</div>
+                    <div style="font-size: 0.8rem; color: #64748b; margin-bottom: 6px;"><i class="fas fa-calendar" style="margin-right:4px;"></i> Applied on: ${new Date(app.dateApplied).toLocaleDateString()}</div>
+                    <div style="font-size: 0.8rem;">${resumeDisplay}</div>
                 </div>
                 <span class="badge ${badgeClass}" style="padding: 6px 12px; font-size:0.8rem;">${app.status}</span>
             </div>
@@ -399,8 +426,36 @@ function renderApplications(myApplications) {
 }
 
 // ------------------------------------------
-// Application Modal Logic
+// Application Modal Logic (With File Upload)
 // ------------------------------------------
+function toggleResumeInput() {
+    const type = document.querySelector('input[name="resumeType"]:checked').value;
+    const fileWrap = document.getElementById('resumeFileWrap');
+    const fileInput = document.getElementById('applyResumeFile');
+    const linkInput = document.getElementById('applyResumeLink');
+
+    if (type === 'file') {
+        fileWrap.style.display = 'block';
+        fileInput.required = true;
+        linkInput.style.display = 'none';
+        linkInput.required = false;
+    } else {
+        fileWrap.style.display = 'none';
+        fileInput.required = false;
+        linkInput.style.display = 'block';
+        linkInput.required = true;
+    }
+}
+
+function updateFileName(input) {
+    const display = document.getElementById('fileNameDisplay');
+    if (input.files && input.files.length > 0) {
+        display.textContent = input.files[0].name;
+    } else {
+        display.textContent = '';
+    }
+}
+
 function openApplicationModal(jobId, jobTitle) {
     document.getElementById('applyJobId').value = jobId;
     document.getElementById('applyJobTitle').textContent = jobTitle;
@@ -409,6 +464,10 @@ function openApplicationModal(jobId, jobTitle) {
 
 function closeApplicationModal() {
     document.getElementById('applicationModal').classList.remove('active');
+    document.getElementById('applicationForm').reset();
+    document.getElementById('fileNameDisplay').textContent = '';
+    document.getElementById('applyName').value = document.getElementById('userName').textContent;
+    document.getElementById('applyEmail').value = JSON.parse(localStorage.getItem('simpatico_user') || '{}').email || '';
 }
 
 function submitApplication(e) {
@@ -419,9 +478,22 @@ function submitApplication(e) {
     const name = document.getElementById('applyName').value;
     const email = document.getElementById('applyEmail').value;
     const phone = document.getElementById('applyPhone').value;
-    const resume = document.getElementById('applyResume').value;
     
-    // Create new application object
+    // Check if they selected File or Link
+    const resumeType = document.querySelector('input[name="resumeType"]:checked').value;
+    let finalResumeVal = '';
+
+    if (resumeType === 'file') {
+        const fileInput = document.getElementById('applyResumeFile');
+        if (fileInput.files.length > 0) {
+            // In a real app, this is where you upload to Supabase Storage.
+            // For this frontend mockup, we just save the filename.
+            finalResumeVal = fileInput.files[0].name; 
+        }
+    } else {
+        finalResumeVal = document.getElementById('applyResumeLink').value;
+    }
+    
     const newApplication = {
         id: 'app_' + Date.now(),
         jobId: jobId,
@@ -429,18 +501,16 @@ function submitApplication(e) {
         candidateName: name,
         candidateEmail: email,
         candidatePhone: phone,
-        resumeLink: resume,
+        resumeLink: finalResumeVal, // Holds either the file name or the URL
         status: 'Under Review',
         dateApplied: new Date().toISOString()
     };
 
-    // Save to LocalStorage DataStore
     const storedData = JSON.parse(localStorage.getItem('simpaticoHR_data') || '{"jobs":[], "applications":[]}');
     if (!storedData.applications) storedData.applications = [];
     
     storedData.applications.push(newApplication);
     
-    // Increment the job's application counter in HR dashboard
     const jobIndex = storedData.jobs.findIndex(j => j.id === jobId);
     if (jobIndex > -1) {
         storedData.jobs[jobIndex].applications = (storedData.jobs[jobIndex].applications || 0) + 1;
@@ -448,7 +518,6 @@ function submitApplication(e) {
 
     localStorage.setItem('simpaticoHR_data', JSON.stringify(storedData));
 
-    // Cleanup & Reload
     closeApplicationModal();
     alert("✅ Application Submitted Successfully!");
     loadDashboardData(); 
