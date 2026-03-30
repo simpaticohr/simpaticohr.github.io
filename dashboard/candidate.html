@@ -217,6 +217,7 @@ const user = JSON.parse(localStorage.getItem('simpatico_user') || '{}');
 if (!token) {
     window.location.href = '/platform/login.html';
 } else {
+    // Set UI Names safely
     const name = user.full_name || user.name || 'Candidate';
     document.getElementById('userName').textContent = name;
     document.getElementById('userInitials').textContent = name.charAt(0).toUpperCase();
@@ -227,28 +228,105 @@ if (!token) {
 }
 
 // ------------------------------------------
-// Core Functions
+// Core Functions: Load Data
 // ------------------------------------------
 function loadDashboardData() {
-    const storedData = JSON.parse(localStorage.getItem('simpaticoHR_data') || '{"jobs":[], "applications":[]}');
+    const storedData = JSON.parse(localStorage.getItem('simpaticoHR_data') || '{"jobs":[], "applications":[], "interviews":[]}');
     
-    // Ensure applications array exists
+    // Safely ensure arrays exist
     if (!storedData.applications) storedData.applications = [];
+    if (!storedData.interviews) storedData.interviews = [];
 
-    // Filter to only show jobs that are Open/Active
+    // Filter data specifically for THIS candidate
     const openJobs = storedData.jobs.filter(j => j.status === 'open' || j.status === 'Active');
-    
-    // Filter to only show applications submitted by THIS candidate
     const myApplications = storedData.applications.filter(app => app.candidateEmail === user.email);
+    const myInterviews = storedData.interviews.filter(int => int.candidateEmail === user.email);
 
-    // Update Stats
+    // Update Top Dashboard Stats
     document.getElementById('statAppsSent').textContent = myApplications.length;
     document.getElementById('statShortlisted').textContent = myApplications.filter(app => app.status === 'Shortlisted').length;
+    document.getElementById('statInterviews').textContent = myInterviews.filter(int => int.status === 'scheduled').length; // 🔥 Updates Scheduled count
 
+    // Render UI Elements
     renderJobs(openJobs, myApplications);
     renderApplications(myApplications);
+    renderCandidateInterviews(myInterviews); // 🔥 Renders the Interviews
 }
 
+// ------------------------------------------
+// Render: Interviews (NEW)
+// ------------------------------------------
+function renderCandidateInterviews(myInterviews) {
+    const upcomingContainer = document.getElementById('upcomingInterviewsList');
+    const tabContainer = document.querySelector('#tab-interviews .panel-body');
+    
+    // Get only scheduled ones for the dashboard widget
+    const upcoming = myInterviews.filter(i => i.status === 'scheduled')
+        .sort((a,b) => a.date.localeCompare(b.date) || a.startTime.localeCompare(b.startTime));
+        
+    // 1. Render Dashboard Widget (Max 3)
+    if(upcoming.length === 0) {
+        upcomingContainer.innerHTML = `<div class="empty-state"><i class="fas fa-calendar-times"></i><p>No upcoming interviews scheduled right now.</p></div>`;
+    } else {
+        let html = '<div style="display:flex; flex-direction:column; gap:12px;">';
+        upcoming.slice(0,3).forEach(int => { html += buildInterviewCard(int); });
+        html += '</div>';
+        upcomingContainer.innerHTML = html;
+    }
+    
+    // 2. Render Full Interviews Tab (All history)
+    if(myInterviews.length === 0) {
+        tabContainer.innerHTML = `<div class="empty-state"><i class="fas fa-video"></i><p>No interview records found.</p></div>`;
+    } else {
+        let html = '<div style="display:flex; flex-direction:column; gap:12px;">';
+        // Sort newest first
+        myInterviews.sort((a,b) => b.date.localeCompare(a.date)).forEach(int => { html += buildInterviewCard(int); });
+        html += '</div>';
+        tabContainer.innerHTML = html;
+    }
+}
+
+// Helper to build the visual card for an interview
+function buildInterviewCard(int) {
+    const isProctored = int.mode === 'proctored';
+    const modeBadge = isProctored 
+        ? '<span style="color:#7c3aed; background:#ede9fe; padding:4px 10px; border-radius:12px; font-size:0.75rem; font-weight:700;"><i class="fas fa-shield-halved"></i> Proctored Room</span>' 
+        : `<span style="color:#4f46e5; background:#e0e7ff; padding:4px 10px; border-radius:12px; font-size:0.75rem; font-weight:700;"><i class="fas fa-video"></i> ${int.mode}</span>`;
+    
+    let actionBtn = '';
+    
+    // If scheduled, give them the Join Link!
+    if(int.status === 'scheduled' && int.interviewLink) {
+        actionBtn = `<a href="${int.interviewLink}" target="_blank" style="background:#4f46e5; color:white; padding:10px 20px; border-radius:8px; text-decoration:none; font-size:0.85rem; font-weight:600; display:inline-block; transition:0.2s; box-shadow:0 2px 4px rgba(79,70,229,0.2);"><i class="fas fa-play" style="margin-right:6px;"></i> Join Interview</a>`;
+    } else if (int.status === 'completed') {
+        actionBtn = `<span style="color:#10b981; font-weight:700; font-size:0.85rem; background:#dcfce7; padding:6px 12px; border-radius:8px;"><i class="fas fa-check-circle"></i> Completed</span>`;
+    } else if (int.status === 'cancelled') {
+        actionBtn = `<span style="color:#ef4444; font-weight:700; font-size:0.85rem; background:#fee2e2; padding:6px 12px; border-radius:8px;"><i class="fas fa-times-circle"></i> Cancelled</span>`;
+    } else {
+        actionBtn = `<span style="color:#64748b; font-size:0.85rem;">Link pending...</span>`;
+    }
+
+    return `
+        <div style="border:1px solid #e5e7eb; border-radius:12px; padding:20px; background:#fff; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:16px; box-shadow:0 1px 2px rgba(0,0,0,0.05);">
+            <div>
+                <h5 style="margin-bottom:6px; font-size:1.05rem; color:#1e293b; font-weight:700;">${int.position} <span style="color:#64748b; font-weight:500;">(${int.round})</span></h5>
+                <div style="font-size:0.85rem; color:#475569; margin-bottom:12px; display:flex; gap:16px;">
+                    <span><i class="fas fa-calendar" style="color:#94a3b8;"></i> ${new Date(int.date).toLocaleDateString()}</span>
+                    <span><i class="fas fa-clock" style="color:#94a3b8;"></i> ${int.startTime}</span>
+                    <span><i class="fas fa-user-tie" style="color:#94a3b8;"></i> ${int.interviewer.split('(')[0]}</span>
+                </div>
+                ${modeBadge}
+            </div>
+            <div>
+                ${actionBtn}
+            </div>
+        </div>
+    `;
+}
+
+// ------------------------------------------
+// Render: Jobs & Applications
+// ------------------------------------------
 function renderJobs(openJobs, myApplications) {
     const jobsContainer = document.getElementById('jobsListContainer');
     
@@ -257,13 +335,11 @@ function renderJobs(openJobs, myApplications) {
         return;
     }
 
-    // Get a list of Job IDs the candidate has already applied for
     const appliedJobIds = myApplications.map(app => app.jobId);
-
     let jobsHtml = '<div style="display: grid; grid-template-columns: 1fr; gap: 16px;">';
+    
     openJobs.forEach(job => {
         const hasApplied = appliedJobIds.includes(job.id);
-        
         jobsHtml += `
             <div style="border: 1px solid #e5e7eb; border-radius: 12px; padding: 20px; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
                 <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px;">
@@ -312,9 +388,9 @@ function renderApplications(myApplications) {
             <div style="border: 1px solid #e5e7eb; border-radius: 10px; padding: 16px; display: flex; justify-content: space-between; align-items: center; background: #fff;">
                 <div>
                     <h5 style="margin-bottom: 4px; font-size: 1rem; color: #1e293b;">${app.jobTitle}</h5>
-                    <div style="font-size: 0.8rem; color: #64748b;">Applied on: ${new Date(app.dateApplied).toLocaleDateString()}</div>
+                    <div style="font-size: 0.8rem; color: #64748b;"><i class="fas fa-calendar" style="margin-right:4px;"></i> Applied on: ${new Date(app.dateApplied).toLocaleDateString()}</div>
                 </div>
-                <span class="badge ${badgeClass}" style="padding: 6px 12px;">${app.status}</span>
+                <span class="badge ${badgeClass}" style="padding: 6px 12px; font-size:0.8rem;">${app.status}</span>
             </div>
         `;
     });
@@ -375,8 +451,8 @@ function submitApplication(e) {
     // Cleanup & Reload
     closeApplicationModal();
     alert("✅ Application Submitted Successfully!");
-    loadDashboardData(); // Refresh UI
-    switchTab('applications', document.querySelector('.nav-item:nth-child(4)')); // Jump to My Applications tab
+    loadDashboardData(); 
+    switchTab('applications', document.querySelector('.nav-item:nth-child(4)')); 
 }
 
 // ------------------------------------------
