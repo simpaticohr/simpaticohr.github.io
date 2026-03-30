@@ -3433,6 +3433,69 @@ function timeAgo(timestamp) {
     if (days  < 30) return `${days} day${days > 1 ? 's' : ''} ago`;
     return formatDate(new Date(timestamp).toISOString().split('T')[0]);
 }
+    // ===== PASTE THIS NEW STUFF RIGHT ABOVE </script> =====
+
+// ===== CANDIDATES & APPLICATIONS TABLE =====
+function renderCandidates() {
+    const tbody = document.getElementById('candidatesTableBody');
+    const emptyState = document.getElementById('candidatesEmptyState');
+    const table = document.getElementById('candidatesTable');
+    if (!tbody) return;
+
+    if (!appData.applications) appData.applications = [];
+    const apps = appData.applications.sort((a, b) => new Date(b.dateApplied) - new Date(a.dateApplied));
+
+    if (apps.length === 0) {
+        tbody.innerHTML = '';
+        if (emptyState) emptyState.style.display = 'block';
+        if (table) table.style.display = 'none';
+        return;
+    }
+
+    if (emptyState) emptyState.style.display = 'none';
+    if (table) table.style.display = 'table';
+
+    tbody.innerHTML = apps.map(app => {
+        const isFile = app.resumeLink && !app.resumeLink.startsWith('http');
+        const resumeDisplay = isFile 
+            ? `<i class="fas fa-file-pdf" style="color:#ef4444; margin-right:4px;"></i> ${escapeHtml(app.resumeLink)}`
+            : `<a href="${escapeHtml(app.resumeLink)}" target="_blank" style="color:var(--primary); text-decoration:none;"><i class="fas fa-external-link-alt"></i> View Link</a>`;
+        
+        const badgeClass = app.status === 'Shortlisted' ? 'badge-active' : (app.status === 'Rejected' ? 'badge-cancelled' : 'badge-pending');
+
+        return `
+            <tr>
+                <td><strong>${escapeHtml(app.candidateName)}</strong></td>
+                <td><span style="font-weight:600; color:var(--primary);">${escapeHtml(app.jobTitle)}</span></td>
+                <td>
+                    <div style="font-size:0.85rem;">${escapeHtml(app.candidateEmail)}</div>
+                    <div style="font-size:0.8rem; color:var(--text-secondary);"><i class="fas fa-phone"></i> ${escapeHtml(app.candidatePhone)}</div>
+                </td>
+                <td>${resumeDisplay}</td>
+                <td>${formatDate(app.dateApplied)}</td>
+                <td><span class="status-badge ${badgeClass}">${escapeHtml(app.status)}</span></td>
+                <td>
+                    <button class="btn-sm-action link-btn" title="Shortlist" onclick="updateAppStatus('${app.id}', 'Shortlisted')"><i class="fas fa-check"></i></button>
+                    <button class="btn-sm-action delete" title="Reject" onclick="updateAppStatus('${app.id}', 'Rejected')"><i class="fas fa-times"></i></button>
+                </td>
+            </tr>
+        `;
+    }).join('');
+}
+
+function updateAppStatus(appId, newStatus) {
+    DataStore.update(data => {
+        const app = data.applications.find(a => a.id === appId);
+        if (app) app.status = newStatus;
+    });
+    
+    appData = DataStore.get();
+    renderCandidates();
+    if(window.showToast) showToast(`✅ Candidate marked as ${newStatus}`);
+}
+</script>
+</body>
+</html>
 </script>
 </body>
 </html>
