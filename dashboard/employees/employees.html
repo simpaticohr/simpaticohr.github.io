@@ -190,9 +190,9 @@
                     </div>
                 </form>
             </div>
-            <div class="modal-footer">
+           <div class="modal-footer">
                 <button type="button" class="btn-cancel" data-bs-dismiss="modal">Cancel</button>
-                <button type="submit" form="addEmployeeForm" class="btn-save">Save Employee</button>
+                <button type="button" class="btn-save" onclick="window.saveEmployee(event)">Save Employee</button>
             </div>
         </div>
     </div>
@@ -225,10 +225,15 @@ window.renderEmployeesTable = function() {
         emps = emps.filter(e => e.department === filterDept);
     }
 
-    // Update Stats
-    document.getElementById('statTotalEmployees').textContent = window.appData.employees.length;
-    document.getElementById('statActiveEmployees').textContent = window.appData.employees.filter(e => e.status !== 'Inactive').length;
-    document.getElementById('statOnboarding').textContent = window.appData.employees.filter(e => e.status === 'Onboarding').length;
+    // Safely Update Stats
+    var totalEl = document.getElementById('statTotalEmployees');
+    if (totalEl) totalEl.textContent = window.appData.employees.length;
+    
+    var activeEl = document.getElementById('statActiveEmployees');
+    if (activeEl) activeEl.textContent = window.appData.employees.filter(e => e.status !== 'Inactive').length;
+    
+    var onbEl = document.getElementById('statOnboarding');
+    if (onbEl) onbEl.textContent = window.appData.employees.filter(e => e.status === 'Onboarding').length;
 
     // Render Logic
     if (emps.length === 0) {
@@ -243,14 +248,9 @@ window.renderEmployeesTable = function() {
 
     var html = '';
     emps.forEach((emp, idx) => {
-        // 🔥 THE BULLETPROOF FIX: Safely grab names and prevent crashes
         var fName = emp.firstName || emp.first_name || '';
         var lName = emp.lastName || emp.last_name || '';
-        
-        // Grab first letters, default to "EM" if both are blank
-        var fInit = fName.charAt(0);
-        var lInit = lName.charAt(0);
-        var initials = (fInit + lInit).toUpperCase() || 'EM';
+        var initials = (fName.charAt(0) + lName.charAt(0)).toUpperCase() || 'EM';
 
         var color = avatarColors[idx % avatarColors.length];
         var fullName = (fName + ' ' + lName).trim() || 'Unnamed Employee';
@@ -286,14 +286,23 @@ window.renderEmployeesTable = function() {
     tbody.innerHTML = html;
 };
 
+// 🔥 FIX 2: Prevent multiple Bootstrap modal instances from getting stuck
 window.openAddEmployeeModal = function() {
     document.getElementById('addEmployeeForm').reset();
-    var modal = new bootstrap.Modal(document.getElementById('addEmployeeModal'));
+    var modalEl = document.getElementById('addEmployeeModal');
+    var modal = bootstrap.Modal.getInstance(modalEl) || new bootstrap.Modal(modalEl);
     modal.show();
 };
 
 window.saveEmployee = function(e) {
-    e.preventDefault();
+    if (e) e.preventDefault();
+    
+    // 🔥 FIX 3: Manually trigger form validation since we bypassed the standard submit
+    var form = document.getElementById('addEmployeeForm');
+    if (!form.checkValidity()) {
+        form.reportValidity();
+        return;
+    }
     
     // Safely extract values from the modal
     var newEmp = {
@@ -311,10 +320,11 @@ window.saveEmployee = function(e) {
         createdAt: new Date().toISOString()
     };
 
-    // Add to DataStore
+    // Add to DataStore defensively
     if (window.DataStore) {
         window.DataStore.update(data => {
             if (!data.employees) data.employees = [];
+            if (!data.stats) data.stats = {}; // Prevent crashes if stats is missing
             data.employees.push(newEmp);
             data.stats.totalEmployees = data.employees.length;
         });
@@ -325,10 +335,19 @@ window.saveEmployee = function(e) {
 
     window.renderEmployeesTable();
     
-    // Hide Modal and Show Toast
+    // 🔥 FIX 4: Bulletproof Modal Close
     var modalEl = document.getElementById('addEmployeeModal');
     var modal = bootstrap.Modal.getInstance(modalEl);
-    if (modal) modal.hide();
+    if (modal) {
+        modal.hide();
+    } else {
+        // Hard-hide fallback if Bootstrap fails
+        modalEl.classList.remove('show');
+        modalEl.style.display = 'none';
+        document.body.classList.remove('modal-open');
+        var backdrop = document.querySelector('.modal-backdrop');
+        if (backdrop) backdrop.remove();
+    }
     
     if (window.showToast) window.showToast('✅ Employee added successfully!');
 };
@@ -339,6 +358,7 @@ window.deleteEmployee = function(id) {
     if (window.DataStore) {
         window.DataStore.update(data => {
             data.employees = (data.employees || []).filter(e => e.id !== id);
+            if (!data.stats) data.stats = {};
             data.stats.totalEmployees = data.employees.length;
         });
         window.appData = window.DataStore.get();
