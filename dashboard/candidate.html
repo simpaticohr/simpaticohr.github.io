@@ -44,13 +44,36 @@
         .panel-header h5 { font-size: 1rem; font-weight: 700; color: #1e293b; display: flex; align-items: center; gap: 8px; }
         .panel-body { padding: 20px; }
         
-        /* Empty States / Loading */
+        /* Empty States / Badges */
         .empty-state { text-align: center; padding: 40px 20px; color: #64748b; }
         .empty-state i { font-size: 2rem; margin-bottom: 12px; opacity: 0.5; }
         
         .badge { padding: 4px 10px; border-radius: 20px; font-size: 0.75rem; font-weight: 600; }
         .badge-pending { background: #fef3c7; color: #d97706; }
         .badge-active { background: #dcfce7; color: #15803d; }
+        .badge-review { background: #e0e7ff; color: #4f46e5; }
+
+        /* Application Modal */
+        .modal-overlay {
+            display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.6); 
+            z-index: 1000; align-items: center; justify-content: center; backdrop-filter: blur(2px);
+        }
+        .modal-overlay.active { display: flex; animation: fadeIn 0.2s; }
+        .modal-container {
+            background: white; border-radius: 16px; padding: 30px; width: 100%; max-width: 500px; 
+            box-shadow: 0 20px 40px rgba(0,0,0,0.2);
+        }
+        .form-group { margin-bottom: 15px; }
+        .form-group label { display: block; font-size: 0.85rem; font-weight: 600; margin-bottom: 5px; color: #374151; }
+        .form-group input, .form-group textarea { 
+            width: 100%; padding: 10px 14px; border: 1.5px solid #e5e7eb; border-radius: 8px; 
+            font-family: inherit; font-size: 0.9rem; transition: 0.2s; outline: none;
+        }
+        .form-group input:focus, .form-group textarea:focus { border-color: #4f46e5; box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.1); }
+        .btn-submit { background: #4f46e5; color: white; border: none; padding: 10px 20px; border-radius: 8px; font-weight: 600; cursor: pointer; transition: 0.2s; }
+        .btn-submit:hover { background: #4338ca; }
+        .btn-cancel { background: white; color: #475569; border: 1px solid #cbd5e1; padding: 10px 20px; border-radius: 8px; font-weight: 600; cursor: pointer; transition: 0.2s; }
+        .btn-cancel:hover { background: #f8fafc; }
     </style>
 </head>
 <body>
@@ -92,15 +115,15 @@
             <div class="stats-grid">
                 <div class="stat-card">
                     <div class="stat-icon" style="background:#e0e7ff;color:#4f46e5;"><i class="fas fa-paper-plane"></i></div>
-                    <div><h3>0</h3><p>Applications Sent</p></div>
+                    <div><h3 id="statAppsSent">0</h3><p>Applications Sent</p></div>
                 </div>
                 <div class="stat-card">
                     <div class="stat-icon" style="background:#dcfce7;color:#16a34a;"><i class="fas fa-check-circle"></i></div>
-                    <div><h3>0</h3><p>Shortlisted</p></div>
+                    <div><h3 id="statShortlisted">0</h3><p>Shortlisted</p></div>
                 </div>
                 <div class="stat-card">
                     <div class="stat-icon" style="background:#f3e8ff;color:#9333ea;"><i class="fas fa-video"></i></div>
-                    <div><h3>0</h3><p>Interviews</p></div>
+                    <div><h3 id="statInterviews">0</h3><p>Interviews</p></div>
                 </div>
             </div>
 
@@ -115,24 +138,12 @@
                     </div>
                 </div>
             </div>
-
-            <div class="panel">
-                <div class="panel-header">
-                    <h5><i class="fas fa-file-alt" style="color:#10b981;"></i> Recent Applications</h5>
-                </div>
-                <div class="panel-body" id="recentApplicationsList">
-                    <div class="empty-state">
-                        <i class="fas fa-folder-open"></i>
-                        <p>You haven't applied to any jobs recently.</p>
-                    </div>
-                </div>
-            </div>
         </div>
 
         <div id="tab-jobs" class="tab-content">
             <div class="panel">
                 <div class="panel-header"><h5><i class="fas fa-search"></i> Open Positions</h5></div>
-                <div class="panel-body">
+                <div class="panel-body" id="jobsListContainer">
                     <div class="empty-state">
                         <i class="fas fa-briefcase"></i>
                         <p>No open positions are currently listed. Check back later!</p>
@@ -142,14 +153,59 @@
         </div>
 
         <div id="tab-applications" class="tab-content">
-            <div class="panel"><div class="panel-body"><div class="empty-state"><p>No applications found.</p></div></div></div>
+            <div class="panel">
+                <div class="panel-header"><h5><i class="fas fa-file-alt"></i> My Submitted Applications</h5></div>
+                <div class="panel-body" id="myApplicationsContainer">
+                    <div class="empty-state">
+                        <p>You haven't submitted any applications yet.</p>
+                    </div>
+                </div>
+            </div>
         </div>
+
         <div id="tab-interviews" class="tab-content">
             <div class="panel"><div class="panel-body"><div class="empty-state"><p>No interviews found.</p></div></div></div>
         </div>
+
         <div id="tab-profile" class="tab-content">
             <div class="panel"><div class="panel-body"><p>Profile settings coming soon.</p></div></div>
         </div>
+    </div>
+</div>
+
+<div id="applicationModal" class="modal-overlay">
+    <div class="modal-container">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+            <h3 style="font-size:1.2rem; color:#1e293b;">Apply for <span id="applyJobTitle" style="color:#4f46e5;">Job</span></h3>
+            <button onclick="closeApplicationModal()" style="background:none; border:none; font-size:1.4rem; cursor:pointer; color:#64748b;">&times;</button>
+        </div>
+        <form id="applicationForm" onsubmit="submitApplication(event)">
+            <input type="hidden" id="applyJobId">
+            <div class="form-group">
+                <label>Full Name *</label>
+                <input type="text" id="applyName" required>
+            </div>
+            <div class="form-group">
+                <label>Email Address *</label>
+                <input type="email" id="applyEmail" required>
+            </div>
+            <div class="form-group">
+                <label>Phone Number *</label>
+                <input type="tel" id="applyPhone" required>
+            </div>
+            <div class="form-group">
+                <label>Resume / CV Link *</label>
+                <input type="url" id="applyResume" placeholder="e.g., Google Drive, Portfolio, or LinkedIn URL" required>
+            </div>
+            <div class="form-group" style="margin-bottom:24px;">
+                <label>Cover Letter (Optional)</label>
+                <textarea id="applyCoverLetter" rows="3" placeholder="Tell us why you are a great fit..."></textarea>
+            </div>
+            <div style="display:flex; justify-content:flex-end; gap:12px;">
+                <button type="button" class="btn-cancel" onclick="closeApplicationModal()">Cancel</button>
+                <button type="submit" class="btn-submit">Submit Application</button>
+            </div>
+        </form>
     </div>
 </div>
 
@@ -161,35 +217,53 @@ const user = JSON.parse(localStorage.getItem('simpatico_user') || '{}');
 if (!token) {
     window.location.href = '/platform/login.html';
 } else {
-    // Set UI Names safely
     const name = user.full_name || user.name || 'Candidate';
     document.getElementById('userName').textContent = name;
     document.getElementById('userInitials').textContent = name.charAt(0).toUpperCase();
+    
+    // Pre-fill application form with known data
+    document.getElementById('applyName').value = name;
+    document.getElementById('applyEmail').value = user.email || '';
 }
 
 // ------------------------------------------
-// Fetch and Render Jobs from DataStore
+// Core Functions
 // ------------------------------------------
-function loadJobs() {
-    const jobsContainer = document.querySelector('#tab-jobs .panel-body');
+function loadDashboardData() {
+    const storedData = JSON.parse(localStorage.getItem('simpaticoHR_data') || '{"jobs":[], "applications":[]}');
     
-    // Pull the data that HR saved into the shared local storage
-    const storedData = JSON.parse(localStorage.getItem('simpaticoHR_data') || '{"jobs":[]}');
-    
+    // Ensure applications array exists
+    if (!storedData.applications) storedData.applications = [];
+
     // Filter to only show jobs that are Open/Active
     const openJobs = storedData.jobs.filter(j => j.status === 'open' || j.status === 'Active');
+    
+    // Filter to only show applications submitted by THIS candidate
+    const myApplications = storedData.applications.filter(app => app.candidateEmail === user.email);
 
+    // Update Stats
+    document.getElementById('statAppsSent').textContent = myApplications.length;
+    document.getElementById('statShortlisted').textContent = myApplications.filter(app => app.status === 'Shortlisted').length;
+
+    renderJobs(openJobs, myApplications);
+    renderApplications(myApplications);
+}
+
+function renderJobs(openJobs, myApplications) {
+    const jobsContainer = document.getElementById('jobsListContainer');
+    
     if (openJobs.length === 0) {
-        jobsContainer.innerHTML = `
-            <div class="empty-state">
-                <i class="fas fa-briefcase"></i>
-                <p>No open positions are currently listed. Check back later!</p>
-            </div>`;
+        jobsContainer.innerHTML = `<div class="empty-state"><i class="fas fa-briefcase"></i><p>No open positions are currently listed.</p></div>`;
         return;
     }
 
+    // Get a list of Job IDs the candidate has already applied for
+    const appliedJobIds = myApplications.map(app => app.jobId);
+
     let jobsHtml = '<div style="display: grid; grid-template-columns: 1fr; gap: 16px;">';
     openJobs.forEach(job => {
+        const hasApplied = appliedJobIds.includes(job.id);
+        
         jobsHtml += `
             <div style="border: 1px solid #e5e7eb; border-radius: 12px; padding: 20px; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
                 <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px;">
@@ -211,9 +285,10 @@ function loadJobs() {
                         <i class="fas fa-money-bill-wave" style="margin-right:4px;"></i> 
                         ${job.salaryMin ? '₹' + job.salaryMin + ' - ₹' + job.salaryMax : 'Salary undisclosed'}
                     </span>
-                    <button onclick="applyForJob('${job.id}')" style="background: #4f46e5; color: white; border: none; padding: 8px 20px; border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 0.85rem; transition: 0.2s;">
-                        Apply Now
-                    </button>
+                    ${hasApplied 
+                        ? `<button disabled style="background: #e5e7eb; color: #64748b; border: none; padding: 8px 20px; border-radius: 8px; font-weight: 600; font-size: 0.85rem; cursor: not-allowed;"><i class="fas fa-check"></i> Applied</button>`
+                        : `<button onclick="openApplicationModal('${job.id}', '${job.title}')" style="background: #4f46e5; color: white; border: none; padding: 8px 20px; border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 0.85rem; transition: 0.2s;">Apply Now</button>`
+                    }
                 </div>
             </div>
         `;
@@ -222,22 +297,93 @@ function loadJobs() {
     jobsContainer.innerHTML = jobsHtml;
 }
 
-function applyForJob(jobId) {
-    alert("Application feature connecting... You clicked apply for job ID: " + jobId);
-    // You can wire this up to Supabase or your Cloudflare Worker later!
+function renderApplications(myApplications) {
+    const appsContainer = document.getElementById('myApplicationsContainer');
+    
+    if (myApplications.length === 0) {
+        appsContainer.innerHTML = `<div class="empty-state"><p>You haven't submitted any applications yet.</p></div>`;
+        return;
+    }
+
+    let appsHtml = '<div style="display: grid; grid-template-columns: 1fr; gap: 12px;">';
+    myApplications.forEach(app => {
+        const badgeClass = app.status === 'Shortlisted' ? 'badge-active' : 'badge-review';
+        appsHtml += `
+            <div style="border: 1px solid #e5e7eb; border-radius: 10px; padding: 16px; display: flex; justify-content: space-between; align-items: center; background: #fff;">
+                <div>
+                    <h5 style="margin-bottom: 4px; font-size: 1rem; color: #1e293b;">${app.jobTitle}</h5>
+                    <div style="font-size: 0.8rem; color: #64748b;">Applied on: ${new Date(app.dateApplied).toLocaleDateString()}</div>
+                </div>
+                <span class="badge ${badgeClass}" style="padding: 6px 12px;">${app.status}</span>
+            </div>
+        `;
+    });
+    appsHtml += '</div>';
+    appsContainer.innerHTML = appsHtml;
 }
 
 // ------------------------------------------
-// Navigation Logic
+// Application Modal Logic
+// ------------------------------------------
+function openApplicationModal(jobId, jobTitle) {
+    document.getElementById('applyJobId').value = jobId;
+    document.getElementById('applyJobTitle').textContent = jobTitle;
+    document.getElementById('applicationModal').classList.add('active');
+}
+
+function closeApplicationModal() {
+    document.getElementById('applicationModal').classList.remove('active');
+}
+
+function submitApplication(e) {
+    e.preventDefault();
+    
+    const jobId = document.getElementById('applyJobId').value;
+    const jobTitle = document.getElementById('applyJobTitle').textContent;
+    const name = document.getElementById('applyName').value;
+    const email = document.getElementById('applyEmail').value;
+    const phone = document.getElementById('applyPhone').value;
+    const resume = document.getElementById('applyResume').value;
+    
+    // Create new application object
+    const newApplication = {
+        id: 'app_' + Date.now(),
+        jobId: jobId,
+        jobTitle: jobTitle,
+        candidateName: name,
+        candidateEmail: email,
+        candidatePhone: phone,
+        resumeLink: resume,
+        status: 'Under Review',
+        dateApplied: new Date().toISOString()
+    };
+
+    // Save to LocalStorage DataStore
+    const storedData = JSON.parse(localStorage.getItem('simpaticoHR_data') || '{"jobs":[], "applications":[]}');
+    if (!storedData.applications) storedData.applications = [];
+    
+    storedData.applications.push(newApplication);
+    
+    // Increment the job's application counter in HR dashboard
+    const jobIndex = storedData.jobs.findIndex(j => j.id === jobId);
+    if (jobIndex > -1) {
+        storedData.jobs[jobIndex].applications = (storedData.jobs[jobIndex].applications || 0) + 1;
+    }
+
+    localStorage.setItem('simpaticoHR_data', JSON.stringify(storedData));
+
+    // Cleanup & Reload
+    closeApplicationModal();
+    alert("✅ Application Submitted Successfully!");
+    loadDashboardData(); // Refresh UI
+    switchTab('applications', document.querySelector('.nav-item:nth-child(4)')); // Jump to My Applications tab
+}
+
+// ------------------------------------------
+// Navigation & Logout Logic
 // ------------------------------------------
 function switchTab(tabId, el) {
-    const titles = {
-        'dashboard': 'Dashboard',
-        'jobs': 'Browse Jobs',
-        'applications': 'My Applications',
-        'interviews': 'Interviews',
-        'profile': 'My Profile'
-    };
+    const titles = { 'dashboard': 'Dashboard', 'jobs': 'Browse Jobs', 'applications': 'My Applications', 'interviews': 'Interviews', 'profile': 'My Profile' };
     document.getElementById('pageTitle').textContent = titles[tabId];
 
     document.querySelectorAll('.nav-item').forEach(nav => nav.classList.remove('active'));
@@ -247,9 +393,6 @@ function switchTab(tabId, el) {
     document.getElementById('tab-' + tabId).classList.add('active');
 }
 
-// ------------------------------------------
-// Logout Logic
-// ------------------------------------------
 function signOut() {
     if (confirm('Are you sure you want to sign out?')) {
         ['simpatico_token','simpatico_user','simpatico_refresh','simpatico_company'].forEach(k => {
@@ -260,8 +403,8 @@ function signOut() {
     }
 }
 
-// Initialize the data when the page loads
-loadJobs();
+// Boot up
+loadDashboardData();
 </script>
 </body>
 </html>
