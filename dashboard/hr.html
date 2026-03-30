@@ -1370,7 +1370,7 @@
             </div>
         </div>
 
-     <div id="section-candidates" class="content-section" style="display:none;">
+        <div id="section-candidates" class="content-section" style="display:none;">
             <div class="page-header">
                 <div>
                     <h1>Candidates & Applications</h1>
@@ -1902,7 +1902,6 @@
 <script>
 // ===========================================================================
 // SIMPATICO HR — CORE APPLICATION LOGIC v2.0
-// New: Token Links, Email Automation, WhatsApp Automation, Iframe Fixes
 // ===========================================================================
 
 const DataStore = {
@@ -1912,6 +1911,7 @@ const DataStore = {
         jobs: [],
         interviews: [],
         activities: [],
+        applications: [],
         user: {
             name: 'HR Admin',
             email: 'admin@simpaticohr.com',
@@ -1950,7 +1950,7 @@ let appData = DataStore.get();
 let currentSection = 'dashboard';
 let loadedModules = {};
 let selectedInterviewMode = '';
-let activeChannels = new Set(['email']); // tracks selected notification channels
+let activeChannels = new Set(['email']); 
 
 // ===== TOKEN GENERATION =====
 function generateInterviewToken() {
@@ -1977,20 +1977,18 @@ function getInterviewLink(token) {
 
 // ===== INIT =====
 document.addEventListener('DOMContentLoaded', () => { initApp(); });
+
 function initApp() {
     appData = DataStore.get();
-
-    // 🔥 THE FIX: Check for the REAL Supabase token from login.html
+    
     const realToken = localStorage.getItem('simpatico_token');
     const realUser = JSON.parse(localStorage.getItem('simpatico_user') || '{}');
 
-    // If no real token exists, kick them out
     if (!realToken) { 
         performLogout(); 
         return; 
     }
 
-    // Force the local DataStore to recognize the login and use the real database user info
     DataStore.update(data => { 
         data.user.isLoggedIn = true; 
         if (realUser.email) {
@@ -2000,7 +1998,6 @@ function initApp() {
         }
     });
     
-    // Refresh appData with the new logged-in state
     appData = DataStore.get(); 
 
     const today = new Date().toISOString().split('T')[0];
@@ -2018,7 +2015,7 @@ function initApp() {
     renderInterviewTable();
     renderProctoredTable();
     renderResultsTable();
-    renderCandidates();
+    renderCandidates(); 
     updateInterviewCounts();
     populatePositionDropdown();
 
@@ -2271,7 +2268,6 @@ async function loadExternalModule(sectionId, href) {
         const parser = new DOMParser();
         const doc = parser.parseFromString(html, 'text/html');
 
-        // 1. FORCE CSS TO LOAD: Grab any missing stylesheets
         doc.querySelectorAll('link[rel="stylesheet"]').forEach(link => {
             const href = link.getAttribute('href');
             if (href && !document.querySelector(`link[href*="${href.split('/').pop()}"]`)) {
@@ -2283,12 +2279,10 @@ async function loadExternalModule(sectionId, href) {
         });
         doc.querySelectorAll('style').forEach(style => document.head.appendChild(style.cloneNode(true)));
 
-        // 2. INJECT CONTENT
         const mainContent = doc.querySelector('.hr-main');
         container.innerHTML = (mainContent ? mainContent.innerHTML : doc.body.innerHTML);
         doc.querySelectorAll('.hr-modal-overlay, .modal').forEach(m => container.innerHTML += m.outerHTML);
 
-        // 3. RUTHLESS JS FIX: Destroy variable collisions
         window.loadedScripts = window.loadedScripts || new Set();
 
         for (const oldScript of doc.querySelectorAll('script')) {
@@ -2307,10 +2301,8 @@ async function loadExternalModule(sectionId, href) {
                 jsCode = oldScript.textContent;
             }
 
-            // MAGIC FIX: Find any "const" or "let" causing crashes and force them to be "var"
             jsCode = jsCode.replace(/(const|let)\s+(SB_URL|SB_ANON|TENANT|WORKER_URL|_sb|sbHeaders|allEmployees|filtered|currentView|editingId|avatarColors|statusBadge|statusLabel|typeLabel)\s*=/g, 'var $2 =');
             
-            // Wake up DOMContentLoaded events
             jsCode = jsCode.replace(/document\.addEventListener\(\s*['"`]DOMContentLoaded['"`]/g, "window.addEventListener('SimpaticoSPA'");
 
             const newScript = document.createElement('script');
@@ -2318,7 +2310,6 @@ async function loadExternalModule(sectionId, href) {
             document.body.appendChild(newScript);
         }
 
-        // 4. Wake up the injected scripts
         setTimeout(() => { window.dispatchEvent(new Event('SimpaticoSPA')); }, 150);
 
     } catch (error) {
@@ -2394,16 +2385,12 @@ function performLogout() {
     DataStore.update(data => { data.user.isLoggedIn = false; });
     hideLogoutConfirmation();
     showToast('Signed out successfully. Redirecting...', 'success');
-    
-    // Clear out session storage to be safe
     ['simpatico_token','simpatico_user','simpatico_refresh','simpatico_company'].forEach(k=>{
         localStorage.removeItem(k);
         sessionStorage.removeItem(k);
     });
-
     setTimeout(() => {
-        // ✅ THE FIX: Absolute path straight to the root login page
-        window.location.href = '/platform/login.html';
+        window.location.href = '/platform/login.html'; 
     }, 1000);
 }
 
@@ -2920,7 +2907,6 @@ async function handleScheduleInterview(e) {
         showToast('⚠️ Enter candidate phone number for WhatsApp notification', 'warning');
     }
 
-    // Generate unique token + interview link
     const token = generateInterviewToken();
     const interviewLink = getInterviewLink(token);
 
@@ -2967,7 +2953,6 @@ async function handleScheduleInterview(e) {
     renderDashboardActivities();
     updateInterviewCounts();
 
-    // Reset form
     document.getElementById('scheduleInterviewForm')?.reset();
     document.getElementById('intMode').value = '';
     document.querySelectorAll('.mode-card').forEach(c => c.classList.remove('selected'));
@@ -3000,7 +2985,6 @@ async function handleScheduleInterview(e) {
     toastContainer.appendChild(toast);
     setTimeout(() => { toast.style.transition='opacity 0.3s'; toast.style.opacity='0'; setTimeout(()=>toast.remove(),300); }, 8000);
 
-    // ===== SEND EMAIL =====
     if (sendEmail || sendInterviewerEmail) {
         const recipientType = sendEmail && sendInterviewerEmail ? 'both' : sendEmail ? 'candidate' : 'interviewer';
         sendEmailNotification({ ...newInterview, interviewLink, token }, recipientType).then(result => {
@@ -3028,7 +3012,6 @@ async function handleScheduleInterview(e) {
         });
     }
 
-    // ===== SEND WHATSAPP =====
     if (sendWhatsApp && candidatePhone) {
         const intWithLink = { ...newInterview, interviewLink, token };
         setTimeout(async () => {
@@ -3063,7 +3046,6 @@ async function handleScheduleInterview(e) {
     }
 }
 
-// ===== VIEW INTERVIEW DETAIL MODAL =====
 function viewInterview(id) {
     const int = appData.interviews.find(i => i.id === id);
     if (!int) return;
@@ -3145,7 +3127,6 @@ function viewInterview(id) {
     modal.show();
 }
 
-// ===== SEND NOTIFICATION MODAL =====
 function openSendNotifModal(id) {
     const int = appData.interviews.find(i => i.id === id);
     if (!int) return;
@@ -3256,7 +3237,6 @@ async function executeSendNotification(id) {
     }
 }
 
-// ===== JOB ACTIONS =====
 function filterJobs() {
     const dept   = document.getElementById('filterDept')?.value.toLowerCase() || '';
     const status = document.getElementById('filterStatus')?.value.toLowerCase() || '';
@@ -3334,7 +3314,6 @@ function startProctoredMonitor(id) {
     showToast('🖥️ Live monitoring — coming soon', 'success');
 }
 
-// ===== AI JD GENERATOR =====
 async function generateJD() {
     const title      = document.getElementById('jobTitle')?.value.trim();
     const department = document.getElementById('jobDepartment')?.value;
@@ -3362,8 +3341,6 @@ async function generateJD() {
         });
         
         const resJson = await res.json();
-        
-        // FIX: Extract the JD from the new v5 nested data structure
         const jdText = resJson.data?.jd || resJson.jd; 
         
         if (output) output.innerText = jdText || 'Could not generate JD. Please try again.';
@@ -3392,7 +3369,6 @@ function handleGlobalSearch(e) {
     showToast(`No results for "${query}"`, 'error');
 }
 
-// ===== UTILITIES =====
 function escapeHtml(str) {
     if (!str) return '';
     return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
@@ -3433,7 +3409,6 @@ function timeAgo(timestamp) {
     if (days  < 30) return `${days} day${days > 1 ? 's' : ''} ago`;
     return formatDate(new Date(timestamp).toISOString().split('T')[0]);
 }
-    // ===== PASTE THIS NEW STUFF RIGHT ABOVE </script> =====
 
 // ===== CANDIDATES & APPLICATIONS TABLE =====
 function renderCandidates() {
