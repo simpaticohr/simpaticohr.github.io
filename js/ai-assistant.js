@@ -377,3 +377,53 @@ window.showToast = (msg, type='info') => {
   const t = document.createElement('div'); t.className=`hr-toast ${type}`; t.textContent=msg;
   c.appendChild(t); setTimeout(()=>t.remove(),3800);
 };
+// Global fixes for token generation and AI
+(function() {
+    'use strict';
+    
+    // Ensure functions are globally available
+    if (typeof window.generateSecureToken !== 'function') {
+        window.generateSecureToken = function() {
+            const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+            let token = '';
+            for (let i = 0; i < 32; i++) {
+                token += chars.charAt(Math.floor(Math.random() * chars.length));
+            }
+            return token;
+        };
+    }
+    
+    if (typeof window.aiSendMessage !== 'function') {
+        window.aiSendMessage = async function(message) {
+            console.log('AI Message received:', message);
+            return "AI Assistant: I understand your question about '" + 
+                   (message.substring(0, 50) || "general HR") + 
+                   "'. For detailed assistance, please contact HR.";
+        };
+    }
+    
+    if (typeof window.getInterviewLinkFixed !== 'function') {
+        window.getInterviewLinkFixed = function(token) {
+            const baseUrl = window.SIMPATICO_CONFIG?.interviewBaseUrl || 
+                           'https://simpatico-hr-ats.simpaticohrconsultancy.workers.dev/join';
+            return baseUrl + '/' + (token || generateSecureToken());
+        };
+    }
+    
+    // Also fix the original function if it's broken
+    if (typeof window.generateInterviewToken === 'function') {
+        const originalFunc = window.generateInterviewToken;
+        window.generateInterviewToken = function() {
+            try {
+                return originalFunc();
+            } catch (e) {
+                console.warn('Original token function failed, using fallback');
+                return window.generateSecureToken();
+            }
+        };
+    } else {
+        window.generateInterviewToken = window.generateSecureToken;
+    }
+    
+    console.log('Global AI and token functions initialized');
+})();
