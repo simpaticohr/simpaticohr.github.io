@@ -1955,9 +1955,31 @@ function getInterviewLink(token) {
 
 // ===== INIT =====
 document.addEventListener('DOMContentLoaded', () => { initApp(); });
-
 function initApp() {
     appData = DataStore.get();
+
+    // 🔥 THE FIX: Check for the REAL Supabase token from login.html
+    const realToken = localStorage.getItem('simpatico_token');
+    const realUser = JSON.parse(localStorage.getItem('simpatico_user') || '{}');
+
+    // If no real token exists, kick them out
+    if (!realToken) { 
+        performLogout(); 
+        return; 
+    }
+
+    // Force the local DataStore to recognize the login and use the real database user info
+    DataStore.update(data => { 
+        data.user.isLoggedIn = true; 
+        if (realUser.email) {
+            data.user.name = realUser.full_name || realUser.name || 'HR Admin';
+            data.user.email = realUser.email;
+            data.user.role = realUser.role || 'HR';
+        }
+    });
+    
+    // Refresh appData with the new logged-in state
+    appData = DataStore.get(); 
 
     const today = new Date().toISOString().split('T')[0];
     const dateInput = document.getElementById('intDate');
@@ -1965,8 +1987,6 @@ function initApp() {
         dateInput.setAttribute('min', today);
         dateInput.addEventListener('change', refreshTimeSlots);
     }
-
-    if (!appData.user.isLoggedIn) { performLogout(); return; }
 
     updateUserDisplay();
     renderDashboardStats();
@@ -1985,13 +2005,13 @@ function initApp() {
             if (this.value.toLowerCase().includes('proctored') || this.value.toLowerCase().includes('coding assessment')) {
                 const modeCard = document.querySelector('.mode-card:nth-child(4)');
                 selectInterviewMode('proctored', modeCard);
-                showToast('💡 Proctored mode auto-selected for coding assessments', 'success');
+                if(window.showToast) showToast('💡 Proctored mode auto-selected for coding assessments', 'success');
             }
         });
     }
 
     loadInterviewerSuggestions();
-    console.log('✅ Simpatico HR v2.0 initialized. Interviews:', appData.interviews.length);
+    console.log('✅ Simpatico HR initialized securely with Supabase token.');
 }
 
 // ===== CHANNEL TOGGLE =====
