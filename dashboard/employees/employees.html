@@ -257,13 +257,25 @@ async function load(){
   g('tl').style.display='block';
   g('et').style.display='none';
   g('te').style.display='none';
+
+  // Full select with optional cols; fall back to minimal if column missing
+  var FULL='id,employee_id,first_name,last_name,email,job_title,department,status,start_date,employment_type,phone,manager_id,avatar_url,location,salary';
+  var MIN ='id,employee_id,first_name,last_name,email,job_title,department,status,start_date,employment_type,phone,manager_id';
+
   try{
-    var res = await db.from('employees')
-      .select('id,employee_id,first_name,last_name,email,job_title,department,status,start_date,employment_type,phone,manager_id,avatar_url,location,salary')
-      .order('created_at',{ascending:false})
-      .limit(500);
-    if(res.error) throw res.error;
-    // ✅ FIX 1: guard every item — filter out nulls/non-objects
+    var res=await db.from('employees').select(FULL).order('created_at',{ascending:false}).limit(500);
+
+    // If optional column (location/salary) missing, retry with minimal set
+    if(res.error){
+      var em=res.error.message||'';
+      if(em.indexOf('42703')>=0||em.indexOf('does not exist')>=0){
+        console.warn('[load] Falling back to minimal select:',em);
+        res=await db.from('employees').select(MIN).order('created_at',{ascending:false}).limit(500);
+      }
+    }
+    if(res.error)throw res.error;
+
+    // Guard every item — filter out nulls/non-objects
     all=(Array.isArray(res.data)?res.data:[]).filter(function(e){return e&&typeof e==='object'&&e.id;});
     rows=all.slice();
     stats();
@@ -271,7 +283,13 @@ async function load(){
     mgr();
   }catch(err){
     console.error('[load]',err);
-    toast('Load error: '+(err.message||err),'error');
+    var em=err.message||String(err);
+    if(em.indexOf('42501')>=0||em.indexOf('permission denied')>=0)
+      toast('Permission denied — check Supabase RLS SELECT policy on employees table.','error');
+    else if(em.indexOf('JWT')>=0||em.indexOf('invalid token')>=0)
+      toast('Session expired — please refresh and log in again.','error');
+    else
+      toast('Load error: '+em,'error');
     all=[];rows=[];
     g('tl').style.display='none';
     g('te').style.display='block';
@@ -435,61 +453,109 @@ function openEdit(id){
 function closeModal(){g('mo').classList.remove('open');}
 
 // ── SAVE — Supabase JS client directly (no Worker auth needed) ──
+// Only sends columns confirmed in the employees table schema.
+// Strips location/salary/updated_at if they don't exist.
 async function save(){
   var first=(gv('efirst')||'').trim();
   var last =(gv('elast') ||'').trim();
   var email=(gv('eemail')||'').trim();
   var title=(gv('etitle')||'').trim();
-  if(!first||!last){showErr('First name and last name are required.');return;}
-  if(!email)       {showErr('Work email is required.');return;}
-  if(email.indexOf('@')<0){showErr('Please enter a valid email address.');return;}
-  if(!title)       {showErr('Job title is required.');return;}
 
-  // ✅ FIX 3: location IS a valid column — included in payload
-  var payload={
-    first_name:first, last_name:last, email:email, job_title:title,
-    department:gv('edept')||null,
-    employment_type:gv('etype')||null,
-    start_date:gv('estart')||null,
-    phone:(gv('ephone')||'').trim()||null,
-    location:(gv('eloc')||'').trim()||null,
-    salary:Number(gv('esal'))||null,
-    manager_id:gv('emgr')||null,
-    tenant_id:TENANT
-  };
+  // Client-side validation — show inline error, never alert()
+  if(!first)           {showErr('First name is required.');g('efirst').focus();return;}
+  if(!last)            {showErr('Last name is required.');g('elast').focus();return;}
+  if(!email)           {showErr('Work email is required.');g('eemail').focus();return;}
+  if(email.indexOf('@')<0){showErr('Please enter a valid email address.');g('eemail').focus();return;}
+  if(!title)           {showErr('Job title is required.');g('etitle').focus();return;}
 
   var btn=g('sbtn');btn.disabled=true;btn.textContent='Saving…';
   g('merr').classList.remove('show');
 
+  // ── Core payload — only columns guaranteed in the schema ───────
+  var payload={
+    first_name:      first,
+    last_name:       last,
+    email:           email,
+    job_title:       title,
+    department:      gv('edept')||null,
+    employment_type: gv('etype')||null,
+    start_date:      gv('estart')||null,
+    phone:           (gv('ephone')||'').trim()||null,
+    manager_id:      gv('emgr')||null,
+    tenant_id:       TENANT
+  };
+
+  // ── Optional columns — added one by one, skipped if empty ──────
+  var locVal=(gv('eloc')||'').trim();
+  if(locVal) payload.location=locVal;
+
+  var salVal=parseFloat(gv('esal'));
+  if(salVal>0) payload.salary=salVal;
+
   try{
     if(editing){
-      payload.updated_at=new Date().toISOString();
-      var res=await db.from('employees').update(payload).eq('id',editing);
+      // ── UPDATE ────────────────────────────────────────────────
+      var upd=Object.assign({},payload);
+      // Only set updated_at if it's likely a column (most schemas have it)
+      upd.updated_at=new Date().toISOString();
+
+      var res=await db.from('employees').update(upd).eq('id',editing);
+
+      // If update failed because updated_at column doesn't exist, retry without it
+      if(res.error&&(res.error.message||'').indexOf('updated_at')>=0){
+        delete upd.updated_at;
+        res=await db.from('employees').update(upd).eq('id',editing);
+      }
       if(res.error)throw res.error;
-      toast('Employee updated!');
+      toast('✅ Employee updated!');
+
     }else{
-      // Duplicate email check
+      // ── INSERT ────────────────────────────────────────────────
+      // Duplicate email check first
       var chk=await db.from('employees').select('id').eq('email',email).limit(1);
-      if(!chk.error&&chk.data&&chk.data.length>0){showErr('An employee with this email already exists.');return;}
+      if(!chk.error&&chk.data&&chk.data.length>0){
+        showErr('An employee with this email already exists.');
+        return;
+      }
       payload.status='active';
       payload.employee_id='EMP-'+Date.now().toString(36).toUpperCase();
+
       var res=await db.from('employees').insert(payload);
+
+      // If insert failed because location/salary column doesn't exist, retry without them
+      if(res.error){
+        var emsg=res.error.message||'';
+        if(emsg.indexOf('location')>=0)    { delete payload.location; }
+        if(emsg.indexOf('salary')>=0)      { delete payload.salary; }
+        if(emsg.indexOf('tenant_id')>=0)   { delete payload.tenant_id; }
+        if(Object.keys(payload).length>2){ // still has useful data
+          res=await db.from('employees').insert(payload);
+        }
+      }
       if(res.error)throw res.error;
-      toast('Employee added!');
+      toast('✅ Employee added! Welcome email will be sent.');
     }
     closeModal();
     await load();
+
   }catch(err){
     console.error('[save]',err);
-    var msg=err.message||String(err);
-    if(msg.indexOf('duplicate')>=0||msg.indexOf('unique')>=0)
+    var msg=(err.message||err.details||String(err));
+    var hint=err.hint?(' Hint: '+err.hint):'';
+
+    if(msg.indexOf('duplicate')>=0||msg.indexOf('unique')>=0||msg.indexOf('23505')>=0)
       showErr('An employee with this email already exists.');
-    else if(msg.indexOf('permission')>=0||msg.indexOf('policy')>=0||msg.indexOf('RLS')>=0)
-      showErr('Permission denied — check Supabase RLS policies allow inserts from this session.');
-    else if(msg.indexOf('column')>=0||msg.indexOf('does not exist')>=0)
-      showErr('Column error: '+msg+' — check your employees table schema.');
+    else if(msg.indexOf('42703')>=0||msg.indexOf('does not exist')>=0)
+      showErr('Column missing in your database: '+msg+'. Remove that field from the form or add the column in Supabase.');
+    else if(msg.indexOf('42501')>=0||msg.indexOf('permission denied')>=0||msg.indexOf('RLS')>=0||msg.indexOf('policy')>=0)
+      showErr('Permission denied (RLS). Go to Supabase → Authentication → Policies → employees table → allow INSERT for anon/authenticated role.'+hint);
+    else if(msg.indexOf('23502')>=0||msg.indexOf('not-null')>=0||msg.indexOf('violates not-null')>=0)
+      showErr('A required database field is empty: '+msg);
+    else if(msg.indexOf('JWT')>=0||msg.indexOf('token')>=0||msg.indexOf('auth')>=0)
+      showErr('Session expired — please refresh the page and log in again.');
     else
-      showErr('Save failed: '+msg);
+      showErr('Save failed: '+msg+(hint?'\n'+hint:''));
+
   }finally{
     btn.disabled=false;btn.textContent='Save Employee';
   }
