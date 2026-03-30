@@ -1,222 +1,426 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>HR Ops  Simpatico HR</title>
-  <link rel="stylesheet" href="/hr-modules.css">
-<script>
-// Hide shell when loaded inside dashboard iframe
-if (window.self !== window.top) {
-  document.addEventListener("DOMContentLoaded", function() {
-    var shell = document.querySelector(".hr-shell");
-    if (shell) {
-      shell.style.gridTemplateColumns = "1fr";
-      shell.style.gridTemplateRows = "1fr";
-    }
-    var topbar = document.querySelector(".hr-topbar");
-    if (topbar) topbar.style.display = "none";
-    var sidebar = document.querySelector(".hr-sidebar");
-    if (sidebar) sidebar.style.display = "none";
-    var main = document.querySelector(".hr-main");
-    if (main) {
-      main.style.gridColumn = "1";
-      main.style.padding = "20px";
-    }
-  });
+/**
+ * hr-ops.js — Simpatico HR Platform (Bulletproof Edition)
+ * Leave management, policies, HR tickets, org chart
+ */
+
+const OPS_CONFIG = {
+    supabaseUrl: window.SIMPATICO_CONFIG?.supabaseUrl    || 'https://YOUR_PROJECT.supabase.co',
+    supabaseKey: window.SIMPATICO_CONFIG?.supabaseAnonKey || 'YOUR_ANON_KEY',
+    workerUrl:   window.SIMPATICO_CONFIG?.workerUrl       || 'https://hr-api.YOUR_SUBDOMAIN.workers.dev',
+    r2PublicUrl: window.SIMPATICO_CONFIG?.r2PublicUrl     || 'https://files.YOUR_DOMAIN.com',
+};
+
+let _sb = null;
+function sb() {
+    if (_sb) return _sb;
+    if (window.supabase) { _sb = window.supabase.createClient(OPS_CONFIG.supabaseUrl, OPS_CONFIG.supabaseKey); return _sb; }
+    return null;
 }
-</script></head>
-<body class="hr-module">
-<div class="hr-shell">
-  <header class="hr-topbar">
-    <!-- <a href="/dashboard/hr.html" class="hr-topbar-brand">
-      <img src="favicon-96x96.png" style="width:32px;height:32px;border-radius:8px;margin-right:8px;vertical-align:middle;">Simpatico<span>HR</span>
-    </a> -->
-    <div class="hr-topbar-right">
-      <div class="hr-avatar" id="user-avatar">U</div>
-    </div>
-  </header>
-  <nav class="hr-sidebar">
-    <div class="hr-nav-section">Core HR</div>
-    <a class="hr-nav-item" href="/employees.html"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>Employees</a>
-    <a class="hr-nav-item" href="/onboarding.html"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/></svg>Onboarding</a>
-    <a class="hr-nav-item" href="/training.html"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>Training</a>
-    <a class="hr-nav-item" href="/performance.html"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>Performance</a>
-    <div class="hr-nav-section" style="margin-top:8px">Operations</div>
-    <a class="hr-nav-item active" href="/hr-ops.html"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/></svg>HR Ops</a>
-    <a class="hr-nav-item" href="/payroll.html"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>Payroll</a>
-    <div class="hr-nav-section" style="margin-top:8px">Intelligence</div>
-    <a class="hr-nav-item" href="/analytics.html"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>Analytics</a>
-    <a class="hr-nav-item" href="/ai-assistant.html"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/></svg>AI Assistant</a>
-  </nav>
 
-  <main class="hr-main">
-    <div class="hr-page-header">
-      <div class="hr-page-title">HR Operations
-        <small>Leave management, policies, org charts, and HR requests</small>
-      </div>
-      <div class="hr-page-actions">
-        <button class="hr-btn hr-btn-primary" onclick="openModal('leave-modal')">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:15px;height:15px"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-          New Leave Request
-        </button>
-      </div>
-    </div>
+let allLeave   = [];
+let allTickets = [];
 
-    <!-- Stats -->
-    <div class="hr-stats-grid">
-      <div class="hr-stat-card" style="--card-accent:#00c4ff">
-        <div class="label">Pending Requests</div>
-        <div class="value" id="stat-pending"></div>
-        <div class="trend neutral">Awaiting approval</div>
-        <div class="icon" style="--icon-bg:rgba(0,196,255,.1)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></div>
-      </div>
-      <div class="hr-stat-card" style="--card-accent:#f59e0b">
-        <div class="label">On Leave Today</div>
-        <div class="value" id="stat-today"></div>
-        <div class="trend neutral">Currently away</div>
-        <div class="icon" style="--icon-bg:rgba(245,158,11,.1)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg></div>
-      </div>
-      <div class="hr-stat-card" style="--card-accent:#10b981">
-        <div class="label">Approved (30d)</div>
-        <div class="value" id="stat-approved"></div>
-        <div class="trend up">This month</div>
-        <div class="icon" style="--icon-bg:rgba(16,185,129,.1)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg></div>
-      </div>
-      <div class="hr-stat-card" style="--card-accent:#a78bfa">
-        <div class="label">Open HR Tickets</div>
-        <div class="value" id="stat-tickets"></div>
-        <div class="trend neutral">Support requests</div>
-        <div class="icon" style="--icon-bg:rgba(167,139,250,.1)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 17H20L18.595 15.595A7 7 0 0 0 5.145 15.145"/></svg></div>
-      </div>
-    </div>
+document.addEventListener('DOMContentLoaded', async () => {
+    // Run all fetches safely
+    await Promise.all([
+        loadUser().catch(console.error), 
+        loadLeave().catch(console.error), 
+        loadPolicies().catch(console.error), 
+        loadTickets().catch(console.error), 
+        loadEmployeeSelect().catch(console.error)
+    ]);
+});
 
-    <div class="hr-tabs" id="ops-tabs">
-      <button class="hr-tab active" onclick="switchOpsTab(this,'tab-leave')">Leave Management</button>
-      <button class="hr-tab" onclick="switchOpsTab(this,'tab-policies')">Policies</button>
-      <button class="hr-tab" onclick="switchOpsTab(this,'tab-tickets')">HR Tickets</button>
-      <button class="hr-tab" onclick="switchOpsTab(this,'tab-org')">Org Chart</button>
-    </div>
+async function loadUser() {
+    const client = sb(); if (!client) return;
+    const { data: { user }, error } = await client.auth.getUser();
+    if (user) {
+        const el = document.getElementById('user-avatar');
+        if (el) el.textContent = user.email?.slice(0,2).toUpperCase() || 'U';
+    }
+}
 
-    <!-- Leave Management -->
-    <div id="tab-leave">
-      <div style="display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap">
-        <select class="hr-select" id="leave-status-filter" onchange="filterLeave()" style="width:auto;min-width:140px">
-          <option value="">All Statuses</option>
-          <option value="pending">Pending</option>
-          <option value="approved">Approved</option>
-          <option value="rejected">Rejected</option>
-        </select>
-        <select class="hr-select" id="leave-type-filter" onchange="filterLeave()" style="width:auto;min-width:140px">
-          <option value="">All Types</option>
-          <option value="annual">Annual Leave</option>
-          <option value="sick">Sick Leave</option>
-          <option value="parental">Parental Leave</option>
-          <option value="unpaid">Unpaid Leave</option>
-          <option value="other">Other</option>
-        </select>
-      </div>
-      <div class="hr-table-wrap">
-        <div class="hr-table-header">
-          <span class="hr-table-title">Leave Requests</span>
-          <button class="hr-btn hr-btn-ghost hr-btn-sm" onclick="exportLeave()">Export</button>
-        </div>
-        <table class="hr-table">
-          <thead><tr>
-            <th>Employee</th><th>Type</th><th>From</th><th>To</th><th>Days</th><th>Reason</th><th>Status</th><th>Actions</th>
-          </tr></thead>
-          <tbody id="leave-tbody">
-            <tr><td colspan="8" style="text-align:center;padding:40px;color:var(--hr-text-muted)">Loading</td></tr>
-          </tbody>
-        </table>
-      </div>
-    </div>
+async function loadEmployeeSelect() {
+    const client = sb(); if (!client) return;
+    const { data, error } = await client.from('employees').select('id,first_name,last_name').eq('status','active').order('first_name');
+    if (error) return;
+    const sel = document.getElementById('leave-employee'); if (!sel) return;
+    
+    (data||[]).forEach(e => {
+        const opt = document.createElement('option');
+        opt.value = e.id; 
+        
+        // Safely handle missing names
+        const fName = e.first_name || '';
+        const lName = e.last_name || '';
+        opt.textContent = `${fName} ${lName}`.trim() || 'Unknown Employee';
+        
+        sel.appendChild(opt);
+    });
+}
 
-    <!-- Policies -->
-    <div id="tab-policies" style="display:none">
-      <div style="display:flex;justify-content:flex-end;margin-bottom:16px">
-        <button class="hr-btn hr-btn-primary hr-btn-sm" onclick="uploadPolicy()">Upload Policy</button>
-      </div>
-      <div id="policies-list" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px">
-        <!-- JS rendered -->
-      </div>
-    </div>
+// ── Leave ──
+async function loadLeave() {
+    const client = sb(); if (!client) return;
+    const today = new Date().toISOString().slice(0,10);
+    const thirtyDaysAgo = new Date(Date.now()-30*24*60*60*1000).toISOString().slice(0,10);
 
-    <!-- HR Tickets -->
-    <div id="tab-tickets" style="display:none">
-      <div style="display:flex;justify-content:flex-end;margin-bottom:16px">
-        <button class="hr-btn hr-btn-primary hr-btn-sm" onclick="openTicketModal()">New Ticket</button>
-      </div>
-      <div class="hr-table-wrap">
-        <table class="hr-table">
-          <thead><tr>
-            <th>Ticket #</th><th>Employee</th><th>Category</th><th>Subject</th><th>Priority</th><th>Status</th><th>Assigned To</th>
-          </tr></thead>
-          <tbody id="tickets-tbody">
-            <tr><td colspan="7" style="text-align:center;padding:40px;color:var(--hr-text-muted)">Loading</td></tr>
-          </tbody>
-        </table>
-      </div>
-    </div>
+    const { data, error } = await client
+        .from('leave_requests')
+        .select(`
+            id, type, from_date, to_date, days, reason, status, created_at,
+            employees(first_name, last_name),
+            approver:employees!approver_id(first_name, last_name)
+        `)
+        .order('created_at', { ascending: false });
 
-    <!-- Org Chart -->
-    <div id="tab-org" style="display:none">
-      <div id="org-chart-container" style="overflow:auto;min-height:400px;display:flex;justify-content:center;padding:20px">
-        <div id="org-chart">Loading org chart</div>
-      </div>
-    </div>
+    if (error) { 
+        console.error("Supabase Error (Leave):", error); 
+        renderLeaveTable([]); 
+        return; 
+    }
+    
+    allLeave = data || [];
 
-  </main>
-</div>
+    const pending  = allLeave.filter(l => l.status === 'pending').length;
+    const onToday  = allLeave.filter(l => l.status === 'approved' && l.from_date <= today && l.to_date >= today).length;
+    const approved = allLeave.filter(l => l.status === 'approved' && l.created_at >= thirtyDaysAgo).length;
 
-<!-- Leave Request Modal -->
-<div class="hr-modal-overlay" id="leave-modal">
-  <div class="hr-modal">
-    <div class="hr-modal-head">
-      <h2>New Leave Request</h2>
-      <button class="hr-modal-close" onclick="closeModal('leave-modal')">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-      </button>
-    </div>
-    <div class="hr-form-group">
-      <label class="hr-label">Employee</label>
-      <select class="hr-select" id="leave-employee"></select>
-    </div>
-    <div class="hr-form-group">
-      <label class="hr-label">Leave Type</label>
-      <select class="hr-select" id="leave-type">
-        <option value="annual">Annual Leave</option>
-        <option value="sick">Sick Leave</option>
-        <option value="parental">Parental Leave</option>
-        <option value="unpaid">Unpaid Leave</option>
-        <option value="other">Other</option>
-      </select>
-    </div>
-    <div class="hr-grid-2">
-      <div class="hr-form-group">
-        <label class="hr-label">From Date</label>
-        <input class="hr-input" type="date" id="leave-from">
-      </div>
-      <div class="hr-form-group">
-        <label class="hr-label">To Date</label>
-        <input class="hr-input" type="date" id="leave-to">
-      </div>
-    </div>
-    <div class="hr-form-group">
-      <label class="hr-label">Reason</label>
-      <textarea class="hr-textarea" id="leave-reason" placeholder="Optional reason" style="min-height:80px"></textarea>
-    </div>
-    <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:8px">
-      <button class="hr-btn hr-btn-ghost" onclick="closeModal('leave-modal')">Cancel</button>
-      <button class="hr-btn hr-btn-primary" onclick="submitLeaveRequest()">Submit Request</button>
-    </div>
-  </div>
-</div>
+    setText('stat-pending', pending);
+    setText('stat-today',   onToday);
+    setText('stat-approved',approved);
+    renderLeaveTable(allLeave);
+}
 
-<div class="hr-toast-container" id="toasts"></div>
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="../js/supabase-client.js"></script>
-  <script src="../js/hr-config.js"></script>
-  <script src="../js/hr-ops.js"></script>
-</body>
-</html>
+function renderLeaveTable(list) {
+    const tbody = document.getElementById('leave-tbody'); if (!tbody) return;
+    if (!list || list.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:40px;color:var(--hr-text-muted)">No leave requests found.</td></tr>';
+        return;
+    }
+    
+    tbody.innerHTML = list.map(l => {
+        // 🔥 DEFENSIVE FALLBACKS
+        const emp = l.employees || {};
+        const fName = String(emp.first_name || '').trim();
+        const lName = String(emp.last_name || '').trim();
+        const name = (fName || lName) ? `${fName} ${lName}` : 'Unknown Employee';
+        
+        const type = l.type?.replace('_',' ');
+        const badgeClass = { pending:'hr-badge-pending', approved:'hr-badge-active', rejected:'hr-badge-danger' }[l.status] || 'hr-badge-inactive';
+        
+        const approver = l.approver || {};
+        const approverName = (approver.first_name || approver.last_name) ? `${approver.first_name || ''} ${approver.last_name || ''}`.trim() : 'Unknown';
+
+        const actions = l.status === 'pending'
+            ? `<button class="hr-btn hr-btn-primary hr-btn-sm" style="margin-right:4px" onclick="approveLeave('${l.id}')">Approve</button>
+               <button class="hr-btn hr-btn-danger hr-btn-sm" onclick="rejectLeave('${l.id}')">Reject</button>`
+            : `<span style="font-size:12px;color:var(--hr-text-muted)">${approverName}</span>`;
+            
+        return `<tr>
+            <td><span class="primary-text">${name}</span></td>
+            <td style="text-transform:capitalize;">${type || '—'}</td>
+            <td>${l.from_date || '—'}</td>
+            <td>${l.to_date || '—'}</td>
+            <td>${l.days || '—'}</td>
+            <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${l.reason || '—'}</td>
+            <td><span class="hr-badge ${badgeClass}">${l.status || 'Unknown'}</span></td>
+            <td>${actions}</td>
+        </tr>`;
+    }).join('');
+}
+
+window.filterLeave = () => {
+    const st   = document.getElementById('leave-status-filter')?.value || '';
+    const type = document.getElementById('leave-type-filter')?.value || '';
+    renderLeaveTable(allLeave.filter(l => (!st||l.status===st) && (!type||l.type===type)));
+};
+
+window.approveLeave = async (id) => updateLeaveStatus(id, 'approved');
+window.rejectLeave  = async (id) => updateLeaveStatus(id, 'rejected');
+
+async function updateLeaveStatus(id, status) {
+    try {
+        const res = await fetch(`${OPS_CONFIG.workerUrl}/leave/${id}/${status}`, {
+            method: 'PATCH', headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        });
+        if (!res.ok) throw new Error('Failed to update leave');
+        showToast(`Leave ${status}`, 'success');
+        await loadLeave();
+    } catch (err) { showToast(err.message, 'error'); }
+}
+
+window.openLeaveRequestModal = () => openModal('leave-modal');
+
+window.submitLeaveRequest = async function() {
+    const empId  = document.getElementById('leave-employee')?.value;
+    const type   = document.getElementById('leave-type')?.value;
+    const from   = document.getElementById('leave-from')?.value;
+    const to     = document.getElementById('leave-to')?.value;
+    const reason = document.getElementById('leave-reason')?.value.trim();
+
+    if (!empId || !from || !to) { showToast('Employee and dates required', 'error'); return; }
+
+    const days = Math.round((new Date(to) - new Date(from)) / (1000*60*60*24)) + 1;
+
+    try {
+        const res = await fetch(`${OPS_CONFIG.workerUrl}/leave`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...authHeaders() },
+            body: JSON.stringify({ employee_id: empId, type, from_date: from, to_date: to, days, reason }),
+        });
+        if (!res.ok) throw new Error('Failed to submit request');
+        showToast('Leave request submitted', 'success');
+        closeModal('leave-modal');
+        await loadLeave();
+    } catch (err) { showToast(err.message, 'error'); }
+};
+
+// ── Policies ──
+async function loadPolicies() {
+    const client = sb(); if (!client) return;
+    const { data, error } = await client
+        .from('hr_policies')
+        .select('id, name, category, version, file_key, updated_at')
+        .order('updated_at', { ascending: false });
+
+    if (error) { console.error("Supabase Error (Policies):", error); return; }
+
+    const container = document.getElementById('policies-list'); if (!container) return;
+    const policies = data || [];
+    
+    if (policies.length === 0) {
+        container.innerHTML = '<div class="hr-empty" style="grid-column:1/-1"><p>No policies uploaded yet.</p></div>';
+        return;
+    }
+
+    container.innerHTML = policies.map(p => {
+        const updated = new Date(p.updated_at).toLocaleDateString();
+        const catColors = { hr:'#0ea5e9', legal:'#ef4444', it:'#8b5cf6', finance:'#f59e0b' };
+        const color = catColors[p.category] || '#64748b';
+        return `
+        <div class="hr-card" style="cursor:pointer" onclick="downloadPolicy('${p.file_key}','${p.name}')">
+            <div style="display:flex;align-items:flex-start;gap:12px">
+                <div style="width:40px;height:40px;border-radius:8px;background:rgba(${hexToRgb(color)},.1);display:flex;align-items:center;justify-content:center;flex-shrink:0;color:${color}">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:18px;height:18px"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                </div>
+                <div style="flex:1">
+                    <div style="font-weight:600;font-size:14px">${p.name}</div>
+                    <div style="font-size:12px;color:var(--hr-text-muted);margin-top:3px">v${p.version} · Updated ${updated}</div>
+                    <span class="hr-chip" style="margin-top:8px">${p.category || 'General'}</span>
+                </div>
+            </div>
+        </div>`;
+    }).join('');
+}
+
+window.downloadPolicy = async function(key, name) {
+    try {
+        const res = await fetch(`${OPS_CONFIG.workerUrl}/r2/signed-url?key=${encodeURIComponent(key)}`, { headers: authHeaders() });
+        const { url } = await res.json();
+        window.open(url, '_blank');
+    } catch { showToast('Failed to open policy', 'error'); }
+};
+
+window.uploadPolicy = async function() {
+    const input = document.createElement('input');
+    input.type = 'file'; input.accept = '.pdf,.doc,.docx';
+    input.onchange = async e => {
+        const file = e.target.files[0]; if (!file) return;
+        const name = prompt('Policy name:', file.name.replace(/\.[^.]+$/,''));
+        if (!name) return;
+        showToast('Uploading policy…', 'info');
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('name', name);
+        try {
+            const res = await fetch(`${OPS_CONFIG.workerUrl}/policies`, {
+                method: 'POST', headers: authHeaders(), body: formData,
+            });
+            if (!res.ok) throw new Error('Upload failed');
+            showToast('Policy uploaded', 'success');
+            await loadPolicies();
+        } catch (err) { showToast(err.message, 'error'); }
+    };
+    input.click();
+};
+
+// ── HR Tickets ──
+async function loadTickets() {
+    const client = sb(); if (!client) return;
+    
+    // 🔥 FIX: Using explicit foreign keys to stop the Ambiguous Join Error!
+    let data = [], error = null;
+    try {
+        const res = await client
+            .from('hr_tickets')
+            .select(`
+                id, ticket_number, category, subject, priority, status, created_at,
+                employees!hr_tickets_created_by_fkey(first_name, last_name),
+                assignee:employees!assignee_id(first_name, last_name)
+            `)
+            .order('created_at', { ascending: false });
+        data = res.data;
+        error = res.error;
+        
+        // Fallback if schema doesn't match expected names exactly
+        if (error && error.code === 'PGRST201') {
+             console.warn("Retrying tickets without foreign key joins...");
+             const fallback = await client.from('hr_tickets').select('*').order('created_at', { ascending: false });
+             data = fallback.data;
+             error = fallback.error;
+        }
+    } catch (e) {
+        console.error("Tickets query failed:", e);
+    }
+
+    if (error) { 
+        console.error("Supabase Error (Tickets):", error); 
+        renderTickets([]);
+        return; 
+    }
+    
+    allTickets = data || [];
+    setText('stat-tickets', allTickets.filter(t => t.status === 'open').length);
+    renderTickets(allTickets);
+}
+
+function renderTickets(list) {
+    const tbody = document.getElementById('tickets-tbody'); if (!tbody) return;
+    if (!list || list.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:40px;color:var(--hr-text-muted)">No tickets found.</td></tr>';
+        return;
+    }
+    
+    tbody.innerHTML = list.map(t => {
+        // 🔥 DEFENSIVE FALLBACKS
+        const emp = t.employees || {};
+        const fName = String(emp.first_name || '').trim();
+        const lName = String(emp.last_name || '').trim();
+        const creatorName = (fName || lName) ? `${fName} ${lName}` : 'Unknown Employee';
+
+        const asgn = t.assignee || {};
+        const asgnFName = String(asgn.first_name || '').trim();
+        const asgnLName = String(asgn.last_name || '').trim();
+        const assigneeName = (asgnFName || asgnLName) ? `${asgnFName} ${asgnLName}` : 'Unassigned';
+
+        const pBadge = { high:'hr-badge-danger', medium:'hr-badge-pending', low:'hr-badge-inactive' }[t.priority] || 'hr-badge-inactive';
+        const sBadge = { open:'hr-badge-info', in_progress:'hr-badge-pending', resolved:'hr-badge-active', closed:'hr-badge-inactive' }[t.status] || 'hr-badge-inactive';
+        
+        return `<tr>
+            <td><span class="primary-text hr-font-mono">${t.ticket_number || (t.id ? t.id.slice(0,8).toUpperCase() : '---')}</span></td>
+            <td>${creatorName}</td>
+            <td>${t.category || '—'}</td>
+            <td>${t.subject || 'No Subject'}</td>
+            <td><span class="hr-badge ${pBadge}">${t.priority || 'none'}</span></td>
+            <td><span class="hr-badge ${sBadge}">${t.status?.replace('_',' ') || 'unknown'}</span></td>
+            <td>${assigneeName}</td>
+        </tr>`;
+    }).join('');
+}
+
+window.openTicketModal = () => showToast('New ticket modal — coming soon', 'info');
+
+// ── Org Chart (simple tree) ──
+window.loadOrgChart = async function() {
+    const client = sb(); if (!client) return;
+    const { data, error } = await client
+        .from('employees')
+        .select('id, first_name, last_name, job_title, manager_id, departments(name)')
+        .eq('status', 'active');
+
+    if (error) {
+        document.getElementById('org-chart').innerHTML = `<p style="color:var(--hr-text-muted);">Failed to load org chart</p>`;
+        return;
+    }
+
+    const employees = data || [];
+    const container = document.getElementById('org-chart'); if (!container) return;
+
+    if (employees.length === 0) {
+        container.innerHTML = `<p style="color:var(--hr-text-muted);">No employees found.</p>`;
+        return;
+    }
+
+    function buildTree(managerId, depth=0) {
+        const reports = employees.filter(e => e.manager_id === managerId || (!managerId && !e.manager_id));
+        if (reports.length === 0) return '';
+        
+        return reports.map(e => {
+            const color = avatarColor(e.id);
+            
+            // 🔥 STOP CRASHING ON NULL NAMES
+            const fName = String(e.first_name || '').trim();
+            const lName = String(e.last_name || '').trim();
+            const fInit = fName ? fName.charAt(0) : '';
+            const lInit = lName ? lName.charAt(0) : '';
+            const initials = (fInit + lInit).toUpperCase() || 'EM';
+            const fullName = (fName || lName) ? `${fName} ${lName}` : 'Unknown Employee';
+
+            return `<div style="display:inline-flex;flex-direction:column;align-items:center;margin:0 12px">
+                <div style="display:flex;flex-direction:column;align-items:center;padding:12px 16px;background:var(--hr-bg-card);border:1px solid var(--hr-border);border-radius:var(--hr-radius-lg);min-width:140px;position:relative">
+                    <div class="hr-emp-avatar" style="background:${color};color:#fff;margin-bottom:6px">${initials}</div>
+                    <div style="font-weight:600;font-size:13px;text-align:center">${fullName}</div>
+                    <div style="font-size:11px;color:var(--hr-text-muted);text-align:center">${e.job_title||'—'}</div>
+                </div>
+                ${buildTree(e.id, depth+1) ? `<div style="width:1px;height:20px;background:var(--hr-border)"></div><div style="display:flex;gap:0">${buildTree(e.id, depth+1)}</div>` : ''}
+            </div>`;
+        }).join('');
+    }
+
+    container.innerHTML = `<div style="display:flex;justify-content:center">${buildTree(null)}</div>`;
+};
+
+window.switchOpsTab = function(btn, tabId) {
+    document.querySelectorAll('#ops-tabs .hr-tab').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    ['tab-leave','tab-policies','tab-tickets','tab-org'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.style.display = id === tabId ? 'block' : 'none';
+    });
+    if (tabId === 'tab-org') loadOrgChart();
+};
+
+window.exportLeave = function() {
+    if (allLeave.length === 0) return showToast('No data to export', 'warning');
+    const headers = ['Employee','Type','From','To','Days','Status'];
+    const rows = allLeave.map(l => {
+        const fName = l.employees?.first_name || '';
+        const lName = l.employees?.last_name || '';
+        return [
+            `${fName} ${lName}`.trim(),
+            l.type || '', l.from_date || '', l.to_date || '', l.days || '', l.status || ''
+        ];
+    });
+    const csv = [headers,...rows].map(r=>r.map(c=>`"${c}"`).join(',')).join('\n');
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([csv],{type:'text/csv'}));
+    a.download = `leave-requests-${new Date().toISOString().slice(0,10)}.csv`;
+    a.click();
+    showToast('Export downloaded', 'success');
+};
+
+function hexToRgb(hex) {
+    const r = parseInt(hex.slice(1,3),16), g = parseInt(hex.slice(3,5),16), b = parseInt(hex.slice(5,7),16);
+    return `${r},${g},${b}`;
+}
+
+function authHeaders() {
+    const token = sb()?.auth?.session()?.access_token || localStorage.getItem('sb-token') || '';
+    return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
+function avatarColor(id) {
+    const c=['#0ea5e9','#8b5cf6','#10b981','#f59e0b','#ef4444','#06b6d4'];
+    let h=0; for(const ch of (id||'')) h=(h*31+ch.charCodeAt(0))&0xffffffff;
+    return c[Math.abs(h)%c.length];
+}
+
+function setText(id,v) { const el=document.getElementById(id); if(el) el.textContent=v; }
+window.openModal  = id => document.getElementById(id)?.classList.add('open');
+window.closeModal = id => document.getElementById(id)?.classList.remove('open');
+window.showToast  = (msg,type='info') => {
+    const c=document.getElementById('toasts'); if(!c) return;
+    const t=document.createElement('div'); t.className=`hr-toast ${type}`; t.textContent=msg;
+    c.appendChild(t); setTimeout(()=>t.remove(),3800);
+};
