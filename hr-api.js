@@ -734,7 +734,7 @@ async function sendEmail(env, { to, subject, html }) {
     await fetch('https://api.resend.com/emails', {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${env.RESEND_API_KEY}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ from: 'hr@simpatico.app', to, subject, html }),
+      body: JSON.stringify({ from: 'hr@ats.simpaticohr.in', to, subject, html }),
     });
   } catch (e) { console.error('Email send error:', e); }
 }

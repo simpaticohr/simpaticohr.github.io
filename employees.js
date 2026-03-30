@@ -140,8 +140,8 @@ function renderTable(list) {
   if (empty) empty.style.display = 'none';
 
   tbody.innerHTML = list.map(e => {
-    const name    = `${e.first_name} ${e.last_name}`;
-    const initials= `${e.first_name[0]}${e.last_name[0]}`.toUpperCase();
+    const name    = `${e.first_name || ''} ${e.last_name || ''}`;
+    const initials= e.first_name && e.last_name ? `${e.first_name[0]}${e.last_name[0]}`.toUpperCase() : '??';
     const color   = avatarColor(e.id);
     const dept    = e.departments?.name || '—';
     const mgr     = e.manager ? `${e.manager.first_name} ${e.manager.last_name}` : '—';
@@ -182,8 +182,8 @@ function renderGrid(list) {
   if (!grid) return;
   if (list.length === 0) { grid.innerHTML = '<p style="color:var(--hr-text-muted);text-align:center;grid-column:1/-1;padding:40px">No employees found.</p>'; return; }
   grid.innerHTML = list.map(e => {
-    const name    = `${e.first_name} ${e.last_name}`;
-    const initials= `${e.first_name[0]}${e.last_name[0]}`.toUpperCase();
+    const name    = `${e.first_name || ''} ${e.last_name || ''}`;
+    const initials= e.first_name && e.last_name ? `${e.first_name[0]}${e.last_name[0]}`.toUpperCase() : '??';
     const color   = avatarColor(e.id);
     const dept    = e.departments?.name || '';
     const badge   = statusBadge(e.status);
@@ -234,14 +234,20 @@ function openAddModal() { openModal('add-modal'); }
 
 async function saveEmployee() {
   const btn = document.getElementById('save-btn');
-  if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Saving…';
+  }
 
   const first = document.getElementById('emp-first')?.value.trim();
   const last  = document.getElementById('emp-last')?.value.trim();
   const email = document.getElementById('emp-email')?.value.trim();
   if (!first || !last || !email) {
     showToast('First name, last name and email are required', 'error');
-    if (btn) { btn.disabled = false; btn.textContent = 'Save Employee'; }
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = 'Save Employee';
+    }
     return;
   }
 
@@ -274,7 +280,10 @@ async function saveEmployee() {
   } catch (err) {
     showToast(err.message, 'error');
   } finally {
-    if (btn) { btn.disabled = false; btn.textContent = 'Save Employee'; }
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = 'Save Employee';
+    }
   }
 }
 
