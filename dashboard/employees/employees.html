@@ -14,7 +14,7 @@
     .emp-name-text strong { color: var(--text-primary); font-size: 0.9rem; }
     .emp-name-text small { color: var(--text-secondary); font-size: 0.75rem; }
     
-    /* Dark Theme Modal (Matching your screenshot) */
+    /* Dark Theme Modal */
     .dark-modal .modal-content {
         background: #0f172a;
         color: #f8fafc;
@@ -109,7 +109,7 @@
                         </tr>
                     </thead>
                     <tbody id="employeesTableBody">
-                        </tbody>
+                    </tbody>
                 </table>
             </div>
             <div id="empEmptyState" class="empty-state" style="display:none; padding: 60px 20px;">
@@ -132,7 +132,7 @@
                 <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
             <div class="modal-body" style="padding: 24px;">
-                <form id="addEmployeeForm" onsubmit="window.saveEmployee(event)">
+                <form id="addEmployeeForm">
                     <div class="row">
                         <div class="col-md-6 form-group">
                             <label>First Name *</label>
@@ -190,7 +190,7 @@
                     </div>
                 </form>
             </div>
-           <div class="modal-footer">
+            <div class="modal-footer">
                 <button type="button" class="btn-cancel" data-bs-dismiss="modal">Cancel</button>
                 <button type="button" class="btn-save" onclick="window.saveEmployee(event)">Save Employee</button>
             </div>
@@ -200,14 +200,12 @@
 
 <script>
 // =========================================================================
-// EMPLOYEES MODULE JS
+// EMPLOYEES MODULE JS (BULLETPROOF EDITION)
 // =========================================================================
 
-// Initialize Employee Data Array if it doesn't exist
 if (!window.appData) window.appData = window.DataStore ? window.DataStore.get() : { employees: [] };
 if (!window.appData.employees) window.appData.employees = [];
 
-// Random colors for avatars
 var avatarColors = ['#4f46e5', '#0ea5e9', '#10b981', '#f59e0b', '#ec4899', '#8b5cf6', '#ef4444'];
 
 window.renderEmployeesTable = function() {
@@ -218,24 +216,24 @@ window.renderEmployeesTable = function() {
     if (!tbody) return;
 
     var filterDept = document.getElementById('empFilterDept')?.value || '';
-    var emps = window.appData.employees;
+    
+    // Safely guarantee we are working with an array
+    var emps = Array.isArray(window.appData.employees) ? window.appData.employees : [];
 
-    // Filter Logic
     if (filterDept) {
-        emps = emps.filter(e => e.department === filterDept);
+        emps = emps.filter(e => e && e.department === filterDept);
     }
 
     // Safely Update Stats
     var totalEl = document.getElementById('statTotalEmployees');
-    if (totalEl) totalEl.textContent = window.appData.employees.length;
+    if (totalEl) totalEl.textContent = emps.length;
     
     var activeEl = document.getElementById('statActiveEmployees');
-    if (activeEl) activeEl.textContent = window.appData.employees.filter(e => e.status !== 'Inactive').length;
+    if (activeEl) activeEl.textContent = emps.filter(e => e && e.status !== 'Inactive').length;
     
     var onbEl = document.getElementById('statOnboarding');
-    if (onbEl) onbEl.textContent = window.appData.employees.filter(e => e.status === 'Onboarding').length;
+    if (onbEl) onbEl.textContent = emps.filter(e => e && e.status === 'Onboarding').length;
 
-    // Render Logic
     if (emps.length === 0) {
         tbody.innerHTML = '';
         if (emptyState) emptyState.style.display = 'block';
@@ -248,13 +246,22 @@ window.renderEmployeesTable = function() {
 
     var html = '';
     emps.forEach((emp, idx) => {
-        var fName = emp.firstName || emp.first_name || '';
-        var lName = emp.lastName || emp.last_name || '';
-        var initials = (fName.charAt(0) + lName.charAt(0)).toUpperCase() || 'EM';
+        // 🔥 ULTIMATE SAFETY NET: If the database row is empty/null, skip it entirely
+        if (!emp) return;
+
+        // Force variables to be Strings, completely eliminating the 'Cannot read property of null' error
+        var fName = String(emp.firstName || emp.first_name || '').trim();
+        var lName = String(emp.lastName || emp.last_name || '').trim();
+        
+        var fInit = fName ? fName.charAt(0) : '';
+        var lInit = lName ? lName.charAt(0) : '';
+        var initials = (fInit + lInit).toUpperCase() || 'EM';
 
         var color = avatarColors[idx % avatarColors.length];
-        var fullName = (fName + ' ' + lName).trim() || 'Unnamed Employee';
-        var statusColor = emp.status === 'Active' ? 'active' : (emp.status === 'Onboarding' ? 'pending' : 'closed');
+        var fullName = (fName + ' ' + lName).trim() || 'Unknown Employee';
+        
+        var status = String(emp.status || 'Active').trim();
+        var statusColor = status === 'Active' ? 'active' : (status === 'Onboarding' ? 'pending' : 'closed');
 
         html += `
             <tr>
@@ -273,7 +280,7 @@ window.renderEmployeesTable = function() {
                 </td>
                 <td style="font-size:0.85rem;">${emp.type || '—'}</td>
                 <td style="font-size:0.85rem; color:var(--text-secondary);">${emp.startDate ? new Date(emp.startDate).toLocaleDateString() : '—'}</td>
-                <td><span class="status-badge ${statusColor}">${emp.status || 'Active'}</span></td>
+                <td><span class="status-badge ${statusColor}">${status}</span></td>
                 <td>
                     <button class="btn-sm-action view" title="View Profile"><i class="fas fa-eye"></i></button>
                     <button class="btn-sm-action edit" title="Edit"><i class="fas fa-pen"></i></button>
@@ -286,7 +293,6 @@ window.renderEmployeesTable = function() {
     tbody.innerHTML = html;
 };
 
-// 🔥 FIX 2: Prevent multiple Bootstrap modal instances from getting stuck
 window.openAddEmployeeModal = function() {
     document.getElementById('addEmployeeForm').reset();
     var modalEl = document.getElementById('addEmployeeModal');
@@ -297,14 +303,12 @@ window.openAddEmployeeModal = function() {
 window.saveEmployee = function(e) {
     if (e) e.preventDefault();
     
-    // 🔥 FIX 3: Manually trigger form validation since we bypassed the standard submit
     var form = document.getElementById('addEmployeeForm');
     if (!form.checkValidity()) {
         form.reportValidity();
         return;
     }
     
-    // Safely extract values from the modal
     var newEmp = {
         id: 'emp_' + Date.now(),
         firstName: document.getElementById('empFirstName').value.trim(),
@@ -320,11 +324,10 @@ window.saveEmployee = function(e) {
         createdAt: new Date().toISOString()
     };
 
-    // Add to DataStore defensively
     if (window.DataStore) {
         window.DataStore.update(data => {
             if (!data.employees) data.employees = [];
-            if (!data.stats) data.stats = {}; // Prevent crashes if stats is missing
+            if (!data.stats) data.stats = {}; 
             data.employees.push(newEmp);
             data.stats.totalEmployees = data.employees.length;
         });
@@ -335,13 +338,11 @@ window.saveEmployee = function(e) {
 
     window.renderEmployeesTable();
     
-    // 🔥 FIX 4: Bulletproof Modal Close
     var modalEl = document.getElementById('addEmployeeModal');
     var modal = bootstrap.Modal.getInstance(modalEl);
     if (modal) {
         modal.hide();
     } else {
-        // Hard-hide fallback if Bootstrap fails
         modalEl.classList.remove('show');
         modalEl.style.display = 'none';
         document.body.classList.remove('modal-open');
@@ -357,13 +358,13 @@ window.deleteEmployee = function(id) {
     
     if (window.DataStore) {
         window.DataStore.update(data => {
-            data.employees = (data.employees || []).filter(e => e.id !== id);
+            data.employees = (data.employees || []).filter(e => e && e.id !== id);
             if (!data.stats) data.stats = {};
             data.stats.totalEmployees = data.employees.length;
         });
         window.appData = window.DataStore.get();
     } else {
-        window.appData.employees = window.appData.employees.filter(e => e.id !== id);
+        window.appData.employees = window.appData.employees.filter(e => e && e.id !== id);
     }
     
     window.renderEmployeesTable();
@@ -374,11 +375,9 @@ window.filterEmployees = function() {
     window.renderEmployeesTable();
 };
 
-// Listen for the custom SPA load event from hr.html to trigger rendering
 window.addEventListener('SimpaticoSPA', function() {
     window.renderEmployeesTable();
 });
 
-// Run once immediately in case it loads directly
 window.renderEmployeesTable();
 </script>
