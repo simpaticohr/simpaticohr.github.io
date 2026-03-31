@@ -57,6 +57,7 @@
             color: var(--text-gray);
             margin: 0;
             font-size: 0.95rem;
+            line-height: 1.6;
         }
 
         .form-group {
@@ -71,10 +72,12 @@
 
         label {
             display: block;
-            font-weight: 500;
+            font-weight: 600;
             margin-bottom: 8px;
-            font-size: 0.9rem;
+            font-size: 0.85rem;
             color: var(--primary);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
         }
 
         input[type="text"],
@@ -87,13 +90,14 @@
             font-family: 'Poppins', sans-serif;
             font-size: 0.95rem;
             box-sizing: border-box;
-            transition: border-color 0.2s;
+            transition: all 0.2s;
         }
 
         input:focus, textarea:focus {
             outline: none;
             border-color: #0078d4;
             box-shadow: 0 0 0 3px rgba(0, 120, 212, 0.1);
+            background: #fff;
         }
 
         .btn-submit {
@@ -102,24 +106,26 @@
             background: var(--tech-gradient);
             color: white;
             border: none;
-            border-radius: 8px;
+            border-radius: 10px;
             font-size: 1rem;
-            font-weight: 600;
+            font-weight: 700;
             cursor: pointer;
-            transition: transform 0.2s, box-shadow 0.2s;
+            transition: all 0.3s;
             display: flex;
             justify-content: center;
             align-items: center;
             gap: 10px;
+            margin-top: 10px;
         }
 
         .btn-submit:hover {
             transform: translateY(-2px);
             box-shadow: 0 8px 20px rgba(0, 120, 212, 0.3);
+            filter: brightness(1.05);
         }
 
         .btn-submit:disabled {
-            opacity: 0.7;
+            opacity: 0.6;
             cursor: not-allowed;
             transform: none;
         }
@@ -131,9 +137,15 @@
         }
 
         .success-icon {
-            font-size: 4rem;
+            font-size: 4.5rem;
             color: #10b981;
             margin-bottom: 20px;
+            animation: scaleIn 0.5s ease-out;
+        }
+
+        @keyframes scaleIn {
+            0% { transform: scale(0); opacity: 0; }
+            100% { transform: scale(1); opacity: 1; }
         }
 
         @media (max-width: 600px) {
@@ -148,19 +160,19 @@
 
     <div class="apply-card">
         <div class="apply-header" id="headerState">
-            <h2>Apply for Position</h2>
-            <p>Submit your application and our AI will review it instantly.</p>
+            <h2>Apply Now</h2>
+            <p id="jobContext">Loading position details...</p>
         </div>
 
         <form id="applyForm">
             <div class="form-row">
                 <div class="form-group">
                     <label>First Name</label>
-                    <input type="text" id="firstName" required placeholder="Diana">
+                    <input type="text" id="firstName" required placeholder="e.g. Diana">
                 </div>
                 <div class="form-group">
                     <label>Last Name</label>
-                    <input type="text" id="lastName" required placeholder="Prince">
+                    <input type="text" id="lastName" required placeholder="e.g. Prince">
                 </div>
             </div>
 
@@ -170,70 +182,81 @@
             </div>
 
             <div class="form-group">
-                <label>Key Skills (Comma separated)</label>
-                <textarea id="skills" rows="3" required placeholder="e.g. Python, AWS, React, Project Management"></textarea>
-                <small style="color: var(--text-gray); font-size: 0.8rem; margin-top: 5px; display: block;">
-                    Our AI parses these skills to determine your ATS match score.
+                <label>Resume Summary / Skills</label>
+                <textarea id="skills" rows="4" required placeholder="List your key skills or paste a short summary of your experience..."></textarea>
+                <small style="color: var(--text-gray); font-size: 0.8rem; margin-top: 8px; display: block;">
+                    <i class="fas fa-robot"></i> Simpatico AI will analyze these details for an instant match score.
                 </small>
             </div>
 
             <button type="submit" class="btn-submit" id="submitBtn">
-                Submit Application <i class="fas fa-arrow-right"></i>
+                Submit Application <i class="fas fa-paper-plane"></i>
             </button>
         </form>
 
         <div id="successState">
             <div class="success-icon"><i class="fas fa-check-circle"></i></div>
-            <h2 style="color: var(--primary);">Application Received!</h2>
-            <p style="color: var(--text-gray);">Your profile has been routed to our AI Screening Engine. You can track your status in the Candidate Portal.</p>
-            <a href="platform/login.html" style="display: inline-block; margin-top: 20px; color: #0078d4; text-decoration: none; font-weight: 600;">Go to Candidate Portal →</a>
+            <h2 style="color: var(--primary); margin-bottom: 10px;">Application Sent!</h2>
+            <p style="color: var(--text-gray); margin-bottom: 30px;">Thank you for applying. Your profile is being processed by our AI screening engine.</p>
+            <a href="jobs.html" style="text-decoration: none; color: #0078d4; font-weight: 700; border: 1px solid #0078d4; padding: 10px 20px; border-radius: 8px; transition: 0.2s;">View More Jobs</a>
         </div>
     </div>
 
     <script>
-        // Your live Supabase Project Credentials
+        // --- DATABASE CONFIGURATION ---
         const SUPABASE_URL = 'https://cvkxtsvgnynxexmemfuy.supabase.co';
         const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN2a3h0c3ZnbnlueGV4bWVtZnV5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc0MjE2NTEsImV4cCI6MjA4Mjk5NzY1MX0.2mys8Cc-ucJ1uLThEGJubeDEg1TvfIAkW-xFsR4ecq4';
         
         const supabase = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
+        // --- URL LOGIC ---
+        // Reads ?role=Title from the address bar
+        const urlParams = new URLSearchParams(window.location.search);
+        const appliedRole = urlParams.get('role') || 'General Application';
+        
+        // Update the UI text
+        document.getElementById('jobContext').innerHTML = `You are applying for the <strong>${appliedRole}</strong> position.`;
+
+        // --- FORM SUBMISSION ---
         document.getElementById('applyForm').addEventListener('submit', async (e) => {
             e.preventDefault();
             
             const btn = document.getElementById('submitBtn');
             btn.disabled = true;
-            btn.innerHTML = 'Processing AI Review... <i class="fas fa-spinner fa-spin"></i>';
+            btn.innerHTML = 'Analyzing with AI... <i class="fas fa-spinner fa-spin"></i>';
 
-            // Gather form data
+            // Gather Data
             const firstName = document.getElementById('firstName').value.trim();
             const lastName = document.getElementById('lastName').value.trim();
             const email = document.getElementById('email').value.trim();
+            const skills = document.getElementById('skills').value.trim();
 
             try {
-                // Insert directly into your LIVE 'applications' table
+                // Insert into 'applications' table
                 const { data, error } = await supabase
                     .from('applications')
                     .insert([
                         {
-                            name: firstName + " " + lastName, // Formats as "Diana Prince"
+                            name: `${firstName} ${lastName}`,
                             email: email,
-                            status: 'New', // Sets initial status for the HR Dashboard
-                            created_at: new Date().toISOString() // Fixes the "Invalid Date" bug
+                            status: 'New', 
+                            applied_for: appliedRole, // Saves the Job Title from URL
+                            created_at: new Date().toISOString()
                         }
                     ]);
 
                 if (error) throw error;
 
-                // Show Success Screen
+                // UI Transition
                 document.getElementById('applyForm').style.display = 'none';
                 document.getElementById('headerState').style.display = 'none';
                 document.getElementById('successState').style.display = 'block';
 
             } catch (err) {
-                alert("Database Error: " + err.message);
+                alert("Submission Error: " + err.message);
                 console.error(err);
                 btn.disabled = false;
-                btn.innerHTML = 'Submit Application <i class="fas fa-arrow-right"></i>';
+                btn.innerHTML = 'Submit Application <i class="fas fa-paper-plane"></i>';
             }
         });
     </script>
