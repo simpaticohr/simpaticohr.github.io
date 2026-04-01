@@ -6,6 +6,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" rel="stylesheet">
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <script src="js/hr-config.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <style>
     *{box-sizing:border-box;margin:0;padding:0}
     body{font-family:'Plus Jakarta Sans',system-ui,-apple-system,sans-serif;background:#0a0f1e;color:#e2e8f0;min-height:100vh}
@@ -279,25 +281,31 @@ function showToast(msg, type = "success") {
   t.textContent = msg;
   t.className = `toast ${type} show`;
   setTimeout(() => t.classList.remove('show'), 3000);
-}
-
-// ---------------------------------------------------------------
-// LOAD JOBS  Public endpoint GET /jobs
+}// ---------------------------------------------------------------
+// LOAD JOBS — Public endpoint GET /job_postings
 // ---------------------------------------------------------------
 async function loadJobs() {
   const el = document.getElementById("jobsList");
   try {
     const params = new URLSearchParams();
     const search = document.getElementById('searchInput')?.value?.trim();
-    if (search) params.set('search', search);
-    if (currentFilter !== 'all') params.set('type', currentFilter);
-
-    const queryStr = params.toString();
-    const sbKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN2a3h0c3ZnbnlueGV4bWVtZnV5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc0MjE2NTEsImV4cCI6MjA4Mjk5NzY1MX0.2mys8Cc-ucJ1uLThEGJubeDEg1TvfIAkW-xFsR4ecq4';
-    let sbUrl = 'https://cvkxtsvgnynxexmemfuy.supabase.co/rest/v1/jobs?select=*,companies(name)&status=eq.active&order=created_at.desc';
+    
+    const SUPABASE_URL = window.SIMPATICO_CONFIG?.supabaseUrl;
+    const SUPABASE_ANON_KEY = window.SIMPATICO_CONFIG?.supabaseAnonKey;
+    
+    // Default query for open job postings
+    let sbUrl = `${SUPABASE_URL}/rest/v1/job_postings?status=eq.open&select=*,org_profiles(name)&order=created_at.desc`;
+    
     if (search) sbUrl += '&title=ilike.*' + encodeURIComponent(search) + '*';
-    if (currentFilter !== 'all') sbUrl += '&job_type=eq.' + currentFilter;
-    const res = await fetch(sbUrl, { headers: { apikey: sbKey, Authorization: 'Bearer ' + sbKey } });
+    if (currentFilter && currentFilter !== 'all') sbUrl += '&type=eq.' + currentFilter;
+    
+    const res = await fetch(sbUrl, { 
+      headers: { 
+        apikey: SUPABASE_ANON_KEY, 
+        Authorization: 'Bearer ' + SUPABASE_ANON_KEY 
+      } 
+    });
+    
     const jobs = (await res.json()) || [];
 
     if (!jobs.length) {

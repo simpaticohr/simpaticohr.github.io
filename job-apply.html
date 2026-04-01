@@ -7,6 +7,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     
+    <script src="js/hr-config.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
     <style>
@@ -130,6 +131,41 @@
             transform: none;
         }
 
+        /* Resume Upload Styling */
+        .file-upload-box {
+            border: 2px dashed var(--border);
+            border-radius: 10px;
+            padding: 20px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.2s;
+            background: #fafbfc;
+        }
+
+        .file-upload-box:hover {
+            border-color: #0078d4;
+            background: #f0f7ff;
+        }
+
+        .file-upload-box i {
+            font-size: 1.5rem;
+            color: var(--text-gray);
+            margin-bottom: 8px;
+        }
+
+        .file-upload-box p {
+            margin: 0;
+            font-size: 0.85rem;
+            color: var(--text-gray);
+        }
+
+        .file-name-display {
+            margin-top: 10px;
+            font-size: 0.85rem;
+            color: var(--primary);
+            font-weight: 600;
+        }
+
         #successState {
             display: none;
             text-align: center;
@@ -182,6 +218,16 @@
             </div>
 
             <div class="form-group">
+                <label>Upload Resume (PDF)</label>
+                <div class="file-upload-box" onclick="document.getElementById('resumeFile').click()">
+                    <i class="fas fa-file-pdf"></i>
+                    <p>Click to upload your resume (PDF only, max 5MB)</p>
+                    <div id="resumeName" class="file-name-display"></div>
+                </div>
+                <input type="file" id="resumeFile" accept=".pdf" style="display:none;">
+            </div>
+
+            <div class="form-group">
                 <label>Resume Summary / Skills</label>
                 <textarea id="skills" rows="4" required placeholder="List your key skills or paste a short summary of your experience..."></textarea>
                 <small style="color: var(--text-gray); font-size: 0.8rem; margin-top: 8px; display: block;">
@@ -204,10 +250,9 @@
 
     <script>
         // --- DATABASE CONFIGURATION ---
-        const SUPABASE_URL = 'https://cvkxtsvgnynxexmemfuy.supabase.co';
-        const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN2a3h0c3ZnbnlueGV4bWVtZnV5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc0MjE2NTEsImV4cCI6MjA4Mjk5NzY1MX0.2mys8Cc-ucJ1uLThEGJubeDEg1TvfIAkW-xFsR4ecq4';
+        const SUPABASE_URL = window.SIMPATICO_CONFIG?.supabaseUrl;
+        const SUPABASE_ANON_KEY = window.SIMPATICO_CONFIG?.supabaseAnonKey;
         
-        // FIX: Renamed variable to 'supabaseClient' to avoid the naming crash
         const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
         // --- URL LOGIC ---
@@ -218,31 +263,65 @@
         // Update the UI text,
         document.getElementById('jobContext').innerHTML = `You are applying for the <strong>${appliedRole}</strong> position.`;
 
+        // Handle file name display
+        document.getElementById('resumeFile').addEventListener('change', (e) => {
+            const fileName = e.target.files[0]?.name || "";
+            document.getElementById('resumeName').textContent = fileName;
+        });
+
         // --- FORM SUBMISSION ---
         document.getElementById('applyForm').addEventListener('submit', async (e) => {
             e.preventDefault();
             
             const btn = document.getElementById('submitBtn');
+            const resumeInput = document.getElementById('resumeFile');
+            const resumeFile = resumeInput.files[0];
+
+            if (!resumeFile) {
+                alert("Please upload your resume.");
+                return;
+            }
+
             btn.disabled = true;
-            btn.innerHTML = 'Analyzing with AI... <i class="fas fa-spinner fa-spin"></i>';
+            btn.innerHTML = 'Uploading Application... <i class="fas fa-spinner fa-spin"></i>';
 
             // Gather Data
             const firstName = document.getElementById('firstName').value.trim();
             const lastName = document.getElementById('lastName').value.trim();
             const email = document.getElementById('email').value.trim();
+            const skills = document.getElementById('skills').value.trim();
 
             try {
-                // Insert into 'applications' table
+                // 1. Upload Resume to Storage
+                const fileExt = resumeFile.name.split('.').pop();
+                const fileName = `${Date.now()}-${Math.random().toString(36).substring(7)}.${fileExt}`;
+                const filePath = `resumes/${fileName}`;
+
+                const { data: uploadData, error: uploadError } = await supabaseClient
+                    .storage
+                    .from('hr-documents')
+                    .upload(filePath, resumeFile);
+
+                if (uploadError) throw uploadError;
+
+                // 2. Get Public URL
+                const { data: { publicUrl } } = supabaseClient
+                    .storage
+                    .from('hr-documents')
+                    .getPublicUrl(filePath);
+
+                // 3. Insert into 'job_applications' table
                 const { data, error } = await supabaseClient
-                    .from('applications')
+                    .from('job_applications')
                     .insert([
                         {
-                            name: `${firstName} ${lastName}`,
-                            email: email,
-                            status: 'New', 
-                            applied_for: appliedRole,
+                            candidate_name: `${firstName} ${lastName}`,
+                            candidate_email: email,
+                            status: 'applied', 
                             job_id: jobId,
-                            created_at: new Date().toISOString()
+                            resume_url: publicUrl,
+                            candidate_skills: skills,
+                            applied_at: new Date().toISOString()
                         }
                     ]);
 
@@ -254,7 +333,7 @@
                 document.getElementById('successState').style.display = 'block';
 
             } catch (err) {
-                alert("Database Error: " + err.message);
+                alert("Application Error: " + err.message);
                 console.error(err);
                 btn.disabled = false;
                 btn.innerHTML = 'Submit Application <i class="fas fa-paper-plane"></i>';

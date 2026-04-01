@@ -244,8 +244,17 @@
         </div>
     </div>
 
+    <script src="../js/hr-config.js"></script>
+    <script src="../js/supabase-client.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    
     <script>
-    const API = 'https://evalis-ai.simpaticohrconsultancy.workers.dev';
+    // Configuration from window.SIMPATICO_CONFIG (hr-config.js)
+    const SUPABASE_URL = window.SIMPATICO_CONFIG?.supabaseUrl;
+    const SUPABASE_ANON_KEY = window.SIMPATICO_CONFIG?.supabaseAnonKey;
+    
+    // Use the centralized SimpaticoDB if available
+    const db = window.SimpaticoDB || supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
     function showFileName(input) {
         const fn = document.getElementById('fileName');
@@ -296,53 +305,81 @@
     spinner.style.display = 'inline-block';
 
     try {
-
-        const res = await fetch(`${API}/api/auth/register-candidate`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
+        // 1. Sign up with Supabase Auth
+        const { data: authData, error: authError } = await db.auth.signUp({
+            email: email,
+            password: password,
+            options: {
+                data: {
+                    full_name: fullName,
+                    role: 'candidate'
+                }
+            }
         });
 
-        const data = await res.json();
+        if (authError) throw authError;
 
-        if (!res.ok || data.error) {
-            throw new Error(data.error || data.message || 'Registration failed');
+        const userId = authData.user?.id;
+        if (!userId) throw new Error('Registration failed - please try again');
+
+        // 2. Resume upload (optional during reg)
+        let resumeUrl = '';
+        const resumeFile = document.getElementById('resumeFile').files[0];
+        if (resumeFile) {
+            const fileExt = resumeFile.name.split('.').pop();
+            const fileName = `resumes/${userId}_${Date.now()}.${fileExt}`;
+            const { error: uploadError } = await db.storage
+                .from('hr-documents')
+                .upload(fileName, resumeFile);
+            
+            if (!uploadError) {
+                const { data: { publicUrl } } = db.storage
+                    .from('hr-documents')
+                    .getPublicUrl(fileName);
+                resumeUrl = publicUrl;
+            }
         }
 
-        // resume upload
-        const resumeFile = document.getElementById('resumeFile').files[0];
+        // 3. Create entry in users table
+        const { error: dbError } = await db.from('users').insert({
+            auth_id: userId,
+            full_name: fullName,
+            email: email,
+            phone: phone,
+            role: 'candidate',
+            experience: document.getElementById('experience').value,
+            sector: document.getElementById('sector').value,
+            skills: document.getElementById('skills').value.trim(),
+            location: document.getElementById('location').value.trim(),
+            resume_url: resumeUrl,
+            is_active: true,
+            created_at: new Date().toISOString()
+        });
 
-        if (resumeFile && data.token) {
+        if (dbError) throw dbError;
 
-            const formData = new FormData();
-            formData.append('resume', resumeFile);
-
-            await fetch(`${API}/api/candidate/upload-resume`, {
-                method: 'POST',
-                headers: {
-                    'Authorization': `Bearer ${data.token}`
-                },
-                body: formData
-            });
-
+        // 4. Success handling
+        if (authData.session) {
+            localStorage.setItem('simpatico_token', authData.session.access_token);
+            localStorage.setItem('simpatico_user', JSON.stringify({
+                email: email,
+                full_name: fullName,
+                role: 'candidate'
+            }));
         }
 
         toast('Account created successfully! Redirecting...', 'success');
 
         setTimeout(() => {
-            window.location.href = '../dashboard/candidate.html';
+            window.location.href = authData.session ? '../dashboard/candidate.html' : 'login.html?verify=1';
         }, 1500);
 
     } catch (err) {
-
         console.error(err);
         toast(err.message || 'Registration failed', 'error');
-
     } finally {
-
         btn.disabled = false;
         spinner.style.display = 'none';
-
     }
 }
 

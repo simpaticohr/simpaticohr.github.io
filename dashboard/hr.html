@@ -1050,6 +1050,9 @@
         </a>
 
         <div class="nav-section-title">System</div>
+        <a class="nav-item" data-section="storage" onclick="navigateTo('storage', this)">
+            <i class="fas fa-database"></i> Storage
+        </a>
         <a class="nav-item" data-section="settings" onclick="navigateTo('settings', this)">
             <i class="fas fa-gear"></i> Settings
         </a>
@@ -1451,6 +1454,89 @@
                     </div>
                 </div>
             </div>
+        </div>
+
+        <div id="section-storage" class="content-section" style="display:none;">
+            <div class="page-header"><div><h1>Storage Management</h1><div class="breadcrumb-nav"><a href="#" onclick="navigateTo('dashboard')">Dashboard</a> / Storage</div></div></div>
+            <div class="card">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <h5 class="m-0"><i class="fas fa-hdd text-primary me-2"></i> Company Files</h5>
+                        <button class="btn btn-sm btn-outline-primary" onclick="loadCompanyStorage()"><i class="fas fa-sync-alt"></i> Refresh</button>
+                    </div>
+                    <p class="text-muted small">Manage files securely isolated to your company. Ensure files are deleted when no longer needed to prevent exceeding storage limits.</p>
+                    <div class="table-responsive">
+                        <table class="table hr-table">
+                            <thead>
+                                <tr><th>File Name</th><th>Size</th><th>Uploaded</th><th class="text-end">Actions</th></tr>
+                            </thead>
+                            <tbody id="storageFilesList">
+                                <tr><td colspan="4" class="text-center py-4"><i class="fas fa-circle-notch fa-spin text-primary"></i> Loading...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+            <script>
+                async function loadCompanyStorage() {
+                    const list = document.getElementById('storageFilesList');
+                    list.innerHTML = '<tr><td colspan="4" class="text-center py-4"><i class="fas fa-circle-notch fa-spin text-primary"></i> Loading...</td></tr>';
+                    
+                    const t = localStorage.getItem('simpatico_company');
+                    let tenantId = 'default';
+                    if (t) { try { tenantId = JSON.parse(t).id || 'default'; } catch(e){} }
+                    
+                    try {
+                        const { data, error } = await SimpaticoDB.storage.from('hr-documents').list(tenantId, { limit: 100 });
+                        if (error) throw error;
+                        
+                        if (!data || data.length === 0 || (data.length === 1 && data[0].name === '.emptyFolderPlaceholder')) {
+                            list.innerHTML = '<tr><td colspan="4" class="text-center text-muted py-4"><i class="fas fa-folder-open mb-2 d-block fa-2x"></i> No files found for your company</td></tr>';
+                            return;
+                        }
+                        
+                        list.innerHTML = data.filter(f => f.name !== '.emptyFolderPlaceholder').map(file => {
+                            const size = (file.metadata?.size / 1024 / 1024).toFixed(2);
+                            const date = new Date(file.created_at).toLocaleDateString();
+                            return `<tr>
+                                <td><i class="fas fa-file-alt text-secondary me-2"></i><span style="word-break:break-all">${file.name}</span></td>
+                                <td>${size} MB</td>
+                                <td>${date}</td>
+                                <td class="text-end">
+                                    <button class="btn btn-sm" style="background:rgba(239,68,68,0.1);color:#ef4444;border:none;" onclick="deleteCompanyFile('${file.name}', this)"><i class="fas fa-trash"></i> Delete</button>
+                                </td>
+                            </tr>`;
+                        }).join('');
+                    } catch (e) {
+                         console.error(e);
+                         list.innerHTML = '<tr><td colspan="4" class="text-center text-danger py-4"><i class="fas fa-exclamation-triangle mb-2 d-block fa-2x"></i> Failed to load files</td></tr>';
+                    }
+                }
+                
+                async function deleteCompanyFile(fileName, btn) {
+                    if (!confirm('Permanently delete ' + fileName + '?')) return;
+                    const origHtml = btn.innerHTML;
+                    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+                    btn.disabled = true;
+                    
+                    const t = localStorage.getItem('simpatico_company');
+                    let tenantId = 'default';
+                    if (t) { try { tenantId = JSON.parse(t).id || 'default'; } catch(e){} }
+                    
+                    try {
+                        const { error } = await SimpaticoDB.storage.from('hr-documents').remove([tenantId + '/' + fileName]);
+                        if (error) throw error;
+                        btn.closest('tr').remove();
+                        if (typeof showToast === 'function') showToast('File deleted successfully', 'success');
+                    } catch(e) {
+                        console.error(e);
+                        btn.innerHTML = origHtml;
+                        btn.disabled = false;
+                        if (typeof showToast === 'function') showToast('Failed to delete file', 'error');
+                        else alert('Failed to delete file');
+                    }
+                }
+            </script>
         </div>
 
     </div>
@@ -1933,7 +2019,7 @@
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="../js/hr-config.js"></script>
-<script src="js/supabase-client.js"></script>
+<script src="../js/supabase-client.js"></script>
 
 <script>
 // ===========================================================================
@@ -1947,7 +2033,7 @@ const DataStore = {
         jobs: [],
         interviews: [],
         activities: [],
-        applications: [],
+        job_applications: [],
         user: {
             name: 'HR Admin',
             email: 'admin@simpaticohr.com',
@@ -1988,43 +2074,16 @@ let loadedModules = {};
 let selectedInterviewMode = '';
 let activeChannels = new Set(['email']); 
 
-// ===== TOKEN GENERATION =====
-function generateInterviewToken() {
-    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
-    let token = '';
-    if (window.crypto && window.crypto.getRandomValues) {
-        const arr = new Uint8Array(24);
-        window.crypto.getRandomValues(arr);
-        for (let i = 0; i < 24; i++) {
-            token += chars[arr[i] % chars.length];
-        }
-    } else {
-        for (let i = 0; i < 24; i++) {
-            token += chars[Math.floor(Math.random() * chars.length)];
-        }
-    }
-    return token;
-}
-
-function getInterviewLink(token) {
-    const base = window.SIMPATICO_CONFIG?.interviewBaseUrl || 'https://simpatico-hr-ats.simpaticohrconsultancy.workers.dev/join';
-    return `${base}/${token}`;
-}
-
 // ===== INIT =====
 document.addEventListener('DOMContentLoaded', () => { initApp(); });
 
-function initApp() {
-    appData = DataStore.get();
-    
+async function initApp() {
     const realToken = localStorage.getItem('simpatico_token');
     const realUser = JSON.parse(localStorage.getItem('simpatico_user') || '{}');
 
-    if (!realToken) { 
-        performLogout(); 
-        return; 
-    }
+    if (!realToken) { performLogout(); return; }
 
+    // Initialize local session data
     DataStore.update(data => { 
         data.user.isLoggedIn = true; 
         if (realUser.email) {
@@ -2034,7 +2093,16 @@ function initApp() {
         }
     });
     
-    appData = DataStore.get(); 
+    updateUserDisplay();
+    
+    // ── PRODUCTION SYNC ──
+    try {
+        await syncWithSupabase();
+        console.log('✅ Simpatico HR synced with production data.');
+    } catch (e) {
+        console.warn('⚠️ Sync failed, using local offline data.', e);
+        showToast('Running in offline mode', 'warning');
+    }
 
     const today = new Date().toISOString().split('T')[0];
     const dateInput = document.getElementById('intDate');
@@ -2043,7 +2111,6 @@ function initApp() {
         dateInput.addEventListener('change', refreshTimeSlots);
     }
 
-    updateUserDisplay();
     renderDashboardStats();
     renderDashboardInterviews();
     renderDashboardActivities();
@@ -2067,7 +2134,35 @@ function initApp() {
     }
 
     loadInterviewerSuggestions();
-    console.log('✅ Simpatico HR initialized securely with Supabase token.');
+}
+
+async function syncWithSupabase() {
+    if (typeof SimpaticoDB === 'undefined' || !SimpaticoDB) return;
+    
+    const userJson = localStorage.getItem('simpatico_user');
+    if (!userJson) return;
+    const user = JSON.parse(userJson);
+    const tenantId = user.tenant_id || user.company_id || 'default';
+
+    // 1. Fetch Jobs
+    const jobsRes = await SimpaticoDB.from('job_postings').select('*').order('created_at', { ascending: false });
+    if (!jobsRes.error) {
+        DataStore.update(data => { data.jobs = jobsRes.data; });
+    }
+
+    // 2. Fetch Interviews
+    const intRes = await SimpaticoDB.from('interviews').select('*').order('date', { ascending: true });
+    if (!intRes.error) {
+        DataStore.update(data => { data.interviews = intRes.data; });
+    }
+
+    // 3. Fetch Applications (Candidates)
+    const appRes = await SimpaticoDB.from('job_applications').select('*, job_postings(title, department)').order('applied_at', { ascending: false });
+    if (!appRes.error) {
+        DataStore.update(data => { data.job_applications = appRes.data; });
+    }
+
+    appData = DataStore.get();
 }
 
 // ===== CHANNEL TOGGLE =====
@@ -2280,6 +2375,10 @@ function navigateTo(sectionId, navEl) {
     const navLink = document.querySelector(`.nav-item[data-section="${sectionId}"]`);
     if (navLink && navLink.dataset.href) loadExternalModule(sectionId, navLink.dataset.href);
 
+    if (sectionId === 'storage' && typeof loadCompanyStorage === 'function') {
+        loadCompanyStorage();
+    }
+
     document.getElementById('sidebar').classList.remove('open');
     const dd = document.getElementById('userDropdown');
     if (dd) dd.classList.remove('open');
@@ -2346,7 +2445,7 @@ async function loadExternalModule(sectionId, href) {
                 jsCode = oldScript.textContent;
             }
 
-            jsCode = jsCode.replace(/(const|let)\s+(SB_URL|SB_ANON|TENANT|WORKER_URL|_sb|sbHeaders|allEmployees|filtered|currentView|editingId|avatarColors|statusBadge|statusLabel|typeLabel)\s*=/g, 'var $2 =');
+            jsCode = jsCode.replace(/(const|let)\s+(SB_URL|SB_ANON|TENANT|WORKER_URL|_sb|sbHeaders|allEmployees|filtered|currentView|editingId|avatarColors|statusBadge|statusLabel|typeLabel|conversations|currentConvId|messages|activeContexts|isStreaming|currentUserInitials|AI_CONFIG)\s*=/g, 'var $2 =');
             
             jsCode = jsCode.replace(/document\.addEventListener\(\s*['"`]DOMContentLoaded['"`]/g, "window.addEventListener('SimpaticoSPA'");
 
@@ -2865,8 +2964,13 @@ function switchInterviewTab(tabName, el) {
 }
 
 // ===== HANDLE CREATE JOB =====
-function handleCreateJob(e, status = 'open') {
+async function handleCreateJob(e, status = 'open') {
     if (e && e.preventDefault) e.preventDefault();
+    const btn = e.target.closest('button');
+    const origHtml = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Processing...';
+
     const title      = document.getElementById('jobTitle')?.value.trim();
     const department = document.getElementById('jobDepartment')?.value;
     const location   = document.getElementById('jobLocation')?.value.trim();
@@ -2881,38 +2985,52 @@ function handleCreateJob(e, status = 'open') {
 
     if (!title || !department || !location) {
         showToast('Please fill in Job Title, Department, and Location', 'error');
+        btn.disabled = false; btn.innerHTML = origHtml;
         return false;
     }
 
+    const user = JSON.parse(localStorage.getItem('simpatico_user') || '{}');
     const newJob = {
-        id: 'job_' + Date.now(),
         title, department, location, type, experience,
-        salaryMin, salaryMax, skills, notes, description,
-        status, applications: 0,
-        createdAt: new Date().toISOString().split('T')[0]
+        salary_min: salaryMin, salary_max: salaryMax, 
+        skills, notes, description,
+        status, 
+        created_at: new Date().toISOString(),
+        created_by: user.id,
+        tenant_id: user.tenant_id || user.company_id
     };
 
-    DataStore.update(data => {
-        data.jobs.push(newJob);
-        data.activities.unshift({
-            type: 'job',
-            title: `Job Posted: ${title}`,
-            description: `${department} · ${location} · ${type}`,
-            timestamp: Date.now()
-        });
-        if (data.activities.length > 20) data.activities = data.activities.slice(0, 20);
-    });
+    try {
+        const { data, error } = await SimpaticoDB.from('job_postings').insert([newJob]).select();
+        if (error) throw error;
 
-    appData = DataStore.get();
-    renderJobTable();
-    renderDashboardStats();
-    renderDashboardActivities();
-    populatePositionDropdown();
-    closeModal('createJobModal');
-    document.getElementById('createJobForm')?.reset();
-    const jd = document.getElementById('jdOutput');
-    if (jd) { jd.innerText = ''; jd.style.display = 'none'; }
-    showToast(status === 'draft' ? '📝 Job saved as draft' : `✅ Job "${title}" published successfully!`);
+        DataStore.update(data => {
+            if (Array.isArray(data.jobs)) data.jobs.unshift(data[0] || newJob);
+            data.activities.unshift({
+                type: 'job',
+                title: `Job Posted: ${title}`,
+                description: `${department} · ${location} · ${type}`,
+                timestamp: Date.now()
+            });
+        });
+
+        appData = DataStore.get();
+        await syncWithSupabase();
+        renderJobTable();
+        renderDashboardStats();
+        renderDashboardActivities();
+        populatePositionDropdown();
+        closeModal('createJobModal');
+        document.getElementById('createJobForm')?.reset();
+        const jd = document.getElementById('jdOutput');
+        if (jd) { jd.innerText = ''; jd.style.display = 'none'; }
+        showToast(status === 'draft' ? '📝 Job saved as draft' : `✅ Job "${title}" published successfully!`);
+    } catch (err) {
+        showToast('Error saving job: ' + err.message, 'error');
+        console.error(err);
+    } finally {
+        btn.disabled = false; btn.innerHTML = origHtml;
+    }
     return false;
 }
 
@@ -2985,37 +3103,41 @@ async function handleScheduleInterview(e) {
     const experienceLevel = document.getElementById('intExperienceLevel')?.value || 'mid';
 
     const newInterview = {
-        id: 'int_' + Date.now(),
-        candidateName, candidateEmail, candidatePhone,
-        position, round, date, startTime, endTime,
-        interviewer, interviewerEmail, mode,
-        meetingLink, notes,
-        proctorSettings,
+        candidate_name: candidateName,
+        candidate_email: candidateEmail,
+        candidate_phone: candidatePhone,
+        position, round, date, 
+        start_time: startTime, 
+        end_time: endTime,
+        interviewer, 
+        interviewer_email: interviewerEmail, 
+        mode,
+        meeting_link: meetingLink, 
+        notes,
+        proctor_settings: proctorSettings,
         token,           
-        interviewLink,
-        // ── JD & Experience Context (consumed by proctored room AI) ──
+        interview_link: interviewLink,
         job_id: selectedJobId,
-        job_description: selectedJobDesc,
-        job_skills: selectedJobSkills,
-        interview_level: experienceLevel,
-        interview_language: language,
         status: 'scheduled',
-        notificationLog: [],
-        createdAt: new Date().toISOString()
+        tenant_id: user.tenant_id || user.company_id
     };
 
-    DataStore.update(data => {
-        data.interviews.push(newInterview);
-        data.activities.unshift({
-            type: mode === 'proctored' ? 'proctored' : 'interview',
-            title: `Interview Scheduled: ${candidateName}`,
-            description: `${position} · ${round} · ${formatDate(date)} ${formatTime(startTime)} · ${mode === 'proctored' ? '🔒 Proctored' : mode}`,
-            timestamp: Date.now()
-        });
-        if (data.activities.length > 20) data.activities = data.activities.slice(0, 20);
-    });
+    try {
+        const { data, error } = await SimpaticoDB.from('interviews').insert([newInterview]).select();
+        if (error) throw error;
 
-    appData = DataStore.get();
+        DataStore.update(data => {
+            data.interviews.unshift(data[0] || newInterview);
+            data.activities.unshift({
+                type: mode === 'proctored' ? 'proctored' : 'interview',
+                title: `Interview Scheduled: ${candidateName}`,
+                description: `${position} · ${round} · ${formatDate(date)} ${formatTime(startTime)} · ${mode === 'proctored' ? '🔒 Proctored' : mode}`,
+                timestamp: Date.now()
+            });
+        });
+
+        appData = DataStore.get();
+        await syncWithSupabase();
     renderInterviewTable();
     renderProctoredTable();
     renderDashboardStats();
@@ -3113,6 +3235,10 @@ async function handleScheduleInterview(e) {
                 showToast(`⚠️ WhatsApp: ${result.reason}`, 'warning');
             }
         }, 1000);
+    }
+    } catch (err) {
+        showToast('Error scheduling interview: ' + err.message, 'error');
+        console.error(err);
     }
 }
 

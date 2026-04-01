@@ -2,9 +2,9 @@
 // SimpaticoHR Main Application Logic
 
 const AN_CONFIG = {
-  supabaseUrl: window.SIMPATICO_CONFIG?.supabaseUrl    || 'https://cvkxtsvgnynxexmemfuy.supabase.co',
-  supabaseKey: window.SIMPATICO_CONFIG?.supabaseAnonKey || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN2a3h0c3ZnbnlueGV4bWVtZnV5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc0MjE2NTEsImV4cCI6MjA4Mjk5NzY1MX0.2mys8Cc-ucJ1uLThEGJubeDEg1TvfIAkW-xFsR4ecq4',
-  workerUrl:   window.SIMPATICO_CONFIG?.workerUrl       || 'https://simpatico-hr-ats.simpaticohrconsultancy.workers.dev',
+  supabaseUrl: window.SIMPATICO_CONFIG?.supabaseUrl,
+  supabaseKey: window.SIMPATICO_CONFIG?.supabaseAnonKey,
+  workerUrl:   window.SIMPATICO_CONFIG?.workerUrl || 'https://simpatico-hr-ats.simpaticohrconsultancy.workers.dev',
 };
 
 const SB_URL = AN_CONFIG.supabaseUrl;
@@ -110,8 +110,8 @@ async function loadDashboardData(companyId) {
   currentCompanyId = companyId;
   try {
     const [jobs, apps, ints] = await Promise.all([
-      sbFetch("jobs", "select=*&order=created_at.desc&limit=50"),
-      sbFetch("applications", "select=*&order=created_at.desc&limit=100"),
+      sbFetch("job_postings", "select=*&order=created_at.desc&limit=50"),
+      sbFetch("job_applications", "select=*,job_postings(*)&order=created_at.desc&limit=100"),
       sbFetch("interviews", "select=*&order=created_at.desc&limit=50")
     ]);
 
@@ -119,7 +119,7 @@ async function loadDashboardData(companyId) {
     const appsArr = Array.isArray(apps) ? apps : [];
     const intsArr = Array.isArray(ints) ? ints : [];
 
-    const activeJobs = jobsArr.filter(j => j.is_active || j.status === 'active');
+    const activeJobs = jobsArr.filter(j => j.status === 'open' || j.status === 'active');
 
     document.getElementById("statActiveJobs").textContent = activeJobs.length;
     document.getElementById("statApplications").textContent = appsArr.length;
@@ -311,15 +311,14 @@ async function publishJob() {
   if (!title) { showToast('Job title is required', 'error'); return; }
   try {
     const skills = document.getElementById('newJobSkills').value.split(',').map(s => s.trim()).filter(Boolean);
-    await sbInsert("jobs", {
+    await sbInsert("job_postings", {
       title,
       department: document.getElementById('newJobDept').value,
       location: document.getElementById('newJobLocation').value,
       skills: skills,
       description: document.getElementById('newJobDesc').value,
       level: 'Mid-Level',
-      is_active: true,
-      status: 'active',
+      status: 'open',
       created_at: new Date().toISOString()
     });
     closeModal('createJobModal');
@@ -350,7 +349,7 @@ async function loadAllApplications() {
   if (!tbody) return;
   tbody.innerHTML = '<tr><td colspan="6" class="text-center text-gray" style="padding:2rem;">Loading...</td></tr>';
   try {
-    const apps = await sbFetch("applications", "select=*&order=created_at.desc&limit=100");
+    const apps = await sbFetch("job_applications", "select=*,job_postings(*)&order=created_at.desc&limit=100");
     renderAllApplications(Array.isArray(apps) ? apps : []);
   } catch (e) {
     tbody.innerHTML = '<tr><td colspan="6" class="text-center" style="padding:2rem;color:red;">' + e.message + '</td></tr>';
@@ -359,7 +358,7 @@ async function loadAllApplications() {
 
 async function moveApplication(appId, status) {
   try {
-    await sbUpdate("applications", { status }, "id=eq." + appId);
+    await sbUpdate("job_applications", { status }, "id=eq." + appId);
     showToast('Moved to ' + status, 'success');
     loadDashboardData(currentCompanyId);
   } catch (e) { showToast(e.message, 'error'); }
@@ -400,7 +399,7 @@ const PIPELINE_STAGES = [
 
 async function loadPipelineJobs() {
   try {
-    const jobs = await sbFetch("jobs", "select=id,title&is_active=eq.true");
+    const jobs = await sbFetch("job_postings", "select=id,title&status=eq.open");
     const select = document.getElementById('pipelineJobFilter');
     if (!select) return;
     select.innerHTML = '<option value="">Select Job</option>' + (Array.isArray(jobs) ? jobs : []).map(j => '<option value="' + j.id + '">' + j.title + '</option>').join('');
@@ -410,7 +409,7 @@ async function loadPipelineJobs() {
 async function loadPipeline(jobId) {
   if (!jobId) return;
   try {
-    const apps = await sbFetch("applications", "select=*&job_id=eq." + jobId + "&order=created_at.desc");
+    const apps = await sbFetch("job_applications", "select=*&job_id=eq." + jobId + "&order=created_at.desc");
     const board = document.getElementById('pipelineBoard');
     if (!board) return;
     board.innerHTML = PIPELINE_STAGES.map(stage => {
@@ -432,7 +431,7 @@ async function handleDrop(event, newStage) {
   event.preventDefault();
   const appId = event.dataTransfer.getData('text');
   try {
-    await sbUpdate("applications", { status: newStage }, "id=eq." + appId);
+    await sbUpdate("job_applications", { status: newStage }, "id=eq." + appId);
     showToast('Moved to ' + newStage, 'success');
     const jobId = document.getElementById('pipelineJobFilter').value;
     if (jobId) loadPipeline(jobId);
@@ -534,7 +533,7 @@ function api(endpoint, options) {
         }
     }
   }
-  const workerUrl = 'https://evalis-ai.simpaticohrconsultancy.workers.dev';
+  const workerUrl = window.SIMPATICO_CONFIG?.workerUrl || 'https://simpatico-hr-ats.simpaticohrconsultancy.workers.dev';
   return fetch(workerUrl + endpoint, {
     ...options,
     headers: { 

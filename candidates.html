@@ -1,44 +1,56 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>My Applications | Simpatico HR</title>
+  <script src="js/hr-config.js"></script>
+  <script src="js/supabase-client.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body style="font-family:system-ui;padding:30px">
 
 <h2>My Applications</h2>
-<p id="status">Checking login�</p>
+<p id="status">Checking login…</p>
+<p><a href="dashboard/candidate.html" style="color:blue">Go to Member Dashboard →</a></p>
 
 <div id="apps"></div>
 
 <script>
-const supabase = supabase.createClient(
-  "https://cvkxtsvgnynxexmemfuy.supabase.co",
-  "YOUR_ANON_KEY"
-);
-
 async function load() {
-  const { data: { user } } = await supabase.auth.getUser();
+  if (!window.SIMPATICO_CONFIG) return setTimeout(load, 500);
+  
+  const db = window.SimpaticoDB || supabase.createClient(
+    window.SIMPATICO_CONFIG.supabaseUrl,
+    window.SIMPATICO_CONFIG.supabaseAnonKey
+  );
+
+  const { data: { user } } = await db.auth.getUser();
   if (!user) {
-    document.getElementById("status").innerText =
-      "Login required. Check your email.";
+    document.getElementById("status").innerHTML =
+      'Login required. <a href="platform/login.html">Sign In Here</a>';
     return;
   }
 
   document.getElementById("status").innerText =
     "Logged in as " + user.email;
 
-  const { data } = await supabase
-    .from("candidates")
-    .select("status, jobs(title)")
-    .eq("email", user.email);
+  const { data } = await db
+    .from("job_applications")
+    .select("status, job_postings(title)")
+    .eq("candidate_email", user.email);
+
+  if (!data || !data.length) {
+    document.getElementById("apps").innerHTML = "<p>No applications found.</p>";
+    return;
+  }
 
   document.getElementById("apps").innerHTML =
     data.map(a => `
-      <p>
-        <b>${a.jobs.title}</b><br>
-        Status: ${a.status}
-      </p>
+      <div style="border:1px solid #eee;padding:12px;border-radius:8px;margin-bottom:12px">
+        <b>${a.job_postings?.title || 'Position'}</b><br>
+        Status: <span style="text-transform:capitalize">${a.status || 'Applied'}</span>
+      </div>
     `).join("");
 }
 
@@ -46,6 +58,3 @@ load();
 </script>
 </body>
 </html>
-
-
-

@@ -511,6 +511,8 @@ route('POST',   '/ai/chat',                         handleAIChat);
 route('POST',   '/ai/chat/stream',                  handleAIChatStream);
 route('POST',   '/ai/employee-insight',             handleEmployeeInsight);
 route('POST',   '/ai/sentiment',                    handleSentimentAnalysis);
+route('POST',   '/ai/interview-question',           handleInterviewQuestion);
+route('POST',   '/ai/ats-generator',                handleATSGenerator);
 
 // Analytics
 route('GET',    '/analytics/summary',               handleAnalyticsSummary);
@@ -1260,6 +1262,25 @@ async function handleMarkNotificationRead(request, env, ctx, [id]) {
 
 // ── AI Intelligence ───────────────────────────────────────────────────────────
 
+async function handleInterviewQuestion(request, env, ctx) {
+  // requireAuth(ctx);
+  const { messages, token } = await safeJson(request);
+  if (!Array.isArray(messages)) throw new ValidationError('messages array required');
+
+  // We could fetch the JD again here using the token, 
+  // but for efficiency we trust the system prompt built by the frontend 
+  // which already has the JD. We just need to make sure the AI prioritizes it.
+
+  const result = await env.AI.run('@cf/meta/llama-3.1-8b-instruct', { 
+    messages: messages, // Frontend provides the FULL system prompt + history
+    max_tokens: 600,
+    temperature: 0.7 
+  });
+
+  await audit(env, ctx, 'interview.ai_question', 'interviews', null, { token_hint: token?.slice(0,8) });
+  return apiResponse({ response: result.response });
+}
+
 async function handleAIChat(request, env, ctx) {
  // requireAuth(ctx);
   const { messages } = await safeJson(request);
@@ -1321,6 +1342,42 @@ async function handleAIChatStream(request, env, ctx) {
       'Connection': 'keep-alive',
     }
   });
+}
+
+async function handleATSGenerator(request, env, ctx) {
+  const { query } = await safeJson(request);
+  if (!query) throw new ValidationError('query is required');
+  if (!env.AI) throw new ServiceUnavailableError('AI');
+
+  const systemPrompt = `You are an enterprise ATS automation expert. Given a description, output ONLY valid JSON (no markdown, no backticks) for a recruiting automation rule.
+Schema:
+{
+  "name": "short rule name",
+  "desc": "one sentence description",
+  "trigger": "one of: app_received|app_viewed|resume_parsed|stage_moved|stage_stalled|sla_breached|interview_scheduled|interview_completed|interview_noshow|interview_feedback|assessment_sent|assessment_completed|assessment_scored|offer_extended|offer_accepted|offer_declined|candidate_rejected|candidate_withdrawn|job_published|referral_submitted|source_linkedin|schedule_daily|schedule_weekly",
+  "cond_dept": "department or empty",
+  "cond_level": "junior|mid|senior|exec or empty",
+  "cond_score": "number threshold or empty",
+  "cond_stage": "stage key or empty",
+  "actions": [{"type": "send_email|send_sms|send_slack|move_stage|reject_candidate|shortlist|schedule_interview|send_assessment|assign_recruiter|notify_hiring_manager|create_task|trigger_webhook|update_ats|generate_offer|sync_hris|add_to_talent_pool|send_nps", "target": "target", "msg": "message"}]
+}
+Include 2-4 logical actions. Keep it practical for enterprise HR.`;
+
+  const result = await env.AI.run('@cf/meta/llama-3.1-8b-instruct', {
+    messages: [
+      { role: 'system', content: systemPrompt },
+      { role: 'user',   content: query }
+    ],
+    max_tokens: 1024
+  });
+
+  try {
+    const text = result.response.replace(/```json|```/g, '').trim();
+    const rule = JSON.parse(text);
+    return apiResponse({ rule });
+  } catch (e) {
+    throw new AppError('Failed to parse AI-generated rule', HTTP.SERVER_ERROR, 'PARSE_ERROR', result.response);
+  }
 }
 
 async function handleEmployeeInsight(request, env, ctx) {

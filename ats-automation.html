@@ -1019,11 +1019,19 @@ async function buildAI(){
 }
 Include 2-4 logical actions. Keep it practical for enterprise HR.`;
   try{
-    var resp=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:1000,system:sys,messages:[{role:'user',content:q}]})});
+    const token = localStorage.getItem('simpatico_token') || '';
+    var resp=await fetch(window.SIMPATICO_CONFIG.workerUrl + '/ai/ats-generator',{
+      method:'POST',
+      headers:{
+        'Content-Type':'application/json',
+        'Authorization': token ? 'Bearer ' + token : '',
+        'X-Tenant-ID': window.SIMPATICO_CONFIG.tenantId || 'SIMP_PRO_MAIN'
+      },
+      body:JSON.stringify({ query: q })
+    });
     var data=await resp.json();
-    var txt=(data.content&&data.content[0]&&data.content[0].text)||'';
-    var rule=JSON.parse(txt.replace(/```json|```/g,'').trim());
+    if(!resp.ok) throw new Error(data.error?.message || 'AI request failed');
+    var rule=data.data.rule;
     pendingAI=rule; rule.is_ai=true;
     el('aiPreview').innerHTML=
       '<div style="font-weight:700;margin-bottom:6px">'+esc(rule.name)+'</div>'+
@@ -1090,6 +1098,24 @@ var CANDIDATES=[
 /* ══════════════════════════
    SEED DEFAULT RULES
 ══════════════════════════ */
+/* ══════════════════════════
+   DATABASE & INIT
+   ══════════════════════════ */
+async function fetchDatabase() {
+    console.log("ATS Engine: Synchronizing database...");
+    // 1. Seed defaults if empty
+    seed();
+    
+    // 2. Load rules and logs
+    renderRules();
+    updateStats();
+    
+    // 3. Optional: In a production environment, we would fetch 
+    // real candidates from Supabase 'applications' table here.
+    // For now we keep the optimized demo candidates for the walkthrough.
+    console.log("ATS Engine: Active.");
+}
+
 function seed(){
   if(loadRules().length)return;
   var defaults=[

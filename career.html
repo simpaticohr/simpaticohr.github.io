@@ -4,400 +4,106 @@
   <meta charset="UTF-8" />
   <title>Apply | Simpatico HR</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-
-  <!-- Icons -->
   <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" rel="stylesheet">
-
-  <!-- Supabase SDK -->
+  <script src="js/hr-config.js"></script>
+  <script src="js/supabase-client.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-
   <style>
-    body {
-      font-family: system-ui, -apple-system;
-      background: #f5f7fb;
-      margin: 0;
-      padding: 0;
-    }
-
-    .container {
-      max-width: 520px;
-      margin: 80px auto;
-      padding: 0 20px;
-    }
-
-    .card {
-      background: white;
-      border-radius: 20px;
-      box-shadow: 0 20px 40px rgba(0,45,90,0.1);
-      padding: 35px;
-    }
-
-    h1 {
-      color: #002d5a;
-      margin-bottom: 25px;
-    }
-
-    label {
-      display: block;
-      font-weight: 600;
-      margin-bottom: 6px;
-      font-size: 14px;
-    }
-
-    input {
-      width: 100%;
-      padding: 14px;
-      border-radius: 12px;
-      border: 1px solid #dbe3ec;
-      margin-bottom: 20px;
-      font-size: 15px;
-    }
-
-    input:focus {
-      outline: none;
-      border-color: #00c2ff;
-    }
-
-    button {
-      width: 100%;
-      padding: 16px;
-      background: #002d5a;
-      color: white;
-      border: none;
-      border-radius: 14px;
-      font-weight: 700;
-      font-size: 16px;
-      cursor: pointer;
-    }
-
-    button:hover {
-      opacity: 0.95;
-    }
-
-    .status {
-      margin-top: 18px;
-      font-weight: 600;
-      text-align: center;
-    }
-
-    .note {
-      font-size: 13px;
-      color: #64748b;
-      margin-top: 10px;
-      text-align: center;
-    }
+    :root { --primary: #002d5a; --accent: #0062ff; --light: #f4f7fa; --white: #fff; --text: #1e293b; --muted: #64748b; }
+    body { font-family: 'Poppins', system-ui; background: var(--light); color: var(--text); margin: 0; padding: 0; }
+    .container { max-width: 500px; margin: 60px auto; padding: 20px; }
+    .card { background: var(--white); border-radius: 20px; padding: 40px; box-shadow: 0 10px 30px rgba(0,0,0,0.05); }
+    h1 { font-size: 1.5rem; font-weight: 800; color: var(--primary); margin-bottom: 8px; }
+    p.sub { font-size: 0.9rem; color: var(--muted); margin-bottom: 24px; }
+    .form-group { margin-bottom: 20px; }
+    label { display: block; font-size: 0.85rem; font-weight: 600; margin-bottom: 6px; }
+    input { width: 100%; padding: 12px; border-radius: 10px; border: 1px solid #e2e8f0; font-size: 0.95rem; font-family: inherit; }
+    input:focus { outline: none; border-color: var(--accent); }
+    .btn { width: 100%; padding: 14px; background: var(--primary); color: white; border: none; border-radius: 10px; font-weight: 700; cursor: pointer; transition: 0.2s; }
+    .btn:hover { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(0,45,90,0.2); }
+    .btn:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
+    .status { margin-top: 15px; font-size: 0.85rem; text-align: center; font-weight: 500; }
+    .success-box { display: none; text-align: center; }
+    .success-box i { font-size: 3rem; color: #10b981; margin-bottom: 15px; }
   </style>
 </head>
-
 <body>
-
 <div class="container">
-  <div class="card">
-    <h1>Apply for this job</h1>
-
+  <div class="card" id="formCard">
+    <h1 id="jobTitle">Join Our Team</h1>
+    <p class="sub">Complete the form below to apply</p>
     <form id="applyForm">
-      <label>Full Name</label>
-      <input id="full_name" required placeholder="Your full name">
-
-      <label>Email Address</label>
-      <input id="email" type="email" required placeholder="you@example.com">
-
-      <label>Upload CV (PDF / DOC / DOCX)</label>
-      <input id="resume_file" type="file" accept=".pdf,.doc,.docx" required>
-
-      <button type="submit">
-        Submit Application
-      </button>
-
+      <div class="form-group"><label>Full Name</label><input type="text" id="candName" required placeholder="John Doe"></div>
+      <div class="form-group"><label>Email Address</label><input type="email" id="candEmail" required placeholder="john@example.com"></div>
+      <div class="form-group"><label>Resume/CV (PDF)</label><input type="file" id="resumeFile" accept=".pdf" required></div>
+      <button type="submit" class="btn" id="submitBtn">Submit Application</button>
       <div id="status" class="status"></div>
-      <div class="note">
-        Your data is used only for recruitment purposes.
-      </div>
     </form>
+  </div>
+  <div class="card success-box" id="successBox">
+    <i class="fas fa-check-circle"></i>
+    <h1>Application Sent!</h1>
+    <p class="sub">Thank you for applying. Our recruitment team will review your profile and get back to you shortly.</p>
+    <a href="jobs.html" class="btn" style="text-decoration:none; display:inline-block">View More Jobs</a>
   </div>
 </div>
 
 <script>
-  // ---------------------------------------
-  // ? DIRECT SUPABASE CONNECTION
-  // ---------------------------------------
-  const SUPABASE_URL = "https://cvkxtsvgnynxexmemfuy.supabase.co";
-  const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN2a3h0c3ZnbnlueGV4bWVtZnV5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc0MjE2NTEsImV4cCI6MjA4Mjk5NzY1MX0.2mys8Cc-ucJ1uLThEGJubeDEg1TvfIAkW-xFsR4ecq4";
+let currentJobId = new URLSearchParams(window.location.search).get('job_id');
 
-  let resumeText = "";
-  let currentJobId = null;
-  let currentJobTitle = "";
-
-  function toast(m) {
-    const c = document.getElementById("toasts");
-    const t = document.createElement("div");
-    t.className = "toast";
-    t.textContent = m;
-    c.appendChild(t);
-    setTimeout(() => t.remove(), 3200);
+async function init() {
+  if (!window.SIMPATICO_CONFIG) return setTimeout(init, 300);
+  if (currentJobId) {
+    const { data } = await window.SimpaticoDB.from('job_postings').select('title').eq('id', currentJobId).single();
+    if (data) document.getElementById('jobTitle').textContent = 'Apply for ' + data.title;
   }
+}
 
-  // ---------------------------------------
-  // Supabase Helpers
-  // ---------------------------------------
-  async function supabaseGet(table, filters = {}) {
-    let url = `${SUPABASE_URL}/rest/v1/${table}?`;
-    for (const [key, val] of Object.entries(filters)) {
-      url += `${key}=eq.${val}&`;
-    }
-    const res = await fetch(url, {
-      headers: {
-        "apikey": SUPABASE_KEY,
-        "Authorization": "Bearer " + SUPABASE_KEY
-      }
+document.getElementById('applyForm').onsubmit = async (e) => {
+  e.preventDefault();
+  const btn = document.getElementById('submitBtn');
+  const status = document.getElementById('status');
+  btn.disabled = true;
+  btn.textContent = 'Submitting...';
+  
+  try {
+    const name = document.getElementById('candName').value;
+    const email = document.getElementById('candEmail').value;
+    const file = document.getElementById('resumeFile').files[0];
+    
+    if (!file) throw new Error('Please upload a resume');
+    
+    // 1. Upload Resume
+    status.textContent = 'Uploading resume...';
+    const filePath = `resumes/${Date.now()}_${file.name}`;
+    const { data: uploadData, error: uploadError } = await window.SimpaticoDB.storage.from('resumes').upload(filePath, file);
+    if (uploadError) throw uploadError;
+    
+    const resumeUrl = window.SimpaticoDB.storage.from('resumes').getPublicUrl(filePath).data.publicUrl;
+    
+    // 2. Save Application
+    status.textContent = 'Saving application...';
+    const { error: appError } = await window.SimpaticoDB.from('job_applications').insert({
+      job_id: currentJobId,
+      candidate_name: name,
+      candidate_email: email,
+      resume_url: resumeUrl,
+      status: 'applied',
+      tenant_id: window.SIMPATICO_CONFIG.tenantId
     });
-    return await res.json();
-  }
-
-  async function supabaseInsert(table, data) {
-    const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}`, {
-      method: "POST",
-      headers: {
-        "apikey": SUPABASE_KEY,
-        "Authorization": "Bearer " + SUPABASE_KEY,
-        "Content-Type": "application/json",
-        "Prefer": "return=representation"
-      },
-      body: JSON.stringify(data)
-    });
-    return await res.json();
-  }
-
-  async function supabaseUpdate(table, data, filters = {}) {
-    let url = `${SUPABASE_URL}/rest/v1/${table}?`;
-    for (const [key, val] of Object.entries(filters)) {
-      url += `${key}=eq.${val}&`;
-    }
-    const res = await fetch(url, {
-      method: "PATCH",
-      headers: {
-        "apikey": SUPABASE_KEY,
-        "Authorization": "Bearer " + SUPABASE_KEY,
-        "Content-Type": "application/json",
-        "Prefer": "return=representation"
-      },
-      body: JSON.stringify(data)
-    });
-    return await res.json();
-  }
-
-  async function uploadToStorage(file, fileName) {
-    const res = await fetch(
-      `${SUPABASE_URL}/storage/v1/object/resumes/${fileName}`,
-      {
-        method: "POST",
-        headers: {
-          "apikey": SUPABASE_KEY,
-          "Authorization": "Bearer " + SUPABASE_KEY,
-          "Content-Type": file.type
-        },
-        body: file
-      }
-    );
-    if (res.ok) {
-      return { url: `${SUPABASE_URL}/storage/v1/object/public/resumes/${fileName}` };
-    }
-    return { url: '' };
-  }
-
-  // ---------------------------------------
-  // Get job_id from URL
-  // ---------------------------------------
-  function getJobFromURL() {
-    const params = new URLSearchParams(window.location.search);
-    const jobId = params.get('job_id');
-    if (jobId) {
-      currentJobId = jobId;
-      loadJobInfo(jobId);
-    }
-  }
-
-  async function loadJobInfo(jobId) {
-    try {
-      const data = await supabaseGet('jobs', { id: jobId });
-      const job = Array.isArray(data) ? data[0] : data;
-      if (job && job.title) {
-        currentJobTitle = job.title;
-        const badge = document.getElementById('jobBadge');
-        badge.textContent = '?? ' + job.title;
-        badge.style.display = 'inline-block';
-
-        if (job.category) {
-          const sel = document.getElementById('jobCategory');
-          for (let i = 0; i < sel.options.length; i++) {
-            if (sel.options[i].value === job.category) {
-              sel.selectedIndex = i;
-              break;
-            }
-          }
-        }
-      }
-    } catch (e) {
-      console.error('Job load error:', e);
-    }
-  }
-
-  // ---------------------------------------
-  // File Upload Handler
-  // ---------------------------------------
-  document.getElementById('resume').addEventListener('change', async e => {
-    const file = e.target.files[0];
-    if (!file) return;
-    document.getElementById('fileName').textContent = '? Processing...';
-
-    try {
-      const ext = file.name.split('.').pop().toLowerCase();
-      if (ext === 'txt') resumeText = await file.text();
-      else if (ext === 'pdf') resumeText = await extractPDF(file);
-      else resumeText = await file.text();
-
-      resumeText = resumeText.replace(/\s+/g, ' ').replace(/[^\x20-\x7E\n]/g, '').trim().substring(0, 5000);
-
-      if (resumeText.length < 30) {
-        document.getElementById('fileName').textContent = '?? Could not read file. Try TXT format.';
-        resumeText = '';
-        return;
-      }
-
-      document.getElementById('fileName').textContent = '? ' + file.name + ' (' + resumeText.length + ' chars)';
-      document.getElementById('uploadArea').classList.add('ok');
-      window._resumeFile = file;
-      toast('? Resume loaded!');
-    } catch (err) {
-      document.getElementById('fileName').textContent = '? Error reading file';
-      resumeText = '';
-    }
-  });
-
-  async function extractPDF(f) {
-    if (!window.pdfjsLib) return await f.text();
-    try {
-      const b = await f.arrayBuffer();
-      const p = await pdfjsLib.getDocument({ data: b }).promise;
-      let t = '';
-      for (let i = 1; i <= p.numPages; i++) {
-        const pg = await p.getPage(i);
-        const c = await pg.getTextContent();
-        t += c.items.map(x => x.str).join(' ') + '\n';
-      }
-      return t;
-    } catch (e) {
-      return await f.text();
-    }
-  }
-
-  // ---------------------------------------
-  // Submit Application
-  // ---------------------------------------
-  async function submitApplication() {
-    const name = document.getElementById('name').value.trim();
-    const email = document.getElementById('email').value.trim();
-    const phone = document.getElementById('phone').value.trim();
-    const category = document.getElementById('jobCategory').value;
-
-    if (!name) { toast('? Enter your name'); return; }
-    if (!email) { toast('? Enter your email'); return; }
-    if (!resumeText) { toast('? Upload your resume'); return; }
-
-    const btn = document.getElementById('submitBtn');
-    btn.disabled = true;
-    btn.innerHTML = '<i class="fa fa-spinner fa-spin"></i> Submitting...';
-    const st = document.getElementById('status');
-    st.textContent = '';
-
-    try {
-      // 1. Upload resume
-      let resume_url = '';
-      if (window._resumeFile) {
-        st.textContent = '?? Uploading resume...';
-        const fn = Date.now() + '_' + window._resumeFile.name;
-        const up = await uploadToStorage(window._resumeFile, fn);
-        resume_url = up.url || '';
-      }
-
-      // 2. Save application
-      st.textContent = '?? Saving application...';
-      const result = await supabaseInsert('applications', {
-        job_id: currentJobId || null,
-        name, email, phone,
-        resume_url,
-        resume_text: resumeText.substring(0, 5000),
-        status: 'applied'
-      });
-
-      const app = Array.isArray(result) ? result[0] : result;
-      if (!app || app.error) throw new Error(app?.error || 'Failed to save');
-
-      // 3. Show success (without AI screening since worker is down)
-      showSuccess(app, { score: 0, status: 'applied', summary: 'Application received. HR will review your profile.' });
-      toast('? Application submitted!');
-
-    } catch (err) {
-      console.error(err);
-      st.innerHTML = `<span style="color:#f87171;">? Error: ${err.message}</span>`;
-      toast('? Submission failed');
-    }
-
+    if (appError) throw appError;
+    
+    document.getElementById('formCard').style.display = 'none';
+    document.getElementById('successBox').style.display = 'block';
+  } catch (err) {
+    status.textContent = 'Error: ' + err.message;
+    status.style.color = '#ef4444';
     btn.disabled = false;
-    btn.innerHTML = '<i class="fa fa-paper-plane"></i> Submit Application';
+    btn.textContent = 'Submit Application';
   }
+};
 
-  function showSuccess(app, ats) {
-    document.getElementById('formSection').style.display = 'none';
-    document.getElementById('successSection').style.display = 'block';
-
-    const score = ats.score || 0;
-    const isGood = score >= 75;
-    const isOk = score >= 50;
-    const color = isGood ? '#10b981' : isOk ? '#f59e0b' : '#ef4444';
-    const bg = isGood ? 'rgba(16,185,129,.15)' : isOk ? 'rgba(245,158,11,.15)' : 'rgba(239,68,68,.15)';
-
-    const scoreEl = document.getElementById('atsScoreDisplay');
-    if (score > 0) {
-      scoreEl.textContent = 'ATS Score: ' + score + '/100';
-      scoreEl.style.background = bg;
-      scoreEl.style.color = color;
-    } else {
-      scoreEl.textContent = '? Received';
-      scoreEl.style.background = 'rgba(16,185,129,.15)';
-      scoreEl.style.color = '#10b981';
-    }
-
-    document.getElementById('successMsg').textContent =
-      'Your application has been received. HR will review your profile and contact you if shortlisted.';
-
-    if (ats.summary) {
-      document.getElementById('summarySection').style.display = 'block';
-      document.getElementById('atsSummary').textContent = ats.summary;
-    }
-  }
-
-  function resetForm() {
-    document.getElementById('formSection').style.display = 'block';
-    document.getElementById('successSection').style.display = 'none';
-    document.getElementById('name').value = '';
-    document.getElementById('email').value = '';
-    document.getElementById('phone').value = '';
-    document.getElementById('fileName').textContent = 'No file selected';
-    document.getElementById('uploadArea').classList.remove('ok');
-    document.getElementById('status').textContent = '';
-    document.getElementById('matchedSection').style.display = 'none';
-    document.getElementById('missingSection').style.display = 'none';
-    document.getElementById('summarySection').style.display = 'none';
-    resumeText = '';
-    window._resumeFile = null;
-  }
-
-  // Init
-  getJobFromURL();
+init();
 </script>
 </body>
 </html>
-
-
-
