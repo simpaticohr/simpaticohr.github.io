@@ -37,17 +37,17 @@ async function loadUser() {
 }
 
 // ── Auth headers (Supabase v2 compatible) ──
-async function authHeaders() {
-  try {
-    const client = sb();
-    if (!client) return {};
-    const { data } = await client.auth.getSession();
-    const token = data?.session?.access_token || localStorage.getItem('simpatico_token') || '';
-    return token ? { Authorization: `Bearer ${token}` } : {};
-  } catch {
-    const token = localStorage.getItem('simpatico_token') || '';
-    return token ? { Authorization: `Bearer ${token}` } : {};
+function authHeaders() {
+  let token = localStorage.getItem('simpatico_token') || localStorage.getItem('sb-token') || '';
+  if (!token) {
+    for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && k.startsWith('sb-') && k.endsWith('-auth-token')) {
+            try { token = JSON.parse(localStorage.getItem(k)).access_token; } catch(e){}
+        }
+    }
   }
+  return token ? { 'Authorization': 'Bearer ' + token } : {};
 }
 
 // ── Conversations ──

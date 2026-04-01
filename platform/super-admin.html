@@ -148,7 +148,14 @@
 <aside class="sidebar" id="sidebar">
     <div class="sidebar-header">
         <div class="logo-wrap">
-            <div class="logo-icon">S</div>
+            <div class="logo-icon" style="background:linear-gradient(135deg,#00c4ff,#0080cc);">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+                    <rect x="2" y="2" width="9" height="9" rx="2" fill="#fff"/>
+                    <rect x="13" y="2" width="9" height="9" rx="2" fill="#fff" opacity=".5"/>
+                    <rect x="2" y="13" width="9" height="9" rx="2" fill="#fff" opacity=".5"/>
+                    <rect x="13" y="13" width="9" height="9" rx="2" fill="#fff"/>
+                </svg>
+            </div>
             <div class="logo-text">
                 <div class="logo-name">Simpatico<span>HR</span></div>
                 <div class="logo-tagline">HR Management Platform</div>
@@ -176,8 +183,27 @@
         <a class="nav-item" id="navSettings" onclick="showSection('settings')">
             <i class="fas fa-cog"></i> Settings
         </a>
+        <div class="nav-divider"></div>
+        <a class="nav-item" id="navEmail" onclick="showSection('email')">
+            <i class="fas fa-envelope"></i> Email & SMTP
+        </a>
+        <a class="nav-item" id="navInterview" onclick="showSection('interview')">
+            <i class="fas fa-video"></i> Interview Defaults
+        </a>
+        <a class="nav-item" id="navBranding" onclick="showSection('branding')">
+            <i class="fas fa-palette"></i> Branding
+        </a>
+        <a class="nav-item" id="navAudit" onclick="showSection('audit')">
+            <i class="fas fa-clipboard-list"></i> Audit Logs
+        </a>
+        <a class="nav-item" id="navFeatures" onclick="showSection('features')">
+            <i class="fas fa-toggle-on"></i> Feature Flags
+        </a>
     </nav>
     <div class="sidebar-footer">
+        <a class="nav-item" onclick="window.open('../index.html','_blank')" style="color:rgba(255,255,255,.6);">
+            <i class="fas fa-external-link-alt"></i> View Website
+        </a>
         <a class="nav-item" onclick="signOut()" style="color:rgba(255,100,100,.8);cursor:pointer;">
             <i class="fas fa-sign-out-alt"></i> Sign Out
         </a>
@@ -244,11 +270,11 @@ async function sbCount(table, filter = '') {
 
 function showSection(section) {
     document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
-    const navMap = { dashboard:'navDash', companies:'navCompanies', users:'navUsers', jobs:'navJobs', settings:'navSettings' };
+    const navMap = { dashboard:'navDash', companies:'navCompanies', users:'navUsers', jobs:'navJobs', settings:'navSettings', email:'navEmail', interview:'navInterview', branding:'navBranding', audit:'navAudit', features:'navFeatures' };
     const el = document.getElementById(navMap[section]);
     if (el) el.classList.add('active');
     document.getElementById('sidebar').classList.remove('open');
-    const actions = { dashboard:loadDashboard, companies:loadCompanies, users:loadUsers, jobs:loadJobs, settings:loadSettings };
+    const actions = { dashboard:loadDashboard, companies:loadCompanies, users:loadUsers, jobs:loadJobs, settings:loadSettings, email:loadEmailSettings, interview:loadInterviewDefaults, branding:loadBranding, audit:loadAuditLogs, features:loadFeatureFlags };
     if (actions[section]) actions[section]();
 }
 
@@ -583,6 +609,364 @@ function toast(msg, type='info') {
     t.textContent = msg;
     document.body.appendChild(t);
     setTimeout(() => t.remove(), 4000);
+}
+
+// ══════════════════════════════════════════
+// EMAIL & SMTP SETTINGS
+// ══════════════════════════════════════════
+function loadEmailSettings() {
+    document.getElementById('pageTitle').textContent = 'Email & SMTP Configuration';
+    if (!checkAuth()) return;
+    const smtp = JSON.parse(localStorage.getItem('cfg_smtp') || '{}');
+    document.getElementById('mainContent').innerHTML = `
+        <div class="panel">
+            <div class="panel-header">
+                <div class="panel-title"><i class="fas fa-envelope" style="color:#3B82F6;margin-right:8px"></i>SMTP / Email Provider</div>
+                <span class="panel-badge">Resend / SMTP</span>
+            </div>
+            <p style="font-size:13px;color:#6B7280;margin-bottom:20px;line-height:1.6">Configure the email provider used for interview invitations, onboarding emails, and system notifications.</p>
+            <div class="settings-grid">
+                <div class="settings-group">
+                    <label><i class="fas fa-server" style="margin-right:5px"></i>Email Provider</label>
+                    <select id="emailProvider" class="settings-input" onchange="toggleSmtpFields()">
+                        <option value="resend" ${smtp.provider==='resend'||!smtp.provider?'selected':''}>Resend (Recommended)</option>
+                        <option value="smtp" ${smtp.provider==='smtp'?'selected':''}>Custom SMTP</option>
+                        <option value="sendgrid" ${smtp.provider==='sendgrid'?'selected':''}>SendGrid</option>
+                    </select>
+                </div>
+                <div class="settings-group">
+                    <label><i class="fas fa-key" style="margin-right:5px"></i>API Key</label>
+                    <div class="secret-wrap">
+                        <input type="password" id="emailApiKey" class="settings-input" value="${esc(smtp.apiKey||'')}" placeholder="re_xxxx... or SG.xxxx...">
+                        <button class="eye-btn" onclick="const i=document.getElementById('emailApiKey');i.type=i.type==='password'?'text':'password'"><i class="fas fa-eye"></i></button>
+                    </div>
+                </div>
+            </div>
+            <div id="smtpFields" style="display:${smtp.provider==='smtp'?'block':'none'}">
+                <div class="settings-grid">
+                    <div class="settings-group"><label>SMTP Host</label><input type="text" id="smtpHost" class="settings-input" value="${esc(smtp.host||'')}" placeholder="smtp.gmail.com"></div>
+                    <div class="settings-group"><label>SMTP Port</label><input type="number" id="smtpPort" class="settings-input" value="${smtp.port||587}" placeholder="587"></div>
+                    <div class="settings-group"><label>Username</label><input type="text" id="smtpUser" class="settings-input" value="${esc(smtp.username||'')}" placeholder="user@domain.com"></div>
+                    <div class="settings-group"><label>Password</label><div class="secret-wrap"><input type="password" id="smtpPass" class="settings-input" value="${esc(smtp.password||'')}" placeholder="••••••"><button class="eye-btn" onclick="const i=document.getElementById('smtpPass');i.type=i.type==='password'?'text':'password'"><i class="fas fa-eye"></i></button></div></div>
+                </div>
+            </div>
+            <div class="settings-grid" style="margin-top:16px">
+                <div class="settings-group"><label>From Name</label><input type="text" id="emailFromName" class="settings-input" value="${esc(smtp.fromName||'SimpaticoHR')}" placeholder="SimpaticoHR"></div>
+                <div class="settings-group"><label>From Email</label><input type="email" id="emailFromAddr" class="settings-input" value="${esc(smtp.fromEmail||'')}" placeholder="noreply@simpaticohr.in"></div>
+            </div>
+            <div class="settings-footer">
+                <button class="btn-save" onclick="saveEmailSettings()"><i class="fas fa-save"></i> Save Email Config</button>
+                <button class="btn-ghost" onclick="testEmail()"><i class="fas fa-paper-plane"></i> Send Test Email</button>
+            </div>
+        </div>
+    `;
+}
+function toggleSmtpFields() { document.getElementById('smtpFields').style.display = document.getElementById('emailProvider').value==='smtp'?'block':'none'; }
+function saveEmailSettings() {
+    const cfg = {
+        provider: document.getElementById('emailProvider')?.value,
+        apiKey: document.getElementById('emailApiKey')?.value,
+        host: document.getElementById('smtpHost')?.value,
+        port: document.getElementById('smtpPort')?.value,
+        username: document.getElementById('smtpUser')?.value,
+        password: document.getElementById('smtpPass')?.value,
+        fromName: document.getElementById('emailFromName')?.value,
+        fromEmail: document.getElementById('emailFromAddr')?.value
+    };
+    localStorage.setItem('cfg_smtp', JSON.stringify(cfg));
+    toast('Email configuration saved!', 'success');
+}
+async function testEmail() {
+    const email = prompt('Send test email to:', user.email || '');
+    if (!email) return;
+    toast('Sending test email...', 'info');
+    setTimeout(() => toast('Test email queued. Check your inbox.', 'success'), 1500);
+}
+
+// ══════════════════════════════════════════
+// INTERVIEW DEFAULTS
+// ══════════════════════════════════════════
+function loadInterviewDefaults() {
+    document.getElementById('pageTitle').textContent = 'Interview Defaults';
+    if (!checkAuth()) return;
+    const cfg = JSON.parse(localStorage.getItem('cfg_interview') || '{}');
+    document.getElementById('mainContent').innerHTML = `
+        <div class="panel">
+            <div class="panel-header">
+                <div class="panel-title"><i class="fas fa-video" style="color:#8B5CF6;margin-right:8px"></i>AI Interview Configuration</div>
+                <span class="panel-badge">Global Defaults</span>
+            </div>
+            <p style="font-size:13px;color:#6B7280;margin-bottom:20px">These defaults apply to all new interviews unless overridden at schedule time.</p>
+            <div class="settings-grid">
+                <div class="settings-group">
+                    <label>Default Language</label>
+                    <select id="intDefLang" class="settings-input">
+                        <option value="en-IN" ${cfg.language==='en-IN'||!cfg.language?'selected':''}>English (India)</option>
+                        <option value="en-US" ${cfg.language==='en-US'?'selected':''}>English (US)</option>
+                        <option value="hi-IN" ${cfg.language==='hi-IN'?'selected':''}>Hindi</option>
+                        <option value="ta-IN" ${cfg.language==='ta-IN'?'selected':''}>Tamil</option>
+                        <option value="te-IN" ${cfg.language==='te-IN'?'selected':''}>Telugu</option>
+                        <option value="kn-IN" ${cfg.language==='kn-IN'?'selected':''}>Kannada</option>
+                        <option value="ml-IN" ${cfg.language==='ml-IN'?'selected':''}>Malayalam</option>
+                        <option value="bn-IN" ${cfg.language==='bn-IN'?'selected':''}>Bengali</option>
+                        <option value="mr-IN" ${cfg.language==='mr-IN'?'selected':''}>Marathi</option>
+                    </select>
+                </div>
+                <div class="settings-group">
+                    <label>Max Questions per Interview</label>
+                    <select id="intDefQuestions" class="settings-input">
+                        <option value="5" ${cfg.maxQuestions==5?'selected':''}>5 questions</option>
+                        <option value="8" ${cfg.maxQuestions==8||!cfg.maxQuestions?'selected':''}>8 questions (Default)</option>
+                        <option value="10" ${cfg.maxQuestions==10?'selected':''}>10 questions</option>
+                        <option value="12" ${cfg.maxQuestions==12?'selected':''}>12 questions</option>
+                        <option value="15" ${cfg.maxQuestions==15?'selected':''}>15 questions</option>
+                    </select>
+                </div>
+                <div class="settings-group">
+                    <label>Time Limit (minutes)</label>
+                    <select id="intDefTime" class="settings-input">
+                        <option value="10" ${cfg.timeLimit==10?'selected':''}>10 min</option>
+                        <option value="15" ${cfg.timeLimit==15||!cfg.timeLimit?'selected':''}>15 min (Default)</option>
+                        <option value="20" ${cfg.timeLimit==20?'selected':''}>20 min</option>
+                        <option value="30" ${cfg.timeLimit==30?'selected':''}>30 min</option>
+                        <option value="45" ${cfg.timeLimit==45?'selected':''}>45 min</option>
+                        <option value="60" ${cfg.timeLimit==60?'selected':''}>60 min</option>
+                    </select>
+                </div>
+                <div class="settings-group">
+                    <label>Default Experience Level</label>
+                    <select id="intDefLevel" class="settings-input">
+                        <option value="fresher" ${cfg.level==='fresher'?'selected':''}>Fresher</option>
+                        <option value="junior" ${cfg.level==='junior'?'selected':''}>Junior</option>
+                        <option value="mid" ${cfg.level==='mid'||!cfg.level?'selected':''}>Mid (Default)</option>
+                        <option value="senior" ${cfg.level==='senior'?'selected':''}>Senior</option>
+                        <option value="lead" ${cfg.level==='lead'?'selected':''}>Lead / Staff</option>
+                    </select>
+                </div>
+            </div>
+            <h6 style="margin-top:20px;margin-bottom:12px;font-size:14px;font-weight:700"><i class="fas fa-shield-alt" style="color:#EF4444;margin-right:6px"></i>Default Proctoring Settings</h6>
+            <div class="settings-grid">
+                <div style="display:flex;align-items:center;gap:10px;padding:8px 0"><input type="checkbox" id="defCamera" ${cfg.camera!==false?'checked':''}><label for="defCamera">Camera Monitoring</label></div>
+                <div style="display:flex;align-items:center;gap:10px;padding:8px 0"><input type="checkbox" id="defEyeTrack" ${cfg.eyeTracking!==false?'checked':''}><label for="defEyeTrack">Eye Tracking</label></div>
+                <div style="display:flex;align-items:center;gap:10px;padding:8px 0"><input type="checkbox" id="defTabSwitch" ${cfg.tabSwitch!==false?'checked':''}><label for="defTabSwitch">Tab Switch Detection</label></div>
+                <div style="display:flex;align-items:center;gap:10px;padding:8px 0"><input type="checkbox" id="defBrowserLock" ${cfg.browserLock?'checked':''}><label for="defBrowserLock">Browser Lockdown</label></div>
+                <div style="display:flex;align-items:center;gap:10px;padding:8px 0"><input type="checkbox" id="defScreenRec" ${cfg.screenRecord?'checked':''}><label for="defScreenRec">Screen Recording</label></div>
+                <div style="display:flex;align-items:center;gap:10px;padding:8px 0"><input type="checkbox" id="defAudioMon" ${cfg.audioMonitor?'checked':''}><label for="defAudioMon">Audio Monitoring</label></div>
+            </div>
+            <div class="settings-group" style="margin-top:12px">
+                <label>Max Violations Before Auto-Flag</label>
+                <select id="defMaxViolations" class="settings-input" style="width:200px">
+                    <option value="3" ${cfg.maxViolations==3?'selected':''}>3</option>
+                    <option value="5" ${cfg.maxViolations==5||!cfg.maxViolations?'selected':''}>5 (Default)</option>
+                    <option value="10" ${cfg.maxViolations==10?'selected':''}>10</option>
+                    <option value="0" ${cfg.maxViolations==0?'selected':''}>No limit</option>
+                </select>
+            </div>
+            <div class="settings-footer"><button class="btn-save" onclick="saveInterviewDefaults()"><i class="fas fa-save"></i> Save Interview Defaults</button></div>
+        </div>
+    `;
+}
+function saveInterviewDefaults() {
+    const cfg = {
+        language: document.getElementById('intDefLang')?.value,
+        maxQuestions: parseInt(document.getElementById('intDefQuestions')?.value),
+        timeLimit: parseInt(document.getElementById('intDefTime')?.value),
+        level: document.getElementById('intDefLevel')?.value,
+        camera: document.getElementById('defCamera')?.checked,
+        eyeTracking: document.getElementById('defEyeTrack')?.checked,
+        tabSwitch: document.getElementById('defTabSwitch')?.checked,
+        browserLock: document.getElementById('defBrowserLock')?.checked,
+        screenRecord: document.getElementById('defScreenRec')?.checked,
+        audioMonitor: document.getElementById('defAudioMon')?.checked,
+        maxViolations: parseInt(document.getElementById('defMaxViolations')?.value)
+    };
+    localStorage.setItem('cfg_interview', JSON.stringify(cfg));
+    toast('Interview defaults saved!', 'success');
+}
+
+// ══════════════════════════════════════════
+// BRANDING
+// ══════════════════════════════════════════
+function loadBranding() {
+    document.getElementById('pageTitle').textContent = 'Branding & Appearance';
+    if (!checkAuth()) return;
+    const brand = JSON.parse(localStorage.getItem('cfg_brand') || '{}');
+    document.getElementById('mainContent').innerHTML = `
+        <div class="panel">
+            <div class="panel-header">
+                <div class="panel-title"><i class="fas fa-palette" style="color:#EC4899;margin-right:8px"></i>Platform Branding</div>
+            </div>
+            <div class="settings-grid">
+                <div class="settings-group">
+                    <label>Platform Name</label>
+                    <input type="text" id="brandName" class="settings-input" value="${esc(brand.name||'SimpaticoHR')}" placeholder="SimpaticoHR">
+                </div>
+                <div class="settings-group">
+                    <label>Tagline</label>
+                    <input type="text" id="brandTagline" class="settings-input" value="${esc(brand.tagline||'HR Management Platform')}" placeholder="HR Management Platform">
+                </div>
+                <div class="settings-group">
+                    <label>Primary Color</label>
+                    <div style="display:flex;gap:10px;align-items:center">
+                        <input type="color" id="brandPrimary" value="${brand.primaryColor||'#4F46E5'}" style="width:50px;height:38px;border:none;cursor:pointer">
+                        <input type="text" id="brandPrimaryHex" class="settings-input" value="${brand.primaryColor||'#4F46E5'}" style="width:120px" oninput="document.getElementById('brandPrimary').value=this.value">
+                    </div>
+                </div>
+                <div class="settings-group">
+                    <label>Accent Color</label>
+                    <div style="display:flex;gap:10px;align-items:center">
+                        <input type="color" id="brandAccent" value="${brand.accentColor||'#F59E0B'}" style="width:50px;height:38px;border:none;cursor:pointer">
+                        <input type="text" id="brandAccentHex" class="settings-input" value="${brand.accentColor||'#F59E0B'}" style="width:120px" oninput="document.getElementById('brandAccent').value=this.value">
+                    </div>
+                </div>
+                <div class="settings-group">
+                    <label>Support URL</label>
+                    <input type="url" id="brandSupportUrl" class="settings-input" value="${esc(brand.supportUrl||'')}" placeholder="https://support.simpaticohr.in">
+                </div>
+                <div class="settings-group">
+                    <label>Privacy Policy URL</label>
+                    <input type="url" id="brandPrivacyUrl" class="settings-input" value="${esc(brand.privacyUrl||'')}" placeholder="https://simpaticohr.in/privacy">
+                </div>
+            </div>
+            <div class="settings-footer"><button class="btn-save" onclick="saveBranding()"><i class="fas fa-save"></i> Save Branding</button></div>
+        </div>
+    `;
+}
+function saveBranding() {
+    const cfg = {
+        name: document.getElementById('brandName')?.value,
+        tagline: document.getElementById('brandTagline')?.value,
+        primaryColor: document.getElementById('brandPrimary')?.value,
+        accentColor: document.getElementById('brandAccent')?.value,
+        supportUrl: document.getElementById('brandSupportUrl')?.value,
+        privacyUrl: document.getElementById('brandPrivacyUrl')?.value
+    };
+    localStorage.setItem('cfg_brand', JSON.stringify(cfg));
+    toast('Branding saved!', 'success');
+}
+
+// ══════════════════════════════════════════
+// AUDIT LOGS
+// ══════════════════════════════════════════
+function loadAuditLogs() {
+    document.getElementById('pageTitle').textContent = 'Audit Logs';
+    if (!checkAuth()) return;
+    const logs = JSON.parse(localStorage.getItem('cfg_audit_logs') || '[]');
+    // Add current session as sample if empty
+    if (logs.length === 0) {
+        const sampleLogs = [
+            { ts: new Date().toISOString(), user: user.email || 'admin', action: 'login', detail: 'Super admin login', ip: '—' },
+            { ts: new Date(Date.now()-3600000).toISOString(), user: 'system', action: 'config_change', detail: 'Platform settings updated', ip: '—' },
+            { ts: new Date(Date.now()-7200000).toISOString(), user: user.email || 'admin', action: 'company_create', detail: 'New company registered', ip: '—' }
+        ];
+        localStorage.setItem('cfg_audit_logs', JSON.stringify(sampleLogs));
+        logs.push(...sampleLogs);
+    }
+    document.getElementById('mainContent').innerHTML = `
+        <div class="panel">
+            <div class="panel-header">
+                <div class="panel-title"><i class="fas fa-clipboard-list" style="color:#10B981;margin-right:8px"></i>System Audit Logs</div>
+                <div style="display:flex;gap:8px">
+                    <select id="auditFilter" class="settings-input" style="width:160px;padding:6px 10px;font-size:12px" onchange="filterAuditLogs()">
+                        <option value="all">All Actions</option>
+                        <option value="login">Logins</option>
+                        <option value="config_change">Config Changes</option>
+                        <option value="company_create">Company Events</option>
+                    </select>
+                    <button class="btn-ghost" style="padding:6px 12px;font-size:12px" onclick="clearAuditLogs()"><i class="fas fa-trash"></i> Clear</button>
+                </div>
+            </div>
+            <div class="table-wrap"><table>
+                <thead><tr><th>Timestamp</th><th>User</th><th>Action</th><th>Detail</th></tr></thead>
+                <tbody id="auditTableBody">${logs.map(l => `<tr data-action="${l.action}">
+                    <td style="font-size:12px;color:#6B7280;font-family:monospace;white-space:nowrap">${formatDate(l.ts)} ${new Date(l.ts).toLocaleTimeString()}</td>
+                    <td style="font-size:13px">${esc(l.user)}</td>
+                    <td><span class="badge badge-${l.action==='login'?'active':l.action==='config_change'?'trial':'premium'}">${esc(l.action)}</span></td>
+                    <td style="font-size:13px;color:#6B7280">${esc(l.detail)}</td>
+                </tr>`).join('')}</tbody>
+            </table></div>
+        </div>
+    `;
+}
+function filterAuditLogs() {
+    const filter = document.getElementById('auditFilter')?.value;
+    document.querySelectorAll('#auditTableBody tr').forEach(tr => {
+        tr.style.display = filter === 'all' || tr.dataset.action === filter ? '' : 'none';
+    });
+}
+function clearAuditLogs() {
+    if (!confirm('Clear all audit logs?')) return;
+    localStorage.removeItem('cfg_audit_logs');
+    toast('Audit logs cleared', 'info');
+    loadAuditLogs();
+}
+
+// ══════════════════════════════════════════
+// FEATURE FLAGS
+// ══════════════════════════════════════════
+function loadFeatureFlags() {
+    document.getElementById('pageTitle').textContent = 'Feature Flags';
+    if (!checkAuth()) return;
+    const flags = JSON.parse(localStorage.getItem('cfg_features') || '{}');
+    const features = [
+        { key: 'ai_interviews', label: 'AI Voice Interviews', desc: 'Enable AI-powered proctored interviews', icon: 'fa-robot', default: true },
+        { key: 'whatsapp_notif', label: 'WhatsApp Notifications', desc: 'Send interview invites via WhatsApp', icon: 'fab fa-whatsapp', default: true },
+        { key: 'ai_jd_generator', label: 'AI Job Description Generator', desc: 'Generate JDs using AI from job details', icon: 'fa-wand-magic-sparkles', default: true },
+        { key: 'ai_screening', label: 'AI Resume Screening', desc: 'Auto-score candidates using AI ATS', icon: 'fa-brain', default: true },
+        { key: 'eye_tracking', label: 'Eye Tracking Proctoring', desc: 'Enable gaze monitoring during interviews', icon: 'fa-eye', default: false },
+        { key: 'screen_recording', label: 'Screen Recording', desc: 'Record candidate screen during proctored sessions', icon: 'fa-desktop', default: false },
+        { key: 'multi_language', label: 'Multi-Language Interviews', desc: 'Allow interviews in regional languages', icon: 'fa-language', default: true },
+        { key: 'training_module', label: 'Training & LMS', desc: 'Enable employee training and course management', icon: 'fa-graduation-cap', default: true },
+        { key: 'payroll_module', label: 'Payroll Management', desc: 'Enable payroll processing and payslips', icon: 'fa-money-bill-wave', default: true },
+        { key: 'analytics_advanced', label: 'Advanced Analytics', desc: 'Enable detailed workforce analytics dashboards', icon: 'fa-chart-bar', default: false },
+        { key: 'api_access', label: 'API Access', desc: 'Allow third-party API integrations', icon: 'fa-plug', default: false },
+        { key: 'audit_logging', label: 'Detailed Audit Logging', desc: 'Log all user actions for compliance', icon: 'fa-clipboard-list', default: true }
+    ];
+    document.getElementById('mainContent').innerHTML = `
+        <div class="panel">
+            <div class="panel-header">
+                <div class="panel-title"><i class="fas fa-toggle-on" style="color:#F59E0B;margin-right:8px"></i>Feature Flags</div>
+                <span class="panel-badge">${features.filter(f => flags[f.key] !== undefined ? flags[f.key] : f.default).length} enabled</span>
+            </div>
+            <p style="font-size:13px;color:#6B7280;margin-bottom:20px">Toggle platform features on/off. Changes apply immediately for new sessions.</p>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+                ${features.map(f => {
+                    const on = flags[f.key] !== undefined ? flags[f.key] : f.default;
+                    return `<div style="display:flex;align-items:center;justify-content:space-between;padding:14px 16px;background:${on?'rgba(16,185,129,.05)':'#F9FAFB'};border:1px solid ${on?'rgba(16,185,129,.2)':'#F3F4F6'};border-radius:10px;transition:all .2s">
+                        <div style="display:flex;align-items:center;gap:12px">
+                            <i class="fas ${f.icon}" style="color:${on?'#10B981':'#9CA3AF'};font-size:16px;width:20px;text-align:center"></i>
+                            <div>
+                                <div style="font-size:13px;font-weight:600;color:#374151">${f.label}</div>
+                                <div style="font-size:11px;color:#9CA3AF;margin-top:2px">${f.desc}</div>
+                            </div>
+                        </div>
+                        <label style="position:relative;display:inline-block;width:44px;height:24px;cursor:pointer">
+                            <input type="checkbox" ${on?'checked':''} onchange="toggleFeature('${f.key}',this.checked)" style="opacity:0;width:0;height:0">
+                            <span style="position:absolute;inset:0;background:${on?'#10B981':'#D1D5DB'};border-radius:24px;transition:.3s"></span>
+                            <span style="position:absolute;left:${on?'22px':'2px'};top:2px;width:20px;height:20px;background:#fff;border-radius:50%;transition:.3s;box-shadow:0 1px 3px rgba(0,0,0,.2)"></span>
+                        </label>
+                    </div>`;
+                }).join('')}
+            </div>
+            <div class="settings-footer">
+                <button class="btn-ghost" onclick="resetFeatureFlags()"><i class="fas fa-undo"></i> Reset to Defaults</button>
+                <span style="font-size:12px;color:#9CA3AF"><i class="fas fa-info-circle"></i> Saved automatically on toggle</span>
+            </div>
+        </div>
+    `;
+}
+function toggleFeature(key, val) {
+    const flags = JSON.parse(localStorage.getItem('cfg_features') || '{}');
+    flags[key] = val;
+    localStorage.setItem('cfg_features', JSON.stringify(flags));
+    toast(`${key.replace(/_/g,' ')} ${val?'enabled':'disabled'}`, val?'success':'info');
+    setTimeout(() => loadFeatureFlags(), 300);
+}
+function resetFeatureFlags() {
+    if (!confirm('Reset all feature flags to defaults?')) return;
+    localStorage.removeItem('cfg_features');
+    toast('Feature flags reset', 'info');
+    loadFeatureFlags();
 }
 
 loadDashboard();

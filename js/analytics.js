@@ -316,8 +316,16 @@ function destroyChart(id) {
   if (charts[id]) { charts[id].destroy(); delete charts[id]; }
 }
 function authHeaders() {
-  const token = sb()?.auth?.session()?.access_token || localStorage.getItem('sb-token') || '';
-  return token ? { Authorization: `Bearer ${token}` } : {};
+  let token = localStorage.getItem('simpatico_token') || localStorage.getItem('sb-token') || '';
+  if (!token) {
+    for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && k.startsWith('sb-') && k.endsWith('-auth-token')) {
+            try { token = JSON.parse(localStorage.getItem(k)).access_token; } catch(e){}
+        }
+    }
+  }
+  return token ? { 'Authorization': 'Bearer ' + token } : {};
 }
 function setText(id, v) { const el=document.getElementById(id); if(el) el.textContent=v; }
 window.showToast = (msg, type='info') => {

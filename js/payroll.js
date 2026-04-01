@@ -360,8 +360,16 @@ function avatarColor(id) {
   return c[Math.abs(h)%c.length];
 }
 function authHeaders() {
-  const token = sb()?.auth?.session()?.access_token || localStorage.getItem('sb-token') || '';
-  return token ? { Authorization: `Bearer ${token}` } : {};
+  let token = localStorage.getItem('simpatico_token') || localStorage.getItem('sb-token') || '';
+  if (!token) {
+    for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && k.startsWith('sb-') && k.endsWith('-auth-token')) {
+            try { token = JSON.parse(localStorage.getItem(k)).access_token; } catch(e){}
+        }
+    }
+  }
+  return token ? { 'Authorization': 'Bearer ' + token } : {};
 }
 function setText(id, v) { const el=document.getElementById(id); if(el) el.textContent=v; }
 window.openModal  = id => document.getElementById(id)?.classList.add('open');

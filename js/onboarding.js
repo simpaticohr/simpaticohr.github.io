@@ -79,9 +79,9 @@ async function loadOnboarding() {
   const { data, error } = await client
     .from('onboarding_records')
     .select(`
-      id, stage, start_date, completion_pct, buddy_id,
+      id, stage, start_date, completion_pct,
       employees(id, first_name, last_name, job_title, departments(name)),
-      onboarding_tasks(id, title, due_date, status, assigned_to)
+      onboarding_tasks(id, title, due_date, status, notes)
     `)
     .order('start_date', { ascending: false });
 
@@ -167,7 +167,6 @@ window.startOnboarding = async function() {
         employee_id: empId,
         template_id: template || null,
         start_date:  start || new Date().toISOString().slice(0,10),
-        buddy_id:    buddy || null,
       }),
     });
     const result = await res.json();
@@ -197,8 +196,16 @@ window.generateAIChecklist = async function(role, department) {
 };
 
 function authHeaders() {
-  const token = sb()?.auth?.session()?.access_token || localStorage.getItem('sb-token') || '';
-  return token ? { Authorization: `Bearer ${token}` } : {};
+  let token = localStorage.getItem('simpatico_token') || localStorage.getItem('sb-token') || '';
+  if (!token) {
+    for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && k.startsWith('sb-') && k.endsWith('-auth-token')) {
+            try { token = JSON.parse(localStorage.getItem(k)).access_token; } catch(e){}
+        }
+    }
+  }
+  return token ? { 'Authorization': 'Bearer ' + token } : {};
 }
 function avatarColor(id) {
   const colors = ['#0ea5e9','#8b5cf6','#10b981','#f59e0b','#ef4444','#06b6d4'];
