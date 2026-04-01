@@ -1,18 +1,27 @@
 // js/app.js
 // SimpaticoHR Main Application Logic
 
-const SB_URL = "https://cvkxtsvgnynxexmemfuy.supabase.co";
-const SB_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN2a3h0c3ZnbnlueGV4bWVtZnV5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc0MjE2NTEsImV4cCI6MjA4Mjk5NzY1MX0.2mys8Cc-ucJ1uLThEGJubeDEg1TvfIAkW-xFsR4ecq4";
+const AN_CONFIG = {
+  supabaseUrl: window.SIMPATICO_CONFIG?.supabaseUrl    || 'https://cvkxtsvgnynxexmemfuy.supabase.co',
+  supabaseKey: window.SIMPATICO_CONFIG?.supabaseAnonKey || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN2a3h0c3ZnbnlueGV4bWVtZnV5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc0MjE2NTEsImV4cCI6MjA4Mjk5NzY1MX0.2mys8Cc-ucJ1uLThEGJubeDEg1TvfIAkW-xFsR4ecq4',
+  workerUrl:   window.SIMPATICO_CONFIG?.workerUrl       || 'https://simpatico-hr-ats.simpaticohrconsultancy.workers.dev',
+};
+
+const SB_URL = AN_CONFIG.supabaseUrl;
+const SB_KEY = AN_CONFIG.supabaseKey;
 
 function sbHeaders() {
+  const token = localStorage.getItem('simpatico_token') || localStorage.getItem('sb-token') || '';
   return {
     "apikey": SB_KEY,
-    "Authorization": "Bearer " + SB_KEY,
-```
-
-    "Content-Type": "application/json"
+    "Authorization": "Bearer " + (token || SB_KEY),
+    "Content-Type": "application/json",
+    "X-Tenant-ID": window.SIMPATICO_CONFIG?.tenantId || 'SIMP_PRO_MAIN'
   };
 }
+
+// Global alias for compatibility
+window.authHeaders = sbHeaders;
 
 async function sbFetch(table, query) {
   const r = await fetch(SB_URL + "/rest/v1/" + table + "?" + (query || ""), { headers: sbHeaders() });
@@ -36,6 +45,26 @@ async function sbUpdate(table, data, filter) {
   });
   return r.json();
 }
+
+// Simpatico API Gateway (Worker Interactions)
+window.SimpaticoAPI = {
+  async parseResume(file) {
+    const formData = new FormData();
+    formData.append('file', file);
+    const res = await fetch(`${AN_CONFIG.workerUrl}/ai/parse-resume`, {
+      method: "POST",
+      headers: { ...sbHeaders(), "Accept": "application/json" },
+      body: formData
+    });
+    return res.json();
+  },
+  async getAnalyticsSummary(days = 30) {
+    const res = await fetch(`${AN_CONFIG.workerUrl}/analytics/summary?days=${days}`, {
+      headers: sbHeaders()
+    });
+    return res.json();
+  }
+};
 
 let currentCompanyId = null;
 
@@ -457,14 +486,26 @@ function formatDateTime(dateStr) {
 }
 
 function showToast(message, type) {
-  const container = document.getElementById('toastContainer');
+  const container = document.getElementById('toastContainer') || document.getElementById('toasts');
   if (!container) return;
+
+  // Fix [object Object] bug: Extract message if msg is an object
+  let msg = message;
+  if (typeof message === 'object' && message !== null) {
+      msg = message.message || message.error || message.statusText || JSON.stringify(message);
+  }
+
   const toast = document.createElement('div');
   const colors = { success: '#10b981', error: '#ef4444', warning: '#f59e0b', info: '#6366f1' };
-  toast.style.cssText = 'padding:12px 20px;border-radius:8px;background:' + (colors[type] || colors.info) + ';color:#fff;font-size:0.85rem;font-weight:600;margin-top:8px;box-shadow:0 4px 12px rgba(0,0,0,0.15);';
-  toast.textContent = message;
+  toast.style.cssText = 'padding:12px 20px;border-radius:8px;background:' + (colors[type] || colors.info) + ';color:#fff;font-size:0.85rem;font-weight:600;margin-top:8px;box-shadow:0 4px 12px rgba(0,0,0,0.15);animation:fadeIn 0.3s ease;';
+  toast.textContent = msg;
   container.appendChild(toast);
-  setTimeout(() => toast.remove(), 3000);
+  setTimeout(() => {
+      toast.style.opacity = '0';
+      toast.style.transform = 'translateY(-10px)';
+      toast.style.transition = '0.3s ease';
+      setTimeout(() => toast.remove(), 300);
+  }, 3000);
 }
 
 function doLogout() {
@@ -484,10 +525,23 @@ function searchCandidates() { alert('Candidate Sourcing coming soon!'); }
 
 
 function api(endpoint, options) {
-  const token = localStorage.getItem('simpatico_token') || '';
+  let token = localStorage.getItem('simpatico_token') || localStorage.getItem('sb-token') || '';
+  if (!token) {
+    for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && k.startsWith('sb-') && k.endsWith('-auth-token')) {
+            try { token = JSON.parse(localStorage.getItem(k)).access_token; } catch(e){}
+        }
+    }
+  }
   const workerUrl = 'https://evalis-ai.simpaticohrconsultancy.workers.dev';
   return fetch(workerUrl + endpoint, {
     ...options,
-    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token, ...((options || {}).headers || {}) }
+    headers: { 
+        'Content-Type': 'application/json', 
+        'apikey': SB_KEY,
+        ...(token ? { 'Authorization': 'Bearer ' + token } : {}),
+        ...((options || {}).headers || {}) 
+    }
   }).then(r => r.json());
 }

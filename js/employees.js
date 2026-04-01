@@ -648,7 +648,12 @@ function authHeaders() {
         }
     }
   }
-  return token ? { 'Authorization': 'Bearer ' + token } : {};
+  const headers = { 
+    'Content-Type': 'application/json',
+    'apikey': EMP_CONFIG.supabaseKey 
+  };
+  if (token) headers['Authorization'] = 'Bearer ' + token;
+  return headers;
 }
 function statusBadge(s) {
   const map = { active:'hr-badge-active', on_leave:'hr-badge-pending', terminated:'hr-badge-inactive' };
@@ -676,10 +681,17 @@ document.querySelectorAll('.hr-modal-overlay').forEach(m =>
 
 window.showToast = function(msg, type='info') {
   const c = document.getElementById('toasts'); if (!c) return;
+  
+  // Fix [object Object] bug: Extract message if msg is an object
+  let message = msg;
+  if (typeof msg === 'object' && msg !== null) {
+      message = msg.message || msg.error || msg.statusText || JSON.stringify(msg);
+  }
+
   const t = document.createElement('div');
   t.className = `hr-toast ${type}`;
   const icons = { success:'✓', error:'✕', info:'ℹ' };
-  t.innerHTML = `<span style="font-size:15px">${icons[type]||'ℹ'}</span><span>${msg}</span>`;
+  t.innerHTML = `<span style="font-size:15px">${icons[type]||'ℹ'}</span><span>${message}</span>`;
   c.appendChild(t);
   setTimeout(() => t.remove(), 3800);
 };

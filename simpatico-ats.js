@@ -38,7 +38,7 @@ const HTTP = Object.freeze({
 const CORS_HEADERS = Object.freeze({
   'Access-Control-Allow-Origin':  '*',
   'Access-Control-Allow-Methods': 'GET,POST,PUT,PATCH,DELETE,OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type,Authorization,X-Tenant-ID,X-Idempotency-Key,X-Request-ID,X-App-Version',
+  'Access-Control-Allow-Headers': 'Content-Type,Authorization,X-Tenant-ID,X-Idempotency-Key,X-Request-ID,X-App-Version,apikey',
   'Access-Control-Expose-Headers':'X-Request-ID,X-RateLimit-Remaining,X-Cursor',
   'Access-Control-Max-Age':       '86400',
   'X-Content-Type-Options':       'nosniff',
