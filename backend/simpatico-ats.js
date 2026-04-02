@@ -1198,7 +1198,7 @@ async function handleCreateJob(request, env, ctx) {
   const body = await safeJson(request);
   validate(body, 'job_posting');
 
-  const res = await sbFetch(env, 'POST', '/rest/v1/job_listings', { ...sanitize(body), status: 'open', tenant_id: ctx.tenantId, created_by: ctx.actorId }, false, ctx.tenantId);
+  const res = await sbFetch(env, 'POST', '/rest/v1/jobs', { ...sanitize(body), status: 'open', tenant_id: ctx.tenantId, created_by: ctx.actorId }, false, ctx.tenantId);
   const [job] = await res.json();
   await invalidateCache(env, `analytics:summary:${ctx.tenantId}`);
   return apiResponse({ job }, HTTP.CREATED);
@@ -1207,7 +1207,7 @@ async function handleCreateJob(request, env, ctx) {
 async function handleListJobs(request, env, ctx, _, url) {
   requireAuth(ctx);
   const status = url.searchParams.get('status') || 'open';
-  const res    = await sbFetch(env, 'GET', `/rest/v1/job_listings?status=eq.${status}&select=*&order=created_at.desc`, null, false, ctx.tenantId);
+  const res    = await sbFetch(env, 'GET', `/rest/v1/jobs?status=eq.${status}&select=*&order=created_at.desc`, null, false, ctx.tenantId);
   return apiResponse({ jobs: await res.json() });
 }
 
@@ -1216,7 +1216,7 @@ async function handleCreateApplication(request, env, ctx) {
   if (!body.job_id || !body.candidate_email) throw new ValidationError('job_id and candidate_email required');
 
   // 1. Fetch Job Listing to check for Auto-Shortlist / requirements
-  const jobRes = await sbFetch(env, 'GET', `/rest/v1/job_listings?id=eq.${body.job_id}&select=*`, null, false, ctx.tenantId);
+  const jobRes = await sbFetch(env, 'GET', `/rest/v1/jobs?id=eq.${body.job_id}&select=*`, null, false, ctx.tenantId);
   const [job] = await jobRes.json();
   
   let match_score = null;
@@ -1314,7 +1314,7 @@ async function handleListApplications(request, env, ctx, _, url) {
   requireRole(ctx, 'hr', 'admin', 'superadmin');
   const jobId  = url.searchParams.get('job_id');
   const status = url.searchParams.get('status');
-  let qp = `select=*,job_listings(title,department)&order=created_at.desc`;
+  let qp = `select=*,jobs(title,department)&order=created_at.desc`;
   if (jobId)  qp += `&job_id=eq.${jobId}`;
   if (status) qp += `&status=eq.${status}`;
   const res = await sbFetch(env, 'GET', `/rest/v1/job_applications?${qp}`, null, false, ctx.tenantId);
@@ -1603,7 +1603,7 @@ async function handleAnalyticsSummary(request, env, ctx) {
     const [empR, leaveR, jobsR, reviewR, onboardR] = await Promise.all([
       sbFetch(env, 'GET', '/rest/v1/employees?select=id,status', null, false, ctx.tenantId),
       sbFetch(env, 'GET', '/rest/v1/leave_requests?status=eq.pending&select=id', null, false, ctx.tenantId),
-      sbFetch(env, 'GET', '/rest/v1/job_listings?status=eq.open&select=id', null, false, ctx.tenantId),
+      sbFetch(env, 'GET', '/rest/v1/jobs?status=eq.open&select=id', null, false, ctx.tenantId),
       sbFetch(env, 'GET', '/rest/v1/performance_reviews?select=rating', null, false, ctx.tenantId),
       sbFetch(env, 'GET', '/rest/v1/onboarding_records?stage=eq.in_progress&select=id', null, false, ctx.tenantId),
     ]);
