@@ -110,8 +110,8 @@ async function loadDashboardData(companyId) {
   currentCompanyId = companyId;
   try {
     const [jobs, apps, ints] = await Promise.all([
-      sbFetch("job_postings", "select=*&order=created_at.desc&limit=50"),
-      sbFetch("job_applications", "select=*,job_postings(*)&order=created_at.desc&limit=100"),
+      sbFetch("job_listings", "select=*&order=created_at.desc&limit=50"),
+      sbFetch("job_applications", "select=*,job_listings(*)&order=created_at.desc&limit=100"),
       sbFetch("interviews", "select=*&order=created_at.desc&limit=50")
     ]);
 
@@ -311,7 +311,7 @@ async function publishJob() {
   if (!title) { showToast('Job title is required', 'error'); return; }
   try {
     const skills = document.getElementById('newJobSkills').value.split(',').map(s => s.trim()).filter(Boolean);
-    await sbInsert("job_postings", {
+    await sbInsert("job_listings", {
       title,
       department: document.getElementById('newJobDept').value,
       location: document.getElementById('newJobLocation').value,
@@ -349,7 +349,7 @@ async function loadAllApplications() {
   if (!tbody) return;
   tbody.innerHTML = '<tr><td colspan="6" class="text-center text-gray" style="padding:2rem;">Loading...</td></tr>';
   try {
-    const apps = await sbFetch("job_applications", "select=*,job_postings(*)&order=created_at.desc&limit=100");
+    const apps = await sbFetch("job_applications", "select=*,job_listings(*)&order=created_at.desc&limit=100");
     renderAllApplications(Array.isArray(apps) ? apps : []);
   } catch (e) {
     tbody.innerHTML = '<tr><td colspan="6" class="text-center" style="padding:2rem;color:red;">' + e.message + '</td></tr>';
@@ -399,7 +399,7 @@ const PIPELINE_STAGES = [
 
 async function loadPipelineJobs() {
   try {
-    const jobs = await sbFetch("job_postings", "select=id,title&status=eq.open");
+    const jobs = await sbFetch("job_listings", "select=id,title&status=eq.open");
     const select = document.getElementById('pipelineJobFilter');
     if (!select) return;
     select.innerHTML = '<option value="">Select Job</option>' + (Array.isArray(jobs) ? jobs : []).map(j => '<option value="' + j.id + '">' + j.title + '</option>').join('');

@@ -1643,6 +1643,14 @@
                         <div id="jdOutput" class="jd-output" contenteditable="true" style="display:none;"></div>
                     </div>
 
+                    <div style="background:var(--bg-main);padding:15px;border-radius:8px;border:1px solid #e2e8f0;display:flex;align-items:center;gap:12px;margin-top:16px;">
+                        <input type="checkbox" id="jobAutoShortlist" style="width:20px;height:20px;accent-color:var(--primary);">
+                        <div>
+                            <label style="margin-bottom:0;font-weight:600;color:var(--text-primary);cursor:pointer;" for="jobAutoShortlist">Enable AI Auto-Shortlisting</label>
+                            <div style="font-size:0.8rem;color:var(--text-secondary);">Automatically calculates candidate Match Score. If > 75%, auto-schedules an AI interview and emails candidate.</div>
+                        </div>
+                    </div>
+
                     <div class="form-group mt-3">
                         <label>Additional Notes</label>
                         <textarea class="form-control-custom" id="jobNotes" placeholder="Any additional information..."></textarea>
@@ -2151,13 +2159,13 @@ async function syncWithSupabase() {
     }
 
     // 2. Fetch Interviews
-    const intRes = await SimpaticoDB.from('interviews').select('*').order('date', { ascending: true });
+    const intRes = await SimpaticoDB.from('interviews').select('*').order('created_at', { ascending: false });
     if (!intRes.error) {
         DataStore.update(data => { data.interviews = intRes.data; });
     }
 
     // 3. Fetch Applications (Candidates)
-    const appRes = await SimpaticoDB.from('job_applications').select('*, job_listings(title, department)').order('applied_at', { ascending: false });
+    const appRes = await SimpaticoDB.from('job_applications').select('*, job_listings(title, department)').order('created_at', { ascending: false });
     if (!appRes.error) {
         DataStore.update(data => { data.job_applications = appRes.data; });
     }
@@ -2981,7 +2989,12 @@ async function handleCreateJob(e, status = 'open') {
     const skills     = document.getElementById('jobSkills')?.value.trim();
     const notes      = document.getElementById('jobNotes')?.value.trim();
     const jdOutput   = document.getElementById('jdOutput');
-    const description = jdOutput ? jdOutput.innerText.trim() : '';
+    let description = jdOutput ? jdOutput.innerText.trim() : '';
+
+    const autoShortlist = document.getElementById('jobAutoShortlist')?.checked;
+    if (autoShortlist) {
+        description += '\n<!-- SIMPATICO_AUTO_SHORTLIST:TRUE -->';
+    }
 
     if (!title || !department || !location) {
         showToast('Please fill in Job Title, Department, and Location', 'error');

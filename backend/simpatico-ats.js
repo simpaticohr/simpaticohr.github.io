@@ -1198,7 +1198,7 @@ async function handleCreateJob(request, env, ctx) {
   const body = await safeJson(request);
   validate(body, 'job_posting');
 
-  const res = await sbFetch(env, 'POST', '/rest/v1/job_postings', { ...sanitize(body), status: 'open', tenant_id: ctx.tenantId, created_by: ctx.actorId }, false, ctx.tenantId);
+  const res = await sbFetch(env, 'POST', '/rest/v1/job_listings', { ...sanitize(body), status: 'open', tenant_id: ctx.tenantId, created_by: ctx.actorId }, false, ctx.tenantId);
   const [job] = await res.json();
   await invalidateCache(env, `analytics:summary:${ctx.tenantId}`);
   return apiResponse({ job }, HTTP.CREATED);
@@ -1207,7 +1207,7 @@ async function handleCreateJob(request, env, ctx) {
 async function handleListJobs(request, env, ctx, _, url) {
   requireAuth(ctx);
   const status = url.searchParams.get('status') || 'open';
-  const res    = await sbFetch(env, 'GET', `/rest/v1/job_postings?status=eq.${status}&select=*&order=created_at.desc`, null, false, ctx.tenantId);
+  const res    = await sbFetch(env, 'GET', `/rest/v1/job_listings?status=eq.${status}&select=*&order=created_at.desc`, null, false, ctx.tenantId);
   return apiResponse({ jobs: await res.json() });
 }
 
@@ -1215,19 +1215,106 @@ async function handleCreateApplication(request, env, ctx) {
   const body = await safeJson(request);
   if (!body.job_id || !body.candidate_email) throw new ValidationError('job_id and candidate_email required');
 
+  // 1. Fetch Job Listing to check for Auto-Shortlist / requirements
+  const jobRes = await sbFetch(env, 'GET', `/rest/v1/job_listings?id=eq.${body.job_id}&select=*`, null, false, ctx.tenantId);
+  const [job] = await jobRes.json();
+  
+  let match_score = null;
+  let status = 'applied';
+  let ai_summary = '';
+
+  // 2. AI Resume Parsing & Scoring (if resume_text is available and env.AI exists)
+  if (body.resume_text && job && env.AI) {
+    const prompt = `You are an expert ATS AI. Compare the candidate's resume to the job description.
+Job Title: ${job.title}
+Job Desc: ${job.description || job.department}
+Resume: ${body.resume_text}
+
+Calculate a match score out of 100 based on skills, experience, and requirements fit. 
+Return ONLY valid JSON in format: {"match_score": 85, "reason": "Brief 1-sentence reason"}`;
+    
+    try {
+      const result = await env.AI.run('@cf/meta/llama-3.1-8b-instruct', { messages: [{ role: 'user', content: prompt }], max_tokens: 300 });
+      const cleaned = result.response.replace(/```json|```/g, '').trim();
+      const analysis = JSON.parse(cleaned);
+      match_score = analysis.match_score || null;
+      ai_summary = analysis.reason;
+      
+      body.ai_summary = ai_summary;
+      // We assume job_applications has a JSONB metadata or similar, but to be perfectly safe,
+      // we'll append the ai_summary to the resume_text or note field if metadata isn't strictly defined.
+      body.resume_text = `[AI Score: ${match_score}/100 - ${ai_summary}]\n\n` + body.resume_text;
+    } catch (e) {
+      console.warn("AI parsing failed:", e);
+    }
+  }
+
+  // 3. Auto-Shortlist Logic
+  let autoInterview = false;
+  let interviewToken = '';
+  // Check if job description has the hidden auto-shortlist flag
+  const autoEnabled = job?.description?.includes('<!-- SIMPATICO_AUTO_SHORTLIST:TRUE -->') || false;
+  
+  if (autoEnabled && match_score !== null && match_score >= 75) {
+      status = 'shortlisted';
+      autoInterview = true;
+      const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+      for (let i = 0; i < 32; i++) {
+          interviewToken += chars.charAt(Math.floor(Math.random() * chars.length));
+      }
+  }
+
   const res = await sbFetch(env, 'POST', '/rest/v1/job_applications', {
-    ...sanitize(body), status: 'applied', applied_at: new Date().toISOString(), tenant_id: ctx.tenantId
+    ...sanitize(body), status, applied_at: new Date().toISOString(), tenant_id: ctx.tenantId
   }, false, ctx.tenantId);
   const [app] = await res.json();
-  await dispatchWebhook(env, ctx.tenantId, 'application.received', { application_id: app.id, job_id: body.job_id });
-  return apiResponse({ application: app }, HTTP.CREATED);
+  
+  // 4. Auto-Schedule Interview execution
+  if (autoInterview && app) {
+      const intvPayload = {
+          candidate_name: app.candidate_name,
+          candidate_email: app.candidate_email,
+          job_id: job.id,
+          position: job.title,
+          round: "AI Auto-Screen",
+          token: interviewToken,
+          status: "scheduled",
+          tenant_id: ctx.tenantId,
+          date: new Date().toISOString().split('T')[0],
+          start_time: "Flexible",
+          end_time: "Flexible",
+          duration_minutes: 20
+      };
+      
+      await sbFetch(env, 'POST', '/rest/v1/interviews', intvPayload, false, ctx.tenantId);
+      
+      const baseUrl = env.FRONTEND_URL || 'https://simpaticohr.github.io';
+      const meetingLink = `${baseUrl}/interview/proctored-room.html?token=${interviewToken}`;
+      
+      try {
+          await sendEmail(env, {
+              to: app.candidate_email,
+              subject: `Interview Invitation: ${job.title} at Simpatico`,
+              html: `<p>Hi ${app.candidate_name},</p>
+                     <p>Congratulations! Your profile is a strong match for the <strong>${job.title}</strong> position.</p>
+                     <p>Please complete your preliminary AI proctored interview at your earliest convenience using this secure link:</p>
+                     <p><a href="${meetingLink}" style="background:#4f46e5;color:white;padding:10px 20px;text-decoration:none;border-radius:5px;">Start Interview</a></p>
+                     <p>Best regards,<br>Simpatico AI ATS</p>`
+          });
+      } catch(e) {
+          console.warn("Auto-shortlist email failed", e);
+      }
+  }
+
+  await dispatchWebhook(env, ctx.tenantId, 'application.received', { application_id: app.id, job_id: body.job_id, auto_shortlisted: autoInterview });
+  return apiResponse({ application: app, auto_scheduled: autoInterview, match_score }, HTTP.CREATED);
 }
 
 async function handleListApplications(request, env, ctx, _, url) {
   requireRole(ctx, 'hr', 'admin', 'superadmin');
   const jobId  = url.searchParams.get('job_id');
   const status = url.searchParams.get('status');
-  let qp = `select=*,job_postings(title,department)&order=applied_at.desc`;
+  let qp = `select=*,job_listings(title,department)&order=created_at.desc`;
   if (jobId)  qp += `&job_id=eq.${jobId}`;
   if (status) qp += `&status=eq.${status}`;
   const res = await sbFetch(env, 'GET', `/rest/v1/job_applications?${qp}`, null, false, ctx.tenantId);
@@ -1516,7 +1603,7 @@ async function handleAnalyticsSummary(request, env, ctx) {
     const [empR, leaveR, jobsR, reviewR, onboardR] = await Promise.all([
       sbFetch(env, 'GET', '/rest/v1/employees?select=id,status', null, false, ctx.tenantId),
       sbFetch(env, 'GET', '/rest/v1/leave_requests?status=eq.pending&select=id', null, false, ctx.tenantId),
-      sbFetch(env, 'GET', '/rest/v1/job_postings?status=eq.open&select=id', null, false, ctx.tenantId),
+      sbFetch(env, 'GET', '/rest/v1/job_listings?status=eq.open&select=id', null, false, ctx.tenantId),
       sbFetch(env, 'GET', '/rest/v1/performance_reviews?select=rating', null, false, ctx.tenantId),
       sbFetch(env, 'GET', '/rest/v1/onboarding_records?stage=eq.in_progress&select=id', null, false, ctx.tenantId),
     ]);

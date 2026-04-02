@@ -1,4 +1,4 @@
-﻿/**
+/**
  * 🏢 SIMPATICO HR — ENTERPRISE CONFIGURATION (v5.0)
  * Points to the isolated 'production' environment.
  */
@@ -19,4 +19,22 @@ window.SIMPATICO_CONFIG = {
   
   // Helper to generate Trace IDs for debugging
   generateTraceId: () => `TRC-${Math.random().toString(36).substr(2, 9).toUpperCase()}`
+};
+
+window.generateSecureToken = function() {
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+    let token = '';
+    for (let i = 0; i < 32; i++) {
+        token += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    return token;
+};
+
+window.generateInterviewToken = function() {
+    return window.generateSecureToken();
+};
+
+window.getInterviewLink = function(token) {
+    const baseUrl = window.location.origin + '/interview/proctored-room.html';
+    return baseUrl + '?token=' + (token || window.generateSecureToken());
 };
