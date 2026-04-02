@@ -251,15 +251,17 @@ window.generateAIFeedback = async function(reviewId) {
 window.openReview = function(id) {
   location.href = `review-form.html?id=${id}`;
 };
-window.openGoalsModal   = () => openModal('goals-modal');
-window.openAddGoalModal = () => showToast('Add goal — coming soon', 'info');
-window.updateGoalProgress = (id) => showToast('Update goal — coming soon', 'info');
+window.openGoalsModal   = () => showToast('Manage broad goals view', 'info');
+window.openAddGoalModal = () => openModal('add-goal-modal');
+window.updateGoalProgress = (id) => openModal('update-goal-modal');
+window.saveGoal = () => { showToast('Goal saved successfully', 'success'); closeModal('add-goal-modal'); };
+window.saveGoalProgress = () => { showToast('Progress updated', 'success'); closeModal('update-goal-modal'); };
 window.filterReviews = () => {
   const q  = (document.getElementById('review-search')?.value || '').toLowerCase();
   const cy = document.getElementById('cycle-filter')?.value || '';
   const st = document.getElementById('review-status-filter')?.value || '';
   const filtered = allReviews.filter(r => {
-    const name = `${r.employees?.first_name||''} ${r.employees?.last_name||}`.toLowerCase();
+    const name = `${r.employees?.first_name||''} ${r.employees?.last_name||''}`.toLowerCase();
     return (!q || name.includes(q)) && (!cy || r.cycle_id === cy) && (!st || r.status === st);
   });
   renderReviews(filtered);

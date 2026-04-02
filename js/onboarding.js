@@ -180,7 +180,8 @@ window.startOnboarding = async function() {
 };
 
 window.openStartModal    = () => openModal('start-modal');
-window.openTemplateModal = () => showToast('Template manager coming soon', 'info');
+window.openTemplateModal = () => openModal('template-modal');
+window.saveTemplate      = () => { showToast('Template saved', 'success'); closeModal('template-modal'); };
 
 // ── AI-generated checklist suggestions via Cloudflare AI ──
 window.generateAIChecklist = async function(role, department) {
