@@ -11,7 +11,15 @@ const SB_URL = AN_CONFIG.supabaseUrl;
 const SB_KEY = AN_CONFIG.supabaseKey;
 
 function sbHeaders() {
-  const token = localStorage.getItem('simpatico_token') || localStorage.getItem('sb-token') || '';
+  let token = localStorage.getItem('simpatico_token') || localStorage.getItem('sb-token') || '';
+  if (!token) {
+    for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && k.startsWith('sb-') && k.endsWith('-auth-token')) {
+            try { token = JSON.parse(localStorage.getItem(k)).access_token; } catch(e){}
+        }
+    }
+  }
   return {
     "apikey": SB_KEY,
     "Authorization": "Bearer " + (token || SB_KEY),
@@ -25,7 +33,9 @@ window.authHeaders = sbHeaders;
 
 async function sbFetch(table, query) {
   const r = await fetch(SB_URL + "/rest/v1/" + table + "?" + (query || ""), { headers: sbHeaders() });
-  return r.json();
+  const data = await r.json();
+  if (!r.ok) throw new Error(data.message || data.error || 'Fetch failed');
+  return data;
 }
 
 async function sbInsert(table, data) {
@@ -34,7 +44,9 @@ async function sbInsert(table, data) {
     headers: { ...sbHeaders(), "Prefer": "return=representation" },
     body: JSON.stringify(data)
   });
-  return r.json();
+  const result = await r.json();
+  if (!r.ok) throw new Error(result.message || result.error || 'Insert failed');
+  return result;
 }
 
 async function sbUpdate(table, data, filter) {
@@ -43,7 +55,9 @@ async function sbUpdate(table, data, filter) {
     headers: { ...sbHeaders(), "Prefer": "return=representation" },
     body: JSON.stringify(data)
   });
-  return r.json();
+  const result = await r.json();
+  if (!r.ok) throw new Error(result.message || result.error || 'Update failed');
+  return result;
 }
 
 // Simpatico API Gateway (Worker Interactions)
@@ -313,7 +327,7 @@ async function publishJob() {
     const skills = document.getElementById('newJobSkills').value.split(',').map(s => s.trim()).filter(Boolean);
     await sbInsert("job_listings", {
       title,
-      department: document.getElementById('newJobDept').value,
+      category: document.getElementById('newJobDept').value,
       location: document.getElementById('newJobLocation').value,
       skills: skills,
       description: document.getElementById('newJobDesc').value,
@@ -333,7 +347,7 @@ async function saveJobDraft() {
   const title = document.getElementById('newJobTitle').value;
   if (!title) { showToast('Job title is required', 'error'); return; }
   try {
-    await sbInsert("jobs", { title, department: document.getElementById('newJobDept').value, description: document.getElementById('newJobDesc').value, status: 'draft', is_active: false, created_at: new Date().toISOString() });
+    await sbInsert("job_listings", { title, category: document.getElementById('newJobDept').value, description: document.getElementById('newJobDesc').value, status: 'draft', is_active: false, created_at: new Date().toISOString() });
     closeModal('createJobModal');
     showToast('Job saved as draft', 'success');
   } catch (e) {

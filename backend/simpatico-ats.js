@@ -1913,6 +1913,11 @@ async function handleScheduleInterviewEmail(request, env, ctx) {
   }[mode] || mode;
 
 
+  const meetingSection = meetingLink
+    ? `<tr><td style="padding:8px 0;color:#6b7280;font-size:14px;">Link</td>
+           <td style="padding:8px 0;font-weight:600;font-size:14px;"><a href="${meetingLink}" style="color:#4f46e5;">Join Meeting</a></td></tr>`
+    : '';
+
   const notesSection = notes
     ? `<div style="margin-top:20px;background:#fef3c7;border-left:4px solid #f59e0b;padding:12px 16px;border-radius:6px;font-size:14px;color:#92400e;">
         <strong>📝 Notes:</strong> ${notes}

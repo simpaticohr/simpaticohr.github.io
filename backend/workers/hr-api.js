@@ -436,7 +436,7 @@ async function handleCalculatePayroll(request, env, token, corsHeaders) {
 async function handleRunPayroll(request, env, token, corsHeaders) {
   const { period, pay_date, type, notes } = await request.json();
 
-  const calc = await (await handleCalculatePayroll(new Request('', { method:'POST', body: JSON.stringify({ period }), headers:{'Content-Type':'application/json'} }), env, token, {})).json();
+  const calc = await (await handleCalculatePayroll(new Request('http://localhost', { method:'POST', body: JSON.stringify({ period }), headers:{'Content-Type':'application/json'} }), env, token, {})).json();
 
   // Create payroll run
   const runRes = await sbFetch(env, 'POST', '/rest/v1/payroll_runs', {
@@ -544,8 +544,8 @@ async function handleAnalyticsReport(request, env, token, url, corsHeaders) {
   const rows = [
     ['Type','Name','Department','Period/Date','Amount/Days','Status'],
     ...emp.map(e  => ['Employee', `${e.first_name} ${e.last_name}`, e.departments?.name||'', e.start_date||'', '', e.status]),
-    ...leave.map(l => ['Leave', `${l.employees?.first_name||''} ${l.employees?.last_name||}`, '', `${l.from_date}–${l.to_date}`, l.days, l.status]),
-    ...pay.map(p  => ['Payslip', `${p.employees?.first_name||''} ${p.employees?.last_name||}`, '', p.period||'', p.net_pay, 'paid']),
+    ...leave.map(l => ['Leave', `${l.employees?.first_name||''} ${l.employees?.last_name||''}`, '', `${l.from_date}–${l.to_date}`, l.days, l.status]),
+    ...pay.map(p  => ['Payslip', `${p.employees?.first_name||''} ${p.employees?.last_name||''}`, '', p.period||'', p.net_pay, 'paid']),
   ];
   const csv = rows.map(r => r.map(c=>`"${c}"`).join(',')).join('\n');
   return new Response(csv, { headers: { ...corsHeaders, 'Content-Type':'text/csv', 'Content-Disposition':`attachment; filename="hr-report.csv"` } });
