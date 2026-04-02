@@ -245,7 +245,9 @@ async function saveEmployee() {
     return;
   }
 
+  const empNum = `EMP-${Date.now().toString(36).toUpperCase()}`;
   const payload = {
+    employee_id:      empNum,
     first_name:       first,
     last_name:        last,
     email,
@@ -258,18 +260,25 @@ async function saveEmployee() {
     status:           'active',
   };
 
-  // Call Cloudflare Worker (handles server-side logic, sends welcome email, etc.)
+  // Insert directly via Supabase client (uses existing session auth)
   try {
-    const res = await fetch(`${EMP_CONFIG.workerUrl}/employees`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...authHeaders() },
-      body: JSON.stringify(payload),
-    });
-    const result = await res.json();
-    if (!res.ok) throw new Error(result.error || 'Failed to create employee');
+    const client = sb();
+    if (!client) throw new Error('Database not connected');
+
+    const { data, error } = await client
+      .from('employees')
+      .insert([payload])
+      .select();
+
+    if (error) throw new Error(error.message || 'Failed to create employee');
 
     showToast(`${first} ${last} added successfully`, 'success');
     closeModal('add-modal');
+    // Reset form fields
+    ['emp-first','emp-last','emp-email','emp-title','emp-start','emp-location'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.value = '';
+    });
     await loadEmployees();
   } catch (err) {
     showToast(err.message, 'error');
