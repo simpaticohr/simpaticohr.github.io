@@ -3647,8 +3647,9 @@ function renderCandidates() {
     const table = document.getElementById('candidatesTable');
     if (!tbody) return;
 
-    if (!appData.applications) appData.applications = [];
-    const apps = appData.applications.sort((a, b) => new Date(b.dateApplied) - new Date(a.dateApplied));
+    // ✅ Read from job_applications (what Supabase syncs into)
+    const raw = appData.job_applications || [];
+    const apps = raw.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
 
     if (apps.length === 0) {
         tbody.innerHTML = '';
@@ -3661,30 +3662,36 @@ function renderCandidates() {
     if (table) table.style.display = 'table';
 
     tbody.innerHTML = apps.map(app => {
-        const isFile = app.resumeLink && !app.resumeLink.startsWith('http');
-        const resumeDisplay = isFile 
-            ? `<i class="fas fa-file-pdf" style="color:#ef4444; margin-right:4px;"></i> ${escapeHtml(app.resumeLink)}`
-            : `<a href="${escapeHtml(app.resumeLink)}" target="_blank" style="color:var(--primary); text-decoration:none;"><i class="fas fa-external-link-alt"></i> View Link</a>`;
-        
-        const badgeClass = app.status === 'Shortlisted' ? 'badge-active' : (app.status === 'Rejected' ? 'badge-cancelled' : 'badge-pending');
+        // ✅ Map snake_case DB columns to display
+        const name   = app.candidate_name  || app.candidateName  || '—';
+        const email  = app.candidate_email || app.candidateEmail || '—';
+        const phone  = app.candidate_phone || app.candidatePhone || '—';
+        const title  = app.jobs?.title     || app.job_role       || app.jobTitle || '—';
+        const resume = app.resume_url      || app.resumeLink     || '';
+        const status = app.status          || 'Pending';
+        const date   = app.created_at      || app.dateApplied    || '';
 
-        return `
-            <tr>
-                <td><strong>${escapeHtml(app.candidateName)}</strong></td>
-                <td><span style="font-weight:600; color:var(--primary);">${escapeHtml(app.jobTitle)}</span></td>
-                <td>
-                    <div style="font-size:0.85rem;">${escapeHtml(app.candidateEmail)}</div>
-                    <div style="font-size:0.8rem; color:var(--text-secondary);"><i class="fas fa-phone"></i> ${escapeHtml(app.candidatePhone)}</div>
-                </td>
-                <td>${resumeDisplay}</td>
-                <td>${formatDate(app.dateApplied)}</td>
-                <td><span class="status-badge ${badgeClass}">${escapeHtml(app.status)}</span></td>
-                <td>
-                    <button class="btn-sm-action link-btn" title="Shortlist" onclick="updateAppStatus('${app.id}', 'Shortlisted')"><i class="fas fa-check"></i></button>
-                    <button class="btn-sm-action delete" title="Reject" onclick="updateAppStatus('${app.id}', 'Rejected')"><i class="fas fa-times"></i></button>
-                </td>
-            </tr>
-        `;
+        const resumeDisplay = resume
+            ? `<a href="${escapeHtml(resume)}" target="_blank" style="color:var(--primary);text-decoration:none;"><i class="fas fa-external-link-alt"></i> View</a>`
+            : '<span style="color:var(--text-secondary)">—</span>';
+
+        const badgeClass = status === 'Shortlisted' ? 'active' : status === 'Rejected' ? 'cancelled' : 'pending';
+
+        return `<tr>
+            <td><strong>${escapeHtml(name)}</strong></td>
+            <td><span style="font-weight:600;color:var(--primary);">${escapeHtml(title)}</span></td>
+            <td>
+                <div style="font-size:0.85rem;">${escapeHtml(email)}</div>
+                <div style="font-size:0.8rem;color:var(--text-secondary);">${escapeHtml(phone)}</div>
+            </td>
+            <td>${resumeDisplay}</td>
+            <td>${formatDate(date.split('T')[0])}</td>
+            <td><span class="status-badge ${badgeClass}">${escapeHtml(status)}</span></td>
+            <td>
+                <button class="btn-sm-action link-btn" onclick="updateAppStatus('${app.id}','Shortlisted')"><i class="fas fa-check"></i></button>
+                <button class="btn-sm-action delete" onclick="updateAppStatus('${app.id}','Rejected')"><i class="fas fa-times"></i></button>
+            </td>
+        </tr>`;
     }).join('');
 }
 
