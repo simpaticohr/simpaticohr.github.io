@@ -1,0 +1,512 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Automated DB Analytics | Simpatico HR</title>
+  <meta name="description" content="Automated database analytics with AI insights, anomaly detection, and predictive modeling for enterprise HR">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <style>
+    :root {
+      --db-bg: #06080f;
+      --db-bg-card: rgba(13, 19, 32, 0.9);
+      --db-bg-glass: rgba(20, 30, 55, 0.6);
+      --db-border: rgba(0, 196, 255, 0.1);
+      --db-border-glow: rgba(0, 196, 255, 0.25);
+      --db-text: #e2e8f0;
+      --db-text-muted: #64748b;
+      --db-text-dim: #475569;
+      --db-cyan: #00c4ff;
+      --db-cyan-light: rgba(0, 196, 255, 0.1);
+      --db-purple: #a78bfa;
+      --db-purple-light: rgba(167, 139, 250, 0.1);
+      --db-green: #10b981;
+      --db-green-light: rgba(16, 185, 129, 0.1);
+      --db-amber: #f59e0b;
+      --db-amber-light: rgba(245, 158, 11, 0.1);
+      --db-red: #ef4444;
+      --db-red-light: rgba(239, 68, 68, 0.1);
+      --db-pink: #ec4899;
+      --db-radius: 16px;
+      --db-radius-sm: 10px;
+      --db-font: 'Inter', -apple-system, sans-serif;
+      --db-mono: 'JetBrains Mono', monospace;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: var(--db-font);
+      background: var(--db-bg);
+      color: var(--db-text);
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background: radial-gradient(circle at 20% 30%, rgba(0,196,255,0.04) 0%, transparent 50%),
+                  radial-gradient(circle at 80% 70%, rgba(167,139,250,0.03) 0%, transparent 50%);
+      z-index: 0;
+      pointer-events: none;
+    }
+    @keyframes fadeUp { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: translateY(0); } }
+    @keyframes pulse { 0%, 100% { opacity: 0.6; } 50% { opacity: 1; } }
+    @keyframes scanline {
+      0% { background-position: 0 0; }
+      100% { background-position: 0 100%; }
+    }
+    @keyframes typewriter {
+      from { width: 0; }
+      to { width: 100%; }
+    }
+
+    .db-layout {
+      position: relative;
+      z-index: 1;
+      max-width: 1440px;
+      margin: 0 auto;
+      padding: 24px 28px 60px;
+    }
+
+    /* ── Top Bar ── */
+    .db-topbar {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 16px 0 28px;
+      animation: fadeUp 0.4s ease;
+    }
+    .db-topbar-left { display: flex; align-items: center; gap: 16px; }
+    .db-logo {
+      width: 42px; height: 42px;
+      background: linear-gradient(135deg, #00c4ff 0%, #a78bfa 100%);
+      border-radius: 12px;
+      display: flex; align-items: center; justify-content: center;
+      font-weight: 800; font-size: 18px; color: #fff;
+      box-shadow: 0 4px 16px rgba(0,196,255,0.3);
+    }
+    .db-brand { font-size: 15px; font-weight: 700; letter-spacing: -0.3px; }
+    .db-brand span { color: var(--db-cyan); }
+    .db-topbar-right { display: flex; align-items: center; gap: 12px; }
+    .db-btn {
+      padding: 8px 18px; border-radius: 10px;
+      font-size: 13px; font-weight: 600;
+      cursor: pointer; border: none;
+      transition: all 0.2s ease;
+      display: flex; align-items: center; gap: 8px;
+      font-family: var(--db-font);
+    }
+    .db-btn-primary {
+      background: linear-gradient(135deg, #00c4ff 0%, #0ea5e9 100%);
+      color: #fff;
+      box-shadow: 0 4px 12px rgba(0,196,255,0.25);
+    }
+    .db-btn-primary:hover { transform: translateY(-1px); box-shadow: 0 6px 20px rgba(0,196,255,0.35); }
+    .db-btn-ghost {
+      background: var(--db-bg-glass);
+      border: 1px solid var(--db-border);
+      color: var(--db-text);
+      backdrop-filter: blur(8px);
+    }
+    .db-btn-ghost:hover { border-color: var(--db-border-glow); background: rgba(0,196,255,0.06); }
+    .db-avatar {
+      width: 38px; height: 38px;
+      background: linear-gradient(135deg, #00c4ff, #a78bfa);
+      border-radius: 10px;
+      display: flex; align-items: center; justify-content: center;
+      font-weight: 700; font-size: 13px; color: #fff;
+      cursor: pointer;
+    }
+
+    /* ── AI Insights Banner ── */
+    .db-ai-banner {
+      background: var(--db-bg-card);
+      border: 1px solid var(--db-border);
+      border-radius: var(--db-radius);
+      padding: 28px 32px;
+      margin-bottom: 24px;
+      animation: fadeUp 0.5s ease;
+      position: relative;
+      overflow: hidden;
+    }
+    .db-ai-banner::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 2px;
+      background: linear-gradient(90deg, transparent, var(--db-cyan), var(--db-purple), transparent);
+      animation: scanline 3s linear infinite;
+    }
+    .db-ai-header {
+      display: flex; align-items: center; gap: 14px; margin-bottom: 16px;
+    }
+    .db-ai-icon {
+      width: 44px; height: 44px;
+      background: linear-gradient(135deg, rgba(0,196,255,0.15), rgba(167,139,250,0.15));
+      border: 1px solid rgba(0,196,255,0.2);
+      border-radius: 12px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 20px;
+    }
+    .db-ai-title h2 {
+      font-size: 18px; font-weight: 800; letter-spacing: -0.3px;
+      background: linear-gradient(135deg, #e2e8f0, #00c4ff);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .db-ai-title p { font-size: 12px; color: var(--db-text-muted); }
+    .db-insights-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px; }
+    .db-insight-card {
+      padding: 16px;
+      background: rgba(20, 30, 55, 0.5);
+      border: 1px solid rgba(0,196,255,0.06);
+      border-radius: var(--db-radius-sm);
+      display: flex; gap: 12px;
+      transition: all 0.25s ease;
+      cursor: default;
+    }
+    .db-insight-card:hover {
+      border-color: rgba(0,196,255,0.15);
+      background: rgba(0,196,255,0.03);
+    }
+    .db-insight-icon {
+      width: 36px; height: 36px;
+      border-radius: 8px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 16px;
+      flex-shrink: 0;
+    }
+    .db-insight-text h4 { font-size: 13px; font-weight: 600; margin-bottom: 3px; }
+    .db-insight-text p { font-size: 12px; color: var(--db-text-muted); line-height: 1.5; }
+
+    /* ── Metric Tiles ── */
+    .db-metrics { display: grid; grid-template-columns: repeat(6, 1fr); gap: 14px; margin-bottom: 24px; }
+    .db-metric {
+      background: var(--db-bg-card);
+      border: 1px solid var(--db-border);
+      border-radius: var(--db-radius);
+      padding: 18px 16px;
+      text-align: center;
+      animation: fadeUp 0.6s ease;
+      transition: border-color 0.3s;
+      position: relative;
+      overflow: hidden;
+    }
+    .db-metric:hover { border-color: var(--db-border-glow); }
+    .db-metric::after {
+      content: '';
+      position: absolute;
+      bottom: 0; left: 0; right: 0;
+      height: 3px;
+      border-radius: 0 0 16px 16px;
+    }
+    .db-metric .num {
+      font-size: 28px; font-weight: 800;
+      font-family: var(--db-mono);
+      letter-spacing: -1px;
+    }
+    .db-metric .label {
+      font-size: 11px; color: var(--db-text-muted);
+      font-weight: 600; text-transform: uppercase;
+      letter-spacing: 0.5px; margin-top: 4px;
+    }
+    .db-metric .change {
+      font-size: 11px; font-weight: 600; margin-top: 6px;
+      display: flex; align-items: center; justify-content: center; gap: 4px;
+    }
+    .db-metric .change.up { color: var(--db-green); }
+    .db-metric .change.down { color: var(--db-red); }
+
+    /* ── Grid ── */
+    .db-grid { display: grid; gap: 20px; margin-bottom: 20px; }
+    .db-grid-2 { grid-template-columns: 1fr 1fr; }
+    .db-grid-3 { grid-template-columns: 2fr 1fr 1fr; }
+
+    /* ── Section ── */
+    .db-section {
+      background: var(--db-bg-card);
+      border: 1px solid var(--db-border);
+      border-radius: var(--db-radius);
+      padding: 22px;
+      animation: fadeUp 0.7s ease;
+      transition: border-color 0.3s;
+    }
+    .db-section:hover { border-color: var(--db-border-glow); }
+    .db-section-title {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 18px;
+    }
+    .db-section-title h3 {
+      font-size: 14px; font-weight: 700;
+      display: flex; align-items: center; gap: 10px;
+    }
+    .db-section-icon {
+      width: 30px; height: 30px;
+      border-radius: 8px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 13px;
+    }
+    .db-badge {
+      padding: 3px 10px; border-radius: 20px;
+      font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;
+    }
+    .db-badge-cyan { background: var(--db-cyan-light); color: var(--db-cyan); }
+    .db-badge-purple { background: var(--db-purple-light); color: var(--db-purple); }
+    .db-badge-green { background: var(--db-green-light); color: var(--db-green); }
+    .db-badge-amber { background: var(--db-amber-light); color: var(--db-amber); }
+    .db-badge-red { background: var(--db-red-light); color: var(--db-red); }
+
+    /* ── Chart containers ── */
+    .db-chart-wrap { position: relative; height: 250px; }
+
+    /* ── Data Health ── */
+    .db-health-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+    .db-health-item {
+      padding: 14px;
+      background: rgba(20, 30, 55, 0.4);
+      border: 1px solid rgba(0,196,255,0.06);
+      border-radius: var(--db-radius-sm);
+      display: flex; align-items: center; gap: 12px;
+    }
+    .db-health-icon {
+      width: 34px; height: 34px;
+      border-radius: 8px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 14px;
+    }
+    .db-health-text h4 { font-size: 12px; font-weight: 600; }
+    .db-health-text p { font-size: 11px; color: var(--db-text-muted); }
+    .db-health-status {
+      margin-left: auto;
+      font-size: 11px; font-weight: 700;
+      padding: 3px 10px;
+      border-radius: 20px;
+    }
+
+    /* ── SQL Insight Display ── */
+    .db-sql-block {
+      background: rgba(6, 8, 15, 0.8);
+      border: 1px solid rgba(0,196,255,0.08);
+      border-radius: var(--db-radius-sm);
+      padding: 16px;
+      font-family: var(--db-mono);
+      font-size: 12px;
+      color: var(--db-cyan);
+      line-height: 1.7;
+      overflow-x: auto;
+      position: relative;
+    }
+    .db-sql-block .keyword { color: var(--db-purple); font-weight: 600; }
+    .db-sql-block .table-name { color: var(--db-green); }
+    .db-sql-block .number { color: var(--db-amber); }
+    .db-sql-block .comment { color: var(--db-text-dim); }
+
+    /* ── Anomaly Alert ── */
+    .db-anomaly {
+      display: flex; align-items: center; gap: 14px;
+      padding: 14px 16px;
+      background: rgba(239, 68, 68, 0.04);
+      border: 1px solid rgba(239, 68, 68, 0.12);
+      border-radius: var(--db-radius-sm);
+      margin-bottom: 10px;
+      transition: all 0.2s;
+    }
+    .db-anomaly:hover { background: rgba(239, 68, 68, 0.06); }
+    .db-anomaly-icon {
+      width: 36px; height: 36px;
+      border-radius: 8px;
+      background: var(--db-red-light);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 14px; color: var(--db-red);
+      flex-shrink: 0;
+    }
+    .db-anomaly-text h4 { font-size: 13px; font-weight: 600; color: var(--db-red); }
+    .db-anomaly-text p { font-size: 12px; color: var(--db-text-muted); }
+
+    /* ── Table Breakdown ── */
+    .db-table-stats { width: 100%; border-collapse: collapse; }
+    .db-table-stats th {
+      font-size: 11px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 0.5px; color: var(--db-text-dim);
+      padding: 8px 12px; text-align: left;
+      border-bottom: 1px solid rgba(0,196,255,0.08);
+    }
+    .db-table-stats td {
+      font-size: 13px; padding: 10px 12px;
+      border-bottom: 1px solid rgba(0,196,255,0.04);
+    }
+    .db-table-stats tr:hover td { background: rgba(0,196,255,0.02); }
+    .db-table-bar {
+      height: 6px;
+      border-radius: 3px;
+      background: rgba(0,196,255,0.1);
+      overflow: hidden;
+    }
+    .db-table-bar-fill {
+      height: 100%;
+      border-radius: 3px;
+      background: linear-gradient(90deg, var(--db-cyan), var(--db-purple));
+      transition: width 1s ease;
+    }
+
+    /* ── Toasts ── */
+    #toasts { position: fixed; top: 20px; right: 20px; z-index: 9999; display: flex; flex-direction: column; gap: 8px; }
+
+    /* ── Responsive ── */
+    @media (max-width: 1024px) {
+      .db-metrics { grid-template-columns: repeat(3, 1fr); }
+      .db-grid-2, .db-grid-3 { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 640px) {
+      .db-metrics { grid-template-columns: repeat(2, 1fr); }
+    }
+  </style>
+</head>
+<body>
+<div id="toasts"></div>
+
+<div class="db-layout">
+  <!-- Top Bar -->
+  <div class="db-topbar">
+    <div class="db-topbar-left">
+      <div class="db-logo">⚡</div>
+      <div>
+        <div class="db-brand">Simpatico <span>Analytics</span></div>
+        <div style="font-size:11px;color:var(--db-text-muted)">Automated Database Intelligence</div>
+      </div>
+    </div>
+    <div class="db-topbar-right">
+      <button class="db-btn db-btn-ghost" onclick="location.href='/ats-automation.html'"><i class="fas fa-arrow-left"></i> Dashboard</button>
+      <button class="db-btn db-btn-ghost" onclick="runAnalysis()"><i class="fas fa-play"></i> Run Analysis</button>
+      <button class="db-btn db-btn-primary" onclick="exportAnalytics()"><i class="fas fa-file-export"></i> Export</button>
+      <div class="db-avatar" id="user-avatar">U</div>
+    </div>
+  </div>
+
+  <!-- AI Insights Banner -->
+  <div class="db-ai-banner" id="db-ai-banner">
+    <div class="db-ai-header">
+      <div class="db-ai-icon">🧠</div>
+      <div class="db-ai-title">
+        <h2>AI-Generated Database Insights</h2>
+        <p>Automatically analyzed your HR database • <span id="analysis-time">Just now</span></p>
+      </div>
+      <div style="margin-left:auto;display:flex;gap:8px">
+        <span class="db-badge db-badge-cyan" id="insight-count">Loading…</span>
+        <span class="db-badge db-badge-green"><i class="fas fa-check" style="margin-right:4px"></i>Auto-run</span>
+      </div>
+    </div>
+    <div class="db-insights-grid" id="db-insights"></div>
+  </div>
+
+  <!-- Metric Tiles -->
+  <div class="db-metrics" id="db-metrics"></div>
+
+  <!-- Row 1: Headcount Trend + Table Health -->
+  <div class="db-grid db-grid-2">
+    <!-- Headcount Trend -->
+    <div class="db-section">
+      <div class="db-section-title">
+        <h3>
+          <span class="db-section-icon" style="background:var(--db-cyan-light);color:var(--db-cyan)"><i class="fas fa-chart-area"></i></span>
+          Workforce Trend Analysis
+        </h3>
+        <span class="db-badge db-badge-cyan">12 Months</span>
+      </div>
+      <div class="db-chart-wrap"><canvas id="chart-workforce"></canvas></div>
+    </div>
+
+    <!-- Data Health Monitor -->
+    <div class="db-section">
+      <div class="db-section-title">
+        <h3>
+          <span class="db-section-icon" style="background:var(--db-green-light);color:var(--db-green)"><i class="fas fa-heartbeat"></i></span>
+          Database Health Monitor
+        </h3>
+        <span class="db-badge db-badge-green">Live</span>
+      </div>
+      <div class="db-health-grid" id="db-health"></div>
+    </div>
+  </div>
+
+  <!-- Row 2: Department Breakdown + Payroll Correlation -->
+  <div class="db-grid db-grid-2" style="margin-top:20px">
+    <div class="db-section">
+      <div class="db-section-title">
+        <h3>
+          <span class="db-section-icon" style="background:var(--db-purple-light);color:var(--db-purple)"><i class="fas fa-sitemap"></i></span>
+          Department Distribution
+        </h3>
+      </div>
+      <div class="db-chart-wrap"><canvas id="chart-departments"></canvas></div>
+    </div>
+
+    <div class="db-section">
+      <div class="db-section-title">
+        <h3>
+          <span class="db-section-icon" style="background:var(--db-amber-light);color:var(--db-amber)"><i class="fas fa-dollar-sign"></i></span>
+          Payroll Distribution
+        </h3>
+      </div>
+      <div class="db-chart-wrap"><canvas id="chart-payroll"></canvas></div>
+    </div>
+  </div>
+
+  <!-- Row 3: Anomaly Detection + Auto-SQL -->
+  <div class="db-grid db-grid-2" style="margin-top:20px">
+    <!-- Anomaly Detection -->
+    <div class="db-section">
+      <div class="db-section-title">
+        <h3>
+          <span class="db-section-icon" style="background:var(--db-red-light);color:var(--db-red)"><i class="fas fa-triangle-exclamation"></i></span>
+          Anomaly Detection
+        </h3>
+        <span class="db-badge db-badge-amber" id="anomaly-count">Scanning…</span>
+      </div>
+      <div id="db-anomalies"></div>
+    </div>
+
+    <!-- Auto-Generated SQL -->
+    <div class="db-section">
+      <div class="db-section-title">
+        <h3>
+          <span class="db-section-icon" style="background:var(--db-purple-light);color:var(--db-purple)"><i class="fas fa-code"></i></span>
+          Auto-Generated Queries
+        </h3>
+        <span class="db-badge db-badge-purple">AI</span>
+      </div>
+      <div id="db-sql-insights"></div>
+    </div>
+  </div>
+
+  <!-- Row 4: Table-Level Analytics -->
+  <div class="db-section" style="margin-top:20px">
+    <div class="db-section-title">
+      <h3>
+        <span class="db-section-icon" style="background:var(--db-cyan-light);color:var(--db-cyan)"><i class="fas fa-database"></i></span>
+        Table-Level Analytics
+      </h3>
+      <span class="db-badge db-badge-cyan" id="total-records">0 records</span>
+    </div>
+    <table class="db-table-stats">
+      <thead>
+        <tr>
+          <th>Table</th>
+          <th>Records</th>
+          <th>Completeness</th>
+          <th>Volume</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody id="db-table-tbody"></tbody>
+    </table>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="js/hr-config.js"></script>
+<script src="js/shared-utils.js"></script>
+<script src="js/supabase-client.js"></script>
+<script src="js/db-analytics.js"></script>
+</body>
+</html>

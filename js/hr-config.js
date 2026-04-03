@@ -17,24 +17,33 @@ window.SIMPATICO_CONFIG = {
   tenantId: 'SIMP_PRO_MAIN', // Change this when you onboard new clients
   appVersion: '5.0.0-Industrial',
   
-  // Helper to generate Trace IDs for debugging
-  generateTraceId: () => `TRC-${Math.random().toString(36).substr(2, 9).toUpperCase()}`
+  // Helper to generate Trace IDs for debugging (crypto-safe)
+  generateTraceId: () => {
+    const arr = new Uint8Array(6);
+    crypto.getRandomValues(arr);
+    return 'TRC-' + Array.from(arr, b => b.toString(16).padStart(2, '0')).join('').toUpperCase();
+  }
 };
 
-window.generateSecureToken = function() {
+// Secure token generation (crypto.getRandomValues — NOT Math.random)
+// shared-utils.js provides the canonical version; this is a fallback.
+if (!window.generateSecureToken) {
+  window.generateSecureToken = function(length) {
+    length = length || 32;
+    const array = new Uint8Array(length);
+    crypto.getRandomValues(array);
     const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
     let token = '';
-    for (let i = 0; i < 32; i++) {
-        token += chars.charAt(Math.floor(Math.random() * chars.length));
-    }
+    for (let i = 0; i < length; i++) token += chars[array[i] % chars.length];
     return token;
-};
+  };
+}
 
-window.generateInterviewToken = function() {
-    return window.generateSecureToken();
-};
+if (!window.generateInterviewToken) {
+  window.generateInterviewToken = function() { return window.generateSecureToken(); };
+}
 
 window.getInterviewLink = function(token) {
-    const baseUrl = window.location.origin + '/interview/proctored-room.html';
-    return baseUrl + '?token=' + (token || window.generateSecureToken());
+  const baseUrl = window.location.origin + '/interview/proctored-room.html';
+  return baseUrl + '?token=' + (token || window.generateSecureToken());
 };

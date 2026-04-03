@@ -35,6 +35,34 @@ const HTTP = Object.freeze({
   TOO_MANY: 429, SERVER_ERROR: 500, UNAVAILABLE: 503
 });
 
+const ALLOWED_ORIGINS = [
+  'https://simpaticohr.in',
+  'https://www.simpaticohr.in',
+  'https://simpaticohrconsultancy.com',
+  'https://www.simpaticohrconsultancy.com',
+  'http://localhost:3000',
+  'http://localhost:5500',
+  'http://127.0.0.1:5500',
+];
+
+function getCorsHeaders(request) {
+  const origin = request?.headers?.get?.('Origin') || '*';
+  const allowed = ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0];
+  return {
+    'Access-Control-Allow-Origin':  allowed,
+    'Access-Control-Allow-Methods': 'GET,POST,PUT,PATCH,DELETE,OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type,Authorization,X-Tenant-ID,X-Idempotency-Key,X-Request-ID,X-App-Version,apikey',
+    'Access-Control-Expose-Headers':'X-Request-ID,X-RateLimit-Remaining,X-Cursor',
+    'Access-Control-Max-Age':       '86400',
+    'Vary':                         'Origin',
+    'X-Content-Type-Options':       'nosniff',
+    'X-Frame-Options':              'DENY',
+    'Strict-Transport-Security':    'max-age=63072000; includeSubDomains; preload',
+    'X-API-Version':                VERSION,
+  };
+}
+
+// Legacy constant for code that references CORS_HEADERS directly
 const CORS_HEADERS = Object.freeze({
   'Access-Control-Allow-Origin':  '*',
   'Access-Control-Allow-Methods': 'GET,POST,PUT,PATCH,DELETE,OPTIONS',
@@ -531,7 +559,7 @@ export default {
     const path   = url.pathname;
 
     // Preflight
-    if (method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS_HEADERS });
+    if (method === 'OPTIONS') return new Response(null, { status: 204, headers: getCorsHeaders(request) });
 
     // Reject oversized bodies early
     const contentLength = parseInt(request.headers.get('Content-Length') || '0');
@@ -1714,7 +1742,14 @@ async function handleAttritionReport(request, env, ctx) {
 async function sbFetch(env, method, path, body, countOnly = false, tenantId = 'default') {
   if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_KEY) throw new ServiceUnavailableError('Database');
 
-  const url = `${env.SUPABASE_URL}${path}`;
+  // ── TENANT ISOLATION: Inject tenant filter on ALL read queries ──
+  let finalPath = path;
+  if (method === 'GET' && tenantId && tenantId !== 'default') {
+    const separator = finalPath.includes('?') ? '&' : '?';
+    finalPath += `${separator}tenant_id=eq.${tenantId}`;
+  }
+
+  const url = `${env.SUPABASE_URL}${finalPath}`;
   const headers = {
     'apikey':        env.SUPABASE_SERVICE_KEY,
     'Authorization': `Bearer ${env.SUPABASE_SERVICE_KEY}`,

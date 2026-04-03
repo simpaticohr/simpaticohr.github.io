@@ -315,21 +315,29 @@ window.exportReport = async function() {
 function destroyChart(id) {
   if (charts[id]) { charts[id].destroy(); delete charts[id]; }
 }
-function authHeaders() {
-  let token = localStorage.getItem('simpatico_token') || localStorage.getItem('sb-token') || '';
-  if (!token) {
-    for (let i = 0; i < localStorage.length; i++) {
+// ── Utility functions: defer to shared-utils.js if loaded ──
+if (typeof window.authHeaders === 'undefined') {
+  window.authHeaders = function() {
+    let token = localStorage.getItem('simpatico_token') || localStorage.getItem('sb-token') || '';
+    if (!token) {
+      for (let i = 0; i < localStorage.length; i++) {
         const k = localStorage.key(i);
         if (k && k.startsWith('sb-') && k.endsWith('-auth-token')) {
-            try { token = JSON.parse(localStorage.getItem(k)).access_token; } catch(e){}
+          try { token = JSON.parse(localStorage.getItem(k)).access_token; } catch(e){}
         }
+      }
     }
-  }
-  return token ? { 'Authorization': 'Bearer ' + token } : {};
+    return token ? { 'Authorization': 'Bearer ' + token } : {};
+  };
 }
-function setText(id, v) { const el=document.getElementById(id); if(el) el.textContent=v; }
-window.showToast = (msg, type='info') => {
-  const c=document.getElementById('toasts'); if(!c) return;
-  const t=document.createElement('div'); t.className=`hr-toast ${type}`; t.textContent=msg;
-  c.appendChild(t); setTimeout(()=>t.remove(),3800);
-};
+if (typeof window.setText === 'undefined') {
+  window.setText = function(id, v) { const el=document.getElementById(id); if(el) el.textContent=v; };
+}
+if (typeof window.showToast === 'undefined') {
+  window.showToast = (msg, type='info') => {
+    const c=document.getElementById('toasts'); if(!c) return;
+    const t=document.createElement('div'); t.className=`hr-toast ${type}`; t.textContent=msg;
+    c.appendChild(t); setTimeout(()=>t.remove(),3800);
+  };
+}
+

@@ -242,8 +242,15 @@ window.generateAIFeedback = async function(reviewId) {
     });
     const { feedback } = await res.json();
     if (feedback) {
-      // Open a simple display
-      alert(`AI Feedback Suggestions:\n\n${feedback}`);
+      // Display AI suggestions in a toast or dedicated element
+      const el = document.getElementById('ai-feedback-content');
+      if (el) {
+        el.textContent = feedback;
+        openModal('ai-feedback-modal');
+      } else {
+        showToast('AI Feedback ready — check the review form', 'success');
+        console.log('[AI Feedback]', feedback);
+      }
     }
   } catch { showToast('AI feedback unavailable', 'error'); }
 };
@@ -277,28 +284,41 @@ window.switchPerfTab = function(btn, tabId) {
   if (tabId === 'tab-nine-box') renderNineBox();
 };
 
-function authHeaders() {
-  let token = localStorage.getItem('simpatico_token') || localStorage.getItem('sb-token') || '';
-  if (!token) {
-    for (let i = 0; i < localStorage.length; i++) {
+// ── Utility functions: defer to shared-utils.js if loaded ──
+if (typeof window.authHeaders === 'undefined') {
+  window.authHeaders = function() {
+    let token = localStorage.getItem('simpatico_token') || localStorage.getItem('sb-token') || '';
+    if (!token) {
+      for (let i = 0; i < localStorage.length; i++) {
         const k = localStorage.key(i);
         if (k && k.startsWith('sb-') && k.endsWith('-auth-token')) {
-            try { token = JSON.parse(localStorage.getItem(k)).access_token; } catch(e){}
+          try { token = JSON.parse(localStorage.getItem(k)).access_token; } catch(e){}
         }
+      }
     }
-  }
-  return token ? { 'Authorization': 'Bearer ' + token } : {};
+    return token ? { 'Authorization': 'Bearer ' + token } : {};
+  };
 }
-function avatarColor(id) {
-  const c = ['#0ea5e9','#8b5cf6','#10b981','#f59e0b','#ef4444','#06b6d4'];
-  let h=0; for(const ch of (id||'')) h=(h*31+ch.charCodeAt(0))&0xffffffff;
-  return c[Math.abs(h)%c.length];
+if (typeof window.avatarColor === 'undefined') {
+  window.avatarColor = function(id) {
+    const c = ['#0ea5e9','#8b5cf6','#10b981','#f59e0b','#ef4444','#06b6d4'];
+    let h=0; for(const ch of (id||'')) h=(h*31+ch.charCodeAt(0))&0xffffffff;
+    return c[Math.abs(h)%c.length];
+  };
 }
-function setText(id, v) { const el = document.getElementById(id); if (el) el.textContent = v; }
-window.openModal  = id => document.getElementById(id)?.classList.add('open');
-window.closeModal = id => document.getElementById(id)?.classList.remove('open');
-window.showToast  = (msg, type='info') => {
-  const c = document.getElementById('toasts'); if (!c) return;
-  const t = document.createElement('div'); t.className = `hr-toast ${type}`; t.textContent = msg;
-  c.appendChild(t); setTimeout(() => t.remove(), 3800);
-};
+if (typeof window.setText === 'undefined') {
+  window.setText = function(id, v) { const el = document.getElementById(id); if (el) el.textContent = v; };
+}
+if (typeof window.openModal === 'undefined') {
+  window.openModal  = id => { const el = document.getElementById(id); if(el) { el.classList.add('open'); el.classList.add('active'); } };
+}
+if (typeof window.closeModal === 'undefined') {
+  window.closeModal = id => { const el = document.getElementById(id); if(el) { el.classList.remove('open'); el.classList.remove('active'); } };
+}
+if (typeof window.showToast === 'undefined') {
+  window.showToast  = (msg, type='info') => {
+    const c = document.getElementById('toasts'); if (!c) return;
+    const t = document.createElement('div'); t.className = `hr-toast ${type}`; t.textContent = msg;
+    c.appendChild(t); setTimeout(() => t.remove(), 3800);
+  };
+}

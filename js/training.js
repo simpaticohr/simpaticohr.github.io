@@ -335,7 +335,22 @@ window.openCourse = function(id) {
   location.href = `course-viewer.html?id=${id}`;
 };
 window.editCourse = function(id) {
-  showToast('Edit course — coming soon', 'info');
+  // Pre-fill the course modal with existing data for editing
+  const course = allCourses.find(c => c.id === id);
+  if (!course) { showToast('Course not found', 'error'); return; }
+  const titleEl = document.getElementById('course-title');
+  const descEl  = document.getElementById('course-desc');
+  const catEl   = document.getElementById('course-category');
+  const durEl   = document.getElementById('course-duration');
+  const urlEl   = document.getElementById('course-url');
+  const reqEl   = document.getElementById('course-required');
+  if (titleEl) titleEl.value = course.title || '';
+  if (descEl)  descEl.value  = course.description || '';
+  if (catEl)   catEl.value   = course.category || '';
+  if (durEl)   durEl.value   = course.duration_hours || '';
+  if (urlEl)   urlEl.value   = course.content_url || '';
+  if (reqEl)   reqEl.checked = course.is_required || false;
+  openModal('create-course-modal');
 };
 
 // ── Tab switching ──
@@ -349,24 +364,38 @@ window.switchTab = function(btn, tabId) {
   currentTabId = tabId;
 };
 
-function authHeaders() {
-  let token = localStorage.getItem('simpatico_token') || localStorage.getItem('sb-token') || '';
-  if (!token) {
-    for (let i = 0; i < localStorage.length; i++) {
+// ── Utility functions: use shared-utils.js if loaded, else define locally ──
+if (typeof window.authHeaders === 'undefined') {
+  window.authHeaders = function() {
+    let token = localStorage.getItem('simpatico_token') || localStorage.getItem('sb-token') || '';
+    if (!token) {
+      for (let i = 0; i < localStorage.length; i++) {
         const k = localStorage.key(i);
         if (k && k.startsWith('sb-') && k.endsWith('-auth-token')) {
-            try { token = JSON.parse(localStorage.getItem(k)).access_token; } catch(e){}
+          try { token = JSON.parse(localStorage.getItem(k)).access_token; } catch(e){}
         }
+      }
     }
-  }
-  return token ? { 'Authorization': 'Bearer ' + token } : {};
+    return token ? { 'Authorization': 'Bearer ' + token } : {};
+  };
 }
-function formatEnum(s) { return (s||'').replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase()); }
-function setText(id, v) { const el = document.getElementById(id); if (el) el.textContent = v; }
-window.openModal  = id => document.getElementById(id)?.classList.add('open');
-window.closeModal = id => document.getElementById(id)?.classList.remove('open');
-window.showToast = (msg, type='info') => {
-  const c = document.getElementById('toasts'); if (!c) return;
-  const t = document.createElement('div'); t.className = `hr-toast ${type}`; t.textContent = msg;
-  c.appendChild(t); setTimeout(() => t.remove(), 3800);
-};
+if (typeof window.formatEnum === 'undefined') {
+  window.formatEnum = function(s) { return (s||'').replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase()); };
+}
+if (typeof window.setText === 'undefined') {
+  window.setText = function(id, v) { const el = document.getElementById(id); if (el) el.textContent = v; };
+}
+if (typeof window.openModal === 'undefined') {
+  window.openModal  = id => { const el = document.getElementById(id); if(el) { el.classList.add('open'); el.classList.add('active'); } };
+}
+if (typeof window.closeModal === 'undefined') {
+  window.closeModal = id => { const el = document.getElementById(id); if(el) { el.classList.remove('open'); el.classList.remove('active'); } };
+}
+if (typeof window.showToast === 'undefined') {
+  window.showToast = (msg, type='info') => {
+    const c = document.getElementById('toasts'); if (!c) return;
+    const t = document.createElement('div'); t.className = `hr-toast ${type}`; t.textContent = msg;
+    c.appendChild(t); setTimeout(() => t.remove(), 3800);
+  };
+}
+

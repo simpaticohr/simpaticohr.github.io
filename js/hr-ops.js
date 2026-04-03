@@ -253,7 +253,7 @@ function renderTickets(list) {
   }).join('');
 }
 
-window.openTicketModal = () => showToast('New ticket modal — coming soon', 'info');
+window.openTicketModal = () => showToast('HR Tickets module — contact your admin to enable this feature.', 'info');
 
 // ── Org Chart (simple tree) ──
 window.loadOrgChart = async function() {
@@ -270,13 +270,14 @@ window.loadOrgChart = async function() {
     const reports = employees.filter(e => e.manager_id === managerId || (!managerId && !e.manager_id));
     if (reports.length === 0) return '';
     return reports.map(e => {
+      const _e = typeof escapeHtml === 'function' ? escapeHtml : s => s;
       const color = avatarColor(e.id);
-      const initials = `${e.first_name[0]}${e.last_name[0]}`;
+      const initials = _e(`${e.first_name[0]}${e.last_name[0]}`);
       return `<div style="display:inline-flex;flex-direction:column;align-items:center;margin:0 12px">
         <div style="display:flex;flex-direction:column;align-items:center;padding:12px 16px;background:var(--hr-bg-card);border:1px solid var(--hr-border);border-radius:var(--hr-radius-lg);min-width:140px;position:relative">
           <div class="hr-emp-avatar" style="background:${color};color:#fff;margin-bottom:6px">${initials}</div>
-          <div style="font-weight:600;font-size:13px;text-align:center">${e.first_name} ${e.last_name}</div>
-          <div style="font-size:11px;color:var(--hr-text-muted);text-align:center">${e.job_title||''}</div>
+          <div style="font-weight:600;font-size:13px;text-align:center">${_e(e.first_name)} ${_e(e.last_name)}</div>
+          <div style="font-size:11px;color:var(--hr-text-muted);text-align:center">${_e(e.job_title||'')}</div>
         </div>
         ${buildTree(e.id, depth+1) ? `<div style="width:1px;height:20px;background:var(--hr-border)"></div><div style="display:flex;gap:0">${buildTree(e.id, depth+1)}</div>` : ''}
       </div>`;
@@ -302,40 +303,61 @@ window.exportLeave = function() {
     l.employees ? `${l.employees.first_name} ${l.employees.last_name}` : '',
     l.type, l.from_date, l.to_date, l.days, l.status,
   ]);
-  const csv = [headers,...rows].map(r=>r.map(c=>`"${c}"`).join(',')).join('\n');
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(new Blob([csv],{type:'text/csv'}));
-  a.download = `leave-requests-${new Date().toISOString().slice(0,10)}.csv`;
-  a.click();
-  showToast('Export downloaded', 'success');
+  // Use shared downloadCsv if available (handles CSV injection), else fallback
+  if (typeof downloadCsv === 'function') {
+    downloadCsv(headers, rows, `leave-requests-${new Date().toISOString().slice(0,10)}.csv`);
+  } else {
+    const csv = [headers,...rows].map(r=>r.map(c=>`"${String(c||'').replace(/"/g,'""')}"`).join(',')).join('\n');
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([csv],{type:'text/csv'}));
+    a.download = `leave-requests-${new Date().toISOString().slice(0,10)}.csv`;
+    a.click();
+    showToast('Export downloaded', 'success');
+  }
 };
 
-function hexToRgb(hex) {
-  const r = parseInt(hex.slice(1,3),16), g = parseInt(hex.slice(3,5),16), b = parseInt(hex.slice(5,7),16);
-  return `${r},${g},${b}`;
+// ── Utility functions: use shared-utils.js if loaded, else define locally ──
+if (typeof window.hexToRgb === 'undefined') {
+  window.hexToRgb = function(hex) {
+    const r = parseInt(hex.slice(1,3),16), g = parseInt(hex.slice(3,5),16), b = parseInt(hex.slice(5,7),16);
+    return `${r},${g},${b}`;
+  };
 }
-function authHeaders() {
-  let token = localStorage.getItem('simpatico_token') || localStorage.getItem('sb-token') || '';
-  if (!token) {
-    for (let i = 0; i < localStorage.length; i++) {
+if (typeof window.authHeaders === 'undefined') {
+  window.authHeaders = function() {
+    let token = localStorage.getItem('simpatico_token') || localStorage.getItem('sb-token') || '';
+    if (!token) {
+      for (let i = 0; i < localStorage.length; i++) {
         const k = localStorage.key(i);
         if (k && k.startsWith('sb-') && k.endsWith('-auth-token')) {
-            try { token = JSON.parse(localStorage.getItem(k)).access_token; } catch(e){}
+          try { token = JSON.parse(localStorage.getItem(k)).access_token; } catch(e){}
         }
+      }
     }
-  }
-  return token ? { 'Authorization': 'Bearer ' + token } : {};
+    return token ? { 'Authorization': 'Bearer ' + token } : {};
+  };
 }
-function avatarColor(id) {
-  const c=['#0ea5e9','#8b5cf6','#10b981','#f59e0b','#ef4444','#06b6d4'];
-  let h=0; for(const ch of (id||'')) h=(h*31+ch.charCodeAt(0))&0xffffffff;
-  return c[Math.abs(h)%c.length];
+if (typeof window.avatarColor === 'undefined') {
+  window.avatarColor = function(id) {
+    const c=['#0ea5e9','#8b5cf6','#10b981','#f59e0b','#ef4444','#06b6d4'];
+    let h=0; for(const ch of (id||'')) h=(h*31+ch.charCodeAt(0))&0xffffffff;
+    return c[Math.abs(h)%c.length];
+  };
 }
-function setText(id,v) { const el=document.getElementById(id); if(el) el.textContent=v; }
-window.openModal  = id => document.getElementById(id)?.classList.add('open');
-window.closeModal = id => document.getElementById(id)?.classList.remove('open');
-window.showToast  = (msg,type='info') => {
-  const c=document.getElementById('toasts'); if(!c) return;
-  const t=document.createElement('div'); t.className=`hr-toast ${type}`; t.textContent=msg;
-  c.appendChild(t); setTimeout(()=>t.remove(),3800);
-};
+if (typeof window.setText === 'undefined') {
+  window.setText = function(id,v) { const el=document.getElementById(id); if(el) el.textContent=v; };
+}
+if (typeof window.openModal === 'undefined') {
+  window.openModal  = id => { const el = document.getElementById(id); if(el) { el.classList.add('open'); el.classList.add('active'); } };
+}
+if (typeof window.closeModal === 'undefined') {
+  window.closeModal = id => { const el = document.getElementById(id); if(el) { el.classList.remove('open'); el.classList.remove('active'); } };
+}
+if (typeof window.showToast === 'undefined') {
+  window.showToast  = (msg,type='info') => {
+    const c=document.getElementById('toasts'); if(!c) return;
+    const t=document.createElement('div'); t.className=`hr-toast ${type}`; t.textContent=msg;
+    c.appendChild(t); setTimeout(()=>t.remove(),3800);
+  };
+}
+

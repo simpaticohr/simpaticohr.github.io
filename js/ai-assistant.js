@@ -36,15 +36,18 @@ async function loadUser() {
   }
 }
 
-// ── Auth headers (Supabase v2 compatible) ──
+// ── Auth headers: defer to shared-utils if loaded ──
 function authHeaders() {
+  if (typeof window.authHeaders === 'function' && window.authHeaders !== authHeaders) {
+    return window.authHeaders();
+  }
   let token = localStorage.getItem('simpatico_token') || localStorage.getItem('sb-token') || '';
   if (!token) {
     for (let i = 0; i < localStorage.length; i++) {
-        const k = localStorage.key(i);
-        if (k && k.startsWith('sb-') && k.endsWith('-auth-token')) {
-            try { token = JSON.parse(localStorage.getItem(k)).access_token; } catch(e){}
-        }
+      const k = localStorage.key(i);
+      if (k && k.startsWith('sb-') && k.endsWith('-auth-token')) {
+        try { token = JSON.parse(localStorage.getItem(k)).access_token; } catch(e){}
+      }
     }
   }
   return token ? { 'Authorization': 'Bearer ' + token } : {};
@@ -369,61 +372,20 @@ window.exportChat = function() {
 };
 
 function escHtml(s) {
+  if (typeof escapeHtml === 'function') return escapeHtml(s).replace(/\n/g,'<br>');
   return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>');
 }
 
-window.showToast = (msg, type='info') => {
-  const c = document.getElementById('toasts'); if (!c) return;
-  const t = document.createElement('div'); t.className=`hr-toast ${type}`; t.textContent=msg;
-  c.appendChild(t); setTimeout(()=>t.remove(),3800);
-};
-// Global fixes for token generation and AI
-(function() {
-    'use strict';
-    
-    // Ensure functions are globally available
-    if (typeof window.generateSecureToken !== 'function') {
-        window.generateSecureToken = function() {
-            const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-            let token = '';
-            for (let i = 0; i < 32; i++) {
-                token += chars.charAt(Math.floor(Math.random() * chars.length));
-            }
-            return token;
-        };
-    }
-    
-    if (typeof window.aiSendMessage !== 'function') {
-        window.aiSendMessage = async function(message) {
-            console.log('AI Message received:', message);
-            return "AI Assistant: I understand your question about '" + 
-                   (message.substring(0, 50) || "general HR") + 
-                   "'. For detailed assistance, please contact HR.";
-        };
-    }
-    
-    if (typeof window.getInterviewLinkFixed !== 'function') {
-        window.getInterviewLinkFixed = function(token) {
-            const baseUrl = window.SIMPATICO_CONFIG?.interviewBaseUrl || 
-                           'https://simpatico-hr-ats.simpaticohrconsultancy.workers.dev/join';
-            return baseUrl + '/' + (token || generateSecureToken());
-        };
-    }
-    
-    // Also fix the original function if it's broken
-    if (typeof window.generateInterviewToken === 'function') {
-        const originalFunc = window.generateInterviewToken;
-        window.generateInterviewToken = function() {
-            try {
-                return originalFunc();
-            } catch (e) {
-                console.warn('Original token function failed, using fallback');
-                return window.generateSecureToken();
-            }
-        };
-    } else {
-        window.generateInterviewToken = window.generateSecureToken;
-    }
-    
-    console.log('Global AI and token functions initialized');
-})();
+if (typeof window.showToast === 'undefined') {
+  window.showToast = (msg, type='info') => {
+    const c = document.getElementById('toasts'); if (!c) return;
+    const t = document.createElement('div'); t.className=`hr-toast ${type}`; t.textContent=msg;
+    c.appendChild(t); setTimeout(()=>t.remove(),3800);
+  };
+}
+
+// setText fallback
+if (typeof window.setText === 'undefined') {
+  window.setText = function(id, v) { const el = document.getElementById(id); if (el) el.textContent = v; };
+}
+

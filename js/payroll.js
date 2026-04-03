@@ -351,33 +351,52 @@ window.switchPayrollTab = function(btn, tabId) {
   });
 };
 
-function formatCurrency(amount, currency='USD') {
-  if (!amount && amount !== 0) return '—';
-  return new Intl.NumberFormat('en-US', { style:'currency', currency, maximumFractionDigits:0 }).format(amount);
+// ── Utility functions: defer to shared-utils.js if loaded ──
+if (typeof window.formatCurrency === 'undefined') {
+  window.formatCurrency = function(amount, currency) {
+    currency = currency || 'USD';
+    if (!amount && amount !== 0) return '—';
+    return new Intl.NumberFormat('en-US', { style:'currency', currency, maximumFractionDigits:0 }).format(amount);
+  };
 }
-function formatEnum(s) { return (s||'').replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase()); }
-function avatarColor(id) {
-  const c=['#0ea5e9','#8b5cf6','#10b981','#f59e0b','#ef4444','#06b6d4'];
-  let h=0; for(const ch of (id||'')) h=(h*31+ch.charCodeAt(0))&0xffffffff;
-  return c[Math.abs(h)%c.length];
+if (typeof window.formatEnum === 'undefined') {
+  window.formatEnum = function(s) { return (s||'').replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase()); };
 }
-function authHeaders() {
-  let token = localStorage.getItem('simpatico_token') || localStorage.getItem('sb-token') || '';
-  if (!token) {
-    for (let i = 0; i < localStorage.length; i++) {
+if (typeof window.avatarColor === 'undefined') {
+  window.avatarColor = function(id) {
+    const c=['#0ea5e9','#8b5cf6','#10b981','#f59e0b','#ef4444','#06b6d4'];
+    let h=0; for(const ch of (id||'')) h=(h*31+ch.charCodeAt(0))&0xffffffff;
+    return c[Math.abs(h)%c.length];
+  };
+}
+if (typeof window.authHeaders === 'undefined') {
+  window.authHeaders = function() {
+    let token = localStorage.getItem('simpatico_token') || localStorage.getItem('sb-token') || '';
+    if (!token) {
+      for (let i = 0; i < localStorage.length; i++) {
         const k = localStorage.key(i);
         if (k && k.startsWith('sb-') && k.endsWith('-auth-token')) {
-            try { token = JSON.parse(localStorage.getItem(k)).access_token; } catch(e){}
+          try { token = JSON.parse(localStorage.getItem(k)).access_token; } catch(e){}
         }
+      }
     }
-  }
-  return token ? { 'Authorization': 'Bearer ' + token } : {};
+    return token ? { 'Authorization': 'Bearer ' + token } : {};
+  };
 }
-function setText(id, v) { const el=document.getElementById(id); if(el) el.textContent=v; }
-window.openModal  = id => document.getElementById(id)?.classList.add('open');
-window.closeModal = id => document.getElementById(id)?.classList.remove('open');
-window.showToast  = (msg, type='info') => {
-  const c=document.getElementById('toasts'); if(!c) return;
-  const t=document.createElement('div'); t.className=`hr-toast ${type}`; t.textContent=msg;
-  c.appendChild(t); setTimeout(()=>t.remove(),3800);
-};
+if (typeof window.setText === 'undefined') {
+  window.setText = function(id, v) { const el=document.getElementById(id); if(el) el.textContent=v; };
+}
+if (typeof window.openModal === 'undefined') {
+  window.openModal  = id => { const el = document.getElementById(id); if(el) { el.classList.add('open'); el.classList.add('active'); } };
+}
+if (typeof window.closeModal === 'undefined') {
+  window.closeModal = id => { const el = document.getElementById(id); if(el) { el.classList.remove('open'); el.classList.remove('active'); } };
+}
+if (typeof window.showToast === 'undefined') {
+  window.showToast  = (msg, type='info') => {
+    const c=document.getElementById('toasts'); if(!c) return;
+    const t=document.createElement('div'); t.className=`hr-toast ${type}`; t.textContent=msg;
+    c.appendChild(t); setTimeout(()=>t.remove(),3800);
+  };
+}
+

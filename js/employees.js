@@ -497,7 +497,17 @@ window.openAiInsight = async function(empId) {
       body: JSON.stringify({ employee_id: empId }),
     });
     const { insight } = await res.json();
-    alert(insight || 'No insight available.');
+    if (insight) {
+      const insightEl = document.getElementById('ai-insight-content');
+      if (insightEl) {
+        insightEl.textContent = insight;
+        openModal('ai-insight-modal');
+      } else {
+        showToast(insight.length > 100 ? insight.slice(0, 100) + '…' : insight, 'info');
+      }
+    } else {
+      showToast('No insight available', 'info');
+    }
   } catch {
     showToast('AI insight unavailable', 'error');
   }
@@ -567,18 +577,22 @@ window.downloadDoc = async function(key) {
 window.exportEmployees = function() {
   const headers = ['First Name','Last Name','Email','Department','Title','Location','Status','Start Date'];
   const rows = allEmployees.map(e => [
-    e.first_name, e.last_name, e.email,
-    e.departments?.name || '',
-    e.job_title || '', e.location || '', e.status,
-    e.start_date || ''
-  ]);
-  const csv = [headers, ...rows].map(r => r.map(c => `"${c}"`).join(',')).join('\n');
-  const blob = new Blob([csv], { type: 'text/csv' });
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = `employees-${new Date().toISOString().slice(0,10)}.csv`;
-  a.click();
-  showToast('Export downloaded', 'success');
+     e.first_name, e.last_name, e.email,
+     e.departments?.name || '',
+     e.job_title || '', e.location || '', e.status,
+     e.start_date || ''
+   ]);
+   if (typeof downloadCsv === 'function') {
+     downloadCsv(headers, rows, `employees-${new Date().toISOString().slice(0,10)}.csv`);
+   } else {
+     const csv = [headers, ...rows].map(r => r.map(c => `"${String(c||'').replace(/"/g,'""')}"`).join(',')).join('\n');
+     const blob = new Blob([csv], { type: 'text/csv' });
+     const a = document.createElement('a');
+     a.href = URL.createObjectURL(blob);
+     a.download = `employees-${new Date().toISOString().slice(0,10)}.csv`;
+     a.click();
+     showToast('Export downloaded', 'success');
+   }
 };
 
 // ── Populate manager select ──
@@ -592,33 +606,40 @@ function populateManagerSelect() {
   });
 }
 
-// ── Helpers ──
-function authHeaders() {
-  let token = localStorage.getItem('simpatico_token') || localStorage.getItem('sb-token') || '';
-  if (!token) {
-    for (let i = 0; i < localStorage.length; i++) {
+// ── Helpers: conditional fallbacks (shared-utils.js is canonical) ──
+if (typeof window.authHeaders === 'undefined') {
+  window.authHeaders = function() {
+    let token = localStorage.getItem('simpatico_token') || localStorage.getItem('sb-token') || '';
+    if (!token) {
+      for (let i = 0; i < localStorage.length; i++) {
         const k = localStorage.key(i);
         if (k && k.startsWith('sb-') && k.endsWith('-auth-token')) {
-            try { token = JSON.parse(localStorage.getItem(k)).access_token; } catch(e){}
+          try { token = JSON.parse(localStorage.getItem(k)).access_token; } catch(e){}
         }
+      }
     }
-  }
-  const headers = { 
-    'Content-Type': 'application/json',
-    'apikey': EMP_CONFIG.supabaseKey 
+    const headers = { 'Content-Type': 'application/json' };
+    if (EMP_CONFIG.supabaseKey) headers['apikey'] = EMP_CONFIG.supabaseKey;
+    if (token) headers['Authorization'] = 'Bearer ' + token;
+    return headers;
   };
-  if (token) headers['Authorization'] = 'Bearer ' + token;
-  return headers;
 }
-function statusBadge(s) {
-  const map = { active:'hr-badge-active', on_leave:'hr-badge-pending', terminated:'hr-badge-inactive' };
-  return `<span class="hr-badge ${map[s]||'hr-badge-inactive'}">${s?.replace('_',' ')}</span>`;
+if (typeof window.statusBadge === 'undefined') {
+  window.statusBadge = function(s) {
+    const _e = typeof escapeHtml === 'function' ? escapeHtml : x => x;
+    const map = { active:'hr-badge-active', on_leave:'hr-badge-pending', terminated:'hr-badge-inactive' };
+    return `<span class="hr-badge ${map[s]||'hr-badge-inactive'}">${_e(s?.replace('_',' ') || '')}</span>`;
+  };
 }
-function formatEnum(s) { return (s||'').replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase()); }
-function avatarColor(id) {
-  const colors = ['#0ea5e9','#8b5cf6','#10b981','#f59e0b','#ef4444','#06b6d4','#f97316','#ec4899'];
-  let h = 0; for (const c of (id||'')) h = (h*31 + c.charCodeAt(0)) & 0xffffffff;
-  return colors[Math.abs(h) % colors.length];
+if (typeof window.formatEnum === 'undefined') {
+  window.formatEnum = function(s) { return (s||'').replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase()); };
+}
+if (typeof window.avatarColor === 'undefined') {
+  window.avatarColor = function(id) {
+    const colors = ['#0ea5e9','#8b5cf6','#10b981','#f59e0b','#ef4444','#06b6d4','#f97316','#ec4899'];
+    let h = 0; for (const c of (id||'')) h = (h*31 + c.charCodeAt(0)) & 0xffffffff;
+    return colors[Math.abs(h) % colors.length];
+  };
 }
 function showTableLoading(v) {
   const l = document.getElementById('table-loading');
@@ -626,28 +647,32 @@ function showTableLoading(v) {
   if (l) l.style.display = v ? 'block' : 'none';
   if (t && v) t.style.display = 'none';
 }
-function setText(id, val) { const el = document.getElementById(id); if (el) el.textContent = val; }
-
-window.openModal  = function(id) { document.getElementById(id)?.classList.add('open'); };
-window.closeModal = function(id) { document.getElementById(id)?.classList.remove('open'); };
+if (typeof window.setText === 'undefined') {
+  window.setText = function(id, val) { const el = document.getElementById(id); if (el) el.textContent = val; };
+}
+if (typeof window.openModal === 'undefined') {
+  window.openModal = function(id) { const el = document.getElementById(id); if(el) { el.classList.add('open'); el.classList.add('active'); } };
+}
+if (typeof window.closeModal === 'undefined') {
+  window.closeModal = function(id) { const el = document.getElementById(id); if(el) { el.classList.remove('open'); el.classList.remove('active'); } };
+}
 document.querySelectorAll('.hr-modal-overlay').forEach(m =>
-  m.addEventListener('click', e => { if (e.target === m) m.classList.remove('open'); })
+  m.addEventListener('click', e => { if (e.target === m) { m.classList.remove('open'); m.classList.remove('active'); } })
 );
-
-window.showToast = function(msg, type='info') {
-  const c = document.getElementById('toasts'); if (!c) return;
-  
-  // Fix [object Object] bug: Extract message if msg is an object
-  let message = msg;
-  if (typeof msg === 'object' && msg !== null) {
+if (typeof window.showToast === 'undefined') {
+  window.showToast = function(msg, type='info') {
+    const c = document.getElementById('toasts'); if (!c) return;
+    let message = msg;
+    if (typeof msg === 'object' && msg !== null) {
       message = msg.message || msg.error || msg.statusText || JSON.stringify(msg);
-  }
-
-  const t = document.createElement('div');
-  t.className = `hr-toast ${type}`;
-  const icons = { success:'✓', error:'✕', info:'ℹ' };
-  t.innerHTML = `<span style="font-size:15px">${icons[type]||'ℹ'}</span><span>${message}</span>`;
-  c.appendChild(t);
-  setTimeout(() => t.remove(), 3800);
-};
+    }
+    const t = document.createElement('div');
+    t.className = `hr-toast ${type}`;
+    const icons = { success:'✓', error:'✕', info:'ℹ' };
+    const _e = typeof escapeHtml === 'function' ? escapeHtml : x => x;
+    t.innerHTML = `<span style="font-size:15px">${icons[type]||'ℹ'}</span><span>${_e(message)}</span>`;
+    c.appendChild(t);
+    setTimeout(() => t.remove(), 3800);
+  };
+}
 

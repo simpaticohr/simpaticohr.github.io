@@ -167,9 +167,10 @@ function renderRecentApplications(apps) {
     return;
   }
   tbody.innerHTML = apps.map(app => {
-    const name = app.name || app.candidate_name || 'Unknown';
-    const email = app.email || app.candidate_email || '';
-    const initials = name.split(' ').map(n => n[0]).join('').toUpperCase().substring(0,2);
+    const _e = typeof escapeHtml === 'function' ? escapeHtml : s => s;
+    const name = _e(app.name || app.candidate_name || 'Unknown');
+    const email = _e(app.email || app.candidate_email || '');
+    const initials = _e(name.split(' ').map(n => n[0]).join('').toUpperCase().substring(0,2));
     const score = app.ats_score || app.ai_match_score || null;
     return '<tr>' +
       '<td><div style="display:flex;align-items:center;gap:10px;">' +
@@ -177,12 +178,12 @@ function renderRecentApplications(apps) {
         '<div><div style="font-weight:600;font-size:0.85rem;">' + name + '</div>' +
         '<div style="font-size:0.75rem;color:var(--gray-500);">' + email + '</div></div>' +
       '</div></td>' +
-      '<td style="font-size:0.85rem;">' + (app.job_title || 'N/A') + '</td>' +
+      '<td style="font-size:0.85rem;">' + _e(app.job_title || 'N/A') + '</td>' +
       '<td><span style="padding:2px 8px;border-radius:6px;font-size:0.75rem;font-weight:600;background:rgba(99,102,241,0.1);color:#6366f1;">' + (score !== null ? score + '%' : '--') + '</span></td>' +
-      '<td><span class="badge badge-' + getStatusBadgeClass(app.status) + '">' + formatStatus(app.status) + '</span></td>' +
+      '<td><span class="badge badge-' + getStatusBadgeClass(app.status) + '">' + _e(formatStatus(app.status)) + '</span></td>' +
       '<td style="font-size:0.8rem;color:var(--gray-500);">' + timeAgo(app.created_at) + '</td>' +
       '<td><div style="display:flex;gap:4px;">' +
-        '<button class="btn btn-ghost btn-sm" onclick="viewApplication(\'' + app.id + '\')"><i class="fas fa-eye"></i></button>' +
+        '<button class="btn btn-ghost btn-sm" onclick="viewApplication(\'' + _e(app.id) + '\')"><i class="fas fa-eye"></i></button>' +
       '</div></td>' +
     '</tr>';
   }).join('');
@@ -196,9 +197,10 @@ function renderAllApplications(apps) {
     return;
   }
   tbody.innerHTML = apps.map(app => {
-    const name = app.name || app.candidate_name || 'Unknown';
-    const email = app.email || app.candidate_email || '';
-    const initials = name.split(' ').map(n => n[0]).join('').toUpperCase().substring(0,2);
+    const _e = typeof escapeHtml === 'function' ? escapeHtml : s => s;
+    const name = _e(app.name || app.candidate_name || 'Unknown');
+    const email = _e(app.email || app.candidate_email || '');
+    const initials = _e(name.split(' ').map(n => n[0]).join('').toUpperCase().substring(0,2));
     const score = app.ats_score || app.ai_match_score || null;
     return '<tr>' +
       '<td><div style="display:flex;align-items:center;gap:10px;">' +
@@ -206,13 +208,13 @@ function renderAllApplications(apps) {
         '<div><div style="font-weight:600;font-size:0.85rem;">' + name + '</div>' +
         '<div style="font-size:0.75rem;color:var(--gray-500);">' + email + '</div></div>' +
       '</div></td>' +
-      '<td style="font-size:0.85rem;">' + (app.job_title || 'N/A') + '</td>' +
+      '<td style="font-size:0.85rem;">' + _e(app.job_title || 'N/A') + '</td>' +
       '<td><span style="padding:2px 8px;border-radius:6px;font-size:0.75rem;font-weight:600;background:rgba(99,102,241,0.1);color:#6366f1;">' + (score !== null ? score + '%' : '--') + '</span></td>' +
-      '<td><span class="badge badge-' + getStatusBadgeClass(app.status) + '">' + formatStatus(app.status) + '</span></td>' +
+      '<td><span class="badge badge-' + getStatusBadgeClass(app.status) + '">' + _e(formatStatus(app.status)) + '</span></td>' +
       '<td style="font-size:0.8rem;color:var(--gray-500);">' + timeAgo(app.created_at) + '</td>' +
       '<td><div style="display:flex;gap:4px;">' +
-        '<button class="btn btn-ghost btn-sm" onclick="viewApplication(\'' + app.id + '\')"><i class="fas fa-eye"></i></button>' +
-        '<button class="btn btn-ghost btn-sm" onclick="moveApplication(\'' + app.id + '\', \'shortlisted\')"><i class="fas fa-star"></i></button>' +
+        '<button class="btn btn-ghost btn-sm" onclick="viewApplication(\'' + _e(app.id) + '\')"><i class="fas fa-eye"></i></button>' +
+        '<button class="btn btn-ghost btn-sm" onclick="moveApplication(\'' + _e(app.id) + '\', \'shortlisted\')"><i class="fas fa-star"></i></button>' +
       '</div></td>' +
     '</tr>';
   }).join('');
@@ -226,9 +228,10 @@ function renderUpcomingInterviews(ints) {
     return;
   }
   container.innerHTML = ints.map(i => {
-    const name = i.candidate_name || 'Candidate';
-    const role = i.interview_role || '';
-    const status = i.status || 'pending';
+    const _e = typeof escapeHtml === 'function' ? escapeHtml : s => s;
+    const name = _e(i.candidate_name || 'Candidate');
+    const role = _e(i.interview_role || '');
+    const status = _e(i.status || 'pending');
     const score = i.overall_score !== null && i.overall_score !== undefined ? i.overall_score + '%' : '--';
     return '<div style="display:flex;align-items:center;gap:12px;padding:10px;border:1px solid var(--gray-200);border-radius:8px;margin-bottom:8px;">' +
       '<div style="width:36px;height:36px;border-radius:50%;background:var(--info-light);display:flex;align-items:center;justify-content:center;">' +
@@ -251,13 +254,14 @@ function renderJobsTable(jobs) {
     return;
   }
   tbody.innerHTML = jobs.map(job => {
+    const _e = typeof escapeHtml === 'function' ? escapeHtml : s => s;
     const status = job.status || (job.is_active ? 'active' : 'draft');
     return '<tr>' +
-      '<td><div style="font-weight:600;">' + (job.title || 'Untitled') + '</div>' +
-        '<div style="font-size:0.75rem;color:var(--gray-500);">' + (job.location || 'Remote') + ' • ' + (job.level || 'Mid-Level') + '</div></td>' +
-      '<td>' + (job.department || '-') + '</td>' +
+      '<td><div style="font-weight:600;">' + _e(job.title || 'Untitled') + '</div>' +
+        '<div style="font-size:0.75rem;color:var(--gray-500);">' + _e(job.location || 'Remote') + ' • ' + _e(job.level || 'Mid-Level') + '</div></td>' +
+      '<td>' + _e(job.department || '-') + '</td>' +
       '<td><span style="font-weight:600;color:var(--primary);">' + (job.applications_count || 0) + '</span></td>' +
-      '<td><span class="badge badge-' + (status === 'active' ? 'success' : status === 'draft' ? 'gray' : 'warning') + '">' + status + '</span></td>' +
+      '<td><span class="badge badge-' + (status === 'active' ? 'success' : status === 'draft' ? 'gray' : 'warning') + '">' + _e(status) + '</span></td>' +
       '<td style="font-size:0.85rem;color:var(--gray-500);">' + formatDate(job.created_at) + '</td>' +
       '<td><div style="display:flex;gap:4px;">' +
         '<button class="btn btn-ghost btn-sm" title="View Pipeline" onclick="showPage(\'pipeline\')"><i class="fas fa-columns"></i></button>' +
@@ -457,7 +461,11 @@ async function handleDrop(event, newStage) {
 // ==========================================
 function handleGlobalSearch(val) {
   if (!val || val.length < 2) return;
-  console.log('Search:', val);
+  if (typeof workerFetch !== 'undefined') {
+    workerFetch('/applications/search?q=' + encodeURIComponent(val)).then(data => {
+      if (data?.data?.results) renderAllApplications(data.data.results);
+    }).catch(() => {});
+  }
 }
 
 // ==========================================
@@ -478,83 +486,90 @@ function formatStatus(status) {
   return status.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
 }
 
-function timeAgo(dateStr) {
-  if (!dateStr) return 'N/A';
-  const seconds = Math.floor((new Date() - new Date(dateStr)) / 1000);
-  if (seconds < 60) return 'just now';
-  if (seconds < 3600) return Math.floor(seconds / 60) + ' min ago';
-  if (seconds < 86400) return Math.floor(seconds / 3600) + ' hours ago';
-  if (seconds < 2592000) return Math.floor(seconds / 86400) + ' days ago';
-  return Math.floor(seconds / 2592000) + ' months ago';
+// timeAgo, formatDate, formatDateTime, showToast, doLogout
+// are now provided by shared-utils.js (loaded before app.js).
+// Only define them here as fallback if shared-utils was not loaded.
+if (typeof window.timeAgo === 'undefined') {
+  window.timeAgo = function(dateStr) {
+    if (!dateStr) return 'N/A';
+    const seconds = Math.floor((new Date() - new Date(dateStr)) / 1000);
+    if (seconds < 60) return 'just now';
+    if (seconds < 3600) return Math.floor(seconds / 60) + ' min ago';
+    if (seconds < 86400) return Math.floor(seconds / 3600) + ' hours ago';
+    if (seconds < 2592000) return Math.floor(seconds / 86400) + ' days ago';
+    return Math.floor(seconds / 2592000) + ' months ago';
+  };
 }
 
-function formatDate(dateStr) {
-  if (!dateStr) return '-';
-  return new Date(dateStr).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+if (typeof window.showToast === 'undefined') {
+  window.showToast = function(message, type) {
+    const container = document.getElementById('toastContainer') || document.getElementById('toasts');
+    if (!container) return;
+    let msg = (typeof message === 'object' && message !== null)
+      ? (message.message || message.error || JSON.stringify(message)) : message;
+    const toast = document.createElement('div');
+    const colors = { success: '#10b981', error: '#ef4444', warning: '#f59e0b', info: '#6366f1' };
+    toast.style.cssText = 'padding:12px 20px;border-radius:8px;background:' + (colors[type] || colors.info) + ';color:#fff;font-size:0.85rem;font-weight:600;margin-top:8px;';
+    toast.textContent = msg;
+    container.appendChild(toast);
+    setTimeout(() => toast.remove(), 3800);
+  };
 }
 
-function formatDateTime(dateStr) {
-  if (!dateStr) return 'N/A';
-  return new Date(dateStr).toLocaleString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
-}
-
-function showToast(message, type) {
-  const container = document.getElementById('toastContainer') || document.getElementById('toasts');
-  if (!container) return;
-
-  // Fix [object Object] bug: Extract message if msg is an object
-  let msg = message;
-  if (typeof message === 'object' && message !== null) {
-      msg = message.message || message.error || message.statusText || JSON.stringify(message);
+// ==========================================
+// FEATURE STUBS (Production-safe —  no alerts)
+// ==========================================
+function loadNotifications() {
+  // Notifications are fetched from the Worker's audit log trail
+  if (typeof workerFetch !== 'undefined') {
+    workerFetch('/analytics/summary').then(d => {
+      const pending = d?.data?.pending_leaves || 0;
+      const badge = document.getElementById('notificationBadge');
+      if (badge) badge.textContent = pending > 0 ? pending : '';
+    }).catch(() => {});
   }
-
-  const toast = document.createElement('div');
-  const colors = { success: '#10b981', error: '#ef4444', warning: '#f59e0b', info: '#6366f1' };
-  toast.style.cssText = 'padding:12px 20px;border-radius:8px;background:' + (colors[type] || colors.info) + ';color:#fff;font-size:0.85rem;font-weight:600;margin-top:8px;box-shadow:0 4px 12px rgba(0,0,0,0.15);animation:fadeIn 0.3s ease;';
-  toast.textContent = msg;
-  container.appendChild(toast);
-  setTimeout(() => {
-      toast.style.opacity = '0';
-      toast.style.transform = 'translateY(-10px)';
-      toast.style.transition = '0.3s ease';
-      setTimeout(() => toast.remove(), 300);
-  }, 3000);
 }
 
-function doLogout() {
-  localStorage.removeItem('simpatico_token');
-  localStorage.removeItem('simpatico_user');
-  window.location.href = '/auth/login.html';
+function triggerAutomation(event, id, data) {
+  // Automation hooks — dispatched to Worker webhooks
+  if (typeof workerFetch !== 'undefined') {
+    workerFetch('/webhooks/dispatch', { method: 'POST', body: { event, entity_id: id, payload: data } }).catch(() => {});
+  }
 }
 
-// ==========================================
-// STUBS
-// ==========================================
-function loadNotifications() { console.log('Notifications not yet implemented'); }
-function triggerAutomation(event, id, data) { console.log('Automation:', event, id, data); }
-function setupRealtimeSubscriptions(companyId) { console.log('Realtime subscriptions not yet implemented'); }
+function setupRealtimeSubscriptions(companyId) {
+  // Supabase realtime for live dashboard updates
+  const client = typeof getSupabaseClient === 'function' ? getSupabaseClient() : null;
+  if (!client || !client.channel) return;
+  try {
+    client.channel('hr-live')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'job_listings' }, () => { if (typeof loadJobs === 'function') loadJobs(); })
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'applications' }, () => { if (typeof loadPipelineData === 'function') loadPipelineData(); })
+      .subscribe();
+  } catch (e) { console.warn('[realtime] Setup skipped:', e.message); }
+}
 
-function searchCandidates() { alert('Candidate Sourcing coming soon!'); }
+function searchCandidates() {
+  showToast('Candidate Sourcing — use the Search bar above to find candidates by name or skill.', 'info');
+}
 
-
+/**
+ * api() — Unified Worker API caller.
+ * Uses shared-utils workerFetch if available, else falls back.
+ */
 function api(endpoint, options) {
-  let token = localStorage.getItem('simpatico_token') || localStorage.getItem('sb-token') || '';
-  if (!token) {
-    for (let i = 0; i < localStorage.length; i++) {
-        const k = localStorage.key(i);
-        if (k && k.startsWith('sb-') && k.endsWith('-auth-token')) {
-            try { token = JSON.parse(localStorage.getItem(k)).access_token; } catch(e){}
-        }
-    }
+  if (typeof workerFetch === 'function') {
+    return workerFetch(endpoint, options);
   }
+  // Fallback if shared-utils not loaded
+  const token = typeof getAuthToken === 'function' ? getAuthToken() : (localStorage.getItem('simpatico_token') || '');
   const workerUrl = window.SIMPATICO_CONFIG?.workerUrl || 'https://simpatico-hr-ats.simpaticohrconsultancy.workers.dev';
   return fetch(workerUrl + endpoint, {
     ...options,
-    headers: { 
-        'Content-Type': 'application/json', 
-        'apikey': SB_KEY,
-        ...(token ? { 'Authorization': 'Bearer ' + token } : {}),
-        ...((options || {}).headers || {}) 
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { 'Authorization': 'Bearer ' + token } : {}),
+      ...((options || {}).headers || {})
     }
   }).then(r => r.json());
 }

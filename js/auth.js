@@ -412,4 +412,15 @@ async function handleCandidateRegistration(e) {
   }
 }
 
-function doLogout(){localStorage.clear();sessionStorage.clear();window.location.href="/auth/login.html";}
+// doLogout: prefer shared-utils version if loaded; else define locally
+if (typeof window.doLogout === 'undefined') {
+  window.doLogout = function() {
+    ['sh_token','sh_user','sh_client','simpatico_token','simpatico_user','sb-token'].forEach(k => localStorage.removeItem(k));
+    for (let i = localStorage.length - 1; i >= 0; i--) {
+      const k = localStorage.key(i);
+      if (k && k.startsWith('sb-') && k.endsWith('-auth-token')) localStorage.removeItem(k);
+    }
+    sessionStorage.clear();
+    window.location.href = '/auth/login.html';
+  };
+}
