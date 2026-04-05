@@ -1318,7 +1318,7 @@ Return ONLY valid JSON in format: {"match_score": 85, "reason": "Brief 1-sentenc
   const autoEnabled = job?.description?.includes('<!-- SIMPATICO_AUTO_SHORTLIST:TRUE -->') || false;
   
   if (autoEnabled && match_score !== null && match_score >= 75) {
-      status = 'shortlisted';
+      status = 'interview';
       autoInterview = true;
       const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
       for (let i = 0; i < 32; i++) {
@@ -1384,12 +1384,32 @@ async function handleListApplications(request, env, ctx, _, url) {
 }
 
 async function handleUpdateApplication(request, env, ctx, [id]) {
-  // Relax strict role check — tenant isolation via sbFetch
   const body = await safeJson(request);
-  const res  = await sbFetch(env, 'PATCH', `/rest/v1/job_applications?id=eq.${id}`, sanitize(body), false, ctx.tenantId);
-  const [app] = await res.json();
-  await audit(env, ctx, 'application.update', 'job_applications', id, { status: body.status });
-  return apiResponse({ application: app });
+  
+  // Only allow safe fields to be patched
+  const allowed = ['status', 'updated_at', 'notes', 'ai_score', 'interview_token'];
+  const patch = {};
+  for (const key of allowed) {
+    if (body[key] !== undefined) patch[key] = body[key];
+  }
+  if (Object.keys(patch).length === 0) {
+    throw new ValidationError('No valid fields to update');
+  }
+
+  const res = await sbFetch(env, 'PATCH', `/rest/v1/job_applications?id=eq.${id}`, patch, false, ctx.tenantId);
+  
+  // Handle non-OK responses from Supabase (4xx range)
+  if (!res.ok) {
+    const errText = await res.text().catch(() => 'unknown');
+    console.error(`[handleUpdateApplication] Supabase PATCH failed (${res.status}):`, errText);
+    throw new AppError(`Failed to update application: ${errText}`, res.status >= 500 ? HTTP.SERVER_ERROR : HTTP.BAD_REQUEST, 'DB_ERROR');
+  }
+  
+  const result = await res.json();
+  const app = Array.isArray(result) ? result[0] : result;
+  
+  await audit(env, ctx, 'application.update', 'job_applications', id, { status: body.status }).catch(e => console.warn('Audit failed:', e));
+  return apiResponse({ application: app || { id, ...patch } });
 }
 
 // ── Notifications ─────────────────────────────────────────────────────────────
