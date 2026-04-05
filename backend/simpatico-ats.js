@@ -388,9 +388,22 @@ async function buildContext(request, env) {
   const authHeader = request.headers.get('Authorization') || '';
 
   let actor = null;
-  if (authHeader.startsWith('Bearer ') && env.JWT_SECRET) {
+  if (authHeader.startsWith('Bearer ')) {
     const token = authHeader.slice(7);
-    actor = await verifyJWT(token, env.JWT_SECRET);
+    if (env.JWT_SECRET) {
+      try {
+        actor = await verifyJWT(token, env.JWT_SECRET);
+      } catch (e) {
+        if (e.message.includes('signature') || e.message.includes('failed')) {
+          // Fallback to verifying directly with Supabase if local JWT secret fails
+          actor = await verifyViaSupabase(token, env);
+        } else {
+          throw e;
+        }
+      }
+    } else {
+      actor = await verifyViaSupabase(token, env);
+    }
   }
 
   return {
@@ -400,6 +413,25 @@ async function buildContext(request, env) {
     actorRole:  actor?.role || 'viewer',
     actor,
   };
+}
+
+async function verifyViaSupabase(token, env) {
+  if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_KEY) throw new AuthError('Cannot verify token: database offline');
+  const res = await fetch(`${env.SUPABASE_URL}/auth/v1/user`, {
+    headers: { 'apikey': env.SUPABASE_SERVICE_KEY, 'Authorization': `Bearer ${token}` }
+  });
+  if (!res.ok) throw new AuthError('Invalid or expired remote token');
+  const user = await res.json();
+  // Fetch their profile using the service key to get role
+  const pRes = await fetch(`${env.SUPABASE_URL}/rest/v1/users?auth_id=eq.${user.id}&select=role`, {
+    headers: { 'apikey': env.SUPABASE_SERVICE_KEY, 'Authorization': `Bearer ${env.SUPABASE_SERVICE_KEY}` }
+  });
+  let role = 'viewer';
+  if (pRes.ok) {
+    const profs = await pRes.json();
+    if (profs && profs.length > 0) role = profs[0].role || 'viewer';
+  }
+  return { sub: user.id, email: user.email, role };
 }
 
 function requireAuth(ctx) {
