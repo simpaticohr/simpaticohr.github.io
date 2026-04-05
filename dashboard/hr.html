@@ -1482,7 +1482,7 @@ async function loadExternalModule(sectionId, href) {
         });
         doc.querySelectorAll('style').forEach(style => document.head.appendChild(style.cloneNode(true)));
 
-        const mainContent = doc.querySelector('.hr-main');
+        const mainContent = doc.querySelector('.hr-main, .main-content');
         container.innerHTML = (mainContent ? mainContent.innerHTML : doc.body.innerHTML);
         doc.querySelectorAll('.hr-modal-overlay, .modal').forEach(m => container.innerHTML += m.outerHTML);
 
@@ -1490,16 +1490,18 @@ async function loadExternalModule(sectionId, href) {
 
         for (const oldScript of doc.querySelectorAll('script')) {
             let jsCode = "";
-            let scriptName = oldScript.src ? oldScript.src.split('/').pop() : "inline-" + Math.random().toString(36).substr(2, 5);
+            let srcAttr = oldScript.getAttribute('src');
+            let scriptUrl = srcAttr ? new URL(srcAttr, new URL(href, window.location.href)).href : null;
+            let scriptName = scriptUrl ? scriptUrl.split('/').pop() : "inline-" + Math.random().toString(36).substr(2, 5);
 
-            if (oldScript.src) {
+            if (scriptUrl) {
                 if (scriptName.includes('supabase') || scriptName.includes('hr-config')) continue;
-                if (window.loadedScripts.has(scriptName)) continue; 
-                window.loadedScripts.add(scriptName);
+                if (window.loadedScripts.has(scriptUrl)) continue; 
+                window.loadedScripts.add(scriptUrl);
                 
-                const scriptRes = await fetch(oldScript.src);
+                const scriptRes = await fetch(scriptUrl);
                 if (!scriptRes.ok) {
-                    console.warn(`[Module Loader] Skipping missing script: ${oldScript.src}`);
+                    console.warn(`[Module Loader] Skipping missing script: ${scriptUrl}`);
                     continue;
                 }
                 const contentType = scriptRes.headers.get('content-type');
