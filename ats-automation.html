@@ -633,6 +633,34 @@ var TEMPLATES=[
 ];
 
 /* ══════════════════════════
+   WORKER FETCH (self-contained — does NOT depend on shared-utils.js)
+   This is used when ats-automation.html is loaded standalone OR
+   embedded in the SPA (where shared-utils.js is not available).
+══════════════════════════ */
+if (typeof workerFetch !== 'function') {
+  window.workerFetch = async function(path, opts) {
+    var cfg    = window.SIMPATICO_CONFIG || {};
+    var base   = cfg.workerUrl || 'https://simpatico-hr-ats.simpaticohrconsultancy.workers.dev';
+    var tenant = cfg.tenantId  || 'SIMP_PRO_MAIN';
+    var token  = localStorage.getItem('simpatico_token') || '';
+    var method = (opts && opts.method) ? opts.method.toUpperCase() : 'GET';
+    var headers = {
+      'Content-Type': 'application/json',
+      'X-Tenant-ID':  tenant
+    };
+    if (token) headers['Authorization'] = 'Bearer ' + token;
+    var fetchOpts = { method: method, headers: headers };
+    if (opts && opts.body && method !== 'GET') {
+      fetchOpts.body = typeof opts.body === 'string' ? opts.body : JSON.stringify(opts.body);
+    }
+    var resp = await fetch(base + path, fetchOpts);
+    var data = await resp.json();
+    if (!resp.ok) throw new Error(data.error?.message || data.message || 'Worker error ' + resp.status);
+    return data;
+  };
+}
+
+/* ══════════════════════════
    STORE
 ══════════════════════════ */
 var KR='simpatico_ats_rules', KL='simpatico_ats_log';
@@ -742,14 +770,25 @@ function renderKanban(){
 function candCardHTML(c){
   var sla=c.days_in_stage||0, slaClass='ok';
   if(sla>7) slaClass='late'; else if(sla>4) slaClass='warn';
-  return '<div class="kb-card" onclick="openDrawer(\''+c.id+'\')">'+
-    '<div class="kb-card-name">'+esc(c.name)+'</div>'+
+  
+  // FIX: Fallback for null candidate_name (legacy direct-Supabase records)
+  var displayName = c.name || c.email || 'Unknown Candidate';
+  var statusLabel = formatEnum(c.stage);
+  // Rejected badge styling
+  var isRejected = c.stage === 'rejected';
+  
+  return '<div class="kb-card'+(isRejected?' kb-card-rejected':'')+'" onclick="openDrawer(\''+c.id+'\')"'+(isRejected?' style="opacity:0.65;border-left:3px solid #ef4444;"':'')+'>'+
+    '<div class="kb-card-name">'+esc(displayName)+(isRejected?' <span style="font-size:0.62rem;color:#ef4444;font-weight:700">REJECTED</span>':'')+' </div>'+
     '<div class="kb-card-role">'+esc(c.role)+'</div>'+
+    '<div style="margin-bottom:8px; display:flex; gap:4px; flex-wrap:wrap;">' +
+      '<span class="chip chip-stage" style="font-size:0.65rem; padding:1px 6px;">'+statusLabel+'</span>' +
+      (c.ai_score ? '<span class="chip chip-cond" style="font-size:0.65rem; padding:1px 6px;">AI: '+c.ai_score+'%</span>' : '') +
+    '</div>' +
     '<div class="kb-card-footer">'+
       '<div class="kb-avatar" style="background:'+avatarColor(c.name)+'">'+esc(initials(c.name))+'</div>'+
-      '<div style="display:flex;flex-direction:column;align-items:flex-end;gap:3px">'+
+      '<div style="display:flex;flex-direction:column;align-items:flex-end;gap:2px">'+
         '<span class="kb-sla '+slaClass+'">'+sla+'d in stage</span>'+
-        (c.auto_moved?'<span class="kb-auto">⚡ auto-moved</span>':'') +
+        (c.auto_moved?'<span class="kb-auto" style="font-size:0.6rem;">⚡ auto-moved</span>':'') +
       '</div>'+
     '</div>'+
   '</div>';
@@ -762,15 +801,55 @@ function openDrawer(id){
   var c=CANDIDATES.find(function(x){return x.id===id});
   if(!c) return;
   var stageIdx=STAGE_KEYS.indexOf(c.stage);
-  el('drawerTitle').textContent=c.name;
-  el('drawerBody').innerHTML=
-    '<div class="cand-avatar" style="background:'+avatarColor(c.name)+'">'+initials(c.name)+'</div>'+
-    '<div class="cand-name">'+esc(c.name)+'</div>'+
+
+  // FIX: Ensure drawer exists in DOM (it may not exist when embedded in SPA)
+  var drawerTitle = document.getElementById('drawerTitle');
+  var drawerBody  = document.getElementById('drawerBody');
+  if (!drawerBody) {
+    // Recreate the drawer structure on the fly
+    var existingOverlay = document.getElementById('drawerOverlay');
+    if (!existingOverlay) {
+      var ov = document.createElement('div');
+      ov.className = 'drawer-overlay'; ov.id = 'drawerOverlay';
+      ov.onclick = closeDrawer;
+      document.body.appendChild(ov);
+    }
+    var existingDrawer = document.getElementById('drawer');
+    if (!existingDrawer) {
+      var dr = document.createElement('div');
+      dr.className = 'drawer'; dr.id = 'drawer';
+      dr.innerHTML = '<div class="drawer-head"><div style="font-family:\'Syne\',sans-serif;font-weight:800;font-size:.95rem" id="drawerTitle">Candidate Profile</div><button class="mx" onclick="closeDrawer()">✕</button></div><div class="drawer-body" id="drawerBody"></div>';
+      document.body.appendChild(dr);
+    }
+    drawerTitle = document.getElementById('drawerTitle');
+    drawerBody  = document.getElementById('drawerBody');
+  }
+  if (drawerTitle) drawerTitle.textContent = 'Candidate Profile';
+  if (!drawerBody) { console.warn('[ATS] Could not create drawer'); return; }
+
+  // FIX: name fallback for legacy records with null candidate_name
+  var displayName = c.name || c.email || 'Unknown Candidate';
+
+  drawerBody.innerHTML=
+    '<div class="cand-avatar" style="background:'+avatarColor(displayName)+'">'+initials(displayName)+'</div>'+
+    '<div class="cand-name">'+esc(displayName)+'</div>'+
+    (c.stage==='rejected'?'<div style="display:inline-block;background:#fef2f2;color:#991b1b;border:1px solid #fecaca;border-radius:6px;padding:2px 10px;font-size:0.72rem;font-weight:700;margin-bottom:8px">🚫 REJECTED</div>':'')+
     '<div class="cand-role">'+esc(c.role)+' — '+esc(c.source)+'</div>'+
+    '<div style="font-size:0.8rem; color:var(--muted); margin-top:2px;">'+esc(c.email)+'</div>'+
+    
     '<div class="cand-tags">'+
       (c.skills||[]).map(function(s){return'<span class="ctag">'+esc(s)+'</span>'}).join('')+
     '</div>'+
-    '<div class="ai-score"><div class="ai-score-val">'+c.ai_score+'%</div><div><div class="ai-score-label">AI Match Score</div><div class="ai-score-sub">Based on JD analysis</div></div></div>'+
+    
+    '<div class="ai-score"><div class="ai-score-val">'+c.ai_score+'%</div><div><div class="ai-score-label">AI Fit Score</div><div class="ai-score-sub">Matching against Job Description</div></div></div>'+
+    
+    '<div class="cand-section">' +
+        '<div class="cand-section-title">Resume Summary</div>' +
+        '<div style="font-size:0.82rem; line-height:1.45; color:var(--ink2); background:var(--bg2); padding:12px; border-radius:8px; border:1px solid var(--border);">' +
+            (c.resume_text ? esc(c.resume_text.substring(0, 400)) + '...' : '<i>No resume summary available. Candidate might have applied via Quick-Apply.</i>') +
+        '</div>' +
+    '</div>' +
+
     '<div class="cand-section"><div class="cand-section-title">Pipeline Progress</div>'+
       '<div class="stage-progress">'+
         STAGE_KEYS.slice(0,-1).map(function(sk,i){
@@ -779,6 +858,7 @@ function openDrawer(id){
         }).join('')+
       '</div>'+
     '</div>'+
+    
     '<div class="cand-section"><div class="cand-section-title">Activity Timeline</div>'+
       '<div class="cand-timeline">'+
         (c.timeline||[]).map(function(t){
@@ -787,15 +867,23 @@ function openDrawer(id){
         }).join('')+
       '</div>'+
     '</div>'+
-    '<div style="margin-top:16px;display:flex;gap:8px;flex-wrap:wrap">'+
+    
+    '<div style="margin-top:24px; padding-top:16px; border-top:1px solid var(--border); display:flex; gap:8px; flex-wrap:wrap">'+
       (stageIdx < 5 ? `<button class="btn btn-primary btn-sm" onclick="moveCandidate('${c.id}', '${STAGE_KEYS[stageIdx+1]}')">Move to ${STAGES[stageIdx+1]}</button>` : '')+
-      '<button class="btn btn-ghost btn-sm" onclick="toast(\'Interview scheduling opened\',\'info\')">Schedule Interview</button>'+
+      '<button class="btn btn-ghost btn-sm" onclick="toast(\'Interview scheduler initialized\',\'info\')">Schedule</button>'+
       '<button class="btn btn-danger btn-sm" onclick="moveCandidate(\''+c.id+'\', \'rejected\')">Reject</button>'+
     '</div>';
-  el('drawerOverlay').classList.add('open');
-  el('drawer').classList.add('open');
+    
+  const overlay = document.getElementById('drawerOverlay');
+  const drawer = document.getElementById('drawer');
+  if (overlay) overlay.classList.add('open');
+  if (drawer) drawer.classList.add('open');
 }
-function closeDrawer(){el('drawerOverlay').classList.remove('open');el('drawer').classList.remove('open')}
+function closeDrawer(){
+  var ov=document.getElementById('drawerOverlay'), dr=document.getElementById('drawer');
+  if(ov) ov.classList.remove('open');
+  if(dr) dr.classList.remove('open');
+}
 
 /* ══════════════════════════
    SLA
@@ -1072,9 +1160,46 @@ function switchTab(name,btn){
 /* ══════════════════════════
    UTILITIES
 ══════════════════════════ */
-function closeModal(id){el(id).classList.remove('open')}
-function showErr(id,msg){var e=el(id);e.textContent=msg;e.classList.add('show')}
-function toast(msg,type){var c=el('tc'),t=document.createElement('div');t.className='toast '+(type||'ok');t.textContent=msg;c.appendChild(t);setTimeout(function(){t.style.opacity='0';t.style.transition='opacity .3s';setTimeout(function(){t.parentNode&&t.parentNode.removeChild(t)},300)},4500)}
+function closeModal(id){
+    const el = document.getElementById(id);
+    if (el) el.classList.remove('open');
+}
+
+function showErr(id,msg){
+    var e=document.getElementById(id);
+    if (e) {
+        e.textContent=msg;
+        e.classList.add('show');
+    }
+}
+
+function toast(msg,type){
+  console.log(`[ATS Toast] ${type}: ${msg}`);
+  
+  // PRODUCTION INTEGRATION: Always prefer the main dashboard's toast system if available
+  if (window.showToast && typeof window.showToast === 'function') {
+    window.showToast(msg, type === 'err' ? 'error' : type);
+    return;
+  }
+
+  var c=document.getElementById('tc');
+  if(!c) {
+      console.warn('[ATS] Toast container #tc not found');
+      // Fallback alert if container missing
+      if (type === 'err' || type === 'error') alert(msg);
+      return;
+  }
+  
+  var t=document.createElement('div');
+  t.className='toast '+(type||'ok');
+  t.textContent=msg;
+  c.appendChild(t);
+  setTimeout(function(){
+    t.style.opacity='0';
+    t.style.transition='opacity .3s';
+    setTimeout(function(){t.parentNode&&t.parentNode.removeChild(t)},300)
+  },4500);
+}
 function avatarColor(n){n=n||'';var co=['#4f46e5','#0891b2','#059669','#d97706','#7c3aed','#db2777','#0d9488'];var h=0;for(var i=0;i<n.length;i++)h+=n.charCodeAt(i);return co[h%co.length]}
 function initials(n){var p=(n||'').split(' ');return((p[0]||'').charAt(0)+(p[1]||'').charAt(0)).toUpperCase()||'?'}
 document.addEventListener('keydown',function(e){if(e.key==='Escape'){closeModal('ruleModal');closeModal('tmplModal');closeModal('intModal');closeModal('aiModal');closeDrawer()}});
@@ -1085,50 +1210,71 @@ document.addEventListener('keydown',function(e){if(e.key==='Escape'){closeModal(
 var CANDIDATES = [];
 
 async function fetchCandidates() {
+  // Guard: workerFetch may not be available if js/shared-utils.js failed to load (404)
+  if (typeof workerFetch !== 'function') {
+    console.warn('[ATS] workerFetch not available — shared-utils.js may have failed to load');
+    toast('⚠️ Data service not loaded. Please refresh.', 'err');
+    return;
+  }
   try {
     const resp = await workerFetch('/recruitment/applications');
-    const apps = resp.data.applications || [];
-    CANDIDATES = apps.map(app => {
-      const stageKey = app.status || 'applied';
-      const skills = app.skills ? app.skills.split(',').map(s => s.trim()) : [];
-      const timeline = [{ ico: '📥', color: '#4f46e5', title: 'Application Received', date: formatDate(app.created_at) }];
+    const apps = (resp && resp.data && resp.data.applications) ? resp.data.applications : [];
+    CANDIDATES = apps.map(function(app) {
+      // FIX: Normalize status — handle 'shortlisted' as 'screening' for legacy records
+      var stageKey = app.status || 'applied';
+      if (stageKey === 'shortlisted') stageKey = 'screening';
+      if (stageKey === 'interviewed') stageKey = 'interview';
+
+      // FIX: Support both 'skills' and 'candidate_skills' field names
+      var rawSkills = app.skills || app.candidate_skills || '';
+      var skills = rawSkills ? rawSkills.split(',').map(function(s){ return s.trim(); }).filter(Boolean) : [];
+
+      // FIX: Fallback for null candidate_name (legacy direct-Supabase inserts)
+      var name = app.candidate_name || app.candidate_email || 'Unnamed Candidate';
+
+      var timeline = [{ ico: '📥', color: '#4f46e5', title: 'Application Received', date: formatDate(app.created_at) }];
       if (app.match_score) timeline.push({ ico: '📄', color: '#7c3aed', title: 'AI Match Score: ' + app.match_score + '%', date: formatDate(app.created_at) });
-      if (app.status !== 'applied') timeline.push({ ico: '🔀', color: '#0ea5e9', title: 'Moved to ' + formatEnum(app.status), date: formatDate(app.updated_at || app.created_at) });
+      if (app.status === 'rejected') timeline.push({ ico: '🚫', color: '#ef4444', title: 'Application Rejected', date: formatDate(app.updated_at || app.created_at) });
+      else if (app.status !== 'applied') timeline.push({ ico: '🔀', color: '#0ea5e9', title: 'Moved to ' + formatEnum(app.status), date: formatDate(app.updated_at || app.created_at) });
+      if (app.status === 'interview' || app.status === 'screening') timeline.push({ ico: '📅', color: '#10b981', title: 'Interview Scheduled (AI Auto)', date: formatDate(app.updated_at || app.created_at) });
+
       return {
-        id: app.id,
-        name: app.candidate_name,
-        email: app.candidate_email,
-        role: app.jobs?.title || 'Unknown Role',
-        stage: stageKey,
-        days_in_stage: Math.floor((new Date() - new Date(app.updated_at || app.created_at)) / (1000 * 60 * 60 * 24)),
-        source: app.source || 'Careers Page',
-        ai_score: app.match_score || 0,
-        auto_moved: !!app.ai_summary,
-        skills: skills.length ? skills : ['General'],
-        timeline: timeline,
-        resume_text: app.resume_text
+        id:           app.id,
+        name:         name,
+        email:        app.candidate_email || '',
+        role:         (app.jobs && app.jobs.title) ? app.jobs.title : 'Unknown Role',
+        stage:        stageKey,
+        days_in_stage: Math.floor((new Date() - new Date(app.updated_at || app.created_at)) / (1000*60*60*24)),
+        source:       app.source || 'Careers Page',
+        ai_score:     app.match_score || 0,
+        auto_moved:   !!(app.ai_summary || app.match_score),
+        skills:       skills.length ? skills : ['General'],
+        timeline:     timeline,
+        resume_text:  app.resume_text
       };
     });
     renderPipelineHeader();
     renderKanban();
     updateStats();
+    console.log('[ATS] Loaded ' + CANDIDATES.length + ' candidates. Rejected: ' + CANDIDATES.filter(function(c){return c.stage==='rejected';}).length);
   } catch (e) {
     console.error('Failed to fetch candidates:', e);
-    showToast('Failed to load candidates', 'error');
+    toast('Failed to load candidates: ' + e.message, 'err');
   }
 }
 
 async function moveCandidate(id, nextStage) {
   try {
-    showToast('Moving candidate...', 'info');
+    toast('Moving candidate...', 'info');
     await workerFetch('/recruitment/applications/' + id, {
       method: 'PATCH',
       body: { status: nextStage, updated_at: new Date().toISOString() }
     });
     await fetchCandidates();
-    showToast('Stage updated successfully', 'success');
+    closeDrawer();
+    toast('Stage updated ↑ ' + nextStage, 'ok');
   } catch (e) {
-    showToast('Movement failed: ' + e.message, 'error');
+    toast('Move failed: ' + e.message, 'err');
   }
 }
 

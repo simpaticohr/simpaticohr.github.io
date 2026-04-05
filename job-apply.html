@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -250,97 +250,130 @@
     </div>
 
     <script>
-        // --- DATABASE CONFIGURATION ---
-        const SUPABASE_URL = window.SIMPATICO_CONFIG?.supabaseUrl;
+        // --- CONFIGURATION ---
+        const SUPABASE_URL  = window.SIMPATICO_CONFIG?.supabaseUrl;
         const SUPABASE_ANON_KEY = window.SIMPATICO_CONFIG?.supabaseAnonKey;
-        
+        const WORKER_URL    = window.SIMPATICO_CONFIG?.workerUrl || 'https://simpatico-hr-ats.simpaticohrconsultancy.workers.dev';
+        const TENANT_ID     = window.SIMPATICO_CONFIG?.tenantId  || 'SIMP_PRO_MAIN';
+
         const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-        // --- URL LOGIC ---
-       // Reads ?role=Title and ?job_id=... from the address bar
-        const urlParams = new URLSearchParams(window.location.search);
+        // --- URL PARAMS ---
+        const urlParams   = new URLSearchParams(window.location.search);
         const appliedRole = urlParams.get('role') || 'General Application';
-        const jobId = urlParams.get('job_id') || null; // <--- ADD THIS LINE
-        // Update the UI text,
-        document.getElementById('jobContext').innerHTML = `You are applying for the <strong>${appliedRole}</strong> position.`;
+        const jobId       = urlParams.get('job_id') || null;
 
-        // Handle file name display
-        document.getElementById('resumeFile').addEventListener('change', (e) => {
-            const fileName = e.target.files[0]?.name || "";
-            document.getElementById('resumeName').textContent = fileName;
+        document.getElementById('jobContext').innerHTML =
+            `You are applying for the <strong>${appliedRole}</strong> position.`;
+
+        // File name display
+        document.getElementById('resumeFile').addEventListener('change', e => {
+            document.getElementById('resumeName').textContent = e.target.files[0]?.name || '';
         });
 
         // --- FORM SUBMISSION ---
-        document.getElementById('applyForm').addEventListener('submit', async (e) => {
+        document.getElementById('applyForm').addEventListener('submit', async e => {
             e.preventDefault();
-            
-            const btn = document.getElementById('submitBtn');
-            const resumeInput = document.getElementById('resumeFile');
-            const resumeFile = resumeInput.files[0];
 
-            if (!resumeFile) {
-                alert("Please upload your resume.");
-                return;
-            }
+            const btn        = document.getElementById('submitBtn');
+            const resumeFile = document.getElementById('resumeFile').files[0];
+
+            if (!resumeFile) { alert('Please upload your resume.'); return; }
 
             btn.disabled = true;
-            btn.innerHTML = 'Uploading Application... <i class="fas fa-spinner fa-spin"></i>';
+            btn.innerHTML = 'Uploading Resume... <i class="fas fa-spinner fa-spin"></i>';
 
-            // Gather Data
             const firstName = document.getElementById('firstName').value.trim();
-            const lastName = document.getElementById('lastName').value.trim();
-            const email = document.getElementById('email').value.trim();
-            const skills = document.getElementById('skills').value.trim();
+            const lastName  = document.getElementById('lastName').value.trim();
+            const email     = document.getElementById('email').value.trim();
+            const skills    = document.getElementById('skills').value.trim();
 
             try {
-                // 1. Upload Resume to Storage
-                const fileExt = resumeFile.name.split('.').pop();
-                const fileName = `${Date.now()}-${Math.random().toString(36).substring(7)}.${fileExt}`;
-                const filePath = `resumes/${fileName}`;
-
-                const { data: uploadData, error: uploadError } = await supabaseClient
-                    .storage
-                    .from('hr-documents')
-                    .upload(filePath, resumeFile);
-
+                // ── Step 1: Upload PDF to Supabase Storage ───────────────
+                const filePath = `resumes/${Date.now()}-${Math.random().toString(36).slice(2)}.${resumeFile.name.split('.').pop()}`;
+                const { error: uploadError } = await supabaseClient.storage
+                    .from('hr-documents').upload(filePath, resumeFile);
                 if (uploadError) throw uploadError;
 
-                // 2. Get Public URL
-                const { data: { publicUrl } } = supabaseClient
-                    .storage
-                    .from('hr-documents')
-                    .getPublicUrl(filePath);
+                const { data: { publicUrl } } = supabaseClient.storage
+                    .from('hr-documents').getPublicUrl(filePath);
 
-                // 3. Insert into 'job_applications' table
-                const { data, error } = await supabaseClient
-                    .from('job_applications')
-                    .insert([
-                        {
-                            candidate_name: `${firstName} ${lastName}`,
-                            candidate_email: email,
-                            status: 'applied', 
-                            job_id: jobId,
-                            resume_url: publicUrl,
-                            candidate_skills: skills,
-                            applied_at: new Date().toISOString()
-                        }
-                    ]);
+                // ── Step 2: Extract plain text for AI scoring ────────────
+                // PDF parsing is server-side; we send the skills summary as resume_text.
+                // The Worker AI will score this against the job description.
+                const resumeText = skills
+                    ? `Skills & Experience:\n${skills}`
+                    : 'No resume summary provided.';
 
-                if (error) throw error;
+                // ── Step 3: POST to Worker ─────────────────────────────────
+                //    This triggers: AI scoring → auto-shortlist check → interview scheduling
+                btn.innerHTML = '🤖 AI Screening... <i class="fas fa-spinner fa-spin"></i>';
 
-                // UI Transition
+                const workerRes = await fetch(`${WORKER_URL}/recruitment/applications`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Tenant-ID':  TENANT_ID
+                    },
+                    body: JSON.stringify({
+                        candidate_name:  `${firstName} ${lastName}`,
+                        candidate_email: email,
+                        job_id:          jobId,
+                        resume_url:      publicUrl,
+                        resume_text:     resumeText,
+                        skills:          skills,
+                        source:          'careers_page',
+                        status:          'applied'
+                    })
+                });
+
+                const result = await workerRes.json();
+                if (!workerRes.ok) {
+                    throw new Error(result?.error?.message || result?.message || 'Submission failed');
+                }
+
+                // ── Step 4: Show contextual success screen ─────────────────
+                const autoScheduled = result?.data?.auto_scheduled;
+                const matchScore    = result?.data?.match_score;
+
                 document.getElementById('applyForm').style.display = 'none';
                 document.getElementById('headerState').style.display = 'none';
-                document.getElementById('successState').style.display = 'block';
+                const successEl = document.getElementById('successState');
+                successEl.style.display = 'block';
+
+                if (autoScheduled && matchScore >= 75) {
+                    successEl.innerHTML = `
+                        <div class="success-icon"><i class="fas fa-check-circle"></i></div>
+                        <h2 style="color:var(--primary);margin-bottom:10px">Application Sent!</h2>
+                        <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;padding:16px;margin-bottom:20px">
+                            <p style="color:#166534;font-weight:700;margin:0 0 6px">🎉 AI Match Score: ${matchScore}%</p>
+                            <p style="color:#15803d;font-size:.9rem;margin:0">
+                                Congratulations! Your profile is a strong match.
+                                You've been <strong>automatically invited to an AI proctored interview</strong>.
+                                Check your email for the interview link.
+                            </p>
+                        </div>
+                        <a href="jobs.html" style="text-decoration:none;color:#0078d4;font-weight:700;border:1px solid #0078d4;padding:10px 20px;border-radius:8px">View More Jobs</a>`;
+                } else {
+                    successEl.innerHTML = `
+                        <div class="success-icon"><i class="fas fa-check-circle"></i></div>
+                        <h2 style="color:var(--primary);margin-bottom:10px">Application Sent!</h2>
+                        <p style="color:var(--text-gray);margin-bottom:8px">
+                            Your profile is being reviewed by our AI screening engine.
+                        </p>
+                        ${matchScore !== null && matchScore !== undefined
+                            ? `<p style="color:#64748b;font-size:.9rem;margin-bottom:20px">AI Match Score: <strong>${matchScore}%</strong> — Our team will be in touch soon.</p>`
+                            : `<p style="color:#64748b;font-size:.9rem;margin-bottom:20px">Our recruiting team will be in touch soon.</p>`}
+                        <a href="jobs.html" style="text-decoration:none;color:#0078d4;font-weight:700;border:1px solid #0078d4;padding:10px 20px;border-radius:8px">View More Jobs</a>`;
+                }
 
             } catch (err) {
-                alert("Application Error: " + err.message);
-                console.error(err);
+                console.error('Application error:', err);
+                alert('Application Error: ' + err.message);
                 btn.disabled = false;
                 btn.innerHTML = 'Submit Application <i class="fas fa-paper-plane"></i>';
             }
         });
-       
     </script>
 </body>
 </html>
