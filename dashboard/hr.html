@@ -2171,29 +2171,37 @@ async function initApp() {
 }
 
 async function syncWithSupabase() {
-    if (typeof SimpaticoDB === 'undefined' || !SimpaticoDB) return;
-    
-    const userJson = localStorage.getItem('simpatico_user');
-    if (!userJson) return;
-    const user = JSON.parse(userJson);
-    const tenantId = user.tenant_id || user.company_id || 'default';
-
-    // 1. Fetch Jobs
-    const jobsRes = await SimpaticoDB.from('jobs').select('*').order('created_at', { ascending: false });
-    if (!jobsRes.error) {
-        DataStore.update(data => { data.jobs = jobsRes.data; });
+    // Route ALL reads through the Worker API for tenant isolation
+    try {
+        // 1. Fetch Jobs via Worker API
+        const jobsData = await workerFetch('/recruitment/jobs');
+        if (jobsData && jobsData.data) {
+            DataStore.update(data => { data.jobs = jobsData.data.jobs || []; });
+        }
+    } catch(e) {
+        console.warn('Jobs sync failed:', e.message);
     }
 
-    // 2. Fetch Interviews
-    const intRes = await SimpaticoDB.from('interviews').select('*').order('created_at', { ascending: false });
-    if (!intRes.error) {
-        DataStore.update(data => { data.interviews = intRes.data; });
+    try {
+        // 2. Fetch Interviews — use Supabase client as fallback since no worker route yet
+        if (typeof SimpaticoDB !== 'undefined' && SimpaticoDB) {
+            const intRes = await SimpaticoDB.from('interviews').select('*').order('created_at', { ascending: false });
+            if (!intRes.error) {
+                DataStore.update(data => { data.interviews = intRes.data; });
+            }
+        }
+    } catch(e) {
+        console.warn('Interviews sync failed:', e.message);
     }
 
-    // 3. Fetch Applications (Candidates)
-    const appRes = await SimpaticoDB.from('job_applications').select('*, jobs(title, department)').order('created_at', { ascending: false });
-    if (!appRes.error) {
-        DataStore.update(data => { data.job_applications = appRes.data; });
+    try {
+        // 3. Fetch Applications via Worker API (tenant-isolated)
+        const appData = await workerFetch('/recruitment/applications');
+        if (appData && appData.data) {
+            DataStore.update(data => { data.job_applications = appData.data.applications || []; });
+        }
+    } catch(e) {
+        console.warn('Applications sync failed:', e.message);
     }
 
     appData = DataStore.get();
@@ -3703,15 +3711,26 @@ function renderCandidates() {
     }).join('');
 }
 
-function updateAppStatus(appId, newStatus) {
-    DataStore.update(data => {
-        const app = data.applications.find(a => a.id === appId);
-        if (app) app.status = newStatus;
-    });
-    
-    appData = DataStore.get();
-    renderCandidates();
-    if(window.showToast) showToast(`✅ Candidate marked as ${newStatus}`);
+async function updateAppStatus(appId, newStatus) {
+    try {
+        await workerFetch('/recruitment/applications/' + appId, {
+            method: 'PATCH',
+            body: { status: newStatus.toLowerCase(), updated_at: new Date().toISOString() }
+        });
+
+        // Update local state after successful backend write
+        DataStore.update(data => {
+            const app = (data.job_applications || []).find(a => a.id === appId);
+            if (app) app.status = newStatus.toLowerCase();
+        });
+
+        appData = DataStore.get();
+        renderCandidates();
+        if(window.showToast) showToast(`✅ Candidate marked as ${newStatus}`, 'success');
+    } catch(e) {
+        console.error('Update failed:', e);
+        if(window.showToast) showToast('Failed to update status: ' + e.message, 'error');
+    }
 }
 </script>
 <script>
