@@ -1033,9 +1033,15 @@
         .content-section {
             display: none !important;
         }
-        .content-section.active, .content-section.animate-in {
+        /* Surgical fix for tab functioning: only show section when active or animating */
+        .content-section.active, 
+        .content-section.animate-in {
             display: block !important;
         }
+        
+        /* Ensure internal tabs remain functional */
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
     </style>
 </head>
 <body data-theme="enterprise" class="hr-module">
@@ -2443,9 +2449,24 @@ function updateUserDisplay() {
 
 // ===== NAVIGATION =====
 function navigateTo(sectionId, navEl) {
-    document.querySelectorAll('.content-section').forEach(s => s.style.display = 'none');
+    console.log(`[Navigation] Moving to: ${sectionId}`);
+    
+    // Production-ready cleanup: remove active/animate classes from ALL sections
+    document.querySelectorAll('.content-section').forEach(s => {
+        s.style.setProperty('display', 'none', 'important');
+        s.classList.remove('active');
+        s.classList.remove('animate-in');
+    });
+
     const target = document.getElementById('section-' + sectionId);
-    if (target) { target.style.display = 'block'; target.classList.add('animate-in'); }
+    if (target) { 
+        console.log(`[Navigation] Target section found: ${sectionId}`);
+        target.style.setProperty('display', 'block', 'important'); 
+        target.classList.add('active'); 
+        target.classList.add('animate-in'); 
+    } else {
+        console.warn(`[Navigation] Target section NOT found: ${sectionId}`);
+    }
 
     document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
     if (navEl) {
@@ -2474,8 +2495,11 @@ async function loadExternalModule(sectionId, href) {
     
     loadedModules[sectionId] = true;
     container.innerHTML = `
-        <div id="loading-${sectionId}" style="display:flex;justify-content:center;align-items:center;height:400px;">
-            <i class="fas fa-circle-notch fa-spin" style="font-size:2rem;color:var(--primary);"></i>
+        <div id="loading-${sectionId}" style="display:flex;justify-content:center;align-items:center;height:400px;background:white;border-radius:12px;">
+            <div class="text-center">
+                <i class="fas fa-circle-notch fa-spin mb-3" style="font-size:2.5rem;color:var(--primary);"></i>
+                <div style="font-weight:600;color:var(--text-secondary);">Initializing SaaS Engine...</div>
+            </div>
         </div>
     `;
 
@@ -2487,6 +2511,16 @@ async function loadExternalModule(sectionId, href) {
         const parser = new DOMParser();
         const doc = parser.parseFromString(html, 'text/html');
 
+        // PRODUCTION FIX: Extract content area only (avoid sidebar duplication)
+        const mainContent = doc.querySelector('.main, .hr-main, .content, .shell > .main');
+        if (mainContent) {
+            // Strip nested topbars and sidebars if they leaked into selection
+            mainContent.querySelectorAll('.sidebar, sidebar, .topbar, topbar, .sb-top').forEach(el => el.remove());
+            container.innerHTML = mainContent.innerHTML;
+        } else {
+            container.innerHTML = doc.body.innerHTML;
+        }
+
         doc.querySelectorAll('link[rel="stylesheet"]').forEach(link => {
             const href = link.getAttribute('href');
             if (href && !document.querySelector(`link[href*="${href.split('/').pop()}"]`)) {
@@ -2497,10 +2531,6 @@ async function loadExternalModule(sectionId, href) {
             }
         });
         doc.querySelectorAll('style').forEach(style => document.head.appendChild(style.cloneNode(true)));
-
-        const mainContent = doc.querySelector('.hr-main');
-        container.innerHTML = (mainContent ? mainContent.innerHTML : doc.body.innerHTML);
-        doc.querySelectorAll('.hr-modal-overlay, .modal').forEach(m => container.innerHTML += m.outerHTML);
 
         window.loadedScripts = window.loadedScripts || new Set();
 
