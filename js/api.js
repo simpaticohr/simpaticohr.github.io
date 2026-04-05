@@ -40,7 +40,7 @@ const API = (() => {
                 if (res.status === 401) {
                     clearAuth();
                     if (!window.location.pathname.includes('login')) {
-                        window.location.href = '/login.html?expired=true';
+                        window.location.href = '/platform/login.html?expired=true';
                     }
                 }
                 throw new Error(data.error || `Request failed (${res.status})`);
@@ -119,7 +119,7 @@ const API = (() => {
 
         logout() {
             clearAuth();
-            window.location.href = '/login.html';
+            window.location.href = '/platform/login.html';
         },
 
         get isAuthenticated() { return !!_token && !!_user; },
@@ -334,7 +334,7 @@ const API = (() => {
     };
 
     // Auth guard
-    function requireAuth(redirectTo = '/login.html') {
+    function requireAuth(redirectTo = '/platform/login.html') {
         if (!auth.isAuthenticated) {
             window.location.href = `${redirectTo}?redirect=${encodeURIComponent(window.location.pathname)}`;
             return false;
@@ -346,7 +346,7 @@ const API = (() => {
         if (!requireAuth()) return false;
         if (!roles.includes(_user?.role)) {
             toast.error('Access Denied', 'You do not have permission.');
-            setTimeout(() => window.location.href = '/login.html', 1500);
+            setTimeout(() => window.location.href = '/platform/login.html', 1500);
             return false;
         }
         return true;
