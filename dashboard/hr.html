@@ -1516,6 +1516,14 @@
             <div class="page-header"><div><h1>AI Assistant</h1><div class="breadcrumb-nav"><a href="#" onclick="navigateTo('dashboard')">Dashboard</a> / AI Assistant</div></div></div>
             <div id="aiAssistant-module-container"></div>
         </div>
+        <div id="section-cxPersonalization" class="content-section" style="display:none;">
+            <div class="page-header"><div><h1>CX Hyper-Personalization</h1><div class="breadcrumb-nav"><a href="#" onclick="navigateTo('dashboard')">Dashboard</a> / CX Personalization</div></div></div>
+            <div id="cxPersonalization-module-container"></div>
+        </div>
+        <div id="section-dbAnalytics" class="content-section" style="display:none;">
+            <div class="page-header"><div><h1>DB Analytics</h1><div class="breadcrumb-nav"><a href="#" onclick="navigateTo('dashboard')">Dashboard</a> / DB Analytics</div></div></div>
+            <div id="dbAnalytics-module-container"></div>
+        </div>
         <div id="section-atsAutomation" class="content-section" style="display:none;">
             <div class="page-header"><div><h1>ATS Automation</h1><div class="breadcrumb-nav"><a href="#" onclick="navigateTo('dashboard')">Dashboard</a> / ATS Engine</div></div></div>
             <div id="atsAutomation-module-container"></div>
@@ -2515,18 +2523,39 @@ async function loadExternalModule(sectionId, href) {
         const mainContent = doc.querySelector('.main, .hr-main, .content, .shell > .main');
         if (mainContent) {
             // Strip nested topbars and sidebars if they leaked into selection
-            mainContent.querySelectorAll('.sidebar, sidebar, .topbar, topbar, .sb-top').forEach(el => el.remove());
+            mainContent.querySelectorAll('.sidebar, sidebar, .topbar, topbar, .sb-top, .cx-topbar, .db-topbar, .nav-label, nav.sidebar').forEach(el => el.remove());
             container.innerHTML = mainContent.innerHTML;
         } else {
             container.innerHTML = doc.body.innerHTML;
         }
 
+        // GLOBAL UI COMPONENTS: Extract and append drawers, modals, and toast containers to body
+        // FIX: If element with same ID exists, replace its innerHTML to avoid null references in module scripts
+        doc.querySelectorAll('.tc, .drawer-overlay, .drawer, .mo, .modal, #tc, #drawer, .drawer-content').forEach(el => {
+            if (el.id) {
+                let existing = document.getElementById(el.id);
+                if (existing) {
+                    existing.innerHTML = el.innerHTML;
+                    // Copy classes if they were changed
+                    existing.className = el.className;
+                } else {
+                    const clone = el.cloneNode(true);
+                    document.body.appendChild(clone);
+                }
+                el.remove();
+            } else if (el.classList.contains('mo') || el.classList.contains('drawer')) {
+                // If it's a structural element without ID but has class, add it if not already present
+                document.body.appendChild(el.cloneNode(true));
+                el.remove();
+            }
+        });
+
         doc.querySelectorAll('link[rel="stylesheet"]').forEach(link => {
-            const href = link.getAttribute('href');
-            if (href && !document.querySelector(`link[href*="${href.split('/').pop()}"]`)) {
+            const lHref = link.getAttribute('href');
+            if (lHref && !document.querySelector(`link[href*="${lHref.split('/').pop()}"]`)) {
                 const newLink = document.createElement('link');
                 newLink.rel = 'stylesheet';
-                newLink.href = href;
+                newLink.href = lHref;
                 document.head.appendChild(newLink);
             }
         });
@@ -2536,31 +2565,41 @@ async function loadExternalModule(sectionId, href) {
 
         for (const oldScript of doc.querySelectorAll('script')) {
             let jsCode = "";
-            let scriptName = oldScript.src ? oldScript.src.split('/').pop() : "inline-" + Math.random().toString(36).substr(2, 5);
+            let srcAttr = oldScript.getAttribute('src');
+            let scriptName = srcAttr ? srcAttr.split('/').pop() : "inline-" + Math.random().toString(36).substr(2, 5);
 
-            if (oldScript.src) {
+            if (srcAttr) {
+                // Fix relative paths: root scripts like "js/app.js" fetched from "dashboard/" should use "../"
+                let scriptUrl = srcAttr;
+                if (!srcAttr.startsWith('http') && !srcAttr.startsWith('/') && !srcAttr.startsWith('../')) {
+                    scriptUrl = '../' + srcAttr;
+                }
+
                 if (scriptName.includes('supabase') || scriptName.includes('hr-config')) continue;
                 if (window.loadedScripts.has(scriptName)) continue; 
                 window.loadedScripts.add(scriptName);
                 
-                const scriptRes = await fetch(oldScript.src);
-                if (!scriptRes.ok) {
-                    console.warn(`[Module Loader] Skipping missing script: ${oldScript.src}`);
+                try {
+                    const scriptRes = await fetch(scriptUrl);
+                    if (!scriptRes.ok) {
+                        console.warn(`[Module Loader] Skipping missing script: ${scriptUrl}`);
+                        continue;
+                    }
+                    jsCode = await scriptRes.text();
+                } catch (e) {
+                    console.warn(`[Module Loader] Failed to fetch script: ${scriptUrl}`);
                     continue;
                 }
-                const contentType = scriptRes.headers.get('content-type');
-                if (contentType && !contentType.includes('javascript') && !contentType.includes('application/x-javascript')) {
-                    console.warn(`[Module Loader] Skipping non-JS script: ${oldScript.src} (${contentType})`);
-                    continue;
-                }
-                jsCode = await scriptRes.text();
             } else {
                 if (oldScript.textContent.includes('window.self !== window.top')) continue;
                 jsCode = oldScript.textContent;
             }
 
-          jsCode = jsCode.replace(/(const|let)\s+(SB_URL|SB_ANON|TENANT|WORKER_URL|AN_CONFIG|_sb|sbHeaders|allEmployees|filtered|currentView|editingId|avatarColors|statusBadge|statusLabel|typeLabel|conversations|currentConvId|messages|activeContexts|isStreaming|currentUserInitials|AI_CONFIG)\s*=/g, 'var $2 =');
+            // SaaS VARIABLE COLLISION PROTECTION: convert const/let to var for SPA persistence
+            // Added more common variable names used in modules
+            jsCode = jsCode.replace(/(const|let)\s+(SB_URL|SB_ANON|TENANT|WORKER_URL|AN_CONFIG|_sb|sbHeaders|allEmployees|filtered|currentView|editingId|avatarColors|statusBadge|statusLabel|typeLabel|conversations|currentConvId|messages|activeContexts|isStreaming|currentUserInitials|AI_CONFIG|CANDIDATES|STAGES|STAGE_KEYS|TRIG_LABELS|ACT_LABELS|STAGE_COLORS|ICON_MAP|INTEGRATIONS|pendingAI|SLA_CONFIG|TEMPLATES|KR|KL|actCount)\s*=/g, 'var $2 =');
             
+            // SPA EVENT BINDING: Redirect DOMContentLoaded to custom SPA ready event
             jsCode = jsCode.replace(/document\.addEventListener\(\s*['"`]DOMContentLoaded['"`]/g, "window.addEventListener('SimpaticoSPA'");
 
             const newScript = document.createElement('script');
