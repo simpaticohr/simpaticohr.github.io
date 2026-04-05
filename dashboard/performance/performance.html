@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
@@ -100,7 +100,7 @@
     .form-input:focus { border-color:var(--primary); box-shadow:0 0 0 3px rgba(79,70,229,.1); }
     select.form-input { cursor:pointer; }
     textarea.form-input { min-height:80px; resize:vertical; }
-    .rating-picker { display:flex; gap:6px; }
+    .rating-picker { display:flex; flex-direction: row-reverse; justify-content: flex-end; gap:6px; }
     .rating-picker label { cursor:pointer; font-size:1.6rem; opacity:.35; transition:.15s; }
     .rating-picker input { display:none; }
     .rating-picker input:checked ~ label, .rating-picker label:hover, .rating-picker label:hover ~ label { opacity:1; }
@@ -146,7 +146,7 @@
     @media(max-width:600px) { .perf-stats { grid-template-columns:1fr 1fr; } .nine-box-grid { font-size:.8rem; } }
   </style>
 </head>
-<body>
+<body class="hr-main">
 <div class="toast-container" id="toastContainer"></div>
 
 <!-- ── MAIN CONTENT ── -->
@@ -395,23 +395,29 @@
 </div>
 
 <script src="../../js/hr-config.js"></script>
-<script src="../../js/shared-utils.js"></script>
-<script src="../../js/supabase-client.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-
 <script>
 // ══════════════════════════════════════════════════════
 // CONFIG
 // ══════════════════════════════════════════════════════
-const SB_URL = window.SIMPATICO_CONFIG?.supabaseUrl;
-const SB_ANON = window.SIMPATICO_CONFIG?.supabaseAnonKey;
+const API_URL = window.SIMPATICO_CONFIG?.workerUrl;
 const TENANT  = (window.SIMPATICO_CONFIG && window.SIMPATICO_CONFIG.tenantId) || 'default';
 
-// Iframe-embed detection
 if (window.self !== window.top) document.body.classList.add('embedded');
 
-const sb = supabase.createClient(SB_URL, SB_ANON);
-const headers = { 'X-Tenant-ID': TENANT };
+function apiHeader(ex) {
+    const h = { 'Content-Type': 'application/json', 'X-Tenant-ID': TENANT };
+    if (ex) Object.assign(h, ex);
+    return h;
+}
+
+async function apiCall(path, method = 'GET', body = null) {
+    const opts = { method, headers: apiHeader() };
+    if (body) opts.body = JSON.stringify(body);
+    const res = await fetch(API_URL + path, opts);
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || data.message || res.statusText);
+    return data;
+}
 
 let allReviews = [], allGoals = [], allCycles = [];
 
@@ -422,9 +428,13 @@ document.addEventListener('DOMContentLoaded', () => {
     loadAll();
     setupRatingPicker();
     const today = new Date().toISOString().split('T')[0];
-    document.getElementById('cycle-start').value = today;
-    const end = new Date(); end.setMonth(end.getMonth()+3);
-    document.getElementById('cycle-end').value = end.toISOString().split('T')[0];
+    const cStart = document.getElementById('cycle-start');
+    const cEnd   = document.getElementById('cycle-end');
+    if(cStart) cStart.value = today;
+    if(cEnd) {
+      const end = new Date(); end.setMonth(end.getMonth()+3);
+      cEnd.value = end.toISOString().split('T')[0];
+    }
 });
 
 async function loadAll() {
@@ -433,47 +443,29 @@ async function loadAll() {
     buildNineBox();
 }
 
-// ══════════════════════════════════════════════════════
-// LOAD DATA — direct Supabase REST (no external JS)
-// ══════════════════════════════════════════════════════
-async function sbGet(table, params='') {
-    const res = await fetch(`${SB_URL}/rest/v1/${table}?${params}`, {
-        headers: { apikey: SB_ANON, Authorization: `Bearer ${SB_ANON}`, 'X-Tenant-ID': TENANT }
-    });
-    if (!res.ok) { console.warn(`[${table}] ${res.status}`, await res.text()); return []; }
-    return res.json();
-}
-
-async function sbPost(table, body) {
-    const res = await fetch(`${SB_URL}/rest/v1/${table}`, {
-        method: 'POST',
-        headers: { apikey: SB_ANON, Authorization: `Bearer ${SB_ANON}`, 'Content-Type': 'application/json', Prefer: 'return=representation', 'X-Tenant-ID': TENANT },
-        body: JSON.stringify(body)
-    });
-    if (!res.ok) { const e = await res.text(); throw new Error(e); }
-    return res.json();
-}
-
 async function loadCycles() {
-    // ✅ FIXED: use `order=start_date.desc` — no colon, no number suffix
-    const data = await sbGet('performance_cycles', 'select=*&order=start_date.desc');
-    allCycles = Array.isArray(data) ? data : [];
-    renderCycles();
-    populateCycleSelects();
+    try {
+        const data = await apiCall('/performance/cycles');
+        allCycles = Array.isArray(data) ? data : [];
+        renderCycles();
+        populateCycleSelects();
+    } catch(e) { console.error('Cycles error:', e); }
 }
 
 async function loadReviews() {
-    // ✅ FIXED: select only real columns; join with performance_cycles
-    const data = await sbGet('performance_reviews',
-        'select=*,performance_cycles(name)&order=submitted_at.desc&limit=100');
-    allReviews = Array.isArray(data) ? data : [];
-    renderReviews(allReviews);
+    try {
+        const data = await apiCall('/performance/reviews');
+        allReviews = Array.isArray(data) ? data : [];
+        renderReviews(allReviews);
+    } catch(e) { console.error('Reviews error:', e); }
 }
 
 async function loadGoals() {
-    const data = await sbGet('goals', 'select=*&order=created_at.desc&limit=100');
-    allGoals = Array.isArray(data) ? data : [];
-    renderGoals(allGoals);
+    try {
+        const data = await apiCall('/performance/goals');
+        allGoals = Array.isArray(data) ? data : [];
+        renderGoals(allGoals);
+    } catch(e) { console.error('Goals error:', e); }
 }
 
 // ══════════════════════════════════════════════════════
@@ -490,7 +482,7 @@ function updateStats() {
 
     set('stat-cycles',  activeCycles || allCycles.length || '0');
     set('stat-avg',     avg + (avg !== '—' ? '★' : ''));
-    set('stat-pending', pending || allReviews.length || '0');
+    set('stat-pending', pending || '0');
     set('stat-goals',   goalPct);
     set('stat-goals-sub', totalGoals ? `${doneGoals} of ${totalGoals} goals` : 'No goals yet');
 }
@@ -531,12 +523,35 @@ function renderReviews(list) {
             ${r.strengths    ? `<div class="rc-section">Strengths</div><div class="rc-text">${esc(r.strengths)}</div>` : ''}
             ${r.improvements ? `<div class="rc-section">Areas for Growth</div><div class="rc-text">${esc(r.improvements)}</div>` : ''}
             ${r.comments     ? `<div class="rc-section">Comments</div><div class="rc-text">${esc(r.comments)}</div>` : ''}
+            <div id="ai-fb-${r.id}" style="margin-top:10px;"></div>
             <div class="rc-footer">
                 <span class="cycle-tag">${esc(cycle)}</span>
-                <span style="font-size:.75rem;color:var(--muted)">${date}</span>
+                <div style="display:flex;gap:8px;align-items:center">
+                    <button class="btn btn-sm btn-ghost" onclick="getAIFeedback('${r.id}')" id="ai-btn-${r.id}">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg> AI Analysis
+                    </button>
+                    <span style="font-size:.75rem;color:var(--muted);">${date}</span>
+                </div>
             </div>
         </div>`;
     }).join('');
+}
+
+async function getAIFeedback(reviewId) {
+    const btn = document.getElementById(`ai-btn-${reviewId}`);
+    const area = document.getElementById(`ai-fb-${reviewId}`);
+    btn.disabled = true; btn.textContent = 'Generating...';
+    try {
+        const data = await apiCall('/ai/performance-feedback', 'POST', { review_id: reviewId });
+        area.innerHTML = `<div style="background:#f8fafc;padding:12px;border-radius:8px;font-size:0.83rem;border-left:3px solid var(--primary);margin-top:8px;">
+            <div style="font-weight:700;font-size:0.7rem;text-transform:uppercase;color:var(--primary);margin-bottom:4px;">AI Suggested Feedback</div>
+            <div style="color:var(--text);line-height:1.4;">${esc(data.feedback)}</div>
+        </div>`;
+    } catch(e) {
+        area.innerHTML = `<div style="color:var(--danger);font-size:0.75rem;margin-top:5px;">Error: ${e.message}</div>`;
+    } finally {
+        btn.disabled = false; btn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg> AI Analysis';
+    }
 }
 
 function filterReviews() {
@@ -626,7 +641,7 @@ function renderCycles() {
 // ══════════════════════════════════════════════════════
 function buildNineBox() {
     const g = document.getElementById('nine-box-grid');
-    // Cells: [row][col] — high perf + high potential → star
+    if(!g) return;
     const cells = [
         { label:'Underperformer', style:'nb-risk',  perf:[1,2], pot:[1,2] },
         { label:'Core Player',    style:'nb-mid',   perf:[1,2], pot:[3]   },
@@ -638,13 +653,11 @@ function buildNineBox() {
         { label:'High Performer', style:'nb-high',  perf:[4,5], pot:[3]   },
         { label:'Star',           style:'nb-star',  perf:[4,5], pot:[4,5] },
     ];
-    // Map employees to cells using latest review rating as perf, random pot for demo
     const counts = cells.map(cell => {
         const n = allReviews.filter(r => cell.perf.includes(r.rating)).length;
         return { ...cell, count: n };
     });
-    // Render 3×3 grid (top-left = star for high-high)
-    const order = [8,7,6, 5,4,3, 2,1,0]; // reverse row order so stars at top-right
+    const order = [8,7,6, 5,4,3, 2,1,0];
     g.innerHTML = order.map(i => {
         const c = counts[i];
         return `<div class="nine-box-cell ${c.style}">
@@ -684,7 +697,7 @@ function getSelectedRating() {
 }
 
 // ══════════════════════════════════════════════════════
-// SAVE — CYCLES
+// SAVE ACTIONS
 // ══════════════════════════════════════════════════════
 async function saveCycle() {
     const name  = document.getElementById('cycle-name').value.trim();
@@ -695,13 +708,12 @@ async function saveCycle() {
 
     setBtnLoading('save-cycle-btn', true);
     try {
-        await sbPost('performance_cycles', { name, start_date: start || null, end_date: end || null, description: desc || null, tenant_id: TENANT });
+        await apiCall('/performance/cycles', 'POST', { name, start_date: start || null, end_date: end || null, description: desc || null, tenant_id: TENANT });
         toast('✅ Review cycle created!');
         closeModal('cycleModal');
         document.getElementById('cycle-name').value = '';
         document.getElementById('cycle-desc').value = '';
-        await loadCycles();
-        updateStats();
+        await loadCycles(); updateStats();
     } catch (e) {
         toast('Failed to create cycle: ' + e.message, 'error');
     } finally {
@@ -709,9 +721,6 @@ async function saveCycle() {
     }
 }
 
-// ══════════════════════════════════════════════════════
-// SAVE — REVIEWS
-// ══════════════════════════════════════════════════════
 async function saveReview() {
     const empId  = document.getElementById('rev-employee').value.trim();
     const cycleId = document.getElementById('rev-cycle').value;
@@ -720,7 +729,7 @@ async function saveReview() {
 
     setBtnLoading('save-review-btn', true);
     try {
-        await sbPost('performance_reviews', {
+        await apiCall('/performance/reviews', 'POST', {
             employee_id:  empId,
             cycle_id:     cycleId,
             rating,
@@ -739,8 +748,7 @@ async function saveReview() {
         document.getElementById('rev-comments').value = '';
         document.querySelectorAll('.rating-picker input').forEach(i=>i.checked=false);
         set('rating-label','Select a rating');
-        await loadReviews();
-        updateStats();
+        await loadReviews(); updateStats();
     } catch (e) {
         toast('Failed to submit review: ' + e.message, 'error');
     } finally {
@@ -748,9 +756,6 @@ async function saveReview() {
     }
 }
 
-// ══════════════════════════════════════════════════════
-// SAVE — GOALS
-// ══════════════════════════════════════════════════════
 async function saveGoal() {
     const title = document.getElementById('goal-title').value.trim();
     const empId = document.getElementById('goal-employee').value.trim();
@@ -758,7 +763,7 @@ async function saveGoal() {
 
     setBtnLoading('save-goal-btn', true);
     try {
-        await sbPost('goals', {
+        await apiCall('/performance/goals', 'POST', {
             title,
             employee_id: empId,
             description: document.getElementById('goal-desc').value.trim() || null,
@@ -775,8 +780,7 @@ async function saveGoal() {
         document.getElementById('goal-desc').value = '';
         document.getElementById('goal-period').value = '';
         document.getElementById('goal-due').value = '';
-        await loadGoals();
-        updateStats();
+        await loadGoals(); updateStats();
     } catch (e) {
         toast('Failed to add goal: ' + e.message, 'error');
     } finally {
@@ -790,46 +794,34 @@ async function updateGoalProgress(id, currentPct) {
     const pct = Math.min(100, Math.max(0, parseInt(newPct)||0));
     const status = pct === 100 ? 'completed' : pct >= 70 ? 'on_track' : pct >= 40 ? 'at_risk' : 'behind';
     try {
-        await fetch(`${SB_URL}/rest/v1/goals?id=eq.${id}`, {
-            method: 'PATCH',
-            headers: { apikey: SB_ANON, Authorization: `Bearer ${SB_ANON}`, 'Content-Type': 'application/json', Prefer: 'return=representation', 'X-Tenant-ID': TENANT },
-            body: JSON.stringify({ progress: pct, status })
-        });
+        await apiCall('/performance/goals/' + id, 'PATCH', { progress: pct, status });
         toast('✅ Progress updated!');
         await loadGoals(); updateStats();
-    } catch(e) { toast('Update failed', 'error'); }
+    } catch(e) { toast('Update failed: ' + e.message, 'error'); }
 }
 
 // ══════════════════════════════════════════════════════
-// MODAL HELPERS
+// UI HELPERS
 // ══════════════════════════════════════════════════════
 function openCycleModal()  { document.getElementById('cycleModal').classList.add('open'); }
 function openReviewModal() { populateCycleSelects(); document.getElementById('reviewModal').classList.add('open'); }
 function openGoalModal()   { document.getElementById('goalModal').classList.add('open'); }
 function closeModal(id)    { document.getElementById(id).classList.remove('open'); }
-// Also expose as openReviewCycleModal for backward compatibility
-window.openReviewCycleModal = openCycleModal;
 
-// Close on backdrop click
 document.querySelectorAll('.modal-overlay').forEach(el => {
     el.addEventListener('click', e => { if (e.target === el) el.classList.remove('open'); });
 });
 
-// ══════════════════════════════════════════════════════
-// TAB SWITCHING
-// ══════════════════════════════════════════════════════
 function switchTab(name, btn) {
     ['reviews','goals','cycles','ninebox'].forEach(t => {
-        document.getElementById('tab-'+t).style.display = t === name ? 'block' : 'none';
+        const el = document.getElementById('tab-'+t);
+        if(el) el.style.display = t === name ? 'block' : 'none';
     });
     document.querySelectorAll('.perf-tab').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
     if (name === 'ninebox') buildNineBox();
 }
 
-// ══════════════════════════════════════════════════════
-// UTILS
-// ══════════════════════════════════════════════════════
 function set(id, val) { const e = document.getElementById(id); if (e) e.textContent = val; }
 function esc(s) { if (!s) return ''; return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 
@@ -846,8 +838,11 @@ function setBtnLoading(id, loading) {
     const b = document.getElementById(id);
     if (!b) return;
     b.disabled = loading;
-    b.textContent = loading ? 'Saving…' : b.dataset.label || b.textContent;
-    if (!loading && !b.dataset.label) b.dataset.label = b.textContent;
+    if (!loading) { b.textContent = b.dataset.label || b.textContent; }
+    else {
+      if(!b.dataset.label) b.dataset.label = b.textContent;
+      b.textContent = 'Saving…';
+    }
 }
 </script>
 </body>

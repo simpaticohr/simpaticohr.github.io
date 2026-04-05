@@ -55,6 +55,7 @@ export default {
     try {
       // ── Employees ──
       if (path === '/employees' && method === 'POST') return handleCreateEmployee(request, env, token, corsHeaders);
+      if (path === '/employees' && method === 'GET')  return handleGetEmployees(request, env, token, url, corsHeaders);
       if (path.match(/^\/employees\/[^/]+\/avatar$/) && method === 'POST') return handleUploadAvatar(request, env, token, path, corsHeaders);
       if (path.match(/^\/employees\/[^/]+\/documents$/) && method === 'POST') return handleUploadDocument(request, env, token, path, corsHeaders);
 
@@ -72,10 +73,19 @@ export default {
 
       // ── Performance ──
       if (path === '/performance/cycles' && method === 'POST') return handleCreateCycle(request, env, token, corsHeaders);
+      if (path === '/performance/cycles' && method === 'GET')  return handleGetCycles(request, env, token, url, corsHeaders);
+      if (path === '/performance/reviews' && method === 'POST') return handleCreateReview(request, env, token, corsHeaders);
+      if (path === '/performance/reviews' && method === 'GET')  return handleGetReviews(request, env, token, url, corsHeaders);
+      if (path === '/performance/goals' && method === 'POST') return handleCreateGoal(request, env, token, corsHeaders);
+      if (path === '/performance/goals' && method === 'GET')  return handleGetGoals(request, env, token, url, corsHeaders);
+      if (path.match(/^\/performance\/goals\/[^/]+$/) && method === 'PATCH') return handleUpdateGoal(request, env, token, path, corsHeaders);
 
       // ── Leave ──
       if (path === '/leave' && method === 'POST') return handleSubmitLeave(request, env, token, corsHeaders);
+      if (path === '/leave' && method === 'GET')  return handleGetLeaves(request, env, token, url, corsHeaders);
+      if (path === '/leave/balances' && method === 'GET') return handleGetLeaveBalances(request, env, token, url, corsHeaders);
       if (path.match(/^\/leave\/[^/]+\/(approved|rejected)$/) && method === 'PATCH') return handleLeaveDecision(request, env, token, path, corsHeaders);
+
 
       // ── Policies ──
       if (path === '/policies' && method === 'POST') return handleUploadPolicy(request, env, token, corsHeaders);
@@ -132,6 +142,16 @@ async function handleCreateEmployee(request, env, token, corsHeaders) {
 
   return json({ success: true, employee: data[0] || data }, 201, corsHeaders);
 }
+
+async function handleGetEmployees(request, env, token, url, corsHeaders) {
+  const tenantId = request.headers.get('X-Tenant-ID') || 'default';
+  const status = url.searchParams.get('status');
+  const query = `select=*&tenant_id=eq.${tenantId}${status ? `&status=eq.${status}` : ''}&order=created_at.desc`;
+  const res = await sbFetch(env, 'GET', `/rest/v1/employees?${query}`);
+  const data = await res.json();
+  return json(data, 200, corsHeaders);
+}
+
 
 async function handleUploadAvatar(request, env, token, path, corsHeaders) {
   const empId = path.split('/')[2];
@@ -338,6 +358,54 @@ async function handleCreateCycle(request, env, token, corsHeaders) {
   return json({ success: true, cycle_id: cycleId }, 201, corsHeaders);
 }
 
+async function handleGetCycles(request, env, token, url, corsHeaders) {
+  const tenantId = request.headers.get('X-Tenant-ID') || 'default';
+  const res = await sbFetch(env, 'GET', `/rest/v1/review_cycles?tenant_id=eq.${tenantId}&order=start_date.desc`);
+  const data = await res.json();
+  return json(data, 200, corsHeaders);
+}
+
+async function handleCreateReview(request, env, token, corsHeaders) {
+  const body = await request.json();
+  const res = await sbFetch(env, 'POST', '/rest/v1/performance_reviews', body);
+  const data = await res.json();
+  return json({ success: true, review: data[0] || data }, 201, corsHeaders);
+}
+
+async function handleGetReviews(request, env, token, url, corsHeaders) {
+  const tenantId = request.headers.get('X-Tenant-ID') || 'default';
+  const cycleId = url.searchParams.get('cycle_id');
+  const query = `select=*,performance_cycles(name)&tenant_id=eq.${tenantId}${cycleId ? `&cycle_id=eq.${cycleId}` : ''}&order=submitted_at.desc`;
+  const res = await sbFetch(env, 'GET', `/rest/v1/performance_reviews?${query}`);
+  const data = await res.json();
+  return json(data, 200, corsHeaders);
+}
+
+async function handleCreateGoal(request, env, token, corsHeaders) {
+  const body = await request.json();
+  const res = await sbFetch(env, 'POST', '/rest/v1/goals', body);
+  const data = await res.json();
+  return json({ success: true, goal: data[0] || data }, 201, corsHeaders);
+}
+
+async function handleGetGoals(request, env, token, url, corsHeaders) {
+  const tenantId = request.headers.get('X-Tenant-ID') || 'default';
+  const status = url.searchParams.get('status');
+  const query = `select=*&tenant_id=eq.${tenantId}${status ? `&status=eq.${status}` : ''}&order=created_at.desc`;
+  const res = await sbFetch(env, 'GET', `/rest/v1/goals?${query}`);
+  const data = await res.json();
+  return json(data, 200, corsHeaders);
+}
+
+async function handleUpdateGoal(request, env, token, path, corsHeaders) {
+  const id = path.split('/')[3];
+  const body = await request.json();
+  const res = await sbFetch(env, 'PATCH', `/rest/v1/goals?id=eq.${id}`, body);
+  const data = await res.json();
+  return json({ success: true, goal: data[0] || data }, 200, corsHeaders);
+}
+
+
 // ════════════════════════════════════════════════════════
 // LEAVE
 // ════════════════════════════════════════════════════════
@@ -350,6 +418,25 @@ async function handleSubmitLeave(request, env, token, corsHeaders) {
   const data = await res.json();
   return json({ success: true, leave: data[0] || data }, 201, corsHeaders);
 }
+
+async function handleGetLeaves(request, env, token, url, corsHeaders) {
+  const tenantId = request.headers.get('X-Tenant-ID') || 'default';
+  const status = url.searchParams.get('status');
+  const query = `select=*,employees(first_name,last_name)&tenant_id=eq.${tenantId}${status ? `&status=eq.${status}` : ''}&order=submitted_at.desc`;
+  const res = await sbFetch(env, 'GET', `/rest/v1/leave_requests?${query}`);
+  const data = await res.json();
+  return json(data, 200, corsHeaders);
+}
+
+async function handleGetLeaveBalances(request, env, token, url, corsHeaders) {
+  const tenantId = request.headers.get('X-Tenant-ID') || 'default';
+  const empId = url.searchParams.get('employee_id');
+  const query = `select=*&tenant_id=eq.${tenantId}${empId ? `&employee_id=eq.${empId}` : ''}`;
+  const res = await sbFetch(env, 'GET', `/rest/v1/leave_balances?${query}`);
+  const data = await res.json();
+  return json(data, 200, corsHeaders);
+}
+
 
 async function handleLeaveDecision(request, env, token, path, corsHeaders) {
   const parts  = path.split('/');

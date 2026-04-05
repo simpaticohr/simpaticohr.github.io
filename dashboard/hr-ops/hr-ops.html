@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -113,19 +113,26 @@ table tbody tr:hover{background:#f8fafc}
 </div>
 
 <script src="../../js/hr-config.js"></script>
-<script src="../../js/shared-utils.js"></script>
-<script src="../../js/supabase-client.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-
 <script>
-var SB  = window.SIMPATICO_CONFIG?.supabaseUrl;
-var KEY = window.SIMPATICO_CONFIG?.supabaseAnonKey;
+var API = window.SIMPATICO_CONFIG?.workerUrl;
 var TENANT = (window.SIMPATICO_CONFIG && window.SIMPATICO_CONFIG.tenantId) || 'default';
 if(window.self!==window.top)document.body.classList.add('emb');
-function hdr(ex){var h={'apikey':KEY,'Authorization':'Bearer '+KEY,'Content-Type':'application/json','X-Tenant-ID':TENANT};if(ex)Object.assign(h,ex);return h;}
-async function get(qs){var r=await fetch(SB+'/rest/v1/'+qs,{headers:hdr()});var d=await r.json();if(!r.ok)throw new Error((d&&d.message)||r.statusText);return Array.isArray(d)?d:[];}
-async function post(t,b){var r=await fetch(SB+'/rest/v1/'+t,{method:'POST',headers:hdr({'Prefer':'return=representation'}),body:JSON.stringify(b)});var d=await r.json();if(!r.ok)throw new Error((d&&d.message)||r.statusText);return d;}
-async function pat(t,id,b){var r=await fetch(SB+'/rest/v1/'+t+'?id=eq.'+id,{method:'PATCH',headers:hdr({'Prefer':'return=representation'}),body:JSON.stringify(b)});var d=await r.json();if(!r.ok)throw new Error((d&&d.message)||r.statusText);return d;}
+
+function hdr(ex){
+  var h={'Content-Type':'application/json','X-Tenant-ID':TENANT};
+  if(ex)Object.assign(h,ex);
+  return h;
+}
+
+async function apiCall(path, method='GET', body=null){
+  var opts = { method, headers: hdr() };
+  if(body) opts.body = JSON.stringify(body);
+  var r = await fetch(API + path, opts);
+  var d = await r.json();
+  if(!r.ok) throw new Error((d&&d.error)||d.message||r.statusText);
+  return d;
+}
+
 function fmtD(s){if(!s)return'—';try{return new Date(s+'T00:00:00').toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'});}catch(e){return s;}}
 function x(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
 function el(id){return document.getElementById(id);}
@@ -135,10 +142,10 @@ window.addEventListener('DOMContentLoaded',loadLeaves);
 
 async function loadLeaves(){
   var st=el('lf').value||'';
-  var qs='leave_requests?select=*,employees(first_name,last_name)&order=submitted_at.desc&limit=50'+(st?'&status=eq.'+st:'');
+  var path = '/leave' + (st ? '?status='+st : '');
   el('leaves-area').innerHTML='<div class="es">Loading…</div>';
   try{
-    var data=await get(qs);
+    var data = await apiCall(path);
     var pend=data.filter(function(d){return d.status==='pending';}).length;
     var appr=data.filter(function(d){return d.status==='approved';}).length;
     var rej=data.filter(function(d){return d.status==='rejected';}).length;
@@ -152,7 +159,7 @@ async function loadLeaves(){
         var st=r.status||'—';
         var bc=st==='approved'?'bg-appr':st==='rejected'?'bg-rej':'bg-pend';
         return '<tr><td><strong>'+x(nm)+'</strong></td><td>'+x((r.leave_type||'').replace('_',' '))+'</td><td>'+fmtD(r.from_date)+'</td><td>'+fmtD(r.to_date)+'</td><td>'+x(r.days||1)+'</td><td><span class="bg '+bc+'">'+x(st)+'</span></td><td style="white-space:nowrap">'+
-          (st==='pending'?'<button class="bs bsa" onclick="decide(\''+x(S(r.id))+'\',\'approved\')">Approve</button> <button class="bs bsr" onclick="decide(\''+x(S(r.id))+'\',\'rejected\')">Reject</button>':'—')+'</td></tr>';
+          (st==='pending'?'<button class="bs bsa" onclick="decide(\''+x(r.id)+'\',\'approved\')">Approve</button> <button class="bs bsr" onclick="decide(\''+x(r.id)+'\',\'rejected\')">Reject</button>':'—')+'</td></tr>';
       }).join('')+'</tbody></table></div>';
   }catch(e){el('leaves-area').innerHTML='<div class="es">'+x(e.message)+'</div>';}
 }
@@ -160,7 +167,7 @@ async function loadLeaves(){
 async function decide(id,decision){
   if(!confirm(decision==='approved'?'Approve this leave request?':'Reject this leave request?'))return;
   try{
-    await pat('leave_requests',id,{status:decision,decided_at:new Date().toISOString()});
+    await apiCall('/leave/'+id+'/'+decision, 'PATCH');
     toast('✅ Leave '+decision); await loadLeaves();
   }catch(e){toast('Error: '+e.message,'er');}
 }
@@ -170,7 +177,7 @@ async function loadBalance(){
   if(!empId){toast('Enter an employee ID','er');return;}
   el('balance-area').innerHTML='<div class="es">Loading…</div>';
   try{
-    var data=await get('leave_balances?employee_id=eq.'+encodeURIComponent(empId)+'&select=*');
+    var data = await apiCall('/leave/balances?employee_id='+encodeURIComponent(empId));
     if(!data.length){el('balance-area').innerHTML='<div class="es"><p>No leave balance found for this employee.</p></div>';return;}
     el('balance-area').innerHTML='<div style="overflow-x:auto"><table><thead><tr><th>Leave Type</th><th>Entitled</th><th>Used</th><th>Remaining</th></tr></thead><tbody>'+
       data.map(function(b){
@@ -200,13 +207,19 @@ async function submitLeave(){
   if(new Date(td)<new Date(fd)){var e=el('lerr');e.textContent='To date must be after from date.';e.classList.add('on');return;}
   el('lbtn').disabled=true;el('lbtn').textContent='Submitting…';
   try{
-    await post('leave_requests',{employee_id:emp,leave_type:lt,from_date:fd,to_date:td,reason:reason||null,status:'pending',submitted_at:new Date().toISOString(),tenant_id:TENANT});
+    await apiCall('/leave', 'POST', {
+      employee_id: emp,
+      leave_type: lt,
+      from_date: fd,
+      to_date: td,
+      reason: reason || null,
+      tenant_id: TENANT
+    });
     toast('✅ Leave request submitted!');cm();await loadLeaves();
   }catch(e){var er=el('lerr');er.textContent=e.message;er.classList.add('on');}
   finally{el('lbtn').disabled=false;el('lbtn').textContent='Submit Request';}
 }
 
-function S(v){return String(v==null?'':v);}
 function toast(msg,type){var c=el('tc'),t=document.createElement('div');t.className='toast'+(type?' '+type:'');t.textContent=msg;c.appendChild(t);setTimeout(function(){t.style.opacity='0';t.style.transition='opacity .3s';setTimeout(function(){t.parentNode&&t.parentNode.removeChild(t);},300);},5000);}
 el('mo').addEventListener('click',function(e){if(e.target===el('mo'))cm();});
 document.addEventListener('keydown',function(e){if(e.key==='Escape')cm();});

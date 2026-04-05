@@ -782,9 +782,9 @@ function openDrawer(id){
       '</div>'+
     '</div>'+
     '<div style="margin-top:16px;display:flex;gap:8px;flex-wrap:wrap">'+
-      '<button class="btn btn-primary btn-sm" onclick="toast(\'Moving to next stage…\',\'info\')">Move to '+esc(STAGES[Math.min(stageIdx+1,5)])+'</button>'+
+      (stageIdx < 5 ? `<button class="btn btn-primary btn-sm" onclick="moveCandidate('${c.id}', '${STAGE_KEYS[stageIdx+1]}')">Move to ${STAGES[stageIdx+1]}</button>` : '')+
       '<button class="btn btn-ghost btn-sm" onclick="toast(\'Interview scheduling opened\',\'info\')">Schedule Interview</button>'+
-      '<button class="btn btn-danger btn-sm" onclick="toast(\'Rejection email queued\',\'ok\')">Reject</button>'+
+      '<button class="btn btn-danger btn-sm" onclick="moveCandidate(\''+c.id+'\', \'rejected\')">Reject</button>'+
     '</div>';
   el('drawerOverlay').classList.add('open');
   el('drawer').classList.add('open');
@@ -968,60 +968,11 @@ function openTemplates(){
       '<div style="font-size:1.5rem;margin-bottom:8px">'+t.icon+'</div>'+
       '<div style="font-weight:700;font-size:.89rem;margin-bottom:5px">'+esc(t.name)+'</div>'+
       '<div style="font-size:.77rem;color:var(--muted);margin-bottom:9px;line-height:1.45">'+esc(t.desc)+'</div>'+
-      '<div style="display:flex;gap:5px;flex-wrap:wrap">'+t.tags.map(function(tg){return'<span style="padding:2px 8px;border-radius:5px;font-size:.68rem;font-weight:600;background:var(--bg);border:1px solid var(--border);color:var(--muted)">'+esc(tg)+'</span>'}).join('')+'</div>'+
-    '</div>';
-  }).join('');
-  el('tmplModal').classList.add('open');
-}
-function useTemplate(i){closeModal('tmplModal');var t=Object.assign({},TEMPLATES[i],{is_template:true});openCreateModal(t)}
-
-/* ══════════════════════════
-   INTEGRATIONS
-══════════════════════════ */
-function openIntegrations(){
-  el('intGrid').innerHTML=INTEGRATIONS.map(function(g){
-    return'<div class="int-card'+(g.connected?' connected':'')+'">'+
-      '<div class="int-logo">'+g.icon+'</div>'+
-      '<div class="int-name">'+esc(g.name)+'</div>'+
-      '<div class="int-desc">'+esc(g.desc)+'</div>'+
-      '<div class="int-status">'+
-        '<div class="int-dot" style="background:'+(g.connected?'var(--green)':'var(--faint)')+'"></div>'+
-        (g.connected?'Connected':'Not connected')+
-      '</div>'+
-      '<button class="btn btn-sm '+(g.connected?'btn-ghost':'btn-primary')+'" onclick="toggleInt(this,\''+esc(g.name)+'\','+(g.connected?'true':'false')+')">'+
-        (g.connected?'Disconnect':'Connect')+'</button>'+
-    '</div>';
-  }).join('');
-  el('intModal').classList.add('open');
-}
-function toggleInt(btn,name,connected){
-  toast((connected?'Disconnected from ':'Connected to ')+name,'ok');
-  btn.textContent=connected?'Connect':'Disconnect';
-  btn.className='btn btn-sm '+(connected?'btn-primary':'btn-ghost');
-  btn.closest('.int-card').classList.toggle('connected',!connected);
-  btn.setAttribute('onclick','toggleInt(this,\''+name+'\','+(connected?'false':'true')+')');
-}
-
-/* ══════════════════════════
-   AI BUILDER
-══════════════════════════ */
 async function buildAI(){
   var q=el('aiQ').value.trim();
   if(!q){toast('Describe an automation first','err');return}
   el('aiBtn').disabled=true;
   el('aiSpin').classList.add('show');
-  var sys=`You are an enterprise ATS automation expert. Given a description, output ONLY valid JSON (no markdown, no backticks) for a recruiting automation rule:
-{
-  "name": "short rule name",
-  "desc": "one sentence description",
-  "trigger": "one of: app_received|app_viewed|resume_parsed|stage_moved|stage_stalled|sla_breached|interview_scheduled|interview_completed|interview_noshow|interview_feedback|assessment_sent|assessment_completed|assessment_scored|offer_extended|offer_accepted|offer_declined|candidate_rejected|candidate_withdrawn|job_published|referral_submitted|source_linkedin|schedule_daily|schedule_weekly",
-  "cond_dept": "department or empty",
-  "cond_level": "junior|mid|senior|exec or empty",
-  "cond_score": "number threshold or empty",
-  "cond_stage": "stage key or empty",
-  "actions": [{"type": "send_email|send_sms|send_slack|move_stage|reject_candidate|shortlist|schedule_interview|send_assessment|assign_recruiter|notify_hiring_manager|create_task|trigger_webhook|update_ats|generate_offer|sync_hris|add_to_talent_pool|send_nps", "target": "target", "msg": "message"}]
-}
-Include 2-4 logical actions. Keep it practical for enterprise HR.`;
   try{
     const token = localStorage.getItem('simpatico_token') || '';
     var resp=await fetch(window.SIMPATICO_CONFIG.workerUrl + '/ai/ats-generator',{
@@ -1086,18 +1037,62 @@ function initials(n){var p=(n||'').split(' ');return((p[0]||'').charAt(0)+(p[1]|
 document.addEventListener('keydown',function(e){if(e.key==='Escape'){closeModal('ruleModal');closeModal('tmplModal');closeModal('intModal');closeModal('aiModal');closeDrawer()}});
 
 /* ══════════════════════════
-   DEMO CANDIDATES
-══════════════════════════ */
-var CANDIDATES=[
-  {id:'c1',name:'Priya Sharma',role:'Senior Frontend Engineer',stage:'interview',days_in_stage:3,source:'LinkedIn',ai_score:88,auto_moved:true,skills:['React','TypeScript','GraphQL'],timeline:[{ico:'📥',color:'#4f46e5',title:'Applied',date:'Mar 18, 2026'},{ico:'📄',color:'#7c3aed',title:'Resume scored: 88% match',date:'Mar 18, 2026 (auto)'},{ico:'🔀',color:'#0ea5e9',title:'Moved to Screening',date:'Mar 19, 2026 (auto)'},{ico:'✅',color:'#059669',title:'Screening call completed',date:'Mar 21, 2026'},{ico:'📅',color:'#f59e0b',title:'Technical interview scheduled',date:'Mar 22, 2026'}]},
-  {id:'c2',name:'Arjun Menon',role:'Product Manager',stage:'screening',days_in_stage:6,source:'Referral',ai_score:74,auto_moved:false,skills:['Roadmapping','SQL','Agile'],timeline:[{ico:'🤝',color:'#f59e0b',title:'Referral from Deepak Kumar',date:'Mar 15, 2026'},{ico:'⭐',color:'#4f46e5',title:'Auto-shortlisted (referral)',date:'Mar 15, 2026 (auto)'},{ico:'📅',color:'#059669',title:'Screening call scheduled',date:'Mar 17, 2026'}]},
-  {id:'c3',name:'Meera Nair',role:'Data Engineer',stage:'technical',days_in_stage:2,source:'Careers Page',ai_score:91,auto_moved:true,skills:['Python','Spark','dbt','Airflow'],timeline:[{ico:'📥',color:'#4f46e5',title:'Applied',date:'Mar 20, 2026'},{ico:'📄',color:'#7c3aed',title:'Resume scored: 91% match',date:'Mar 20, 2026 (auto)'},{ico:'🔀',color:'#0ea5e9',title:'Fast-tracked to Technical',date:'Mar 21, 2026 (auto)'},{ico:'📨',color:'#f59e0b',title:'Assessment sent (auto)',date:'Mar 21, 2026 (auto)'}]},
-  {id:'c4',name:'Rohan Gupta',role:'Backend Engineer',stage:'applied',days_in_stage:1,source:'Indeed',ai_score:62,auto_moved:false,skills:['Go','Kubernetes','PostgreSQL'],timeline:[{ico:'📥',color:'#4f46e5',title:'Applied via Indeed',date:'Mar 24, 2026'},{ico:'📄',color:'#7c3aed',title:'Resume scored: 62% match',date:'Mar 24, 2026 (auto)'}]},
-  {id:'c5',name:'Sneha Pillai',role:'UX Designer',stage:'offer',days_in_stage:4,source:'LinkedIn',ai_score:85,auto_moved:true,skills:['Figma','User Research','Design Systems'],timeline:[{ico:'📥',color:'#4f46e5',title:'Applied',date:'Mar 8, 2026'},{ico:'✅',color:'#059669',title:'All interviews completed',date:'Mar 18, 2026'},{ico:'💼',color:'#059669',title:'Offer generated & sent (auto)',date:'Mar 20, 2026 (auto)'}]},
-  {id:'c6',name:'Kiran Thomas',role:'DevOps Engineer',stage:'rejected',days_in_stage:0,source:'LinkedIn',ai_score:45,auto_moved:true,skills:['AWS','Terraform','CI/CD'],timeline:[{ico:'📥',color:'#4f46e5',title:'Applied',date:'Mar 10, 2026'},{ico:'📄',color:'#ef4444',title:'Resume scored: 45% match',date:'Mar 10, 2026 (auto)'},{ico:'🚫',color:'#ef4444',title:'Auto-rejected (below threshold)',date:'Mar 10, 2026 (auto)'},{ico:'📧',color:'#64748b',title:'Rejection email sent (auto)',date:'Mar 10, 2026 (auto)'}]},
-  {id:'c7',name:'Aisha Fernandez',role:'Sales Engineer',stage:'hired',days_in_stage:0,source:'Referral',ai_score:90,auto_moved:true,skills:['SaaS','Demos','Solutions'],timeline:[{ico:'🤝',color:'#f59e0b',title:'Referral submitted',date:'Feb 28, 2026'},{ico:'🎉',color:'#059669',title:'Offer accepted',date:'Mar 14, 2026'},{ico:'🔄',color:'#059669',title:'Synced to Workday (auto)',date:'Mar 14, 2026 (auto)'}]},
-  {id:'c8',name:'Rahul Verma',role:'Product Designer',stage:'interview',days_in_stage:8,source:'Careers Page',ai_score:78,auto_moved:false,skills:['Figma','Prototyping','CSS'],timeline:[{ico:'📥',color:'#4f46e5',title:'Applied',date:'Mar 12, 2026'},{ico:'📅',color:'#f59e0b',title:'Interview scheduled',date:'Mar 16, 2026'}]},
-];
+   LIVE DATA CORE
+   ══════════════════════════ */
+var CANDIDATES = [];
+
+async function fetchCandidates() {
+  try {
+    const resp = await workerFetch('/recruitment/applications');
+    const apps = resp.data.applications || [];
+    CANDIDATES = apps.map(app => {
+      const stageKey = app.status || 'applied';
+      const skills = app.skills ? app.skills.split(',').map(s => s.trim()) : [];
+      const timeline = [{ ico: '📥', color: '#4f46e5', title: 'Application Received', date: formatDate(app.created_at) }];
+      if (app.match_score) timeline.push({ ico: '📄', color: '#7c3aed', title: 'AI Match Score: ' + app.match_score + '%', date: formatDate(app.created_at) });
+      if (app.status !== 'applied') timeline.push({ ico: '🔀', color: '#0ea5e9', title: 'Moved to ' + formatEnum(app.status), date: formatDate(app.updated_at || app.created_at) });
+      return {
+        id: app.id,
+        name: app.candidate_name,
+        email: app.candidate_email,
+        role: app.jobs?.title || 'Unknown Role',
+        stage: stageKey,
+        days_in_stage: Math.floor((new Date() - new Date(app.updated_at || app.created_at)) / (1000 * 60 * 60 * 24)),
+        source: app.source || 'Careers Page',
+        ai_score: app.match_score || 0,
+        auto_moved: !!app.ai_summary,
+        skills: skills.length ? skills : ['General'],
+        timeline: timeline,
+        resume_text: app.resume_text
+      };
+    });
+    renderPipelineHeader();
+    renderKanban();
+    updateStats();
+  } catch (e) {
+    console.error('Failed to fetch candidates:', e);
+    showToast('Failed to load candidates', 'error');
+  }
+}
+
+async function moveCandidate(id, nextStage) {
+  try {
+    showToast('Moving candidate...', 'info');
+    await workerFetch('/recruitment/applications/' + id, {
+      method: 'PATCH',
+      body: { status: nextStage, updated_at: new Date().toISOString() }
+    });
+    await fetchCandidates();
+    showToast('Stage updated successfully', 'success');
+  } catch (e) {
+    showToast('Movement failed: ' + e.message, 'error');
+  }
+}
+
+/* ══════════════════════════
+   DATABASE & INIT
+   ══════════════════════════ */
+
 
 /* ══════════════════════════
    SEED DEFAULT RULES
@@ -1107,16 +1102,16 @@ var CANDIDATES=[
    ══════════════════════════ */
 async function fetchDatabase() {
     console.log("ATS Engine: Synchronizing database...");
-    // 1. Seed defaults if empty
+    
+    // 1. Seed defaults if empty (Local Storage rules)
     seed();
     
-    // 2. Load rules and logs
+    // 2. Render initial rules
     renderRules();
-    updateStats();
     
-    // 3. Optional: In a production environment, we would fetch 
-    // real candidates from Supabase 'applications' table here.
-    // For now we keep the optimized demo candidates for the walkthrough.
+    // 3. FETCH LIVE DATA
+    await fetchCandidates();
+    
     console.log("ATS Engine: Active.");
 }
 
@@ -1138,8 +1133,9 @@ function seed(){
   var log=[];
   defaults.forEach(function(r){
     for(var i=0;i<Math.min(r.run_count,6);i++){
-      var c=CANDIDATES[Math.floor(Math.random()*CANDIDATES.length)];
-      log.push({id:uid(),rule:r.name,candidate:c.name,action:(r.actions[0]?ACT_LABELS[r.actions[0].type]:'—'),status:Math.random()>.05?'success':'failed',ts:new Date(Date.now()-Math.random()*14*864e5).toISOString()});
+      var c=CANDIDATES.length ? CANDIDATES[Math.floor(Math.random()*CANDIDATES.length)] : null;
+      var cName = c ? c.name : 'Sample Candidate';
+      log.push({id:uid(),rule:r.name,candidate:cName,action:(r.actions[0]?ACT_LABELS[r.actions[0].type]:'—'),status:Math.random()>.05?'success':'failed',ts:new Date(Date.now()-Math.random()*14*864e5).toISOString()});
     }
   });
   saveLog(log);
