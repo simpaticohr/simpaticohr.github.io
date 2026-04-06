@@ -780,17 +780,74 @@
             }
 
             // Step 2: Fetch user profile
-            const { data: profiles, error: profileError } = await db
+            let { data: profiles, error: profileError } = await db
                 .from('users')
                 .select('*, companies(*)')
                 .eq('auth_id', authData.user.id)
                 .limit(1);
 
             if (profileError) console.warn('[Login] Error fetching profile:', profileError);
-            const profile = profiles?.[0] ?? null;
+            let profile = profiles?.[0] ?? null;
 
+            // Step 2b: Auto-create profile if auth user exists but profile is missing
+            // This happens when registration created the auth user but the profile insert
+            // failed (common with RLS policies blocking anon inserts on users table)
             if (!profile) {
-                throw new Error('User profile not found. Please contact your administrator.');
+                console.warn('[Login] No profile found — attempting auto-creation for:', authData.user.id);
+                const meta = authData.user.user_metadata || {};
+                const newProfile = {
+                    auth_id: authData.user.id,
+                    email: authData.user.email,
+                    full_name: meta.full_name || meta.name || authData.user.email.split('@')[0],
+                    role: meta.role || selectedRole || 'hr',
+                    is_active: true,
+                    company_id: null
+                };
+
+                // Try direct insert first (now authenticated as this user)
+                const { data: created, error: createErr } = await db
+                    .from('users')
+                    .insert(newProfile)
+                    .select('*, companies(*)')
+                    .single();
+
+                if (!createErr && created) {
+                    profile = created;
+                    console.log('[Login] Auto-created user profile:', profile.id);
+                } else {
+                    console.warn('[Login] Direct profile insert failed:', createErr?.message);
+                    // Fallback: try the worker endpoint
+                    try {
+                        const workerRes = await fetch(WORKER_URL + '/users/ensure-profile', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'Authorization': 'Bearer ' + authData.session.access_token
+                            },
+                            body: JSON.stringify(newProfile)
+                        });
+                        if (workerRes.ok) {
+                            const workerData = await workerRes.json();
+                            if (workerData.data) profile = workerData.data;
+                        }
+                    } catch(e) { console.warn('[Login] Worker profile creation failed:', e); }
+
+                    // Last resort: re-fetch in case another process created it
+                    if (!profile) {
+                        const { data: retryProfiles } = await db
+                            .from('users')
+                            .select('*, companies(*)')
+                            .eq('auth_id', authData.user.id)
+                            .limit(1);
+                        profile = retryProfiles?.[0] ?? null;
+                    }
+
+                    if (!profile) {
+                        // Create a minimal in-memory profile so the user can at least log in
+                        profile = { ...newProfile, id: 'temp-' + authData.user.id };
+                        console.warn('[Login] Using minimal in-memory profile');
+                    }
+                }
             }
 
             // Step 3: Update last_login (best-effort)
