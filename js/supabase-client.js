@@ -1,12 +1,18 @@
 // supabase-client.js — Simpatico HR
-// Initializes Supabase client globally (uses shared-utils getAuthToken if available)
+// Initializes Supabase client globally — SINGLE INSTANCE ONLY
+// Prevents duplicate createClient() calls that cause auth lock conflicts
 (function() {
+  // If shared-utils already created the client, reuse it
+  if (window._supabaseClient || window.SimpaticoDB) {
+    console.log('[supabase-client] Reusing existing Supabase instance');
+    return;
+  }
+
   const CONFIG = window.SIMPATICO_CONFIG || {};
   const url = CONFIG.supabaseUrl || '';
   const key = CONFIG.supabaseAnonKey || '';
 
   if (url && key && window.supabase) {
-    // Use shared-utils token retrieval if available, else scan localStorage
     const token = (typeof getAuthToken === 'function')
       ? getAuthToken()
       : (() => {
@@ -26,7 +32,7 @@
     const client = window.supabase.createClient(url, key, opts);
     window._supabaseClient = client;
     window.SimpaticoDB     = client;
-    console.log('[supabase-client] Initialized: SimpaticoDB');
+    console.log('[supabase-client] Initialized: SimpaticoDB (singleton)');
   } else {
     console.warn('[supabase-client] Not configured — set SIMPATICO_CONFIG in hr-config.js');
     window._supabaseClient = null;
