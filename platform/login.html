@@ -763,62 +763,51 @@
         // SUPABASE DIRECT AUTH
         // ═══════════════════════════════════════════════════════════════════
         async function loginWithSupabase(email, password) {
-            // Step 1: Authenticate
-            const authRes = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=password`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'apikey': SUPABASE_ANON_KEY,
-                    'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
-                },
-                body: JSON.stringify({ email, password })
+            const db = window.SimpaticoDB || window._supabaseClient;
+            if (!db) throw new Error('Database client not initialized');
+
+            // Step 1: Authenticate using SDK
+            const { data: authData, error: authError } = await db.auth.signInWithPassword({
+                email: email,
+                password: password
             });
 
-            const authData = await authRes.json();
-
-            if (!authRes.ok) {
-                const msg = authData?.error_description || authData?.msg || authData?.message || 'Invalid email or password.';
-                throw new Error(msg);
+            if (authError) {
+                throw authError; // message gets parsed below
+            }
+            if (!authData.user || !authData.session) {
+                throw new Error('Authentication failed (no session returned).');
             }
 
             // Step 2: Fetch user profile
-            const profileRes = await fetch(
-                `${SUPABASE_URL}/rest/v1/users?auth_id=eq.${authData.user.id}&select=*,companies(*)&limit=1`,
-                {
-                    headers: {
-                        'apikey': SUPABASE_ANON_KEY,
-                        'Authorization': `Bearer ${authData.access_token}`,
-                        'Content-Type': 'application/json'
-                    }
-                }
-            );
+            const { data: profiles, error: profileError } = await db
+                .from('users')
+                .select('*, companies(*)')
+                .eq('auth_id', authData.user.id)
+                .limit(1);
 
-            const profiles = await profileRes.json();
+            if (profileError) console.warn('[Login] Error fetching profile:', profileError);
             const profile = profiles?.[0] ?? null;
 
             if (!profile) {
                 throw new Error('User profile not found. Please contact your administrator.');
             }
 
-            // Step 3: Update last_login (best-effort, non-blocking)
-            fetch(`${SUPABASE_URL}/rest/v1/users?auth_id=eq.${authData.user.id}`, {
-                method: 'PATCH',
-                headers: {
-                    'apikey': SUPABASE_ANON_KEY,
-                    'Authorization': `Bearer ${authData.access_token}`,
-                    'Content-Type': 'application/json',
-                    'Prefer': 'return=minimal'
-                },
-                body: JSON.stringify({ last_login: new Date().toISOString() })
-            }).catch(() => { });
+            // Step 3: Update last_login (best-effort)
+            db.from('users')
+              .update({ last_login: new Date().toISOString() })
+              .eq('auth_id', authData.user.id)
+              .then(() => {});
 
             return {
-                token: authData.access_token,
-                refreshToken: authData.refresh_token,
+                token: authData.session.access_token,
+                refreshToken: authData.session.refresh_token,
                 user: {
                     id: authData.user.id,
                     email: authData.user.email,
-                    role: profile.role
+                    role: profile.role || selectedRole,
+                    full_name: profile.full_name || '',
+                    company_id: profile.company_id || null
                 },
                 profile
             };
@@ -865,7 +854,18 @@
         // ═══════════════════════════════════════════════════════════════════
         function persistSession(authData) {
             localStorage.setItem('simpatico_token', authData.token);
-            localStorage.setItem('simpatico_user', JSON.stringify(authData.user));
+            // Merge profile data into user for tenant isolation
+            const userToStore = {
+                ...authData.user,
+                company_id: authData.user?.company_id || authData.profile?.company_id || null,
+                full_name: authData.user?.full_name || authData.profile?.full_name || '',
+                tenant_id: authData.user?.company_id || authData.profile?.company_id || null
+            };
+            localStorage.setItem('simpatico_user', JSON.stringify(userToStore));
+            // Also store company info separately for modules that need it
+            if (authData.profile?.companies) {
+                localStorage.setItem('simpatico_company', JSON.stringify(authData.profile.companies));
+            }
             if (authData.refreshToken) {
                 localStorage.setItem('simpatico_refresh', authData.refreshToken);
             }

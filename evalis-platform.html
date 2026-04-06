@@ -1064,7 +1064,11 @@ async function db(action, table, data = null, filters = null, select = '*', orde
   function buildFilters(base, f) {
     if (!f) return base;
     Object.entries(f).forEach(([k, v]) => {
-      base += `&${encodeURIComponent(k)}=eq.${encodeURIComponent(v)}`;
+      if (v === null) {
+        base += \`$\{encodeURIComponent(k)\}=is.null\`;
+      } else {
+        base += \`$\{encodeURIComponent(k)\}=eq.$\{encodeURIComponent(v)\}\`;
+      }
     });
     return base;
   }
@@ -1735,7 +1739,7 @@ async function loadJobs() {
   const el = document.getElementById('jobsList');
   el.innerHTML = '<span class="loading"></span> Loading…';
   try {
-    const data = await db('select', 'jobs', null, { is_active: true }, '*', 'created_at.desc');
+    const data = await db('select', 'jobs', null, { is_active: true, company_id: null }, '*', 'created_at.desc');
     _allJobs = Array.isArray(data) ? data : [];
     if (!_allJobs.length) {
       el.innerHTML = `<p style="color:var(--muted);text-align:center;padding:30px">
@@ -2601,14 +2605,19 @@ function _renderRes(r) {
 async function loadHR() {
   try {
     const [jobs, apps, ints] = await Promise.all([
-      db('select', 'jobs'),
+      db('select', 'jobs', null, { company_id: null }),
       db('select', 'applications'),
       db('select', 'interviews'),
     ]);
 
     const jobsArr  = Array.isArray(jobs) ? jobs : [];
-    const appsArr  = Array.isArray(apps) ? apps : [];
-    const intsArr  = Array.isArray(ints) ? ints : [];
+    const _allApps = Array.isArray(apps) ? apps : [];
+    const _allInts = Array.isArray(ints) ? ints : [];
+    
+    // Filter apps and ints to only include those for Evalis jobs
+    const evalisJobIds = new Set(jobsArr.map(j => j.id));
+    const appsArr = _allApps.filter(a => !a.job_id || evalisJobIds.has(a.job_id));
+    const intsArr = _allInts.filter(i => !i.job_id || evalisJobIds.has(i.job_id));
 
     document.getElementById('statJobs').textContent  = jobsArr.filter(j => j.is_active).length;
     document.getElementById('statApps').textContent  = appsArr.length;
@@ -2685,7 +2694,7 @@ function _candRowHTML(c, showJob = false) {
 async function loadHRJobs() {
   const el = document.getElementById('hrJobsList');
   try {
-    const data = await db('select', 'jobs', null, null, '*', 'created_at.desc');
+    const data = await db('select', 'jobs', null, { company_id: null }, '*', 'created_at.desc');
     if (!Array.isArray(data) || !data.length) {
       el.innerHTML = '<p style="color:var(--muted);text-align:center;padding:16px">No jobs posted yet.</p>';
       return;
