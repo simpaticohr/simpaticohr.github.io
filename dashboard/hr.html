@@ -1169,17 +1169,17 @@
                 <i class="fas fa-envelope"></i>
             </button>
             <div class="user-profile" onclick="toggleUserDropdown(event)">
-                <img src="https://ui-avatars.com/api/?name=HR+Admin&background=4f46e5&color=fff" alt="Admin" id="userAvatar">
+                <img src="https://ui-avatars.com/api/?name=User&background=4f46e5&color=fff" alt="User" id="userAvatar">
                 <div>
-                    <div style="font-size:0.88rem;font-weight:600;" id="userName">HR Admin</div>
-                    <div style="font-size:0.75rem;color:var(--text-secondary);" id="userRole">Super Admin</div>
+                    <div style="font-size:0.88rem;font-weight:600;" id="userName">Loading...</div>
+                    <div style="font-size:0.75rem;color:var(--text-secondary);" id="userRole">—</div>
                 </div>
                 <i class="fas fa-chevron-down" style="font-size:0.7rem;color:var(--text-secondary);margin-left:4px;"></i>
 
                 <div class="user-dropdown" id="userDropdown">
                     <div class="dropdown-header">
-                        <div style="font-weight:600;font-size:0.9rem;" id="dropdownUserName">HR Admin</div>
-                        <div style="font-size:0.78rem;color:var(--text-secondary);" id="dropdownUserEmail">admin@simpatico.com</div>
+                        <div style="font-weight:600;font-size:0.9rem;" id="dropdownUserName">Loading...</div>
+                        <div style="font-size:0.78rem;color:var(--text-secondary);" id="dropdownUserEmail">—</div>
                     </div>
                     <a class="dropdown-item" onclick="navigateTo('settings')">
                         <i class="fas fa-user-circle"></i> My Profile
@@ -2150,10 +2150,10 @@ const DataStore = {
         activities: [],
         job_applications: [],
         user: {
-            name: 'HR Admin',
-            email: 'admin@simpaticohr.com',
-            role: 'Super Admin',
-            isLoggedIn: true
+            name: '',
+            email: '',
+            role: '',
+            isLoggedIn: false
         },
         stats: { totalEmployees: 0, openPositions: 0, interviewsToday: 0, totalApplications: 0, pendingLeaves: 0 }
     },
@@ -2198,20 +2198,20 @@ async function initApp() {
 
     if (!realToken) { performLogout(); return; }
 
-    // Initialize local session data
+    // Initialize local session data from the REAL logged-in user
     DataStore.update(data => { 
         data.user.isLoggedIn = true; 
-        if (realUser.email) {
-            data.user.name = realUser.full_name || realUser.name || 'HR Admin';
-            data.user.email = realUser.email;
-            data.user.role = realUser.role || 'HR';
-        }
+        data.user.name = realUser.full_name || realUser.name || realUser.email || 'User';
+        data.user.email = realUser.email || '';
+        data.user.role = realUser.role || 'HR';
+        data.user.company_id = realUser.company_id || realUser.tenant_id || null;
     });
     
+    // ★ CRITICAL: Refresh appData BEFORE updating the UI
+    appData = DataStore.get();
     updateUserDisplay();
     
     // ── Render immediately with cached data (fast first paint) ──
-    appData = DataStore.get();
     renderDashboardStats();
     renderDashboardInterviews();
     renderDashboardActivities();
@@ -2526,14 +2526,26 @@ function saveInterviewerSuggestion(name) {
 }
 
 function updateUserDisplay() {
-    const u = appData.user;
+    // Read directly from localStorage for the most accurate user data
+    const realUser = JSON.parse(localStorage.getItem('simpatico_user') || '{}');
+    const name = realUser.full_name || realUser.name || realUser.email?.split('@')[0] || 'User';
+    const email = realUser.email || '';
+    const role = realUser.role || 'HR';
+    const companyData = JSON.parse(localStorage.getItem('simpatico_company') || '{}');
+    const companyName = companyData.name || '';
+
     const set = (id, text) => { const el = document.getElementById(id); if (el) el.textContent = text; };
-    set('userName', u.name);
-    set('userRole', u.role);
-    set('dropdownUserName', u.name);
-    set('dropdownUserEmail', u.email);
+    set('userName', name);
+    set('userRole', companyName || role);
+    set('dropdownUserName', name);
+    set('dropdownUserEmail', email);
     const avatar = document.getElementById('userAvatar');
-    if (avatar) avatar.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(u.name)}&background=4f46e5&color=fff`;
+    if (avatar) avatar.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=4f46e5&color=fff`;
+
+    // Also sync the appData.user for other parts of the codebase
+    appData.user.name = name;
+    appData.user.email = email;
+    appData.user.role = role;
 }
 
 // ===== NAVIGATION =====
