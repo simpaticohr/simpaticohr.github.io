@@ -4,15 +4,15 @@
  */
 
 const OB_CONFIG = {
-  supabaseUrl: window.SIMPATICO_CONFIG?.supabaseUrl    || 'https://YOUR_PROJECT.supabase.co',
-  supabaseKey: window.SIMPATICO_CONFIG?.supabaseAnonKey || 'YOUR_ANON_KEY',
-  workerUrl:   window.SIMPATICO_CONFIG?.workerUrl       || 'https://hr-api.YOUR_SUBDOMAIN.workers.dev',
+  supabaseUrl: window.SIMPATICO_CONFIG?.supabaseUrl    || '',
+  supabaseKey: window.SIMPATICO_CONFIG?.supabaseAnonKey || '',
+  workerUrl:   window.SIMPATICO_CONFIG?.workerUrl       || 'https://simpatico-hr-ats.simpaticohrconsultancy.workers.dev',
 };
 
-let _sb = null;
 function sb() {
-  if (_sb) return _sb;
-  if (window.supabase) { _sb = window.supabase.createClient(OB_CONFIG.supabaseUrl, OB_CONFIG.supabaseKey); return _sb; }
+  if (typeof getSupabaseClient === 'function') return getSupabaseClient();
+  if (window._supabaseClient) return window._supabaseClient;
+  if (window.SimpaticoDB) return window.SimpaticoDB;
   return null;
 }
 

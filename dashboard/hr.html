@@ -43,6 +43,7 @@
         /* ===== SIDEBAR ===== */
         .sidebar {
             width: var(--sidebar-width);
+            max-width: var(--sidebar-width);
             background: linear-gradient(180deg, var(--primary-dark) 0%, var(--primary) 100%);
             color: white;
             position: fixed;
@@ -50,21 +51,25 @@
             left: 0;
             height: 100vh;
             overflow-y: auto;
+            overflow-x: hidden;
             z-index: 1000;
             transition: transform 0.3s;
             display: flex;
             flex-direction: column;
+            box-sizing: border-box;
         }
 
         .sidebar-brand {
-            padding: 18px 24px;
-            font-size: 1.3rem;
+            padding: 20px 20px;
+            font-size: 1.2rem;
             font-weight: 700;
             border-bottom: 1px solid rgba(255,255,255,0.1);
             display: flex;
             align-items: center;
-            gap: 12px;
+            gap: 10px;
             flex-shrink: 0;
+            min-height: 64px;
+            box-sizing: border-box;
         }
 
         .sidebar-brand .brand-logo-fallback {
@@ -128,14 +133,18 @@
         .nav-item i { width: 20px; text-align: center; font-size: 1rem; }
 
         .sidebar-footer {
-            padding: 16px 24px;
+            padding: 12px 16px;
             border-top: 1px solid rgba(255,255,255,0.1);
             flex-shrink: 0;
+            box-sizing: border-box;
+            width: 100%;
+            max-width: var(--sidebar-width);
         }
 
         .logout-btn {
             width: 100%;
-            padding: 10px 16px;
+            max-width: 100%;
+            padding: 10px 14px;
             display: flex;
             align-items: center;
             gap: 10px;
@@ -144,9 +153,10 @@
             border: 1px solid rgba(239, 68, 68, 0.3);
             border-radius: 8px;
             cursor: pointer;
-            font-size: 0.88rem;
+            font-size: 0.85rem;
             font-weight: 500;
             transition: all 0.2s;
+            box-sizing: border-box;
         }
 
         .logout-btn:hover { background: rgba(239, 68, 68, 0.3); color: white; }
@@ -2519,24 +2529,27 @@ async function loadExternalModule(sectionId, href) {
         const parser = new DOMParser();
         const doc = parser.parseFromString(html, 'text/html');
 
-        // PRODUCTION FIX: Extract content area only (avoid sidebar duplication)
         const mainContent = doc.querySelector('.main, .hr-main, .content, .shell > .main');
         if (mainContent) {
-            // Strip nested topbars and sidebars if they leaked into selection
-            mainContent.querySelectorAll('.sidebar, sidebar, .topbar, topbar, .sb-top, .cx-topbar, .db-topbar, .nav-label, nav.sidebar').forEach(el => el.remove());
+            const selectorsToRemove = [
+                '.sidebar', 'sidebar',
+                '.topbar', 'topbar',
+                '.hr-sidebar', '.hr-topbar',
+                '.sb-top', '.cx-topbar', '.db-topbar',
+                '.nav-label', 'nav.sidebar',
+                '[data-role="sidebar"]', '[data-role="topbar"]'
+            ].join(',');
+            mainContent.querySelectorAll(selectorsToRemove).forEach(el => el.remove());
             container.innerHTML = mainContent.innerHTML;
         } else {
             container.innerHTML = doc.body.innerHTML;
         }
 
-        // GLOBAL UI COMPONENTS: Extract and append drawers, modals, and toast containers to body
-        // FIX: If element with same ID exists, replace its innerHTML to avoid null references in module scripts
         doc.querySelectorAll('.tc, .drawer-overlay, .drawer, .mo, .modal, #tc, #drawer, .drawer-content').forEach(el => {
             if (el.id) {
                 let existing = document.getElementById(el.id);
                 if (existing) {
                     existing.innerHTML = el.innerHTML;
-                    // Copy classes if they were changed
                     existing.className = el.className;
                 } else {
                     const clone = el.cloneNode(true);
@@ -2544,7 +2557,6 @@ async function loadExternalModule(sectionId, href) {
                 }
                 el.remove();
             } else if (el.classList.contains('mo') || el.classList.contains('drawer')) {
-                // If it's a structural element without ID but has class, add it if not already present
                 document.body.appendChild(el.cloneNode(true));
                 el.remove();
             }
@@ -2569,14 +2581,11 @@ async function loadExternalModule(sectionId, href) {
             let scriptName = srcAttr ? srcAttr.split('/').pop() : "inline-" + Math.random().toString(36).substr(2, 5);
 
             if (srcAttr) {
-                // Fix relative paths: root scripts like "js/app.js" fetched from "dashboard/" should use "../"
                 let scriptUrl = srcAttr;
                 if (!srcAttr.startsWith('http') && !srcAttr.startsWith('/') && !srcAttr.startsWith('../')) {
                     scriptUrl = '../' + srcAttr;
                 }
 
-                // Skip scripts already loaded by the dashboard shell — re-loading causes
-                // function collisions (openModal, toggleSidebar) and auth redirect loops
                 if (scriptName.includes('supabase') || scriptName.includes('hr-config') 
                     || scriptName.includes('shared-utils') || scriptName.includes('app.js') 
                     || scriptName.includes('api.js') || scriptName.includes('auth.js')
@@ -2600,11 +2609,8 @@ async function loadExternalModule(sectionId, href) {
                 jsCode = oldScript.textContent;
             }
 
-            // SaaS VARIABLE COLLISION PROTECTION: convert const/let to var for SPA persistence
-            // Added more common variable names used in modules
             jsCode = jsCode.replace(/(const|let)\s+(SB_URL|SB_ANON|TENANT|WORKER_URL|AN_CONFIG|_sb|sbHeaders|allEmployees|filtered|currentView|editingId|avatarColors|statusBadge|statusLabel|typeLabel|conversations|currentConvId|messages|activeContexts|isStreaming|currentUserInitials|AI_CONFIG|CANDIDATES|STAGES|STAGE_KEYS|TRIG_LABELS|ACT_LABELS|STAGE_COLORS|ICON_MAP|INTEGRATIONS|pendingAI|SLA_CONFIG|TEMPLATES|KR|KL|actCount)\s*=/g, 'var $2 =');
             
-            // SPA EVENT BINDING: Redirect DOMContentLoaded to custom SPA ready event
             jsCode = jsCode.replace(/document\.addEventListener\(\s*['"`]DOMContentLoaded['"`]/g, "window.addEventListener('SimpaticoSPA'");
 
             const newScript = document.createElement('script');

@@ -4,16 +4,16 @@
  */
 
 const PAY_CONFIG = {
-  supabaseUrl: window.SIMPATICO_CONFIG?.supabaseUrl    || 'https://YOUR_PROJECT.supabase.co',
-  supabaseKey: window.SIMPATICO_CONFIG?.supabaseAnonKey || 'YOUR_ANON_KEY',
-  workerUrl:   window.SIMPATICO_CONFIG?.workerUrl       || 'https://hr-api.YOUR_SUBDOMAIN.workers.dev',
-  r2PublicUrl: window.SIMPATICO_CONFIG?.r2PublicUrl     || 'https://files.YOUR_DOMAIN.com',
+  supabaseUrl: window.SIMPATICO_CONFIG?.supabaseUrl    || '',
+  supabaseKey: window.SIMPATICO_CONFIG?.supabaseAnonKey || '',
+  workerUrl:   window.SIMPATICO_CONFIG?.workerUrl       || 'https://simpatico-hr-ats.simpaticohrconsultancy.workers.dev',
+  r2PublicUrl: window.SIMPATICO_CONFIG?.r2PublicUrl     || 'https://files.simpaticohr.in',
 };
 
-let _sb = null;
 function sb() {
-  if (_sb) return _sb;
-  if (window.supabase) { _sb = window.supabase.createClient(PAY_CONFIG.supabaseUrl, PAY_CONFIG.supabaseKey); return _sb; }
+  if (typeof getSupabaseClient === 'function') return getSupabaseClient();
+  if (window._supabaseClient) return window._supabaseClient;
+  if (window.SimpaticoDB) return window.SimpaticoDB;
   return null;
 }
 
@@ -319,12 +319,17 @@ window.exportPayroll = function() {
     p.employees ? `${p.employees.first_name} ${p.employees.last_name}` : '',
     p.period, p.gross_pay, p.deductions_total, p.net_pay, p.status,
   ]);
-  const csv = [headers,...rows].map(r=>r.map(c=>`"${c}"`).join(',')).join('\n');
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(new Blob([csv],{type:'text/csv'}));
-  a.download = `payroll-${new Date().toISOString().slice(0,10)}.csv`;
-  a.click();
-  showToast('Export downloaded', 'success');
+  if (typeof downloadCsv === 'function') {
+    downloadCsv(headers, rows, `payroll-${new Date().toISOString().slice(0,10)}.csv`);
+  } else {
+    const _esc = typeof escapeCsv === 'function' ? escapeCsv : c => `"${String(c||'').replace(/"/g,'""')}"`;
+    const csv = [headers,...rows].map(r=>r.map(_esc).join(',')).join('\n');
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([csv],{type:'text/csv'}));
+    a.download = `payroll-${new Date().toISOString().slice(0,10)}.csv`;
+    a.click();
+    showToast('Export downloaded', 'success');
+  }
 };
 
 window.editSalary = id => { openModal('edit-salary-modal'); };

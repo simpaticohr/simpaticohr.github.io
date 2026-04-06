@@ -4,16 +4,16 @@
  */
 
 const OPS_CONFIG = {
-  supabaseUrl: window.SIMPATICO_CONFIG?.supabaseUrl    || 'https://YOUR_PROJECT.supabase.co',
-  supabaseKey: window.SIMPATICO_CONFIG?.supabaseAnonKey || 'YOUR_ANON_KEY',
-  workerUrl:   window.SIMPATICO_CONFIG?.workerUrl       || 'https://hr-api.YOUR_SUBDOMAIN.workers.dev',
-  r2PublicUrl: window.SIMPATICO_CONFIG?.r2PublicUrl     || 'https://files.YOUR_DOMAIN.com',
+  supabaseUrl: window.SIMPATICO_CONFIG?.supabaseUrl    || '',
+  supabaseKey: window.SIMPATICO_CONFIG?.supabaseAnonKey || '',
+  workerUrl:   window.SIMPATICO_CONFIG?.workerUrl       || 'https://simpatico-hr-ats.simpaticohrconsultancy.workers.dev',
+  r2PublicUrl: window.SIMPATICO_CONFIG?.r2PublicUrl     || 'https://files.simpaticohr.in',
 };
 
-let _sb = null;
 function sb() {
-  if (_sb) return _sb;
-  if (window.supabase) { _sb = window.supabase.createClient(OPS_CONFIG.supabaseUrl, OPS_CONFIG.supabaseKey); return _sb; }
+  if (typeof getSupabaseClient === 'function') return getSupabaseClient();
+  if (window._supabaseClient) return window._supabaseClient;
+  if (window.SimpaticoDB) return window.SimpaticoDB;
   return null;
 }
 
@@ -79,22 +79,23 @@ function renderLeaveTable(list) {
     return;
   }
   tbody.innerHTML = list.map(l => {
+    const _e = typeof escapeHtml === 'function' ? escapeHtml : s => s;
     const emp  = l.employees;
-    const name = emp ? `${emp.first_name} ${emp.last_name}` : '—';
-    const type = l.type?.replace('_',' ');
+    const name = emp ? _e(`${emp.first_name} ${emp.last_name}`) : '—';
+    const type = _e((l.type || '').replace('_',' '));
     const badgeClass = { pending:'hr-badge-pending', approved:'hr-badge-active', rejected:'hr-badge-danger' }[l.status] || 'hr-badge-inactive';
     const actions = l.status === 'pending'
-      ? `<button class="hr-btn hr-btn-primary hr-btn-sm" style="margin-right:4px" onclick="approveLeave('${l.id}')">Approve</button>
-         <button class="hr-btn hr-btn-danger hr-btn-sm" onclick="rejectLeave('${l.id}')">Reject</button>`
-      : `<span style="font-size:12px;color:var(--hr-text-muted)">${l.approver?`${l.approver.first_name} ${l.approver.last_name}`:''}</span>`;
+      ? `<button class="hr-btn hr-btn-primary hr-btn-sm" style="margin-right:4px" onclick="approveLeave('${_e(l.id)}')">Approve</button>
+         <button class="hr-btn hr-btn-danger hr-btn-sm" onclick="rejectLeave('${_e(l.id)}')">Reject</button>`
+      : `<span style="font-size:12px;color:var(--hr-text-muted)">${l.approver?_e(`${l.approver.first_name} ${l.approver.last_name}`):''}</span>`;
     return `<tr>
       <td><span class="primary-text">${name}</span></td>
       <td>${type}</td>
-      <td>${l.from_date || '—'}</td>
-      <td>${l.to_date || '—'}</td>
-      <td>${l.days || '—'}</td>
-      <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${l.reason || '—'}</td>
-      <td><span class="hr-badge ${badgeClass}">${l.status}</span></td>
+      <td>${_e(l.from_date || '—')}</td>
+      <td>${_e(l.to_date || '—')}</td>
+      <td>${_e(String(l.days || '—'))}</td>
+      <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${_e(l.reason || '—')}</td>
+      <td><span class="hr-badge ${badgeClass}">${_e(l.status)}</span></td>
       <td>${actions}</td>
     </tr>`;
   }).join('');
@@ -237,17 +238,18 @@ function renderTickets(list) {
     return;
   }
   tbody.innerHTML = list.map(t => {
+    const _e = typeof escapeHtml === 'function' ? escapeHtml : s => s;
     const emp = t.employees;
-    const assignee = t.assignee ? `${t.assignee.first_name} ${t.assignee.last_name}` : 'Unassigned';
+    const assignee = t.assignee ? _e(`${t.assignee.first_name} ${t.assignee.last_name}`) : 'Unassigned';
     const pBadge = { high:'hr-badge-danger', medium:'hr-badge-pending', low:'hr-badge-inactive' }[t.priority] || 'hr-badge-inactive';
     const sBadge = { open:'hr-badge-info', in_progress:'hr-badge-pending', resolved:'hr-badge-active', closed:'hr-badge-inactive' }[t.status] || 'hr-badge-inactive';
     return `<tr>
-      <td><span class="primary-text hr-font-mono">${t.ticket_number || t.id.slice(0,8).toUpperCase()}</span></td>
-      <td>${emp ? `${emp.first_name} ${emp.last_name}` : '—'}</td>
-      <td>${t.category || '—'}</td>
-      <td>${t.subject}</td>
-      <td><span class="hr-badge ${pBadge}">${t.priority}</span></td>
-      <td><span class="hr-badge ${sBadge}">${t.status?.replace('_',' ')}</span></td>
+      <td><span class="primary-text hr-font-mono">${_e(t.ticket_number || t.id.slice(0,8).toUpperCase())}</span></td>
+      <td>${emp ? _e(`${emp.first_name} ${emp.last_name}`) : '—'}</td>
+      <td>${_e(t.category || '—')}</td>
+      <td>${_e(t.subject)}</td>
+      <td><span class="hr-badge ${pBadge}">${_e(t.priority)}</span></td>
+      <td><span class="hr-badge ${sBadge}">${_e((t.status||'').replace('_',' '))}</span></td>
       <td>${assignee}</td>
     </tr>`;
   }).join('');

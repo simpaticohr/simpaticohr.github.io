@@ -462,6 +462,7 @@
   // API
   window.workerFetch         = workerFetch;
   window.WORKER_URL          = WORKER_URL;
+  window.getSupabaseClient   = getSupabaseClient;
 
   console.log('[shared-utils] Simpatico HR utilities loaded (v5.0)');
 })();

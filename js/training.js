@@ -4,16 +4,16 @@
  */
 
 const TR_CONFIG = {
-  supabaseUrl: window.SIMPATICO_CONFIG?.supabaseUrl    || 'https://YOUR_PROJECT.supabase.co',
-  supabaseKey: window.SIMPATICO_CONFIG?.supabaseAnonKey || 'YOUR_ANON_KEY',
-  workerUrl:   window.SIMPATICO_CONFIG?.workerUrl       || 'https://hr-api.YOUR_SUBDOMAIN.workers.dev',
-  r2PublicUrl: window.SIMPATICO_CONFIG?.r2PublicUrl     || 'https://files.YOUR_DOMAIN.com',
+  supabaseUrl: window.SIMPATICO_CONFIG?.supabaseUrl    || '',
+  supabaseKey: window.SIMPATICO_CONFIG?.supabaseAnonKey || '',
+  workerUrl:   window.SIMPATICO_CONFIG?.workerUrl       || 'https://simpatico-hr-ats.simpaticohrconsultancy.workers.dev',
+  r2PublicUrl: window.SIMPATICO_CONFIG?.r2PublicUrl     || 'https://files.simpaticohr.in',
 };
 
-let _sb = null;
 function sb() {
-  if (_sb) return _sb;
-  if (window.supabase) { _sb = window.supabase.createClient(TR_CONFIG.supabaseUrl, TR_CONFIG.supabaseKey); return _sb; }
+  if (typeof getSupabaseClient === 'function') return getSupabaseClient();
+  if (window._supabaseClient) return window._supabaseClient;
+  if (window.SimpaticoDB) return window.SimpaticoDB;
   return null;
 }
 
@@ -116,7 +116,7 @@ async function loadEnrollments() {
   allEnrollments = data || [];
 
   const completions = allEnrollments.filter(e => e.status === 'completed' && new Date(e.completed_at) >= new Date(thirtyDaysAgo)).length;
-  const learners    = new Set(allEnrollments.map(e => e.employees?.id)).size;
+  const learners    = new Set(allEnrollments.map(e => e.employees ? `${e.employees.first_name}_${e.employees.last_name}` : null).filter(Boolean)).size;
   setText('stat-completions', completions);
   setText('stat-learners', learners);
 

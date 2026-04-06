@@ -5,18 +5,18 @@
 
 // ── Config (pulled from existing app config if available) ──
 const EMP_CONFIG = {
-  supabaseUrl:    window.SIMPATICO_CONFIG?.supabaseUrl    || 'https://YOUR_PROJECT.supabase.co',
-  supabaseKey:    window.SIMPATICO_CONFIG?.supabaseAnonKey || 'YOUR_ANON_KEY',
-  workerUrl:      window.SIMPATICO_CONFIG?.workerUrl       || 'https://hr-api.YOUR_SUBDOMAIN.workers.dev',
-  r2PublicUrl:    window.SIMPATICO_CONFIG?.r2PublicUrl     || 'https://files.YOUR_DOMAIN.com',
+  supabaseUrl:    window.SIMPATICO_CONFIG?.supabaseUrl    || '',
+  supabaseKey:    window.SIMPATICO_CONFIG?.supabaseAnonKey || '',
+  workerUrl:      window.SIMPATICO_CONFIG?.workerUrl       || 'https://simpatico-hr-ats.simpaticohrconsultancy.workers.dev',
+  r2PublicUrl:    window.SIMPATICO_CONFIG?.r2PublicUrl     || 'https://files.simpaticohr.in',
 };
 
-// ── Supabase client (lazy-loads existing if present) ──
-let _sb = null;
+// ── Supabase client — use shared singleton from shared-utils.js ──
 function sb() {
-  if (_sb) return _sb;
-  if (window.supabase) { _sb = window.supabase.createClient(EMP_CONFIG.supabaseUrl, EMP_CONFIG.supabaseKey); return _sb; }
-  console.warn('[employees] Supabase not loaded – load supabase-js before employees.js');
+  if (typeof getSupabaseClient === 'function') return getSupabaseClient();
+  if (window._supabaseClient) return window._supabaseClient;
+  if (window.SimpaticoDB) return window.SimpaticoDB;
+  console.warn('[employees] Supabase not available — ensure shared-utils.js loads before employees.js');
   return null;
 }
 

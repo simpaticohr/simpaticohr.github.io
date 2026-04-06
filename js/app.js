@@ -501,6 +501,15 @@ if (typeof window.timeAgo === 'undefined') {
   };
 }
 
+if (typeof window.formatDate === 'undefined') {
+  window.formatDate = function(dateStr) {
+    if (!dateStr) return '—';
+    return new Date(dateStr).toLocaleDateString('en-IN', {
+      day: 'numeric', month: 'short', year: 'numeric'
+    });
+  };
+}
+
 if (typeof window.showToast === 'undefined') {
   window.showToast = function(message, type) {
     const container = document.getElementById('toastContainer') || document.getElementById('toasts');
@@ -543,8 +552,8 @@ function setupRealtimeSubscriptions(companyId) {
   if (!client || !client.channel) return;
   try {
     client.channel('hr-live')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'job_listings' }, () => { if (typeof loadJobs === 'function') loadJobs(); })
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'applications' }, () => { if (typeof loadPipelineData === 'function') loadPipelineData(); })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'jobs' }, () => { if (typeof loadJobs === 'function') loadJobs(); })
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'job_applications' }, () => { if (typeof loadAllApplications === 'function') loadAllApplications(); })
       .subscribe();
   } catch (e) { console.warn('[realtime] Setup skipped:', e.message); }
 }

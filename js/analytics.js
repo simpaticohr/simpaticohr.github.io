@@ -3,16 +3,16 @@
  * Analytics: Supabase aggregations + Cloudflare Workers analytics API + Chart.js
  */
 
-const AN_CONFIG = {
+const ANALYTICS_CONFIG = {
   supabaseUrl: window.SIMPATICO_CONFIG?.supabaseUrl,
   supabaseKey: window.SIMPATICO_CONFIG?.supabaseAnonKey,
   workerUrl:   window.SIMPATICO_CONFIG?.workerUrl || 'https://simpatico-hr-ats.simpaticohrconsultancy.workers.dev',
 };
 
-let _sb = null;
 function sb() {
-  if (_sb) return _sb;
-  if (window.supabase) { _sb = window.supabase.createClient(AN_CONFIG.supabaseUrl, AN_CONFIG.supabaseKey); return _sb; }
+  if (typeof getSupabaseClient === 'function') return getSupabaseClient();
+  if (window._supabaseClient) return window._supabaseClient;
+  if (window.SimpaticoDB) return window.SimpaticoDB;
   return null;
 }
 
@@ -90,7 +90,7 @@ async function loadAnalytics() {
 
   // Fetch advanced metrics from Cloudflare Worker
   try {
-    const res = await fetch(`${AN_CONFIG.workerUrl}/analytics/summary?days=${days}`, { headers: authHeaders() });
+    const res = await fetch(`${ANALYTICS_CONFIG.workerUrl}/analytics/summary?days=${days}`, { headers: authHeaders() });
     if (res.ok) {
       const { time_to_hire, absenteeism } = await res.json();
       document.getElementById('m-time-to-hire').innerHTML = `${time_to_hire||'—'}<span style="font-size:16px">d</span>`;
@@ -301,7 +301,7 @@ window.exportReport = async function() {
   showToast('Generating report…', 'info');
   try {
     const days = document.getElementById('period-selector')?.value || '90';
-    const res = await fetch(`${AN_CONFIG.workerUrl}/analytics/report?days=${days}&format=csv`, { headers: authHeaders() });
+    const res = await fetch(`${ANALYTICS_CONFIG.workerUrl}/analytics/report?days=${days}&format=csv`, { headers: authHeaders() });
     if (!res.ok) throw new Error('Export failed');
     const blob = await res.blob();
     const a = document.createElement('a');
