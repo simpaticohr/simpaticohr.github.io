@@ -60,7 +60,7 @@
         }
 
         .sidebar-brand {
-            padding: 20px 20px;
+            padding: 16px 20px 16px 24px;
             font-size: 1.2rem;
             font-weight: 700;
             border-bottom: 1px solid rgba(255,255,255,0.1);
@@ -70,6 +70,7 @@
             flex-shrink: 0;
             min-height: 64px;
             box-sizing: border-box;
+            border-left: 3px solid transparent;
         }
 
         .sidebar-brand .brand-logo-fallback {
@@ -133,7 +134,7 @@
         .nav-item i { width: 20px; text-align: center; font-size: 1rem; }
 
         .sidebar-footer {
-            padding: 12px 16px;
+            padding: 12px 12px;
             border-top: 1px solid rgba(255,255,255,0.1);
             flex-shrink: 0;
             box-sizing: border-box;
@@ -144,10 +145,10 @@
         .logout-btn {
             width: 100%;
             max-width: 100%;
-            padding: 10px 14px;
+            padding: 10px 14px 10px 15px;
             display: flex;
             align-items: center;
-            gap: 10px;
+            gap: 12px;
             background: rgba(239, 68, 68, 0.15);
             color: #fca5a5;
             border: 1px solid rgba(239, 68, 68, 0.3);
@@ -1058,7 +1059,7 @@
 
 <aside class="sidebar" id="sidebar">
     <div class="sidebar-brand">
-        <img src="../favicon-96x96.png" style="width:28px;height:28px;margin-right:10px;border-radius:6px">
+        <img src="../favicon-96x96.png" style="width:28px;height:28px;border-radius:6px;flex-shrink:0">
         <div class="brand-text">
             Simpatico HR
             <small>HR Platform</small>
@@ -2203,22 +2204,8 @@ async function initApp() {
     
     updateUserDisplay();
     
-    // ── PRODUCTION SYNC ──
-    try {
-        await syncWithSupabase();
-        console.log('✅ Simpatico HR synced with production data.');
-    } catch (e) {
-        console.warn('⚠️ Sync failed, using local offline data.', e);
-        showToast('Running in offline mode', 'warning');
-    }
-
-    const today = new Date().toISOString().split('T')[0];
-    const dateInput = document.getElementById('intDate');
-    if (dateInput) {
-        dateInput.setAttribute('min', today);
-        dateInput.addEventListener('change', refreshTimeSlots);
-    }
-
+    // ── Render immediately with cached data (fast first paint) ──
+    appData = DataStore.get();
     renderDashboardStats();
     renderDashboardInterviews();
     renderDashboardActivities();
@@ -2229,6 +2216,34 @@ async function initApp() {
     renderCandidates(); 
     updateInterviewCounts();
     populatePositionDropdown();
+
+    // ── PRODUCTION SYNC — then re-render with live data ──
+    try {
+        await syncWithSupabase();
+        console.log('✅ Simpatico HR synced with production data.');
+        // Re-render with fresh data after sync
+        appData = DataStore.get();
+        renderDashboardStats();
+        renderDashboardInterviews();
+        renderDashboardActivities();
+        renderJobTable();
+        renderInterviewTable();
+        renderProctoredTable();
+        renderResultsTable();
+        renderCandidates();
+        updateInterviewCounts();
+        populatePositionDropdown();
+    } catch (e) {
+        console.warn('⚠️ Sync failed, using local offline data.', e);
+        showToast('Running in offline mode — check connectivity', 'warning');
+    }
+
+    const today = new Date().toISOString().split('T')[0];
+    const dateInput = document.getElementById('intDate');
+    if (dateInput) {
+        dateInput.setAttribute('min', today);
+        dateInput.addEventListener('change', refreshTimeSlots);
+    }
 
     const roundSelect = document.getElementById('intRound');
     if (roundSelect) {
@@ -2245,32 +2260,66 @@ async function initApp() {
 }
 
 async function syncWithSupabase() {
-    if (typeof SimpaticoDB === 'undefined' || !SimpaticoDB) return;
+    // Try shared singleton first, then window.SimpaticoDB
+    const db = (typeof getSupabaseClient === 'function' ? getSupabaseClient() : null) || window.SimpaticoDB || window._supabaseClient;
+    if (!db) {
+        console.warn('[sync] No Supabase client available — skipping live sync');
+        return;
+    }
     
     const userJson = localStorage.getItem('simpatico_user');
     if (!userJson) return;
     const user = JSON.parse(userJson);
     const tenantId = user.tenant_id || user.company_id || 'default';
 
+    let synced = 0;
+
     // 1. Fetch Jobs
-    const jobsRes = await SimpaticoDB.from('jobs').select('*').order('created_at', { ascending: false });
-    if (!jobsRes.error) {
-        DataStore.update(data => { data.jobs = jobsRes.data; });
-    }
+    try {
+        const jobsRes = await db.from('jobs').select('*').order('created_at', { ascending: false });
+        if (!jobsRes.error && jobsRes.data) {
+            DataStore.update(data => { data.jobs = jobsRes.data; });
+            synced++;
+        } else if (jobsRes.error) {
+            console.warn('[sync] Jobs fetch error:', jobsRes.error.message);
+        }
+    } catch(e) { console.warn('[sync] Jobs query failed:', e.message); }
 
     // 2. Fetch Interviews
-    const intRes = await SimpaticoDB.from('interviews').select('*').order('created_at', { ascending: false });
-    if (!intRes.error) {
-        DataStore.update(data => { data.interviews = intRes.data; });
-    }
+    try {
+        const intRes = await db.from('interviews').select('*').order('created_at', { ascending: false });
+        if (!intRes.error && intRes.data) {
+            DataStore.update(data => { data.interviews = intRes.data; });
+            synced++;
+        } else if (intRes.error) {
+            console.warn('[sync] Interviews fetch error:', intRes.error.message);
+        }
+    } catch(e) { console.warn('[sync] Interviews query failed:', e.message); }
 
     // 3. Fetch Applications (Candidates)
-    const appRes = await SimpaticoDB.from('job_applications').select('*, jobs(title, department)').order('created_at', { ascending: false });
-    if (!appRes.error) {
-        DataStore.update(data => { data.job_applications = appRes.data; });
-    }
+    try {
+        const appRes = await db.from('job_applications').select('*, jobs(title, department)').order('created_at', { ascending: false });
+        if (!appRes.error && appRes.data) {
+            DataStore.update(data => { data.job_applications = appRes.data; });
+            synced++;
+        } else if (appRes.error) {
+            console.warn('[sync] Applications fetch error:', appRes.error.message);
+        }
+    } catch(e) { console.warn('[sync] Applications query failed:', e.message); }
+
+    // 4. Fetch Employee count for stats
+    try {
+        const empRes = await db.from('employees').select('id', { count: 'exact', head: true });
+        if (!empRes.error) {
+            DataStore.update(data => { data.stats.totalEmployees = empRes.count || 0; });
+            synced++;
+        }
+    } catch(e) { /* employees table may not exist */ }
+
+    if (synced === 0) throw new Error('All sync queries failed');
 
     appData = DataStore.get();
+    console.log(`[sync] Synced ${synced} data sources from Supabase`);
 }
 
 // ===== CHANNEL TOGGLE =====

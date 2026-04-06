@@ -1,4 +1,4 @@
-﻿<!-- auth/register-company.html -->
+<!-- auth/register-company.html -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -209,7 +209,7 @@
 <script src="../js/shared-utils.js"></script>
 <script src="../js/supabase-client.js"></script>
 <script>
-const API = 'https://evalis-ai.simpaticohrconsultancy.workers.dev';
+const WORKER_URL = window.SIMPATICO_CONFIG?.workerUrl || 'https://simpatico-hr-ats.simpaticohrconsultancy.workers.dev';
 
 let currentStep = 1;
 
@@ -244,79 +244,143 @@ function goToStep(step) {
 
 async function submitCompanyRegistration() {
     const btn     = document.getElementById('registerBtn');
-    const spinner = document.getElementById('submitSpinner');
-    const btnText = btn?.querySelector('span') || btn;
+    const btnText = btn;
 
-    // Gather all form values
     const payload = {
-        // Step 1 — account
         full_name:  document.getElementById('regName').value.trim(),
         email:      document.getElementById('regEmail').value.trim(),
         password:   document.getElementById('regPassword').value,
         phone:      document.getElementById('regPhone')?.value.trim() || '',
-        role:       'company_admin',
-
-        // Step 2 — company
         company_name:      document.getElementById('companyName').value.trim(),
         industry:          document.getElementById('companyIndustry')?.value || '',
         company_size:      document.getElementById('companySize')?.value || '',
         website:           document.getElementById('companyWebsite')?.value.trim() || '',
-        contact_email:     document.getElementById('regEmail').value.trim(),
-
-        // Step 3 — plan
-        subscription_plan: document.getElementById('planSelect')?.value || 'trial',
-        whatsapp:          document.getElementById('regPhone')?.value.trim() || '',
     };
 
     if (!payload.full_name || !payload.email || !payload.company_name) {
         toast('Please complete all required fields', 'error'); return;
     }
 
-    // Loading state
-    if (btn)     btn.disabled = true;
-    if (spinner) spinner.style.display = 'inline-block';
-    if (btnText) btnText.textContent = 'Creating account...';
+    btn.disabled = true;
+    btnText.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Creating account...';
 
     try {
-        const { data: authData, error: authError } = await window.SimpaticoDB.auth.signUp({ email: payload.email, password: payload.password, options: { data: { full_name: payload.full_name, role: 'company_admin' } } });
-        if (authError) throw authError;
-        const userId = authData.user?.id;
-        if (!userId) throw new Error('Registration failed - no user returned');
-        const { data: company, error: ce } = await window.SimpaticoDB.from('companies').insert({ name: payload.company_name, email: payload.email, contact_email: payload.email, industry: payload.industry, company_size: payload.company_size, website: payload.website, subscription_plan: 'trial', is_active: true }).select().single();
-        if (ce) throw ce;
-        await window.SimpaticoDB.from('users').insert({ auth_id: userId, full_name: payload.full_name, email: payload.email, phone: payload.phone, role: 'company_admin', company_id: company.id, is_active: true });
-        const data = { token: authData.session?.access_token, user: { email: payload.email, full_name: payload.full_name, role: 'company_admin', company_id: company.id } };
+        // 1. Sign up with Supabase Auth
+        const db = window.SimpaticoDB || (typeof getSupabaseClient === 'function' ? getSupabaseClient() : null);
+        if (!db) throw new Error('System not ready — please refresh and try again');
 
+        const { data: authData, error: authError } = await db.auth.signUp({
+            email: payload.email,
+            password: payload.password,
+            options: { data: { full_name: payload.full_name, role: 'company_admin' } }
+        });
 
-
-
-        // Save session
-        if (data.token) {
-            localStorage.setItem('simpatico_token', data.token);
-            localStorage.setItem('simpatico_user', JSON.stringify(data.user || {
-                email:     payload.email,
-                full_name: payload.full_name,
-                role:      'company_admin'
-            }));
-            if (data.company) {
-                localStorage.setItem('simpatico_company', JSON.stringify(data.company));
+        if (authError) {
+            // Handle "User already registered" gracefully
+            if (authError.message?.toLowerCase().includes('already registered') ||
+                authError.message?.toLowerCase().includes('already been registered')) {
+                toast('This email is already registered. Please sign in instead.', 'error');
+                setTimeout(() => { window.location.href = 'login.html'; }, 2500);
+                return;
             }
+            throw authError;
+        }
+
+        const userId = authData.user?.id;
+        if (!userId) throw new Error('Registration failed — no user returned');
+
+        // 2. Create company via Worker API (bypasses RLS)
+        let companyId = null;
+        try {
+            const workerRes = await fetch(`${WORKER_URL}/companies/register`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': 'Bearer ' + (authData.session?.access_token || ''),
+                    'X-Tenant-ID': 'NEW_REGISTRATION'
+                },
+                body: JSON.stringify({
+                    name: payload.company_name,
+                    email: payload.email,
+                    contact_email: payload.email,
+                    industry: payload.industry,
+                    company_size: payload.company_size,
+                    website: payload.website,
+                    subscription_plan: 'trial',
+                    admin_user_id: userId,
+                    admin_name: payload.full_name,
+                    admin_phone: payload.phone
+                })
+            });
+            const workerData = await workerRes.json();
+            if (workerRes.ok && workerData.data?.company_id) {
+                companyId = workerData.data.company_id;
+            }
+        } catch (workerErr) {
+            console.warn('[registration] Worker company create failed, trying direct:', workerErr);
+        }
+
+        // 3. Fallback: direct insert if Worker unavailable
+        if (!companyId) {
+            try {
+                const { data: company, error: ce } = await db.from('companies').insert({
+                    name: payload.company_name, email: payload.email,
+                    contact_email: payload.email, industry: payload.industry,
+                    company_size: payload.company_size, website: payload.website,
+                    subscription_plan: 'trial', is_active: true
+                }).select().single();
+                if (!ce && company) companyId = company.id;
+                else console.warn('[registration] Direct companies insert failed:', ce?.message);
+            } catch(e) { console.warn('[registration] Direct insert error:', e); }
+        }
+
+        // 4. Create user profile
+        try {
+            await db.from('users').insert({
+                auth_id: userId, full_name: payload.full_name,
+                email: payload.email, phone: payload.phone,
+                role: 'company_admin', company_id: companyId,
+                is_active: true
+            });
+        } catch(e) { console.warn('[registration] User profile insert:', e); }
+
+        // 5. Send welcome email via Worker
+        try {
+            await fetch(`${WORKER_URL}/email/welcome`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    email: payload.email,
+                    name: payload.full_name,
+                    company_name: payload.company_name,
+                    type: 'company'
+                })
+            });
+        } catch(e) { console.warn('[registration] Welcome email failed:', e); }
+
+        // 6. Save session
+        if (authData.session?.access_token) {
+            localStorage.setItem('simpatico_token', authData.session.access_token);
+            localStorage.setItem('simpatico_user', JSON.stringify({
+                email: payload.email, full_name: payload.full_name,
+                role: 'company_admin', company_id: companyId
+            }));
         }
 
         toast('✅ Company registered! Redirecting to dashboard...', 'success');
         setTimeout(() => {
-            window.location.href = data.token
+            window.location.href = authData.session?.access_token
                 ? '../dashboard/hr.html'
-                : 'login.html';
+                : 'login.html?verify=1';
         }, 1500);
 
     } catch (err) {
         console.error('Registration error:', err);
-        toast(err.message || 'Registration failed. Please try again.', 'error');
+        const msg = err.message || 'Registration failed. Please try again.';
+        toast(msg, 'error');
     } finally {
-        if (btn)     btn.disabled = false;
-        if (spinner) spinner.style.display = 'none';
-        if (btnText) btnText.textContent = 'Complete Registration';
+        btn.disabled = false;
+        btnText.innerHTML = '<i class="fas fa-rocket"></i> Complete Registration';
     }
 }
 
@@ -325,18 +389,16 @@ function toast(msg, type = 'info') {
     const t = document.createElement('div');
     t.className = `toast toast-${type}`;
     t.textContent = msg;
-    // Basic inline styles in case app.css not loaded
     Object.assign(t.style, {
         position:'fixed', top:'20px', right:'20px', padding:'14px 20px',
         borderRadius:'10px', fontSize:'14px', fontWeight:'600', color:'#fff',
         zIndex:'10000', maxWidth:'400px', boxShadow:'0 10px 30px rgba(0,0,0,0.2)',
+        animation: 'none',
         background: type==='success' ? '#059669' : type==='error' ? '#DC2626' : '#2563EB'
     });
     document.body.appendChild(t);
-    setTimeout(() => t.remove(), 4000);
+    setTimeout(() => t.remove(), 5000);
 }
 </script>
-</body>
-</html>
 </body>
 </html>

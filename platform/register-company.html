@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -195,18 +195,17 @@
         </div>
     </div>
 
-    <script src="../js/hr-config.js"></script>
-<script src="../js/shared-utils.js"></script>
-    <script src="../js/supabase-client.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="../js/hr-config.js"></script>
+    <script src="../js/shared-utils.js"></script>
+    <script src="../js/supabase-client.js"></script>
     
     <script>
-    // Configuration from window.SIMPATICO_CONFIG (hr-config.js)
-    const SUPABASE_URL = window.SIMPATICO_CONFIG?.supabaseUrl;
-    const SUPABASE_ANON_KEY = window.SIMPATICO_CONFIG?.supabaseAnonKey;
-    
-    // Use the centralized SimpaticoDB if available
-    const db = window.SimpaticoDB || supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    const WORKER_URL = window.SIMPATICO_CONFIG?.workerUrl || 'https://simpatico-hr-ats.simpaticohrconsultancy.workers.dev';
+
+    function getDB() {
+        return window.SimpaticoDB || (typeof getSupabaseClient === 'function' ? getSupabaseClient() : null);
+    }
 
     async function handleRegister(e) {
         e.preventDefault();
@@ -221,6 +220,13 @@
             password: document.getElementById('password').value
         };
 
+        if (!payload.company_name || !payload.name || !payload.email || !payload.password) {
+            toast('Please fill all required fields', 'error'); return;
+        }
+
+        const db = getDB();
+        if (!db) { toast('System not ready \u2014 please refresh', 'error'); return; }
+
         btn.disabled = true;
         spinner.style.display = 'inline-block';
 
@@ -231,26 +237,85 @@
                 options: { data: { full_name: payload.name, role: 'company_admin' } }
             });
 
-            if (authError) throw authError;
+            if (authError) {
+                if (authError.message?.toLowerCase().includes('already registered') ||
+                    authError.message?.toLowerCase().includes('already been registered')) {
+                    toast('This email is already registered. Please sign in instead.', 'error');
+                    setTimeout(() => { window.location.href = 'login.html'; }, 2500);
+                    return;
+                }
+                throw authError;
+            }
+
             const userId = authData.user?.id;
             if (!userId) throw new Error('Registration failed');
 
-            const { data: company, error: compError } = await db.from('companies').insert({
-                name: payload.company_name,
-                industry: payload.industry,
-                slug: payload.company_name.toLowerCase().replace(/[^a-z0-9]+/g, '-') + '-' + Date.now().toString(36)
-            }).select().single();
+            // Create company via Worker (bypasses RLS)
+            let companyId = null;
+            try {
+                const workerRes = await fetch(`${WORKER_URL}/companies/register`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': 'Bearer ' + (authData.session?.access_token || ''),
+                        'X-Tenant-ID': 'NEW_REGISTRATION'
+                    },
+                    body: JSON.stringify({
+                        name: payload.company_name,
+                        email: payload.email,
+                        contact_email: payload.email,
+                        industry: payload.industry,
+                        subscription_plan: 'trial',
+                        admin_user_id: userId,
+                        admin_name: payload.name,
+                        slug: payload.company_name.toLowerCase().replace(/[^a-z0-9]+/g, '-') + '-' + Date.now().toString(36)
+                    })
+                });
+                const workerData = await workerRes.json();
+                if (workerRes.ok && workerData.data?.company_id) {
+                    companyId = workerData.data.company_id;
+                }
+            } catch(e) { console.warn('[registration] Worker error:', e); }
 
-            if (compError) throw compError;
+            // Fallback direct insert
+            if (!companyId) {
+                try {
+                    const { data: company, error: compError } = await db.from('companies').insert({
+                        name: payload.company_name, industry: payload.industry,
+                        email: payload.email, contact_email: payload.email,
+                        subscription_plan: 'trial', is_active: true,
+                        slug: payload.company_name.toLowerCase().replace(/[^a-z0-9]+/g, '-') + '-' + Date.now().toString(36)
+                    }).select().single();
+                    if (!compError && company) companyId = company.id;
+                } catch(e) { console.warn('[registration] Direct insert error:', e); }
+            }
 
-            await db.from('users').insert({
-                auth_id: userId,
-                company_id: company.id,
-                email: payload.email,
-                full_name: payload.name,
-                role: 'company_admin',
-                is_active: true
-            });
+            // Create user profile
+            try {
+                await db.from('users').insert({
+                    auth_id: userId, company_id: companyId,
+                    email: payload.email, full_name: payload.name,
+                    role: 'company_admin', is_active: true
+                });
+            } catch(e) { console.warn('[registration] User profile insert:', e); }
+
+            // Send welcome email
+            try {
+                await fetch(`${WORKER_URL}/email/welcome`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email: payload.email, name: payload.name, company_name: payload.company_name, type: 'company' })
+                });
+            } catch(e) { console.warn('[registration] Welcome email failed:', e); }
+
+            // Save session
+            if (authData.session?.access_token) {
+                localStorage.setItem('simpatico_token', authData.session.access_token);
+                localStorage.setItem('simpatico_user', JSON.stringify({
+                    email: payload.email, full_name: payload.name,
+                    role: 'company_admin', company_id: companyId
+                }));
+            }
 
             toast('Success! Redirecting...', 'success');
             setTimeout(() => {
@@ -258,7 +323,8 @@
             }, 1500);
 
         } catch (err) {
-            toast(err.message, 'error');
+            console.error(err);
+            toast(err.message || 'Registration failed', 'error');
         } finally {
             btn.disabled = false;
             spinner.style.display = 'none';
@@ -266,11 +332,13 @@
     }
 
     function toast(msg, type) {
+        const existing = document.querySelector('.toast');
+        if (existing) existing.remove();
         const t = document.createElement('div');
         t.className = `toast toast-${type}`;
         t.textContent = msg;
         document.body.appendChild(t);
-        setTimeout(() => t.remove(), 4000);
+        setTimeout(() => t.remove(), 5000);
     }
     </script>
 </body>

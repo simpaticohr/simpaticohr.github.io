@@ -315,7 +315,7 @@
     }
 
     sessionStorage.clear();
-    window.location.href = '/auth/login.html';
+    window.location.href = '/platform/login.html';
   }
 
   // ═══════════════════════════════════════════════

@@ -222,7 +222,7 @@ class AuthManager {
   async guardRoute(allowedRoles = []) {
     const session = await this.checkSession();
     if (!session) {
-      window.location.href = '/auth/login.html';
+      window.location.href = '/platform/login.html';
       return null;
     }
     if (allowedRoles.length > 0 && !allowedRoles.includes(session.profile.role)) {
@@ -421,6 +421,6 @@ if (typeof window.doLogout === 'undefined') {
       if (k && k.startsWith('sb-') && k.endsWith('-auth-token')) localStorage.removeItem(k);
     }
     sessionStorage.clear();
-    window.location.href = '/auth/login.html';
+    window.location.href = '/platform/login.html';
   };
 }

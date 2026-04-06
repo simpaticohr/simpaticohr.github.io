@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -244,23 +244,22 @@
         </div>
     </div>
 
-    <script src="../js/hr-config.js"></script>
-<script src="../js/shared-utils.js"></script>
-    <script src="../js/supabase-client.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="../js/hr-config.js"></script>
+    <script src="../js/shared-utils.js"></script>
+    <script src="../js/supabase-client.js"></script>
     
     <script>
-    // Configuration from window.SIMPATICO_CONFIG (hr-config.js)
-    const SUPABASE_URL = window.SIMPATICO_CONFIG?.supabaseUrl;
-    const SUPABASE_ANON_KEY = window.SIMPATICO_CONFIG?.supabaseAnonKey;
-    
-    // Use the centralized SimpaticoDB if available
-    const db = window.SimpaticoDB || supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    const WORKER_URL = window.SIMPATICO_CONFIG?.workerUrl || 'https://simpatico-hr-ats.simpaticohrconsultancy.workers.dev';
+
+    function getDB() {
+        return window.SimpaticoDB || (typeof getSupabaseClient === 'function' ? getSupabaseClient() : null);
+    }
 
     function showFileName(input) {
         const fn = document.getElementById('fileName');
         if (input.files && input.files[0]) {
-            fn.textContent = '📄 ' + input.files[0].name;
+            fn.textContent = '\ud83d\udcc4 ' + input.files[0].name;
         }
     }
 
@@ -291,16 +290,8 @@
         return;
     }
 
-    const payload = {
-        name: fullName,
-        phone: phone,
-        email: email,
-        experience: document.getElementById('experience').value,
-        sector: document.getElementById('sector').value,
-        skills: document.getElementById('skills').value.trim(),
-        location: document.getElementById('location').value.trim(),
-        password: password
-    };
+    const db = getDB();
+    if (!db) { toast('System not ready \u2014 please refresh', 'error'); return; }
 
     btn.disabled = true;
     spinner.style.display = 'inline-block';
@@ -311,19 +302,24 @@
             email: email,
             password: password,
             options: {
-                data: {
-                    full_name: fullName,
-                    role: 'candidate'
-                }
+                data: { full_name: fullName, role: 'candidate' }
             }
         });
 
-        if (authError) throw authError;
+        if (authError) {
+            if (authError.message?.toLowerCase().includes('already registered') ||
+                authError.message?.toLowerCase().includes('already been registered')) {
+                toast('This email is already registered. Please sign in instead.', 'error');
+                setTimeout(() => { window.location.href = 'login.html'; }, 2500);
+                return;
+            }
+            throw authError;
+        }
 
         const userId = authData.user?.id;
         if (!userId) throw new Error('Registration failed - please try again');
 
-        // 2. Resume upload (optional during reg)
+        // 2. Resume upload (optional)
         let resumeUrl = '';
         const resumeFile = document.getElementById('resumeFile').files[0];
         if (resumeFile) {
@@ -359,7 +355,16 @@
 
         if (dbError) throw dbError;
 
-        // 4. Success handling
+        // 4. Send welcome email
+        try {
+            await fetch(`${WORKER_URL}/email/welcome`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email, name: fullName, type: 'candidate' })
+            });
+        } catch(e) { console.warn('[registration] Welcome email failed:', e); }
+
+        // 5. Success handling
         if (authData.session) {
             localStorage.setItem('simpatico_token', authData.session.access_token);
             localStorage.setItem('simpatico_user', JSON.stringify({
@@ -391,7 +396,7 @@
         t.className = `toast toast-${type}`;
         t.textContent = msg;
         document.body.appendChild(t);
-        setTimeout(() => t.remove(), 4000);
+        setTimeout(() => t.remove(), 5000);
     }
     </script>
 </body>
