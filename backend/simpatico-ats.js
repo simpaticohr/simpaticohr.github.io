@@ -582,6 +582,10 @@ route('GET',    '/analytics/report',                handleAnalyticsReport);
 route('GET',    '/analytics/headcount-trend',       handleHeadcountTrend);
 route('GET',    '/analytics/attrition',             handleAttritionReport);
 
+// Registration & Welcome
+route('POST',   '/companies/register',              handleCompanyRegister);
+route('POST',   '/email/welcome',                   handleWelcomeEmail);
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // § 13.  MAIN ENTRY POINT
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -2112,3 +2116,112 @@ function formatTimeStr(timeStr) {
   const hour = h % 12 || 12;
   return `${hour}:${String(m).padStart(2, '0')} ${ampm}`;
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// § REGISTRATION & WELCOME EMAIL HANDLERS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+async function handleCompanyRegister(request, env, ctx) {
+  const body = await safeJson(request);
+  const { name, email, contact_email, industry, company_size, website, subscription_plan, admin_user_id, admin_name, admin_phone, slug } = body;
+
+  if (!name || !email) throw new ValidationError('name and email are required');
+
+  // Insert company using service_role key (bypasses RLS)
+  const compRes = await sbFetch(env, 'POST', '/rest/v1/companies', {
+    name,
+    email,
+    contact_email: contact_email || email,
+    industry: industry || null,
+    company_size: company_size || null,
+    website: website || null,
+    subscription_plan: subscription_plan || 'trial',
+    slug: slug || name.toLowerCase().replace(/[^a-z0-9]+/g, '-') + '-' + Date.now().toString(36),
+    is_active: true,
+  }, false, 'default');
+
+  if (!compRes.ok) {
+    const errText = await compRes.text();
+    throw new AppError(`Failed to create company: ${errText}`, HTTP.SERVER_ERROR, 'DB_ERROR');
+  }
+
+  const companies = await compRes.json();
+  const company = Array.isArray(companies) ? companies[0] : companies;
+
+  // If admin_user_id provided, create user profile
+  if (admin_user_id && company?.id) {
+    try {
+      await sbFetch(env, 'POST', '/rest/v1/users', {
+        auth_id: admin_user_id,
+        full_name: admin_name || 'Admin',
+        email,
+        phone: admin_phone || null,
+        role: 'company_admin',
+        company_id: company.id,
+        is_active: true,
+      }, false, 'default');
+    } catch (e) {
+      console.warn('[handleCompanyRegister] User profile insert failed:', e.message);
+    }
+  }
+
+  // Fire-and-forget welcome email
+  sendEmail(env, {
+    to: email,
+    subject: `Welcome to SimpaticoHR, ${admin_name || 'Team'}! 🎉`,
+    html: registrationWelcomeHtml(admin_name || 'there', name, 'company'),
+  }).catch(e => console.warn('[handleCompanyRegister] Welcome email failed:', e));
+
+  return apiResponse({ company_id: company?.id, company_name: name, status: 'active' }, HTTP.CREATED);
+}
+
+async function handleWelcomeEmail(request, env, ctx) {
+  const { email, name, company_name, type } = await safeJson(request);
+
+  if (!email || !name) throw new ValidationError('email and name are required');
+
+  const subject = type === 'company'
+    ? `Welcome to SimpaticoHR, ${name}! Your company is ready 🚀`
+    : `Welcome to SimpaticoHR, ${name}! 🎉`;
+
+  await sendEmail(env, {
+    to: email,
+    subject,
+    html: registrationWelcomeHtml(name, company_name || 'SimpaticoHR', type || 'candidate'),
+  });
+
+  return apiResponse({ sent: true, to: email });
+}
+
+function registrationWelcomeHtml(name, companyName, type) {
+  const greeting = type === 'company'
+    ? `Your company <strong>${companyName}</strong> has been registered on SimpaticoHR.`
+    : `You've successfully registered on SimpaticoHR as a candidate.`;
+
+  const nextSteps = type === 'company'
+    ? `<li>Post your first job opening</li><li>Configure your hiring pipeline</li><li>Invite your HR team members</li><li>Set up AI-powered interview proctoring</li>`
+    : `<li>Complete your profile</li><li>Upload your latest resume</li><li>Browse job openings</li><li>Prepare with AI mock interviews</li>`;
+
+  return `
+    <div style="max-width:600px;margin:0 auto;font-family:'Inter',Arial,sans-serif;background:#f8fafc;padding:32px 0;">
+      <div style="background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,0.06);margin:0 16px;">
+        <div style="background:linear-gradient(135deg,#1E40AF,#3B82F6);padding:32px 24px;text-align:center;">
+          <h1 style="color:#fff;font-size:24px;margin:0;font-weight:800;">Welcome to SimpaticoHR</h1>
+          <p style="color:rgba(255,255,255,0.85);font-size:14px;margin:8px 0 0;">India's AI-Powered Recruitment Platform</p>
+        </div>
+        <div style="padding:32px 24px;">
+          <p style="font-size:16px;color:#1f2937;margin:0 0 16px;">Hi <strong>${name}</strong>,</p>
+          <p style="font-size:14px;color:#4b5563;line-height:1.7;margin:0 0 20px;">${greeting}</p>
+          <p style="font-size:14px;color:#4b5563;font-weight:600;margin:0 0 12px;">Here's what to do next:</p>
+          <ul style="font-size:14px;color:#4b5563;line-height:2;padding-left:20px;margin:0 0 24px;">${nextSteps}</ul>
+          <div style="text-align:center;margin:24px 0;">
+            <a href="https://simpaticohr.in/platform/login.html" style="display:inline-block;background:linear-gradient(135deg,#1E40AF,#3B82F6);color:#fff;text-decoration:none;padding:14px 32px;border-radius:10px;font-weight:700;font-size:15px;">Go to Dashboard →</a>
+          </div>
+        </div>
+        <div style="background:#f1f5f9;padding:16px 24px;text-align:center;border-top:1px solid #e2e8f0;">
+          <p style="font-size:12px;color:#94a3b8;margin:0;">© ${new Date().getFullYear()} SimpaticoHR Consultancy Pvt Ltd · <a href="https://simpaticohr.in" style="color:#3B82F6;text-decoration:none;">simpaticohr.in</a></p>
+        </div>
+      </div>
+    </div>`;
+}
+
