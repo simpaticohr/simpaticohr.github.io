@@ -1318,10 +1318,11 @@ Return ONLY valid JSON in format: {"match_score": 85, "reason": "Brief 1-sentenc
   // 3. Auto-Shortlist Logic
   let autoInterview = false;
   let interviewToken = '';
-  // Check if job description has the hidden auto-shortlist flag
-  const autoEnabled = job?.description?.includes('<!-- SIMPATICO_AUTO_SHORTLIST:TRUE -->') || false;
+  // Check if job has auto_shortlist enabled (database flag on jobs table)
+  // Falls back to true by default for AI-first automation pipeline
+  const autoEnabled = job?.auto_shortlist !== false;
   
-  if (autoEnabled && match_score !== null && match_score >= 75) {
+  if (autoEnabled && match_score !== null && match_score >= 70) {
       status = 'interview';
       autoInterview = true;
       const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
@@ -1337,10 +1338,12 @@ Return ONLY valid JSON in format: {"match_score": 85, "reason": "Brief 1-sentenc
   
   // 4. Auto-Schedule Interview execution
   if (autoInterview && app) {
+      const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(); // 7 day expiry
       const intvPayload = {
           candidate_name: app.candidate_name,
           candidate_email: app.candidate_email,
           job_id: job.id,
+          job_title: job.title,
           position: job.title,
           round: "AI Auto-Screen",
           token: interviewToken,
@@ -1349,7 +1352,9 @@ Return ONLY valid JSON in format: {"match_score": 85, "reason": "Brief 1-sentenc
           date: new Date().toISOString().split('T')[0],
           start_time: "Flexible",
           end_time: "Flexible",
-          duration_minutes: 20
+          duration_minutes: 20,
+          expires_at: expiresAt,
+          match_score: match_score,
       };
       
       await sbFetch(env, 'POST', '/rest/v1/interviews', intvPayload, false, ctx.tenantId);
@@ -1360,15 +1365,40 @@ Return ONLY valid JSON in format: {"match_score": 85, "reason": "Brief 1-sentenc
       try {
           await sendEmail(env, {
               to: app.candidate_email,
-              subject: `Interview Invitation: ${job.title} at Simpatico`,
-              html: `<p>Hi ${app.candidate_name},</p>
-                     <p>Congratulations! Your profile is a strong match for the <strong>${job.title}</strong> position.</p>
-                     <p>Please complete your preliminary AI proctored interview at your earliest convenience using this secure link:</p>
-                     <p><a href="${meetingLink}" style="background:#4f46e5;color:white;padding:10px 20px;text-decoration:none;border-radius:5px;">Start Interview</a></p>
-                     <p>Best regards,<br>Simpatico AI ATS</p>`
+              subject: `Interview Invitation — ${job.title} at SimpaticoHR`,
+              html: `<div style="max-width:600px;margin:0 auto;font-family:'Inter',Arial,sans-serif;background:#f8fafc;padding:32px 0;">
+  <div style="background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,0.06);margin:0 16px;">
+    <div style="background:linear-gradient(135deg,#4f46e5,#7c3aed);padding:32px 24px;text-align:center;">
+      <h1 style="color:#fff;font-size:22px;margin:0;font-weight:800;">Interview Invitation 🎉</h1>
+      <p style="color:rgba(255,255,255,0.85);font-size:14px;margin:8px 0 0;">You've been shortlisted by our AI screening</p>
+    </div>
+    <div style="padding:32px 24px;">
+      <p style="font-size:16px;color:#1f2937;margin:0 0 16px;">Hi <strong>${app.candidate_name}</strong>,</p>
+      <p style="font-size:14px;color:#4b5563;line-height:1.7;margin:0 0 20px;">Congratulations! Your profile scored <strong>${match_score}%</strong> against the <strong>${job.title}</strong> role requirements. You've been automatically shortlisted for a preliminary AI interview.</p>
+      <div style="background:#f1f5f9;border-radius:12px;padding:20px;margin:0 0 24px;">
+        <table style="width:100%;font-size:14px;color:#374151;" cellpadding="0" cellspacing="0">
+          <tr><td style="padding:6px 0;color:#6b7280;width:120px;">Position</td><td style="padding:6px 0;font-weight:600;">${job.title}</td></tr>
+          <tr><td style="padding:6px 0;color:#6b7280;">Department</td><td style="padding:6px 0;font-weight:600;">${job.department || 'General'}</td></tr>
+          <tr><td style="padding:6px 0;color:#6b7280;">Format</td><td style="padding:6px 0;font-weight:600;">AI Voice Interview (Proctored)</td></tr>
+          <tr><td style="padding:6px 0;color:#6b7280;">Duration</td><td style="padding:6px 0;font-weight:600;">~20 minutes</td></tr>
+          <tr><td style="padding:6px 0;color:#6b7280;">Deadline</td><td style="padding:6px 0;font-weight:600;">Within 7 days</td></tr>
+        </table>
+      </div>
+      <div style="text-align:center;margin:24px 0;">
+        <a href="${meetingLink}" style="display:inline-block;background:linear-gradient(135deg,#4f46e5,#7c3aed);color:#fff;text-decoration:none;padding:14px 32px;border-radius:10px;font-weight:700;font-size:15px;">Start Your Interview →</a>
+      </div>
+      <div style="background:#fef3c7;border-left:4px solid #f59e0b;padding:12px 16px;border-radius:0 8px 8px 0;font-size:13px;color:#92400e;line-height:1.6;">
+        <strong>Tips:</strong> Use Chrome or Edge · Ensure good lighting · Use a quiet room · Have your camera and microphone ready
+      </div>
+    </div>
+    <div style="background:#f1f5f9;padding:16px 24px;text-align:center;border-top:1px solid #e2e8f0;">
+      <p style="font-size:12px;color:#94a3b8;margin:0;">© ${new Date().getFullYear()} SimpaticoHR Consultancy Pvt Ltd · <a href="https://simpaticohr.in" style="color:#4f46e5;text-decoration:none;">simpaticohr.in</a></p>
+    </div>
+  </div>
+</div>`
           });
       } catch(e) {
-          console.warn("Auto-shortlist email failed", e);
+          console.warn("[ATS] Auto-shortlist email failed:", e.message);
       }
   }
 
