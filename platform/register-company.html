@@ -231,75 +231,117 @@
         spinner.style.display = 'inline-block';
 
         try {
+            let userId = null;
+            let session = null;
+
+            // Step 1: Try signup
             const { data: authData, error: authError } = await db.auth.signUp({
                 email: payload.email,
                 password: payload.password,
                 options: { data: { full_name: payload.name, role: 'company_admin' } }
             });
 
+            // Handle "already registered" — recover by signing in
             if (authError) {
-                if (authError.message?.toLowerCase().includes('already registered') ||
-                    authError.message?.toLowerCase().includes('already been registered')) {
+                const msg = authError.message?.toLowerCase() || '';
+                if (msg.includes('already registered') || msg.includes('already been registered')) {
+                    // This email exists in Auth — try signing in to complete setup
+                    toast('Account exists. Completing setup...', 'info');
+                    const { data: signInData, error: signInError } = await db.auth.signInWithPassword({
+                        email: payload.email,
+                        password: payload.password
+                    });
+                    if (signInError) {
+                        toast('This email is already registered with a different password. Please sign in instead.', 'error');
+                        setTimeout(() => { window.location.href = 'login.html'; }, 2500);
+                        return;
+                    }
+                    userId = signInData.user?.id;
+                    session = signInData.session;
+                } else {
+                    throw authError;
+                }
+            } else {
+                // Check for fake success (email already exists with confirmations enabled)
+                if (authData.user?.identities?.length === 0) {
                     toast('This email is already registered. Please sign in instead.', 'error');
                     setTimeout(() => { window.location.href = 'login.html'; }, 2500);
                     return;
                 }
-                throw authError;
+                userId = authData.user?.id;
+                session = authData.session;
             }
 
-            const userId = authData.user?.id;
-            if (!userId) throw new Error('Registration failed');
+            if (!userId) throw new Error('Registration failed — no user ID returned');
 
-            // Create company via Worker (bypasses RLS)
+            const accessToken = session?.access_token || '';
+
+            // Step 2: Check if company already exists for this user
             let companyId = null;
             try {
-                const workerRes = await fetch(`${WORKER_URL}/companies/register`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': 'Bearer ' + (authData.session?.access_token || ''),
-                        'X-Tenant-ID': 'NEW_REGISTRATION'
-                    },
-                    body: JSON.stringify({
-                        name: payload.company_name,
-                        email: payload.email,
-                        contact_email: payload.email,
-                        industry: payload.industry,
-                        subscription_plan: 'trial',
-                        admin_user_id: userId,
-                        admin_name: payload.name,
-                        slug: payload.company_name.toLowerCase().replace(/[^a-z0-9]+/g, '-') + '-' + Date.now().toString(36)
-                    })
-                });
-                const workerData = await workerRes.json();
-                if (workerRes.ok && workerData.data?.company_id) {
-                    companyId = workerData.data.company_id;
+                const { data: existingProfile } = await db.from('users')
+                    .select('company_id')
+                    .eq('auth_id', userId)
+                    .single();
+                if (existingProfile?.company_id) {
+                    companyId = existingProfile.company_id;
+                    console.log('[registration] Existing company found:', companyId);
                 }
-            } catch(e) { console.warn('[registration] Worker error:', e); }
+            } catch(e) { /* no profile yet */ }
 
-            // Fallback direct insert
+            // Step 3: Create company if none exists
             if (!companyId) {
                 try {
-                    const { data: company, error: compError } = await db.from('companies').insert({
-                        name: payload.company_name, industry: payload.industry,
-                        email: payload.email, contact_email: payload.email,
-                        subscription_plan: 'trial', is_active: true,
-                        slug: payload.company_name.toLowerCase().replace(/[^a-z0-9]+/g, '-') + '-' + Date.now().toString(36)
-                    }).select().single();
-                    if (!compError && company) companyId = company.id;
-                } catch(e) { console.warn('[registration] Direct insert error:', e); }
+                    const workerRes = await fetch(`${WORKER_URL}/companies/register`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': 'Bearer ' + accessToken,
+                            'X-Tenant-ID': 'NEW_REGISTRATION'
+                        },
+                        body: JSON.stringify({
+                            name: payload.company_name,
+                            email: payload.email,
+                            contact_email: payload.email,
+                            industry: payload.industry,
+                            subscription_plan: 'trial',
+                            admin_user_id: userId,
+                            admin_name: payload.name,
+                            slug: payload.company_name.toLowerCase().replace(/[^a-z0-9]+/g, '-') + '-' + Date.now().toString(36)
+                        })
+                    });
+                    const workerData = await workerRes.json();
+                    if (workerRes.ok && workerData.data?.company_id) {
+                        companyId = workerData.data.company_id;
+                    }
+                } catch(e) { console.warn('[registration] Worker error:', e); }
+
+                // Fallback direct insert
+                if (!companyId) {
+                    try {
+                        const { data: company, error: compError } = await db.from('companies').insert({
+                            name: payload.company_name, industry: payload.industry,
+                            email: payload.email, contact_email: payload.email,
+                            subscription_plan: 'trial', is_active: true,
+                            slug: payload.company_name.toLowerCase().replace(/[^a-z0-9]+/g, '-') + '-' + Date.now().toString(36)
+                        }).select().single();
+                        if (!compError && company) companyId = company.id;
+                    } catch(e) { console.warn('[registration] Direct insert error:', e); }
+                }
             }
 
-            // Create user profile
+            // Step 4: Create or update user profile
             try {
-                await db.from('users').insert({
+                // Try upsert — handles both new profiles and fixing incomplete ones
+                const { error: profileErr } = await db.from('users').upsert({
                     auth_id: userId, company_id: companyId,
                     email: payload.email, full_name: payload.name,
                     role: 'company_admin', is_active: true
-                });
-            } catch(e) { console.warn('[registration] User profile insert:', e); }
+                }, { onConflict: 'auth_id' });
+                if (profileErr) console.warn('[registration] Profile upsert warning:', profileErr.message);
+            } catch(e) { console.warn('[registration] User profile upsert:', e); }
 
-            // Send welcome email
+            // Step 5: Send welcome email (best-effort)
             try {
                 await fetch(`${WORKER_URL}/email/welcome`, {
                     method: 'POST',
@@ -308,18 +350,20 @@
                 });
             } catch(e) { console.warn('[registration] Welcome email failed:', e); }
 
-            // Save session
-            if (authData.session?.access_token) {
-                localStorage.setItem('simpatico_token', authData.session.access_token);
+            // Step 6: Save session
+            if (accessToken) {
+                localStorage.setItem('simpatico_token', accessToken);
                 localStorage.setItem('simpatico_user', JSON.stringify({
+                    id: userId,
                     email: payload.email, full_name: payload.name,
-                    role: 'company_admin', company_id: companyId
+                    role: 'company_admin', company_id: companyId,
+                    tenant_id: companyId
                 }));
             }
 
-            toast('Success! Redirecting...', 'success');
+            toast('✅ Success! Redirecting to dashboard...', 'success');
             setTimeout(() => {
-                window.location.href = authData.session ? '../dashboard/hr.html' : 'login.html?verify=1';
+                window.location.href = session ? '../dashboard/hr.html' : 'login.html?verify=1';
             }, 1500);
 
         } catch (err) {
