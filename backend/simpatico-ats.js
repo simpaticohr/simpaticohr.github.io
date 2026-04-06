@@ -546,6 +546,7 @@ route('GET',    '/leave',                           handleListLeave);
 route('GET',    '/leave/balance',                   handleGetLeaveBalance);
 route('PATCH',  '/leave/:id/approved',              handleLeaveDecision);
 route('PATCH',  '/leave/:id/rejected',              handleLeaveDecision);
+route('POST',   '/policies',                        handleUploadPolicy);
 
 // Payroll
 route('POST',   '/payroll/calculate',               handleCalculatePayroll);
@@ -931,6 +932,24 @@ async function handleUpdateOnboardingTask(request, env, ctx, [id]) {
   }
 
   return apiResponse({ task });
+}
+
+async function handleUploadPolicy(request, env, ctx) {
+  requireRole(ctx, 'hr', 'admin', 'superadmin');
+  const formData = await request.formData();
+  const file = formData.get('file');
+  const name = formData.get('name') || file?.name || 'Untitled Policy';
+  if (!file) throw new ValidationError('file is required');
+
+  const key = `policies/${ctx.tenantId}/${Date.now()}-${sanitizeFilename(file.name || 'doc')}`;
+  await env.HR_BUCKET.put(key, file.stream(), { httpMetadata: { contentType: file.type || 'application/octet-stream' } });
+  
+  // Try to insert cleanly; if Supabase hr_policies misses version, fallback or assume db defaults version
+  const res = await sbFetch(env, 'POST', '/rest/v1/hr_policies', { name, category: 'general', version: '1.0.0', file_key: key, tenant_id: ctx.tenantId }, false, ctx.tenantId);
+  const [policy] = await res.json();
+  
+  await audit(env, ctx, 'policy.upload', 'hr_policies', policy?.id, { name });
+  return apiResponse({ policy }, HTTP.CREATED);
 }
 
 // ── Training ──────────────────────────────────────────────────────────────────

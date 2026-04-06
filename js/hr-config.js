@@ -2,6 +2,11 @@
  * 🏢 SIMPATICO HR — ENTERPRISE CONFIGURATION (v5.0)
  * Points to the isolated 'production' environment.
  */
+// Fix "Not Secure" by enforcing HTTPS on production domain
+if (location.protocol !== 'https:' && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
+  location.replace(`https:${location.href.substring(location.protocol.length)}`);
+}
+
 window.SIMPATICO_CONFIG = {
   // 1. DATABASE GATEWAY
   supabaseUrl: 'https://cvkxtsvgnynxexmemfuy.supabase.co',
