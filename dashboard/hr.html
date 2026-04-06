@@ -2198,6 +2198,12 @@ async function initApp() {
 
     if (!realToken) { performLogout(); return; }
 
+    // ★ One-time cleanup: remove old shared cache to prevent data bleed
+    if (localStorage.getItem('simpaticoHR_data')) {
+        console.log('[init] Cleaning up old global cache key simpaticoHR_data');
+        localStorage.removeItem('simpaticoHR_data');
+    }
+
     // Initialize local session data from the REAL logged-in user
     DataStore.update(data => { 
         data.user.isLoggedIn = true; 
@@ -2266,7 +2272,6 @@ async function initApp() {
 }
 
 async function syncWithSupabase() {
-    // Try shared singleton first, then window.SimpaticoDB
     const db = (typeof getSupabaseClient === 'function' ? getSupabaseClient() : null) || window.SimpaticoDB || window._supabaseClient;
     if (!db) {
         console.warn('[sync] No Supabase client available — skipping live sync');
@@ -2278,15 +2283,26 @@ async function syncWithSupabase() {
     const user = JSON.parse(userJson);
     const companyId = user.company_id || user.tenant_id || null;
 
+    // ★ STRICT ISOLATION: If no company_id, user has no tenant — show empty dashboard
+    if (!companyId) {
+        console.warn('[sync] No company_id in session — enforcing empty dashboard (strict isolation)');
+        DataStore.update(data => {
+            data.jobs = [];
+            data.interviews = [];
+            data.job_applications = [];
+            data.stats.totalEmployees = 0;
+        });
+        appData = DataStore.get();
+        return;
+    }
+
     let synced = 0;
 
-    // 1. Fetch Jobs — FILTERED by company_id for tenant isolation
+    // 1. Fetch Jobs — STRICTLY FILTERED by company_id
     try {
-        let jobsQuery = db.from('jobs').select('*').order('created_at', { ascending: false });
-        if (companyId) {
-            jobsQuery = jobsQuery.eq('company_id', companyId);
-        }
-        const jobsRes = await jobsQuery;
+        const jobsRes = await db.from('jobs').select('*')
+            .eq('company_id', companyId)
+            .order('created_at', { ascending: false });
         if (!jobsRes.error && jobsRes.data) {
             DataStore.update(data => { data.jobs = jobsRes.data; });
             synced++;
@@ -2295,13 +2311,11 @@ async function syncWithSupabase() {
         }
     } catch(e) { console.warn('[sync] Jobs query failed:', e.message); }
 
-    // 2. Fetch Interviews — FILTERED by company_id for tenant isolation
+    // 2. Fetch Interviews — STRICTLY FILTERED by company_id
     try {
-        let intQuery = db.from('interviews').select('*').order('created_at', { ascending: false });
-        if (companyId) {
-            intQuery = intQuery.eq('company_id', companyId);
-        }
-        const intRes = await intQuery;
+        const intRes = await db.from('interviews').select('*')
+            .eq('company_id', companyId)
+            .order('created_at', { ascending: false });
         if (!intRes.error && intRes.data) {
             DataStore.update(data => { data.interviews = intRes.data; });
             synced++;
@@ -2310,13 +2324,11 @@ async function syncWithSupabase() {
         }
     } catch(e) { console.warn('[sync] Interviews query failed:', e.message); }
 
-    // 3. Fetch Applications — FILTERED by company_id for tenant isolation
+    // 3. Fetch Applications — STRICTLY FILTERED by company_id
     try {
-        let appQuery = db.from('job_applications').select('*, jobs(title, department)').order('created_at', { ascending: false });
-        if (companyId) {
-            appQuery = appQuery.eq('company_id', companyId);
-        }
-        const appRes = await appQuery;
+        const appRes = await db.from('job_applications').select('*, jobs(title, department)')
+            .eq('company_id', companyId)
+            .order('created_at', { ascending: false });
         if (!appRes.error && appRes.data) {
             DataStore.update(data => { data.job_applications = appRes.data; });
             synced++;
@@ -2325,13 +2337,10 @@ async function syncWithSupabase() {
         }
     } catch(e) { console.warn('[sync] Applications query failed:', e.message); }
 
-    // 4. Fetch Employee count for stats — FILTERED by company_id
+    // 4. Fetch Employee count — STRICTLY FILTERED by company_id
     try {
-        let empQuery = db.from('employees').select('id', { count: 'exact', head: true });
-        if (companyId) {
-            empQuery = empQuery.eq('company_id', companyId);
-        }
-        const empRes = await empQuery;
+        const empRes = await db.from('employees').select('id', { count: 'exact', head: true })
+            .eq('company_id', companyId);
         if (!empRes.error) {
             DataStore.update(data => { data.stats.totalEmployees = empRes.count || 0; });
             synced++;
@@ -2341,7 +2350,7 @@ async function syncWithSupabase() {
     if (synced === 0) throw new Error('All sync queries failed');
 
     appData = DataStore.get();
-    console.log(`[sync] Synced ${synced} data sources from Supabase (company: ${companyId || 'global'})`);
+    console.log(`[sync] Synced ${synced} data sources from Supabase (company: ${companyId})`);
 }
 
 // ===== CHANNEL TOGGLE =====
