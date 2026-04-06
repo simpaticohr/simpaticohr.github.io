@@ -51,10 +51,12 @@ async function loadUser() {
 
 async function loadCourses() {
   const client = sb(); if (!client) return;
-  const { data, error } = await client
-    .from('training_courses')
+  const cid = typeof getCompanyId === 'function' ? getCompanyId() : null;
+  let query = client.from('training_courses')
     .select('id, title, description, category, duration_hours, is_required, content_url, thumbnail_key, created_at')
     .order('created_at', { ascending: false });
+  if (cid) query = query.eq('company_id', cid);
+  const { data, error } = await query;
 
   if (error) { console.error(error); return; }
   allCourses = data || [];
@@ -101,6 +103,8 @@ function renderCourses(list) {
 
 async function loadEnrollments() {
   const client = sb(); if (!client) return;
+  const cid = typeof getCompanyId === 'function' ? getCompanyId() : null;
+  if (!cid) { allEnrollments = []; renderEnrollmentsTable([]); return; }
   const thirtyDaysAgo = new Date(Date.now() - 30*24*60*60*1000).toISOString();
 
   const { data, error } = await client
@@ -110,6 +114,7 @@ async function loadEnrollments() {
       employees(first_name, last_name),
       training_courses(id, title, is_required)
     `)
+    .eq('company_id', cid)
     .order('enrolled_at', { ascending: false });
 
   if (error) { console.error(error); return; }
@@ -152,6 +157,8 @@ function renderEnrollmentsTable(list) {
 
 async function loadComplianceReport() {
   const client = sb(); if (!client) return;
+  const cid = typeof getCompanyId === 'function' ? getCompanyId() : null;
+  if (!cid) return;
   const today = new Date().toISOString().slice(0,10);
   const soon  = new Date(Date.now() + 30*24*60*60*1000).toISOString().slice(0,10);
 
@@ -162,6 +169,7 @@ async function loadComplianceReport() {
       employees(first_name, last_name),
       training_courses(title, is_required)
     `)
+    .eq('company_id', cid)
     .eq('training_courses.is_required', true)
     .or(`due_date.lte.${soon},status.eq.overdue`)
     .order('due_date');
@@ -279,11 +287,13 @@ function loadEnrollSelects() {
       coursesSel.appendChild(opt);
     });
   }
-  // Employees
+  // Employees — filtered by company_id
   const empSel = document.getElementById('enroll-employees');
   if (empSel && sb()) {
-    sb().from('employees').select('id,first_name,last_name').eq('status','active').order('first_name')
-      .then(({ data }) => {
+    let query = sb().from('employees').select('id,first_name,last_name').eq('status','active').order('first_name');
+    const cid = typeof getCompanyId === 'function' ? getCompanyId() : null;
+    if (cid) query = query.eq('company_id', cid);
+    query.then(({ data }) => {
         (data||[]).forEach(e => {
           const opt = document.createElement('option');
           opt.value = e.id; opt.textContent = `${e.first_name} ${e.last_name}`;

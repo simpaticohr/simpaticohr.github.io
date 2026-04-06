@@ -42,11 +42,10 @@ async function loadUser() {
 
 async function loadEmployeeSelects() {
   const client = sb(); if (!client) return;
-  const { data } = await client
-    .from('employees')
-    .select('id, first_name, last_name')
-    .eq('status', 'active')
-    .order('first_name');
+  const cid = typeof getCompanyId === 'function' ? getCompanyId() : null;
+  let query = client.from('employees').select('id, first_name, last_name').eq('status', 'active').order('first_name');
+  if (cid) query = query.eq('company_id', cid);
+  const { data } = await query;
 
   ['ob-employee','ob-buddy'].forEach(selId => {
     const sel = document.getElementById(selId); if (!sel) return;
@@ -61,10 +60,10 @@ async function loadEmployeeSelects() {
 
 async function loadTemplates() {
   const client = sb(); if (!client) return;
-  const { data } = await client
-    .from('onboarding_templates')
-    .select('id, name')
-    .order('name');
+  const cid = typeof getCompanyId === 'function' ? getCompanyId() : null;
+  let query = client.from('onboarding_templates').select('id, name').order('name');
+  if (cid) query = query.eq('company_id', cid);
+  const { data } = await query;
 
   const sel = document.getElementById('ob-template'); if (!sel) return;
   (data || []).forEach(t => {
@@ -76,6 +75,8 @@ async function loadTemplates() {
 
 async function loadOnboarding() {
   const client = sb(); if (!client) return;
+  const cid = typeof getCompanyId === 'function' ? getCompanyId() : null;
+  if (!cid) { onboardingRecords = []; updateStats(); renderPipeline(); return; }
   const { data, error } = await client
     .from('onboarding_records')
     .select(`
@@ -83,6 +84,7 @@ async function loadOnboarding() {
       employees(id, first_name, last_name, job_title, departments(name)),
       onboarding_tasks(id, title, due_date, status, notes)
     `)
+    .eq('company_id', cid)
     .order('start_date', { ascending: false });
 
   if (error) { console.error(error); return; }

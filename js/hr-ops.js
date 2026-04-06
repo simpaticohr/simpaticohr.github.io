@@ -35,7 +35,10 @@ async function loadUser() {
 
 async function loadEmployeeSelect() {
   const client = sb(); if (!client) return;
-  const { data } = await client.from('employees').select('id,first_name,last_name').eq('status','active').order('first_name');
+  const cid = typeof getCompanyId === 'function' ? getCompanyId() : null;
+  let query = client.from('employees').select('id,first_name,last_name').eq('status','active').order('first_name');
+  if (cid) query = query.eq('company_id', cid);
+  const { data } = await query;
   const sel = document.getElementById('leave-employee'); if (!sel) return;
   (data||[]).forEach(e => {
     const opt = document.createElement('option');
@@ -47,6 +50,8 @@ async function loadEmployeeSelect() {
 // ── Leave ──
 async function loadLeave() {
   const client = sb(); if (!client) return;
+  const cid = typeof getCompanyId === 'function' ? getCompanyId() : null;
+  if (!cid) { allLeave = []; renderLeaveTable([]); return; }
   const today = new Date().toISOString().slice(0,10);
   const thirtyDaysAgo = new Date(Date.now()-30*24*60*60*1000).toISOString().slice(0,10);
 
@@ -57,6 +62,7 @@ async function loadLeave() {
       employees(first_name, last_name),
       approver:employees!approver_id(first_name, last_name)
     `)
+    .eq('company_id', cid)
     .order('created_at', { ascending: false });
 
   if (error) { console.error(error); return; }
@@ -150,10 +156,10 @@ window.submitLeaveRequest = async function() {
 // ── Policies ──
 async function loadPolicies() {
   const client = sb(); if (!client) return;
-  const { data } = await client
-    .from('hr_policies')
-    .select('id, name, category, version, file_key, updated_at')
-    .order('updated_at', { ascending: false });
+  const cid = typeof getCompanyId === 'function' ? getCompanyId() : null;
+  let query = client.from('hr_policies').select('id, name, category, version, file_key, updated_at').order('updated_at', { ascending: false });
+  if (cid) query = query.eq('company_id', cid);
+  const { data } = await query;
 
   const container = document.getElementById('policies-list'); if (!container) return;
   const policies = data || [];
@@ -216,6 +222,8 @@ window.uploadPolicy = async function() {
 // ── HR Tickets ──
 async function loadTickets() {
   const client = sb(); if (!client) return;
+  const cid = typeof getCompanyId === 'function' ? getCompanyId() : null;
+  if (!cid) { allTickets = []; renderTickets([]); return; }
   const { data, error } = await client
     .from('hr_tickets')
     .select(`
@@ -223,6 +231,7 @@ async function loadTickets() {
       employees(first_name, last_name),
       assignee:employees!assignee_id(first_name, last_name)
     `)
+    .eq('company_id', cid)
     .order('created_at', { ascending: false });
 
   if (error) { console.error(error); return; }
@@ -260,10 +269,10 @@ window.openTicketModal = () => showToast('HR Tickets module — contact your adm
 // ── Org Chart (simple tree) ──
 window.loadOrgChart = async function() {
   const client = sb(); if (!client) return;
-  const { data } = await client
-    .from('employees')
-    .select('id, first_name, last_name, job_title, manager_id, departments(name)')
-    .eq('status', 'active');
+  const cid = typeof getCompanyId === 'function' ? getCompanyId() : null;
+  let query = client.from('employees').select('id, first_name, last_name, job_title, manager_id, departments(name)').eq('status', 'active');
+  if (cid) query = query.eq('company_id', cid);
+  const { data } = await query;
 
   const employees = data || [];
   const container = document.getElementById('org-chart'); if (!container) return;

@@ -55,13 +55,21 @@ async function loadCurrentUser() {
   }
 }
 
+// ── Get current company_id from session ──
+function getCompanyId() {
+  try {
+    const u = JSON.parse(localStorage.getItem('simpatico_user') || '{}');
+    return u.company_id || u.tenant_id || null;
+  } catch(e) { return null; }
+}
+
 // ── Departments ──
 async function loadDepartments() {
   const client = sb(); if (!client) return;
-  const { data, error } = await client
-    .from('departments')
-    .select('id, name')
-    .order('name');
+  let query = client.from('departments').select('id, name').order('name');
+  const cid = getCompanyId();
+  if (cid) query = query.eq('company_id', cid);
+  const { data, error } = await query;
 
   if (error) { console.error(error); return; }
   departments = data || [];
@@ -78,12 +86,23 @@ async function loadDepartments() {
   });
 }
 
-// ── Load employees ──
+// ── Load employees — FILTERED by company_id ──
 async function loadEmployees() {
   const client = sb(); if (!client) return;
+  const cid = getCompanyId();
   showTableLoading(true);
 
-  const { data, error } = await client
+  // ★ STRICT ISOLATION: If no company_id, show empty
+  if (!cid) {
+    showTableLoading(false);
+    allEmployees = [];
+    updateStats();
+    renderEmployees(allEmployees);
+    console.warn('[employees] No company_id — showing empty (strict isolation)');
+    return;
+  }
+
+  let query = client
     .from('employees')
     .select(`
       id, first_name, last_name, email, job_title, employment_type,
@@ -91,7 +110,10 @@ async function loadEmployees() {
       departments(name),
       manager:employees!manager_id(first_name, last_name)
     `)
+    .eq('company_id', cid)
     .order('first_name');
+
+  const { data, error } = await query;
 
   showTableLoading(false);
 
@@ -258,6 +280,7 @@ async function saveEmployee() {
     location:         document.getElementById('emp-location')?.value.trim() || null,
     manager_id:       document.getElementById('emp-manager')?.value || null,
     status:           'active',
+    company_id:       getCompanyId(),
   };
 
   // Insert directly via Supabase client (uses existing session auth)

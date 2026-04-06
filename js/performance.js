@@ -36,10 +36,10 @@ async function loadUser() {
 
 async function loadCycles() {
   const client = sb(); if (!client) return;
-  const { data } = await client
-    .from('review_cycles')
-    .select('id, name, type, start_date, end_date, status')
-    .order('created_at', { ascending: false });
+  const cid = typeof getCompanyId === 'function' ? getCompanyId() : null;
+  let query = client.from('review_cycles').select('id, name, type, start_date, end_date, status').order('created_at', { ascending: false });
+  if (cid) query = query.eq('company_id', cid);
+  const { data } = await query;
   allCycles = data || [];
 
   const sel = document.getElementById('cycle-filter'); if (!sel) return;
@@ -55,6 +55,8 @@ async function loadCycles() {
 
 async function loadReviews() {
   const client = sb(); if (!client) return;
+  const cid = typeof getCompanyId === 'function' ? getCompanyId() : null;
+  if (!cid) { allReviews = []; renderReviews([]); return; }
   const { data, error } = await client
     .from('performance_reviews')
     .select(`
@@ -62,6 +64,7 @@ async function loadReviews() {
       employees(id, first_name, last_name, job_title, departments(name)),
       reviewer:employees!reviewer_id(first_name, last_name)
     `)
+    .eq('company_id', cid)
     .order('created_at', { ascending: false });
 
   if (error) { console.error(error); return; }
@@ -121,12 +124,15 @@ function renderReviews(list) {
 
 async function loadGoals() {
   const client = sb(); if (!client) return;
+  const cid = typeof getCompanyId === 'function' ? getCompanyId() : null;
+  if (!cid) { allGoals = []; renderGoals([]); return; }
   const { data, error } = await client
     .from('performance_goals')
     .select(`
       id, title, description, period, progress, status, due_date,
       employees(first_name, last_name)
     `)
+    .eq('company_id', cid)
     .order('due_date');
 
   if (error) { console.error(error); return; }

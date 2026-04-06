@@ -63,6 +63,18 @@
   }
 
   /**
+   * Returns the current user's company_id from localStorage session.
+   * This is the SINGLE source of truth for tenant isolation.
+   * ALL module queries MUST use this to filter data.
+   */
+  function getCompanyId() {
+    try {
+      var u = JSON.parse(localStorage.getItem('simpatico_user') || '{}');
+      return u.company_id || u.tenant_id || null;
+    } catch(e) { return null; }
+  }
+
+  /**
    * Returns headers WITHOUT Content-Type (for FormData uploads).
    */
   function authHeadersMultipart() {
@@ -427,6 +439,7 @@
   window.authHeaders        = authHeaders;
   window.authHeadersMultipart = authHeadersMultipart;
   window.getSupabaseClient  = getSupabaseClient;
+  window.getCompanyId       = getCompanyId;
 
   // Security
   window.escapeHtml         = escapeHtml;
