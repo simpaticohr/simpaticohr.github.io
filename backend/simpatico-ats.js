@@ -1855,7 +1855,8 @@ async function sbFetch(env, method, path, body, countOnly = false, tenantId = 'd
   let finalPath = path;
   const TENANT_AWARE_TABLES = ['employees', 'leave_requests', 'payroll_runs', 'payslips',
     'training_courses', 'training_enrollments', 'onboarding_records', 'onboarding_tasks',
-    'performance_reviews', 'goals', 'notifications', 'audit_logs', 'employee_documents'];
+    'performance_reviews', 'goals', 'notifications', 'audit_logs', 'employee_documents',
+    'jobs', 'job_applications', 'interviews', 'hr_policies'];
   if (method === 'GET' && tenantId && tenantId !== 'default') {
     const tableName = (path.match(/\/rest\/v1\/([a-z_]+)/) || [])[1];
     if (tableName && TENANT_AWARE_TABLES.includes(tableName)) {
@@ -2214,12 +2215,16 @@ async function handleCompanyRegister(request, env, ctx) {
     }
   }
 
-  // Fire-and-forget welcome email
-  sendEmail(env, {
-    to: email,
-    subject: `Welcome to SimpaticoHR, ${admin_name || 'Team'}! 🎉`,
-    html: registrationWelcomeHtml(admin_name || 'there', name, 'company'),
-  }).catch(e => console.warn('[handleCompanyRegister] Welcome email failed:', e));
+  // Await the welcome email so Cloudflare doesn't terminate the thread early
+  try {
+    await sendEmail(env, {
+      to: email,
+      subject: `Welcome to SimpaticoHR, ${admin_name || 'Team'}! 🎉`,
+      html: registrationWelcomeHtml(admin_name || 'there', name, 'company'),
+    });
+  } catch (e) {
+    console.warn('[handleCompanyRegister] Welcome email failed:', e);
+  }
 
   return apiResponse({ company_id: company?.id, company_name: name, status: 'active' }, HTTP.CREATED);
 }

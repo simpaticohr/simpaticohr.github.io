@@ -19,7 +19,14 @@ window.SIMPATICO_CONFIG = {
   r2PublicUrl: 'https://files.simpaticohr.in',
 
   // 4. SAAS ATTRIBUTES (For Enterprise Isolation)
-  tenantId: 'SIMP_PRO_MAIN', // Change this when you onboard new clients
+  get tenantId() {
+    try {
+      const user = JSON.parse(localStorage.getItem('simpatico_user'));
+      return user?.company_id || 'SIMP_PRO_MAIN';
+    } catch(e) {
+      return 'SIMP_PRO_MAIN';
+    }
+  },
   appVersion: '5.0.0-Industrial',
   
   // Helper to generate Trace IDs for debugging (crypto-safe)
