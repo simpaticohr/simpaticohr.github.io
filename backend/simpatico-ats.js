@@ -390,19 +390,25 @@ async function buildContext(request, env) {
   let actor = null;
   if (authHeader.startsWith('Bearer ')) {
     const token = authHeader.slice(7);
-    if (env.JWT_SECRET) {
-      try {
-        actor = await verifyJWT(token, env.JWT_SECRET);
-      } catch (e) {
-        if (e.message.includes('signature') || e.message.includes('failed')) {
-          // Fallback to verifying directly with Supabase if local JWT secret fails
-          actor = await verifyViaSupabase(token, env);
-        } else {
-          throw e;
+    try {
+      if (env.JWT_SECRET) {
+        try {
+          actor = await verifyJWT(token, env.JWT_SECRET);
+        } catch (e) {
+          if (e.message.includes('signature') || e.message.includes('failed')) {
+            // Fallback to verifying directly with Supabase if local JWT secret fails
+            actor = await verifyViaSupabase(token, env);
+          } else {
+            throw e;
+          }
         }
+      } else {
+        actor = await verifyViaSupabase(token, env);
       }
-    } else {
-      actor = await verifyViaSupabase(token, env);
+    } catch (authErr) {
+      // Don't crash the pipeline — let route handlers decide via requireAuth/requireRole
+      console.warn('[Auth] Token verification failed (will be unauthenticated):', authErr.message);
+      actor = null;
     }
   }
 

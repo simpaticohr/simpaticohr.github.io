@@ -3791,27 +3791,53 @@ async function generateJD() {
     try {
         const workerUrl = window.SIMPATICO_CONFIG?.workerUrl || 'https://simpatico-hr-ats.simpaticohrconsultancy.workers.dev';
         const tenantId = typeof getCompanyId === 'function' ? getCompanyId() : 'default';
-        
+
+        // Get a FRESH token from the live Supabase session (auto-refreshes if expired)
+        let freshToken = '';
+        if (window.SimpaticoDB?.auth?.getSession) {
+            try {
+                const { data: sessionData } = await SimpaticoDB.auth.getSession();
+                freshToken = sessionData?.session?.access_token || '';
+            } catch(e) { console.warn('[JD] Session refresh failed:', e.message); }
+        }
+        // Fallback to localStorage token
+        if (!freshToken && typeof getAuthToken === 'function') {
+            freshToken = getAuthToken();
+        }
+
+        const headers = {
+            'Content-Type': 'application/json',
+            'X-Tenant-ID': tenantId
+        };
+        if (freshToken) headers['Authorization'] = 'Bearer ' + freshToken;
+        if (window.SIMPATICO_CONFIG?.supabaseAnonKey) headers['apikey'] = window.SIMPATICO_CONFIG.supabaseAnonKey;
+
         const res = await fetch(`${workerUrl}/ai/generate-jd`, {
             method: 'POST',
-            headers: { 
-                'Content-Type': 'application/json',
-                'X-Tenant-ID': tenantId 
-            },
+            headers,
             body: JSON.stringify({ title, department, type, experience, skills, location })
         });
-        
+
+        if (!res.ok) {
+            const errJson = await res.json().catch(() => ({}));
+            throw new Error(errJson.error?.message || `Server error (${res.status})`);
+        }
+
         const resJson = await res.json();
         const jdText = resJson.data?.jd || resJson.jd; 
         
-        if (output) output.innerText = jdText || 'Could not generate JD. Please try again.';
-        showToast('✨ Job description generated!');
+        if (jdText) {
+            if (output) output.innerText = jdText;
+            showToast('✨ Job description generated!');
+        } else {
+            throw new Error('Empty response from AI');
+        }
     } catch (e) {
         console.error("JD Gen Error:", e);
         if (output) {
             output.innerText = `About the Role\n\nWe are looking for a talented ${title} to join our ${department || 'team'} at Simpatico.\n\nKey Responsibilities\n• Lead and execute ${title.toLowerCase()}-related initiatives\n• Collaborate with cross-functional teams\n• Drive innovation and continuous improvement\n\nRequirements\n• ${experience || '3-5 years'} of relevant experience\n${skills ? `• Proficiency in: ${skills}\n` : ''}• Strong communication and problem-solving skills\n\nWhat We Offer\n• Competitive salary and benefits\n• Flexible working arrangements\n• Learning and development opportunities`;
         }
-        showToast('✨ Template generated (Worker error: Check console)');
+        showToast('⚠️ AI unavailable — template generated instead', 'warning');
     }
 }
 function clearJD() {
