@@ -157,9 +157,8 @@ window.submitLeaveRequest = async function() {
 async function loadPolicies() {
   const client = sb(); if (!client) return;
   const cid = typeof getCompanyId === 'function' ? getCompanyId() : null;
-  let query = client.from('hr_policies').select('id, name, category, version, file_key, updated_at').order('updated_at', { ascending: false });
-  if (cid) query = query.eq('company_id', cid);
-  const { data } = await query;
+  if (!cid) { const c = document.getElementById('policies-list'); if (c) c.innerHTML = '<div class="hr-empty" style="grid-column:1/-1"><p>No policies uploaded yet.</p></div>'; return; }
+  const { data } = await client.from('hr_policies').select('id, name, category, version, file_key, updated_at').eq('company_id', cid).order('updated_at', { ascending: false });
 
   const container = document.getElementById('policies-list'); if (!container) return;
   const policies = data || [];
@@ -270,9 +269,8 @@ window.openTicketModal = () => showToast('HR Tickets module — contact your adm
 window.loadOrgChart = async function() {
   const client = sb(); if (!client) return;
   const cid = typeof getCompanyId === 'function' ? getCompanyId() : null;
-  let query = client.from('employees').select('id, first_name, last_name, job_title, manager_id, departments(name)').eq('status', 'active');
-  if (cid) query = query.eq('company_id', cid);
-  const { data } = await query;
+  if (!cid) { const c = document.getElementById('org-chart'); if (c) c.innerHTML = '<p style="text-align:center;color:var(--hr-text-muted)">No org data available.</p>'; return; }
+  const { data } = await client.from('employees').select('id, first_name, last_name, job_title, manager_id, departments(name)').eq('status', 'active').eq('company_id', cid);
 
   const employees = data || [];
   const container = document.getElementById('org-chart'); if (!container) return;

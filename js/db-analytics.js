@@ -50,12 +50,18 @@ async function loadUser() {
   } catch(e) { console.warn('User load:', e); }
 }
 
-// ── Full Analysis Pipeline ──
+// ── Full Analysis Pipeline ── TENANT ISOLATED ──
 async function runFullAnalysis() {
   const startTime = Date.now();
   const client = sb(); if (!client) { renderNoConnection(); return; }
+  const cid = typeof getCompanyId === 'function' ? getCompanyId() : null;
+  if (!cid) {
+    console.warn('[db-analytics] No company_id — strict isolation, showing empty');
+    renderNoConnection();
+    return;
+  }
 
-  // Phase 1: Scan all tables in parallel
+  // Phase 1: Scan all tables in parallel — TENANT ISOLATED
   const tables = [
     { name: 'employees', select: 'id, status, start_date, email, first_name, last_name, job_title, departments(name)', key: 'employees' },
     { name: 'departments', select: 'id, name', key: 'departments' },
@@ -70,7 +76,7 @@ async function runFullAnalysis() {
   ];
 
   const results = await Promise.allSettled(
-    tables.map(t => client.from(t.name).select(t.select).limit(500))
+    tables.map(t => client.from(t.name).select(t.select).eq('company_id', cid).limit(500))
   );
 
   // Store results

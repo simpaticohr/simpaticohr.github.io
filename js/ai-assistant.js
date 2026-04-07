@@ -196,16 +196,19 @@ window.sendMessage = async function() {
     scrollToBottom();
   }
 };
-// ── Context builder ──
+// ── Context builder — TENANT ISOLATED ──
 async function buildHRContext() {
   const client = sb();
   if (!client) return defaultSystemPrompt();
+  const cid = typeof getCompanyId === 'function' ? getCompanyId() : null;
 
   const contextParts = [];
 
   try {
     if (activeContexts.has('employees')) {
-      const { data } = await client.from('employees').select('status').limit(200);
+      let q = client.from('employees').select('status').limit(200);
+      if (cid) q = q.eq('company_id', cid);
+      const { data } = await q;
       const active = (data||[]).filter(e=>e.status==='active').length;
       const total  = (data||[]).length;
       contextParts.push(`Current workforce: ${active} active employees out of ${total} total.`);
@@ -213,27 +216,35 @@ async function buildHRContext() {
 
     if (activeContexts.has('payroll')) {
       const month = new Date().toISOString().slice(0,7);
-      const { data } = await client.from('payslips').select('net_pay').like('period', `${month}%`);
+      let q = client.from('payslips').select('net_pay').like('period', `${month}%`);
+      if (cid) q = q.eq('company_id', cid);
+      const { data } = await q;
       const total = (data||[]).reduce((s,p)=>s+(p.net_pay||0),0);
       contextParts.push(`Current month payroll (net): ₹${Math.round(total).toLocaleString()}.`);
     }
 
     if (activeContexts.has('performance')) {
-      const { data } = await client.from('performance_reviews').select('score').not('score','is',null).limit(100);
+      let q = client.from('performance_reviews').select('score').not('score','is',null).limit(100);
+      if (cid) q = q.eq('company_id', cid);
+      const { data } = await q;
       const scores = (data||[]).map(r=>r.score);
       const avg = scores.length ? Math.round(scores.reduce((a,b)=>a+b,0)/scores.length) : null;
       if (avg) contextParts.push(`Average performance score: ${avg}/100 across ${scores.length} reviews.`);
     }
 
     if (activeContexts.has('training')) {
-      const { data } = await client.from('training_enrollments').select('status').limit(300);
+      let q = client.from('training_enrollments').select('status').limit(300);
+      if (cid) q = q.eq('company_id', cid);
+      const { data } = await q;
       const all  = (data||[]).length;
       const done = (data||[]).filter(e=>e.status==='completed').length;
       contextParts.push(`Training: ${done}/${all} enrollments completed (${all>0?Math.round(done/all*100):0}%).`);
     }
 
     if (activeContexts.has('leave')) {
-      const { data } = await client.from('leave_requests').select('status').eq('status','pending');
+      let q = client.from('leave_requests').select('status').eq('status','pending');
+      if (cid) q = q.eq('company_id', cid);
+      const { data } = await q;
       contextParts.push(`Leave requests: ${(data||[]).length} pending approval.`);
     }
   } catch(e) {

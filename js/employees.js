@@ -321,7 +321,9 @@ async function renderProfilePage(id) {
   const loading = document.getElementById('profile-loading');
   const content = document.getElementById('profile-content');
 
-  const { data: emp, error } = await client
+  // TENANT ISOLATED: verify employee belongs to current company
+  const profileCid = getCompanyId();
+  let profileQuery = client
     .from('employees')
     .select(`
       *, 
@@ -331,8 +333,9 @@ async function renderProfilePage(id) {
       performance_reviews(id, period, score, status, created_at),
       training_enrollments(id, course_id, status, completed_at, training_courses(title))
     `)
-    .eq('id', id)
-    .single();
+    .eq('id', id);
+  if (profileCid) profileQuery = profileQuery.eq('company_id', profileCid);
+  const { data: emp, error } = await profileQuery.single();
 
   if (loading) loading.style.display = 'none';
   if (error || !emp) {

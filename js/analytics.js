@@ -45,8 +45,10 @@ async function loadAnalytics() {
   const days = parseInt(document.getElementById('period-selector')?.value || '90');
   const since = new Date(Date.now() - days * 24*60*60*1000).toISOString();
   const client = sb(); if (!client) return;
+  const cid = typeof getCompanyId === 'function' ? getCompanyId() : null;
+  if (!cid) { console.warn('[analytics] No company_id — strict isolation, showing empty'); return; }
 
-  // Run all Supabase queries in parallel
+  // Run all Supabase queries in parallel — TENANT ISOLATED
   const [
     { data: employees },
     { data: leaveData },
@@ -56,13 +58,13 @@ async function loadAnalytics() {
     { data: departments },
     { data: terminated },
   ] = await Promise.all([
-    client.from('employees').select('id, status, start_date, departments(id,name)'),
-    client.from('leave_requests').select('type, days, status').gte('created_at', since),
-    client.from('performance_reviews').select('score, employees(department_id)').not('score','is',null),
-    client.from('training_enrollments').select('status').gte('enrolled_at', since),
-    client.from('payslips').select('gross_pay, net_pay, period').order('period'),
-    client.from('departments').select('id, name'),
-    client.from('employees').select('id').eq('status','terminated').gte('updated_at', since),
+    client.from('employees').select('id, status, start_date, departments(id,name)').eq('company_id', cid),
+    client.from('leave_requests').select('type, days, status').eq('company_id', cid).gte('created_at', since),
+    client.from('performance_reviews').select('score, employees(department_id)').eq('company_id', cid).not('score','is',null),
+    client.from('training_enrollments').select('status').eq('company_id', cid).gte('enrolled_at', since),
+    client.from('payslips').select('gross_pay, net_pay, period').eq('company_id', cid).order('period'),
+    client.from('departments').select('id, name').eq('company_id', cid),
+    client.from('employees').select('id').eq('company_id', cid).eq('status','terminated').gte('updated_at', since),
   ]);
 
   const active    = (employees||[]).filter(e => e.status === 'active');
@@ -235,10 +237,12 @@ function renderPerfDistChart(scores) {
 }
 
 async function renderHiringChart(since) {
-  // Try to load from existing pipeline/candidates
+  // Try to load from existing pipeline/candidates — TENANT ISOLATED
   const client = sb(); if (!client) return;
-  const { data } = await client.from('candidates')
-    .select('stage').gte('created_at', since).limit(500);
+  const cid = typeof getCompanyId === 'function' ? getCompanyId() : null;
+  let hireQuery = client.from('candidates').select('stage').gte('created_at', since).limit(500);
+  if (cid) hireQuery = hireQuery.eq('company_id', cid);
+  const { data } = await hireQuery;
 
   const stages = ['Applied','Screening','Interview','Offer','Hired'];
   const counts = stages.map(s => (data||[]).filter(c=>c.stage?.toLowerCase()===s.toLowerCase()).length);
