@@ -49,9 +49,12 @@ async function loadCurrentUser() {
     if (el) el.textContent = initials;
 
     // load org name
-    const { data: profile } = await client.from('org_profiles').select('name').single();
-    const orgEl = document.getElementById('org-name');
-    if (orgEl && profile) orgEl.textContent = profile.name;
+    const companyId = getCompanyId();
+    if (companyId) {
+      const { data: profile } = await client.from('org_profiles').select('name').eq('id', companyId).single();
+      const orgEl = document.getElementById('org-name');
+      if (orgEl && profile) orgEl.textContent = profile.name;
+    }
   }
 }
 
