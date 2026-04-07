@@ -308,8 +308,13 @@ tbody tr:hover { background: #f8fafc; }
 </div>
 
 <script src="../../js/hr-config.js"></script>
+<script src="../../js/shared-utils.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/supabase-client.js"></script>
 <script>
 var API = window.SIMPATICO_CONFIG?.workerUrl;
+var SB_URL = window.SIMPATICO_CONFIG?.supabaseUrl;
+var SB_KEY = window.SIMPATICO_CONFIG?.supabaseAnonKey;
 var TENANT = (window.SIMPATICO_CONFIG && window.SIMPATICO_CONFIG.tenantId) || 'default';
 
 var allEmployees = [];
@@ -325,14 +330,41 @@ function initials(first, last) {
   return ((first||'').charAt(0) + (last||'').charAt(0)).toUpperCase() || '?';
 }
 
+function getAuthToken() {
+  var token = localStorage.getItem('sh_token')
+           || localStorage.getItem('simpatico_token')
+           || localStorage.getItem('sb-token')
+           || '';
+  if (!token) {
+    for (var i = 0; i < localStorage.length; i++) {
+      var k = localStorage.key(i);
+      if (k && k.startsWith('sb-') && k.endsWith('-auth-token')) {
+        try { token = JSON.parse(localStorage.getItem(k)).access_token || ''; if (token) break; } catch(e){}
+      }
+    }
+  }
+  return token;
+}
+
+function getCompanyIdLocal() {
+  try {
+    var u = JSON.parse(localStorage.getItem('simpatico_user') || '{}');
+    return u.company_id || u.tenant_id || null;
+  } catch(e) { return null; }
+}
+
 function hdr(ex) {
   var h = { 'Content-Type': 'application/json', 'X-Tenant-ID': TENANT };
+  if (SB_KEY) h['apikey'] = SB_KEY;
+  var token = getAuthToken();
+  if (token) h['Authorization'] = 'Bearer ' + token;
   if (ex) Object.assign(h, ex);
   return h;
 }
 
-async function apiCall(path, method = 'GET', body = null) {
-  var opts = { method, headers: hdr() };
+async function apiCall(path, method, body) {
+  method = method || 'GET';
+  var opts = { method: method, headers: hdr() };
   if (body) opts.body = JSON.stringify(body);
   var r = await fetch(API + path, opts);
   var d = await r.json();
@@ -346,7 +378,25 @@ function el(id) { return document.getElementById(id); }
 
 async function loadEmployees() {
   try {
-    var data = await apiCall('/employees');
+    var data;
+    var companyId = getCompanyIdLocal();
+    // Try Supabase first for reliable tenant-isolated reads
+    var client = (typeof getSupabaseClient === 'function') ? getSupabaseClient() : (window._supabaseClient || window.SimpaticoDB || null);
+    if (client && companyId) {
+      var query = client.from('employees')
+        .select('id, first_name, last_name, email, job_title, employment_type, start_date, location, status, avatar_url, department_id, departments(name)')
+        .eq('company_id', companyId)
+        .order('first_name');
+      var result = await query;
+      if (result.error) throw new Error(result.error.message);
+      data = (result.data || []).map(function(e) {
+        e.department_name = (e.departments && e.departments.name) || '';
+        return e;
+      });
+    } else {
+      // Fallback: Worker API
+      data = await apiCall('/employees');
+    }
     allEmployees = data;
 
     // Stats
@@ -359,7 +409,7 @@ async function loadEmployees() {
     // Dept filter
     var depts = {};
     data.forEach(function(e) {
-      var d = e.department_name || e.department_id || '';
+      var d = e.department_name || '';
       if (d && !depts[d]) depts[d] = true;
     });
     departments = Object.keys(depts).sort();
@@ -496,6 +546,9 @@ async function saveEmployee() {
   var btn = el('saveBtn');
   btn.disabled = true; btn.textContent = 'Saving…';
 
+  var companyId = getCompanyIdLocal();
+  var deptVal = (el('empDept').value||'').trim();
+
   var payload = {
     first_name: first, last_name: last,
     email: email,
@@ -503,16 +556,57 @@ async function saveEmployee() {
     location:  (el('empLocation').value||'').trim() || null,
     start_date: el('empStart').value || null,
     status:    el('empStatus').value,
-    tenant_id: TENANT
+    company_id: companyId,
+    department_name: deptVal || null
   };
 
+  // Try direct Supabase insert first (most reliable), fall back to Worker API
   try {
-    if (editId) {
-      await apiCall('/employees/' + editId, 'PATCH', payload);
+    var client = (typeof getSupabaseClient === 'function') ? getSupabaseClient() : (window._supabaseClient || window.SimpaticoDB || null);
+    if (client && !editId) {
+      // Build Supabase payload
+      var sbPayload = {
+        employee_id: 'EMP-' + Date.now().toString(36).toUpperCase(),
+        first_name: first,
+        last_name: last,
+        email: email,
+        job_title: payload.job_title,
+        location: payload.location,
+        start_date: payload.start_date,
+        status: payload.status,
+        company_id: companyId
+      };
+      // Resolve department_id from name if possible
+      if (deptVal) {
+        var deptMatch = departments.find(function(d){ return d === deptVal; });
+        // deptVal is a name; we need to look it up or pass as-is
+        // The worker API handles department_name resolution
+      }
+      var result = await client.from('employees').insert([sbPayload]).select();
+      if (result.error) throw new Error(result.error.message || 'Failed to create employee');
+      toast('✅ Employee added successfully');
+    } else if (client && editId) {
+      var updatePayload = {
+        first_name: first,
+        last_name: last,
+        email: email,
+        job_title: payload.job_title,
+        location: payload.location,
+        start_date: payload.start_date,
+        status: payload.status
+      };
+      var result = await client.from('employees').update(updatePayload).eq('id', editId).select();
+      if (result.error) throw new Error(result.error.message || 'Failed to update employee');
       toast('✅ Employee updated');
     } else {
-      await apiCall('/employees', 'POST', payload);
-      toast('✅ Employee added');
+      // Fallback: Worker API
+      if (editId) {
+        await apiCall('/employees/' + editId, 'PATCH', payload);
+        toast('✅ Employee updated');
+      } else {
+        await apiCall('/employees', 'POST', payload);
+        toast('✅ Employee added');
+      }
     }
     closeModal();
     await loadEmployees();

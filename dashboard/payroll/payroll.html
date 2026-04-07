@@ -99,7 +99,15 @@ var TENANT = (window.SIMPATICO_CONFIG && window.SIMPATICO_CONFIG.tenantId) || 'd
 var WORKER = (window.SIMPATICO_CONFIG && window.SIMPATICO_CONFIG.workerUrl) || 'https://simpatico-hr-ats.simpaticohrconsultancy.workers.dev';
 if(window.self!==window.top)document.body.classList.add('emb');
 
-function hdr(ex){var h={'apikey':KEY,'Authorization':'Bearer '+KEY,'Content-Type':'application/json','X-Tenant-ID':TENANT};if(ex)Object.assign(h,ex);return h;}
+function getPayrollAuthToken(){
+  var token=localStorage.getItem('sh_token')||localStorage.getItem('simpatico_token')||localStorage.getItem('sb-token')||'';
+  if(!token){for(var i=0;i<localStorage.length;i++){var k=localStorage.key(i);if(k&&k.startsWith('sb-')&&k.endsWith('-auth-token')){try{token=JSON.parse(localStorage.getItem(k)).access_token||'';if(token)break;}catch(e){}}}}
+  return token;
+}
+function getPayrollCompanyId(){
+  try{var u=JSON.parse(localStorage.getItem('simpatico_user')||'{}');return u.company_id||u.tenant_id||null;}catch(e){return null;}
+}
+function hdr(ex){var h={'apikey':KEY,'Content-Type':'application/json','X-Tenant-ID':TENANT};var token=getPayrollAuthToken();h['Authorization']='Bearer '+(token||KEY);if(ex)Object.assign(h,ex);return h;}
 async function get(qs){var r=await fetch(SB+'/rest/v1/'+qs,{headers:hdr()});var d=await r.json();if(!r.ok)throw new Error((d&&d.message)||r.statusText);return Array.isArray(d)?d:[];}
 function fmt(n){return '₹'+(Number(n)||0).toLocaleString('en-IN');}
 function fmtD(s){if(!s)return'—';try{return new Date(s+'T00:00:00').toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'});}catch(e){return s;}}
@@ -107,7 +115,18 @@ function fmtD(s){if(!s)return'—';try{return new Date(s+'T00:00:00').toLocaleDa
 window.addEventListener('DOMContentLoaded',load);
 async function load(){
   try{
-    var runs=await get('payroll_runs?select=*&order=created_at.desc&limit=24');
+    var cid=getPayrollCompanyId();
+    var runs;
+    var client=(typeof getSupabaseClient==='function')?getSupabaseClient():(window._supabaseClient||window.SimpaticoDB||null);
+    if(client&&cid){
+      var result=await client.from('payroll_runs').select('*').eq('company_id',cid).order('created_at',{ascending:false}).limit(24);
+      if(result.error)throw new Error(result.error.message);
+      runs=result.data||[];
+    } else if(cid){
+      runs=await get('payroll_runs?select=*&company_id=eq.'+encodeURIComponent(cid)+'&order=created_at.desc&limit=24');
+    } else {
+      runs=await get('payroll_runs?select=*&order=created_at.desc&limit=24');
+    }
     tx('sr1',runs.length);
     if(runs.length){
       var last=runs[0];
