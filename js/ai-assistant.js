@@ -163,7 +163,39 @@ window.sendMessage = async function() {
 
     // 6. Safely parse the JSON and extract the AI's reply
     const data = JSON.parse(responseText);
-    const aiReply = data.data ? data.data.response : data.response;
+    let aiReply = data.data ? data.data.response : data.response;
+
+    // 6.5. Process auto-actions (like create_job)
+    const actionMatch = aiReply.match(/```json\s*(\{[\s\S]*?"action"\s*:\s*"create_job"[\s\S]*?\})\s*```/);
+    if (actionMatch) {
+      try {
+        const actionObj = JSON.parse(actionMatch[1]);
+        if (actionObj.action === 'create_job' && actionObj.data) {
+          const client = sb();
+          const cid = typeof getCompanyId === 'function' ? getCompanyId() : null;
+          if (client && cid) {
+            const newJob = {
+              title: actionObj.data.title || 'Untitled',
+              department: actionObj.data.department || 'General',
+              location: actionObj.data.location || 'Remote',
+              description: actionObj.data.description || '',
+              status: 'active',
+              is_active: true,
+              company_id: cid,
+              created_at: new Date().toISOString()
+            };
+            const { error: jobErr } = await client.from('jobs').insert([newJob]);
+            if (!jobErr) {
+               aiReply = aiReply.replace(actionMatch[0], '\n\n✅ **Success! I have automatically posted this job to your ATS.**');
+            } else {
+               aiReply = aiReply.replace(actionMatch[0], '\n\n❌ **Failed to post job to ATS:** ' + jobErr.message);
+            }
+          }
+        }
+      } catch (e) {
+        console.warn('Action parse error', e);
+      }
+    }
 
     // 7. Add AI message to UI
     const assistantMsg = { role: 'assistant', content: aiReply || 'No response.', timestamp: new Date().toISOString() };
@@ -275,7 +307,21 @@ function defaultSystemPrompt() {
 - Employee onboarding, training, and development
 - Compliance, leave management, and HR operations
 
-You can analyze HR data, generate documents (policies, templates, letters), provide strategic guidance, and answer HR-related questions. Format responses clearly using markdown. Be professional, empathetic, and evidence-based.`;
+ACTION TOOLS:
+If the user explicitly asks to CREATE or POST a job, you MUST output a JSON block formatted exactly like this inside your response:
+\`\`\`json
+{
+  "action": "create_job",
+  "data": {
+    "title": "Job Title",
+    "department": "Department",
+    "location": "Location",
+    "description": "Full job description..."
+  }
+}
+\`\`\`
+
+You can analyze HR data, generate documents, provide strategic guidance, and answer HR questions. Format responses clearly using markdown. Be professional, empathetic, and evidence-based.`;
 }
 
 // ── Markdown renderer ──
