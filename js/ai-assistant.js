@@ -147,7 +147,7 @@ window.sendMessage = async function() {
       method: 'POST',
       headers: { 
         'Content-Type': 'application/json', 
-        'X-Tenant-ID': window.SIMPATICO_CONFIG?.tenantId || 'SIMP_PRO_MAIN',
+        'X-Tenant-ID': typeof getCompanyId === 'function' ? getCompanyId() : 'SIMP_PRO_MAIN',
         ...headers 
       },
       body: JSON.stringify({ messages: apiMessages }),
@@ -246,6 +246,14 @@ async function buildHRContext() {
       if (cid) q = q.eq('company_id', cid);
       const { data } = await q;
       contextParts.push(`Leave requests: ${(data||[]).length} pending approval.`);
+    }
+    if (activeContexts.has('jobs')) {
+      let q = client.from('jobs').select('status, is_active').limit(100);
+      if (cid) q = q.eq('company_id', cid);
+      const { data } = await q;
+      const all  = (data||[]).length;
+      const active = (data||[]).filter(j=>j.is_active || j.status==='active').length;
+      contextParts.push(`Job Postings: ${active} active jobs out of ${all} total jobs. Provide features to post, edit and preview jobs through ATS.`);
     }
   } catch(e) {
     console.warn('Context build error:', e);
@@ -400,3 +408,76 @@ if (typeof window.setText === 'undefined') {
   window.setText = function(id, v) { const el = document.getElementById(id); if (el) el.textContent = v; };
 }
 
+// ── Speech Recognition ──
+let recognition;
+let isRecording = false;
+
+window.toggleVoice = function() {
+  if (isRecording) {
+    if (recognition) recognition.stop();
+    return;
+  }
+  
+  if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
+    window.showToast?.('Voice recognition not supported in this browser.', 'err');
+    return;
+  }
+  
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  recognition = new SpeechRecognition();
+  recognition.continuous = false;
+  recognition.interimResults = true;
+  
+  const micBtn = document.getElementById('mic-btn');
+  const input = document.getElementById('ai-input');
+  
+  recognition.onstart = function() {
+    isRecording = true;
+    if (micBtn) {
+      micBtn.style.color = '#ef4444';
+      micBtn.style.borderColor = '#ef4444';
+    }
+    input.placeholder = 'Listening...';
+  };
+  
+  recognition.onresult = function(event) {
+    let finalTranscript = '';
+    for (let i = event.resultIndex; i < event.results.length; ++i) {
+      if (event.results[i].isFinal) {
+        finalTranscript += event.results[i][0].transcript;
+      }
+    }
+    if (finalTranscript) {
+      input.value = (input.value + ' ' + finalTranscript).trim();
+      autoResize(input);
+    }
+  };
+  
+  recognition.onerror = function(event) {
+    console.error('Speech error:', event.error);
+    window.showToast?.('Voice error: ' + event.error, 'err');
+    stopRecording();
+  };
+  
+  recognition.onend = function() {
+    stopRecording();
+    if (input.value.trim().length > 0) {
+      sendMessage();
+    }
+  };
+  
+  function stopRecording() {
+    isRecording = false;
+    if (micBtn) {
+      micBtn.style.color = 'var(--hr-text-primary)';
+      micBtn.style.borderColor = 'var(--hr-border)';
+    }
+    input.placeholder = 'Ask anything or use Voice Command to access job postings and innovative tech...';
+  }
+  
+  try {
+    recognition.start();
+  } catch (e) {
+    console.error(e);
+  }
+};
