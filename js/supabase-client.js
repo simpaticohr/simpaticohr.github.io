@@ -28,8 +28,7 @@
           return t;
         })();
 
-    const opts = token ? { global: { headers: { Authorization: `Bearer ${token}` } } } : {};
-    const client = window.supabase.createClient(url, key, opts);
+    const client = window.supabase.createClient(url, key);
     window._supabaseClient = client;
     window.SimpaticoDB     = client;
     console.log('[supabase-client] Initialized: SimpaticoDB (singleton)');

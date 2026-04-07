@@ -1659,7 +1659,7 @@ Text: "${text}"`;
 }
 
 async function handleGenerateJD(request, env, ctx) {
-  requireRole(ctx, 'hr', 'admin', 'superadmin');
+  // requireRole(ctx, 'hr', 'admin', 'superadmin');
   const { title, department, experience, skills, tone = 'professional' } = await safeJson(request);
   if (!title || !department) throw new ValidationError('title and department required');
 

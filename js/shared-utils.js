@@ -97,14 +97,9 @@
       console.warn('[shared-utils] Supabase not available');
       return null;
     }
-    const token = getAuthToken();
-    const opts = token
-      ? { global: { headers: { Authorization: 'Bearer ' + token } } }
-      : {};
     window._supabaseClient = window.supabase.createClient(
       CONFIG.supabaseUrl,
-      CONFIG.supabaseAnonKey,
-      opts
+      CONFIG.supabaseAnonKey
     );
     window.SimpaticoDB = window._supabaseClient;
     return window._supabaseClient;
