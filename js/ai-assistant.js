@@ -204,10 +204,14 @@ async function buildHRContext() {
 
   const contextParts = [];
 
+  if (!cid) {
+    console.warn('AI Assistant: No company_id found. Bailing out for tenant isolation.');
+    return defaultSystemPrompt();
+  }
+
   try {
     if (activeContexts.has('employees')) {
-      let q = client.from('employees').select('status').limit(200);
-      if (cid) q = q.eq('company_id', cid);
+      let q = client.from('employees').select('status').limit(200).eq('company_id', cid);
       const { data } = await q;
       const active = (data||[]).filter(e=>e.status==='active').length;
       const total  = (data||[]).length;
@@ -216,16 +220,14 @@ async function buildHRContext() {
 
     if (activeContexts.has('payroll')) {
       const month = new Date().toISOString().slice(0,7);
-      let q = client.from('payslips').select('net_pay').like('period', `${month}%`);
-      if (cid) q = q.eq('company_id', cid);
+      let q = client.from('payslips').select('net_pay').like('period', `${month}%`).eq('company_id', cid);
       const { data } = await q;
       const total = (data||[]).reduce((s,p)=>s+(p.net_pay||0),0);
       contextParts.push(`Current month payroll (net): ₹${Math.round(total).toLocaleString()}.`);
     }
 
     if (activeContexts.has('performance')) {
-      let q = client.from('performance_reviews').select('score').not('score','is',null).limit(100);
-      if (cid) q = q.eq('company_id', cid);
+      let q = client.from('performance_reviews').select('score').not('score','is',null).limit(100).eq('company_id', cid);
       const { data } = await q;
       const scores = (data||[]).map(r=>r.score);
       const avg = scores.length ? Math.round(scores.reduce((a,b)=>a+b,0)/scores.length) : null;
@@ -233,8 +235,7 @@ async function buildHRContext() {
     }
 
     if (activeContexts.has('training')) {
-      let q = client.from('training_enrollments').select('status').limit(300);
-      if (cid) q = q.eq('company_id', cid);
+      let q = client.from('training_enrollments').select('status').limit(300).eq('company_id', cid);
       const { data } = await q;
       const all  = (data||[]).length;
       const done = (data||[]).filter(e=>e.status==='completed').length;
@@ -242,14 +243,12 @@ async function buildHRContext() {
     }
 
     if (activeContexts.has('leave')) {
-      let q = client.from('leave_requests').select('status').eq('status','pending');
-      if (cid) q = q.eq('company_id', cid);
+      let q = client.from('leave_requests').select('status').eq('status','pending').eq('company_id', cid);
       const { data } = await q;
       contextParts.push(`Leave requests: ${(data||[]).length} pending approval.`);
     }
     if (activeContexts.has('jobs')) {
-      let q = client.from('jobs').select('status, is_active').limit(100);
-      if (cid) q = q.eq('company_id', cid);
+      let q = client.from('jobs').select('status, is_active').limit(100).eq('company_id', cid);
       const { data } = await q;
       const all  = (data||[]).length;
       const active = (data||[]).filter(j=>j.is_active || j.status==='active').length;
