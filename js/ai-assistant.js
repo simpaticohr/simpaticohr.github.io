@@ -166,30 +166,43 @@ window.sendMessage = async function() {
     let aiReply = data.data ? data.data.response : data.response;
 
     // 6.5. Process auto-actions (like create_job)
-    const actionMatch = aiReply.match(/```json\s*(\{[\s\S]*?"action"\s*:\s*"create_job"[\s\S]*?\})\s*```/);
+    const actionMatch = aiReply.match(/```json\s*(\{[\s\S]*?"action"\s*:\s*"(?:create_job|add_employee|schedule_interview)"[\s\S]*?\})\s*```/);
     if (actionMatch) {
       try {
         const actionObj = JSON.parse(actionMatch[1]);
-        if (actionObj.action === 'create_job' && actionObj.data) {
-          const client = sb();
-          const cid = typeof getCompanyId === 'function' ? getCompanyId() : null;
-          if (client && cid) {
+        const client = sb();
+        const cid = typeof getCompanyId === 'function' ? getCompanyId() : null;
+        
+        if (client && cid && actionObj.data) {
+          if (actionObj.action === 'create_job') {
             const newJob = {
               title: actionObj.data.title || 'Untitled',
               department: actionObj.data.department || 'General',
               location: actionObj.data.location || 'Remote',
               description: actionObj.data.description || '',
-              status: 'active',
-              is_active: true,
-              company_id: cid,
-              created_at: new Date().toISOString()
+              status: 'active', is_active: true, company_id: cid, created_at: new Date().toISOString()
             };
-            const { error: jobErr } = await client.from('jobs').insert([newJob]);
-            if (!jobErr) {
-               aiReply = aiReply.replace(actionMatch[0], '\n\n✅ **Success! I have automatically posted this job to your ATS.**');
-            } else {
-               aiReply = aiReply.replace(actionMatch[0], '\n\n❌ **Failed to post job to ATS:** ' + jobErr.message);
-            }
+            const { error: err } = await client.from('jobs').insert([newJob]);
+            aiReply = aiReply.replace(actionMatch[0], !err ? '\n\n✅ **Success! I have posted this job to your ATS.**' : '\n\n❌ **Failed to post job:** ' + err.message);
+          } else if (actionObj.action === 'add_employee') {
+            const newEmp = {
+              first_name: actionObj.data.first_name || 'New',
+              last_name: actionObj.data.last_name || 'Employee',
+              email: actionObj.data.email || 'no-email@company.com',
+              job_title: actionObj.data.job_title || 'Employee',
+              status: 'active', company_id: cid, start_date: new Date().toISOString().split('T')[0], created_at: new Date().toISOString()
+            };
+            const { error: err } = await client.from('employees').insert([newEmp]);
+            aiReply = aiReply.replace(actionMatch[0], !err ? '\n\n✅ **Success! I have added the new employee.**' : '\n\n❌ **Failed to add employee:** ' + err.message);
+          } else if (actionObj.action === 'schedule_interview') {
+            const newInt = {
+              candidate_name: actionObj.data.candidate_name || 'Unknown Candidate',
+              position: actionObj.data.position || 'Open Role',
+              date: actionObj.data.date || new Date().toISOString().split('T')[0],
+              status: 'scheduled', company_id: cid, created_at: new Date().toISOString()
+            };
+            const { error: err } = await client.from('interviews').insert([newInt]);
+            aiReply = aiReply.replace(actionMatch[0], !err ? '\n\n✅ **Success! I have scheduled the interview.**' : '\n\n❌ **Failed to schedule interview:** ' + err.message);
           }
         }
       } catch (e) {
@@ -308,15 +321,22 @@ function defaultSystemPrompt() {
 - Compliance, leave management, and HR operations
 
 ACTION TOOLS:
-If the user explicitly asks to CREATE or POST a job, you MUST output a JSON block formatted exactly like this inside your response:
+If the user explicitly asks to CREATE/POST a job, ADD an employee, or SCHEDULE an interview, you MUST output a JSON block formatted exactly like this inside your response (choose the matching action):
 \`\`\`json
 {
-  "action": "create_job",
+  "action": "create_job | add_employee | schedule_interview",
   "data": {
-    "title": "Job Title",
-    "department": "Department",
-    "location": "Location",
-    "description": "Full job description..."
+    "title": "Value here for create_job",
+    "department": "Value here for create_job",
+    "location": "Value here for create_job",
+    "description": "Value here for create_job",
+    "first_name": "Value here for add_employee",
+    "last_name": "Value here for add_employee",
+    "email": "Value here for add_employee",
+    "job_title": "Value here for add_employee",
+    "candidate_name": "Value here for schedule_interview",
+    "position": "Value here for schedule_interview",
+    "date": "YYYY-MM-DD for schedule_interview"
   }
 }
 \`\`\`
