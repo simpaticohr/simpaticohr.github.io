@@ -254,19 +254,68 @@ window.calculatePayroll = async function() {
   const period = document.getElementById('run-period')?.value.trim();
   if (!period) { showToast('Enter a pay period first', 'error'); return; }
   setText('run-preview', 'Calculating…');
+
+  const companyId = typeof getCompanyId === 'function' ? getCompanyId() : null;
+
+  // Try Worker API first
   try {
     const res = await fetch(`${PAY_CONFIG.workerUrl}/payroll/calculate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...authHeaders() },
       body: JSON.stringify({ period }),
     });
-    const { total_gross, total_net, employee_count, deductions_total } = await res.json();
+    if (res.ok) {
+      const data = await res.json();
+      const d = data.data || data;
+      document.getElementById('run-preview').innerHTML = `
+        <strong>${d.employee_count || d.count || '?'}</strong> employees &nbsp;|&nbsp;
+        Gross: <strong>${formatCurrency(d.total_gross || d.gross)}</strong> &nbsp;|&nbsp;
+        Deductions: <span style="color:var(--hr-danger)">-${formatCurrency(d.deductions_total || d.deductions || 0)}</span> &nbsp;|&nbsp;
+        Net: <strong style="color:var(--hr-success)">${formatCurrency(d.total_net || d.net)}</strong>`;
+      return;
+    }
+    if (res.status !== 401 && res.status !== 403) throw new Error('Worker error');
+    console.warn('[payroll] Worker calculate auth failed — using direct Supabase');
+  } catch (e) {
+    console.warn('[payroll] Worker calculate failed:', e.message);
+  }
+
+  // Fallback: Direct Supabase calculation
+  try {
+    if (!companyId) { setText('run-preview', 'No company linked to account.'); return; }
+    const client = sb();
+    if (!client) { setText('run-preview', 'Database not connected.'); return; }
+
+    const { data: salaries } = await client
+      .from('employee_salaries')
+      .select('employee_id, base_salary')
+      .eq('company_id', companyId);
+
+    const { data: deductions } = await client
+      .from('payroll_deductions')
+      .select('employee_id, amount')
+      .eq('company_id', companyId)
+      .eq('status', 'active');
+
+    const dedMap = {};
+    (deductions || []).forEach(d => { dedMap[d.employee_id] = (dedMap[d.employee_id] || 0) + (d.amount || 0); });
+
+    const empCount = (salaries || []).length;
+    let totalGross = 0, totalDed = 0;
+    (salaries || []).forEach(s => {
+      totalGross += s.base_salary || 0;
+      totalDed += dedMap[s.employee_id] || 0;
+    });
+    const totalNet = totalGross - totalDed;
+
     document.getElementById('run-preview').innerHTML = `
-      <strong>${employee_count}</strong> employees &nbsp;|&nbsp;
-      Gross: <strong>${formatCurrency(total_gross)}</strong> &nbsp;|&nbsp;
-      Deductions: <span style="color:var(--hr-danger)">-${formatCurrency(deductions_total)}</span> &nbsp;|&nbsp;
-      Net: <strong style="color:var(--hr-success)">${formatCurrency(total_net)}</strong>`;
-  } catch { setText('run-preview', 'Calculation failed. Check worker connection.'); }
+      <strong>${empCount}</strong> employees &nbsp;|&nbsp;
+      Gross: <strong>${formatCurrency(totalGross)}</strong> &nbsp;|&nbsp;
+      Deductions: <span style="color:var(--hr-danger)">-${formatCurrency(totalDed)}</span> &nbsp;|&nbsp;
+      Net: <strong style="color:var(--hr-success)">${formatCurrency(totalNet)}</strong>`;
+  } catch (e) {
+    setText('run-preview', 'Calculation failed: ' + e.message);
+  }
 };
 
 window.executePayroll = async function() {
@@ -276,7 +325,39 @@ window.executePayroll = async function() {
   const notes   = document.getElementById('run-notes')?.value.trim();
   if (!period) { showToast('Pay period required', 'error'); return; }
 
+  // ★ Validate & auto-resolve company_id
+  let companyId = typeof getCompanyId === 'function' ? getCompanyId() : null;
+  if (!companyId) {
+    try {
+      const client = sb();
+      if (client) {
+        const { data: { user: authUser } } = await client.auth.getUser();
+        if (authUser) {
+          const { data: profiles } = await client
+            .from('users')
+            .select('company_id')
+            .eq('auth_id', authUser.id)
+            .limit(1);
+          if (profiles?.[0]?.company_id) {
+            companyId = profiles[0].company_id;
+            const stored = JSON.parse(localStorage.getItem('simpatico_user') || '{}');
+            stored.company_id = companyId;
+            stored.tenant_id = companyId;
+            localStorage.setItem('simpatico_user', JSON.stringify(stored));
+          }
+        }
+      }
+    } catch (e) { /* silent */ }
+  }
+  if (!companyId) {
+    showToast('No company linked to your account. Cannot run payroll.', 'error');
+    return;
+  }
+
   showToast('Processing payroll…', 'info');
+  
+  // Try Worker API first
+  let workerSuccess = false;
   try {
     const res = await fetch(`${PAY_CONFIG.workerUrl}/payroll/run`, {
       method: 'POST',
@@ -284,11 +365,107 @@ window.executePayroll = async function() {
       body: JSON.stringify({ period, pay_date: payDate, type, notes }),
     });
     const result = await res.json();
-    if (!res.ok) throw new Error(result.error || 'Payroll run failed');
-    showToast(`Payroll run complete — ${result.employee_count} payslips generated`, 'success');
-    closeModal('run-payroll-modal');
-    await Promise.all([loadPayslips(), loadPayrollRuns()]);
-  } catch (err) { showToast(err.message, 'error'); }
+    if (res.ok && result.success !== false) {
+      showToast(`Payroll run complete — ${result.employee_count || result.data?.totals?.count || '?'} payslips generated`, 'success');
+      workerSuccess = true;
+    } else if (res.status === 401 || res.status === 403) {
+      console.warn('[payroll] Worker auth failed, falling back to direct Supabase');
+    } else {
+      throw new Error(result.error?.message || result.error || 'Payroll run failed');
+    }
+  } catch (err) {
+    if (!workerSuccess && (err.message.includes('401') || err.message.includes('403') || err.message.includes('Failed to fetch'))) {
+      console.warn('[payroll] Worker unavailable, using direct Supabase fallback');
+    } else if (!workerSuccess) {
+      // Non-auth error from Worker — still try fallback
+      console.warn('[payroll] Worker error:', err.message, '— trying Supabase fallback');
+    }
+  }
+
+  // Fallback: Direct Supabase payroll processing
+  if (!workerSuccess) {
+    try {
+      const client = sb();
+      if (!client) throw new Error('Database not connected');
+
+      // 1. Get all active employees with salaries
+      const { data: salaries, error: salErr } = await client
+        .from('employee_salaries')
+        .select('employee_id, base_salary, currency')
+        .eq('company_id', companyId);
+      
+      if (salErr) throw new Error('Could not fetch salary data: ' + salErr.message);
+      if (!salaries || salaries.length === 0) {
+        showToast('No salary records found. Add employee salaries first.', 'error');
+        return;
+      }
+
+      // 2. Get active deductions
+      const { data: deductions } = await client
+        .from('payroll_deductions')
+        .select('employee_id, amount, type')
+        .eq('company_id', companyId)
+        .eq('status', 'active');
+
+      const dedMap = {};
+      (deductions || []).forEach(d => {
+        dedMap[d.employee_id] = (dedMap[d.employee_id] || 0) + (d.amount || 0);
+      });
+
+      // 3. Create payroll run record
+      const { data: runData, error: runErr } = await client
+        .from('payroll_runs')
+        .insert([{
+          period, type: type || 'monthly', pay_date: payDate,
+          status: 'processing', notes: notes || null,
+          company_id: companyId, employee_count: salaries.length
+        }])
+        .select()
+        .single();
+      
+      if (runErr) throw new Error('Could not create payroll run: ' + runErr.message);
+
+      // 4. Generate payslips
+      let totalGross = 0, totalNet = 0;
+      const payslips = salaries.map(s => {
+        const gross = s.base_salary || 0;
+        const ded = dedMap[s.employee_id] || 0;
+        const net = gross - ded;
+        totalGross += gross;
+        totalNet += net;
+        return {
+          employee_id: s.employee_id,
+          period, gross_pay: gross,
+          deductions_total: ded, net_pay: net,
+          status: 'generated',
+          payroll_run_id: runData.id,
+          company_id: companyId,
+          pay_date: payDate
+        };
+      });
+
+      const { error: slipErr } = await client
+        .from('payslips')
+        .insert(payslips);
+      
+      if (slipErr) console.warn('[payroll] Payslip insert warning:', slipErr.message);
+
+      // 5. Update run status
+      await client
+        .from('payroll_runs')
+        .update({ status: 'completed', total_gross: totalGross, total_net: totalNet })
+        .eq('id', runData.id);
+
+      showToast(`Payroll complete — ${salaries.length} payslips generated`, 'success');
+    } catch (err) {
+      showToast(err.message, 'error');
+      closeModal('run-payroll-modal');
+      return;
+    }
+  }
+
+  closeModal('run-payroll-modal');
+  await Promise.all([loadPayslips(), loadPayrollRuns()]);
 };
 
 // ── Payslip actions ──

@@ -560,6 +560,36 @@ async function saveEmployee() {
   btn.disabled = true; btn.textContent = 'Saving…';
 
   var companyId = getCompanyIdLocal();
+
+  // ★ Auto-resolve company_id if missing
+  if (!companyId) {
+    try {
+      var client = (typeof getSupabaseClient === 'function') ? getSupabaseClient() : (window._supabaseClient || window.SimpaticoDB || null);
+      if (client) {
+        var authResult = await client.auth.getUser();
+        var authUser = authResult && authResult.data && authResult.data.user;
+        if (authUser) {
+          var profileResult = await client.from('users').select('company_id').eq('auth_id', authUser.id).limit(1);
+          var profile = profileResult.data && profileResult.data[0];
+          if (profile && profile.company_id) {
+            companyId = profile.company_id;
+            var stored = JSON.parse(localStorage.getItem('simpatico_user') || '{}');
+            stored.company_id = companyId;
+            stored.tenant_id = companyId;
+            localStorage.setItem('simpatico_user', JSON.stringify(stored));
+          }
+        }
+      }
+    } catch(e) { /* silent */ }
+  }
+
+  if (!companyId && !editId) {
+    el('addErr').textContent = 'No company linked to your account. Please contact your admin.';
+    el('addErr').classList.add('show');
+    btn.disabled = false; btn.textContent = editId ? 'Update Employee' : 'Save Employee';
+    return;
+  }
+
   var deptVal = (el('empDept').value||'').trim();
 
   var payload = {
@@ -659,7 +689,49 @@ function toast(msg, isErr) {
 }
 
 document.addEventListener('keydown', function(e){ if(e.key==='Escape') closeModal(); });
-document.addEventListener('DOMContentLoaded', loadEmployees);
+
+// ★ AUTO-RESOLVE company_id before loading employees
+async function initEmployeesPage() {
+  var companyId = getCompanyIdLocal();
+  if (!companyId) {
+    console.warn('[employees-page] No company_id — attempting auto-resolution');
+    try {
+      var client = (typeof getSupabaseClient === 'function') ? getSupabaseClient() : (window._supabaseClient || window.SimpaticoDB || null);
+      if (client) {
+        var authResult = await client.auth.getUser();
+        var authUser = authResult && authResult.data && authResult.data.user;
+        if (authUser) {
+          // Try users table
+          var profileResult = await client.from('users').select('company_id').eq('auth_id', authUser.id).limit(1);
+          var profile = profileResult.data && profileResult.data[0];
+          if (profile && profile.company_id) {
+            var stored = JSON.parse(localStorage.getItem('simpatico_user') || '{}');
+            stored.company_id = profile.company_id;
+            stored.tenant_id = profile.company_id;
+            localStorage.setItem('simpatico_user', JSON.stringify(stored));
+            console.log('[employees-page] ✅ Auto-resolved company_id:', profile.company_id);
+          } else {
+            // Try companies table (owner)
+            var compResult = await client.from('companies').select('id').eq('owner_id', authUser.id).limit(1);
+            var comp = compResult.data && compResult.data[0];
+            if (comp) {
+              var stored = JSON.parse(localStorage.getItem('simpatico_user') || '{}');
+              stored.company_id = comp.id;
+              stored.tenant_id = comp.id;
+              localStorage.setItem('simpatico_user', JSON.stringify(stored));
+              console.log('[employees-page] ✅ Auto-resolved company_id from ownership:', comp.id);
+            }
+          }
+        }
+      }
+    } catch(e) {
+      console.warn('[employees-page] Auto-resolution failed:', e.message);
+    }
+  }
+  await loadEmployees();
+}
+
+document.addEventListener('DOMContentLoaded', initEmployeesPage);
 </script>
 </body>
 </html>

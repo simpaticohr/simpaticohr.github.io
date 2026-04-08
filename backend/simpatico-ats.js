@@ -1183,7 +1183,7 @@ async function handleLeaveDecision(request, env, ctx, [id]) {
 // ── Payroll ───────────────────────────────────────────────────────────────────
 
 async function handleCalculatePayroll(request, env, ctx) {
-  requireRole(ctx, 'payroll', 'admin', 'superadmin');
+  requireRole(ctx, 'hr', 'hr_manager', 'company_admin', 'payroll', 'admin', 'superadmin');
   const { period } = await safeJson(request);
 
   const [salRes, dedRes, leaveRes] = await Promise.all([
@@ -1217,7 +1217,7 @@ async function handleCalculatePayroll(request, env, ctx) {
 }
 
 async function handleRunPayroll(request, env, ctx) {
-  requireRole(ctx, 'payroll', 'admin', 'superadmin');
+  requireRole(ctx, 'hr', 'hr_manager', 'company_admin', 'payroll', 'admin', 'superadmin');
   const body = await safeJson(request);
   validate(body, 'payroll_run');
 
@@ -1242,7 +1242,7 @@ async function handleRunPayroll(request, env, ctx) {
 }
 
 async function handleListPayrollRuns(request, env, ctx) {
-  requireRole(ctx, 'payroll', 'admin', 'superadmin');
+  requireRole(ctx, 'hr', 'hr_manager', 'company_admin', 'payroll', 'admin', 'superadmin');
   const res = await sbFetch(env, 'GET', `/rest/v1/payroll_runs?select=*&order=created_at.desc&limit=24`, null, false, ctx.tenantId);
   return apiResponse({ runs: await res.json() });
 }
@@ -1254,7 +1254,7 @@ async function handleGetPayslips(request, env, ctx, [employeeId]) {
 }
 
 async function handleSendPayslip(request, env, ctx, [id]) {
-  requireRole(ctx, 'payroll', 'admin', 'superadmin');
+  requireRole(ctx, 'hr', 'hr_manager', 'company_admin', 'payroll', 'admin', 'superadmin');
   const res = await sbFetch(env, 'GET', `/rest/v1/payslips?id=eq.${id}&select=*,employees(email,first_name)`, null, false, ctx.tenantId);
   const [ps] = await res.json();
   if (!ps) throw new NotFoundError('Payslip');
@@ -1269,7 +1269,7 @@ async function handleSendPayslip(request, env, ctx, [id]) {
 }
 
 async function handleSendAllPayslips(request, env, ctx) {
-  requireRole(ctx, 'payroll', 'admin', 'superadmin');
+  requireRole(ctx, 'hr', 'hr_manager', 'company_admin', 'payroll', 'admin', 'superadmin');
   const { period } = await safeJson(request);
   if (!period) throw new ValidationError('period required');
 

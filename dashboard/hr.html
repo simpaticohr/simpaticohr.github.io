@@ -2194,7 +2194,7 @@ document.addEventListener('DOMContentLoaded', () => { initApp(); });
 
 async function initApp() {
     const realToken = localStorage.getItem('simpatico_token');
-    const realUser = JSON.parse(localStorage.getItem('simpatico_user') || '{}');
+    let realUser = JSON.parse(localStorage.getItem('simpatico_user') || '{}');
 
     if (!realToken) { performLogout(); return; }
 
@@ -2202,6 +2202,62 @@ async function initApp() {
     if (localStorage.getItem('simpaticoHR_data')) {
         console.log('[init] Cleaning up old global cache key simpaticoHR_data');
         localStorage.removeItem('simpaticoHR_data');
+    }
+
+    // ★ AUTO-RESOLVE company_id if missing (ROOT CAUSE FIX)
+    // Without company_id, strict isolation blocks all employee/payroll operations
+    if (!realUser.company_id && !realUser.tenant_id) {
+        console.warn('[init] No company_id in session — attempting auto-resolution from Supabase');
+        try {
+            const db = (typeof getSupabaseClient === 'function' ? getSupabaseClient() : null) || window.SimpaticoDB || window._supabaseClient;
+            if (db) {
+                // Step 1: Get current auth user
+                const { data: { user: authUser } } = await db.auth.getUser();
+                if (authUser) {
+                    // Step 2: Look up profile in users table
+                    const { data: profiles } = await db
+                        .from('users')
+                        .select('company_id, role, full_name')
+                        .eq('auth_id', authUser.id)
+                        .limit(1);
+                    
+                    const profile = profiles?.[0];
+                    if (profile?.company_id) {
+                        realUser.company_id = profile.company_id;
+                        realUser.tenant_id = profile.company_id;
+                        if (profile.role) realUser.role = profile.role;
+                        if (profile.full_name && !realUser.full_name) realUser.full_name = profile.full_name;
+                        localStorage.setItem('simpatico_user', JSON.stringify(realUser));
+                        console.log('[init] ✅ Auto-resolved company_id:', profile.company_id);
+                    } else {
+                        // Step 3: Fallback — check if user owns a company via companies table
+                        const { data: companies } = await db
+                            .from('companies')
+                            .select('id, name')
+                            .eq('owner_id', authUser.id)
+                            .limit(1);
+                        
+                        if (companies?.[0]) {
+                            realUser.company_id = companies[0].id;
+                            realUser.tenant_id = companies[0].id;
+                            localStorage.setItem('simpatico_user', JSON.stringify(realUser));
+                            console.log('[init] ✅ Auto-resolved company_id from ownership:', companies[0].id);
+                            
+                            // Also update the users table so this doesn't happen again
+                            db.from('users')
+                              .update({ company_id: companies[0].id })
+                              .eq('auth_id', authUser.id)
+                              .then(() => console.log('[init] Updated users table with company_id'))
+                              .catch(e => console.warn('[init] Could not update users table:', e.message));
+                        } else {
+                            console.warn('[init] ⚠ No company found for user — dashboard will be empty');
+                        }
+                    }
+                }
+            }
+        } catch (e) {
+            console.warn('[init] company_id auto-resolution failed:', e.message);
+        }
     }
 
     // Initialize local session data from the REAL logged-in user

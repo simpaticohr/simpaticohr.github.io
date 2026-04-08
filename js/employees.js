@@ -270,6 +270,41 @@ async function saveEmployee() {
     return;
   }
 
+  // ★ Resolve company_id — auto-fetch if missing
+  let companyId = getCompanyId();
+  if (!companyId) {
+    try {
+      const client = sb();
+      if (client) {
+        const { data: { user: authUser } } = await client.auth.getUser();
+        if (authUser) {
+          const { data: profiles } = await client
+            .from('users')
+            .select('company_id')
+            .eq('auth_id', authUser.id)
+            .limit(1);
+          if (profiles?.[0]?.company_id) {
+            companyId = profiles[0].company_id;
+            // Persist to localStorage so other modules benefit
+            const stored = JSON.parse(localStorage.getItem('simpatico_user') || '{}');
+            stored.company_id = companyId;
+            stored.tenant_id = companyId;
+            localStorage.setItem('simpatico_user', JSON.stringify(stored));
+            console.log('[employees] Auto-resolved company_id:', companyId);
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('[employees] company_id auto-resolution failed:', e.message);
+    }
+  }
+
+  if (!companyId) {
+    showToast('No company linked to your account. Please contact your admin or re-register your company.', 'error');
+    if (btn) { btn.disabled = false; btn.textContent = 'Save Employee'; }
+    return;
+  }
+
   const empNum = `EMP-${Date.now().toString(36).toUpperCase()}`;
   const payload = {
     employee_id:      empNum,
@@ -283,7 +318,7 @@ async function saveEmployee() {
     location:         document.getElementById('emp-location')?.value.trim() || null,
     manager_id:       document.getElementById('emp-manager')?.value || null,
     status:           'active',
-    company_id:       getCompanyId(),
+    company_id:       companyId,
   };
 
   // Insert directly via Supabase client (uses existing session auth)
@@ -296,7 +331,13 @@ async function saveEmployee() {
       .insert([payload])
       .select();
 
-    if (error) throw new Error(error.message || 'Failed to create employee');
+    if (error) {
+      // Handle specific Supabase errors
+      if (error.code === '23505' || error.message?.includes('duplicate')) {
+        throw new Error('An employee with this email already exists');
+      }
+      throw new Error(error.message || 'Failed to create employee');
+    }
 
     showToast(`${first} ${last} added successfully`, 'success');
     closeModal('add-modal');

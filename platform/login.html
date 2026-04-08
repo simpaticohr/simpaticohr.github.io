@@ -850,7 +850,51 @@
                 }
             }
 
-            // Step 3: Update last_login (best-effort)
+            // Step 3: Resolve company_id if missing from profile
+            if (profile && !profile.company_id) {
+                debug('Profile has no company_id — attempting resolution');
+                try {
+                    // Try by owner_id first
+                    const { data: ownedCompanies } = await db
+                        .from('companies')
+                        .select('id, name')
+                        .eq('owner_id', authData.user.id)
+                        .limit(1);
+                    
+                    if (ownedCompanies?.[0]) {
+                        profile.company_id = ownedCompanies[0].id;
+                        debug('Resolved company_id from ownership: ' + ownedCompanies[0].id);
+                        // Persist to users table (best-effort)
+                        db.from('users')
+                          .update({ company_id: ownedCompanies[0].id })
+                          .eq('auth_id', authData.user.id)
+                          .then(() => debug('Updated users table with company_id'))
+                          .catch(() => {});
+                    } else {
+                        // Try by email domain match
+                        const domain = authData.user.email?.split('@')[1];
+                        if (domain && domain !== 'gmail.com' && domain !== 'yahoo.com' && domain !== 'hotmail.com' && domain !== 'outlook.com') {
+                            const { data: domainCompanies } = await db
+                                .from('companies')
+                                .select('id, name')
+                                .ilike('domain', `%${domain}%`)
+                                .limit(1);
+                            if (domainCompanies?.[0]) {
+                                profile.company_id = domainCompanies[0].id;
+                                debug('Resolved company_id from email domain: ' + domainCompanies[0].id);
+                                db.from('users')
+                                  .update({ company_id: domainCompanies[0].id })
+                                  .eq('auth_id', authData.user.id)
+                                  .then(() => {}).catch(() => {});
+                            }
+                        }
+                    }
+                } catch (e) {
+                    debug('company_id resolution failed: ' + e.message);
+                }
+            }
+
+            // Step 4: Update last_login (best-effort)
             db.from('users')
               .update({ last_login: new Date().toISOString() })
               .eq('auth_id', authData.user.id)
