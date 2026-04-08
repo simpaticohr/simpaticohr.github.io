@@ -29,7 +29,18 @@ document.addEventListener('DOMContentLoaded', async () => {
 
 async function loadUser() {
   const client = sb(); if (!client) return;
-  const { data: { user } } = await client.auth.getUser();
+  // Use cached auth from parent dashboard, or session (no lock), fallback to getUser
+  let user = window._simpaticoAuthUser || null;
+  if (!user) {
+    try {
+      const { data: sesData } = await client.auth.getSession();
+      user = sesData?.session?.user || null;
+    } catch(e) {}
+  }
+  if (!user) {
+    const { data: { user: u } } = await client.auth.getUser();
+    user = u;
+  }
   if (user) {
     const el = document.getElementById('user-avatar');
     if (el) el.textContent = user.email?.slice(0,2).toUpperCase() || 'U';
@@ -331,7 +342,18 @@ window.executePayroll = async function() {
     try {
       const client = sb();
       if (client) {
-        const { data: { user: authUser } } = await client.auth.getUser();
+        // Use cached auth from parent dashboard (no lock), or session (no lock)
+        let authUser = window._simpaticoAuthUser || null;
+        if (!authUser) {
+          try {
+            const { data: sesData } = await client.auth.getSession();
+            authUser = sesData?.session?.user || null;
+          } catch(e) {}
+        }
+        if (!authUser) {
+          const { data: { user: u } } = await client.auth.getUser();
+          authUser = u;
+        }
         if (authUser) {
           const { data: profiles } = await client
             .from('users')

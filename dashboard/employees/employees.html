@@ -320,6 +320,32 @@ var TENANT = (window.SIMPATICO_CONFIG && window.SIMPATICO_CONFIG.tenantId) || 'd
 var allEmployees = [];
 var departments  = [];
 
+// ★ Shared auth-user cache — prevents concurrent getUser() lock contention
+var _cachedAuthUser = null;
+var _authUserPending = null;
+async function getCachedAuthUser() {
+  // Check parent dashboard cache first (set by hr.html initApp)
+  if (window._simpaticoAuthUser) return window._simpaticoAuthUser;
+  if (_cachedAuthUser) return _cachedAuthUser;
+  if (_authUserPending) return _authUserPending;
+  var client = (typeof getSupabaseClient === 'function') ? getSupabaseClient() : (window._supabaseClient || window.SimpaticoDB || null);
+  if (!client) return null;
+  // Try getSession first (reads from local cache, no network lock)
+  try {
+    var sesResult = await client.auth.getSession();
+    var sesUser = sesResult && sesResult.data && sesResult.data.session && sesResult.data.session.user;
+    if (sesUser) { _cachedAuthUser = sesUser; window._simpaticoAuthUser = sesUser; return sesUser; }
+  } catch(e) {}
+  // Fall back to getUser() but only one at a time
+  _authUserPending = client.auth.getUser().then(function(r) {
+    _authUserPending = null;
+    _cachedAuthUser = r && r.data && r.data.user;
+    window._simpaticoAuthUser = _cachedAuthUser;
+    return _cachedAuthUser;
+  }).catch(function() { _authUserPending = null; return null; });
+  return _authUserPending;
+}
+
 var AVATAR_COLORS = ['#4f46e5','#0891b2','#059669','#d97706','#dc2626','#7c3aed','#db2777'];
 function avatarColor(name) {
   var code = 0;
@@ -561,14 +587,13 @@ async function saveEmployee() {
 
   var companyId = getCompanyIdLocal();
 
-  // ★ Auto-resolve company_id if missing
+  // ★ Auto-resolve company_id if missing — uses cached auth to avoid lock contention
   if (!companyId) {
     try {
-      var client = (typeof getSupabaseClient === 'function') ? getSupabaseClient() : (window._supabaseClient || window.SimpaticoDB || null);
-      if (client) {
-        var authResult = await client.auth.getUser();
-        var authUser = authResult && authResult.data && authResult.data.user;
-        if (authUser) {
+      var authUser = await getCachedAuthUser();
+      if (authUser) {
+        var client = (typeof getSupabaseClient === 'function') ? getSupabaseClient() : (window._supabaseClient || window.SimpaticoDB || null);
+        if (client) {
           var profileResult = await client.from('users').select('company_id').eq('auth_id', authUser.id).limit(1);
           var profile = profileResult.data && profileResult.data[0];
           if (profile && profile.company_id) {
@@ -701,11 +726,10 @@ async function initEmployeesPage() {
   if (!companyId) {
     console.warn('[employees-page] No company_id — attempting auto-resolution');
     try {
-      var client = (typeof getSupabaseClient === 'function') ? getSupabaseClient() : (window._supabaseClient || window.SimpaticoDB || null);
-      if (client) {
-        var authResult = await client.auth.getUser();
-        var authUser = authResult && authResult.data && authResult.data.user;
-        if (authUser) {
+      var authUser = await getCachedAuthUser();
+      if (authUser) {
+        var client = (typeof getSupabaseClient === 'function') ? getSupabaseClient() : (window._supabaseClient || window.SimpaticoDB || null);
+        if (client) {
           // Try users table
           var profileResult = await client.from('users').select('company_id').eq('auth_id', authUser.id).limit(1);
           var profile = profileResult.data && profileResult.data[0];
