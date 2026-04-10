@@ -63,28 +63,29 @@ async function runFullAnalysis() {
 
   // Phase 1: Scan all tables in parallel — TENANT ISOLATED
   // Use safe select='*' to avoid 400 errors from non-existent columns/relations
+  // hasCid: true = table has company_id column, false = no tenant filter needed
   const tables = [
-    { name: 'employees', key: 'employees' },
-    { name: 'departments', key: 'departments' },
-    { name: 'leave_requests', key: 'leave' },
-    { name: 'payslips', key: 'payslips' },
-    { name: 'performance_reviews', key: 'reviews' },
-    { name: 'training_enrollments', key: 'enrollments' },
-    { name: 'training_courses', key: 'courses' },
-    { name: 'onboarding_records', key: 'onboarding' },
-    { name: 'hr_policies', key: 'policies' },
-    { name: 'hr_tickets', key: 'tickets' },
+    { name: 'employees', key: 'employees', hasCid: true },
+    { name: 'departments', key: 'departments', hasCid: true },
+    { name: 'leave_requests', key: 'leave', hasCid: false },
+    { name: 'payslips', key: 'payslips', hasCid: true },
+    { name: 'performance_reviews', key: 'reviews', hasCid: false },
+    { name: 'training_enrollments', key: 'enrollments', hasCid: false },
+    { name: 'training_courses', key: 'courses', hasCid: false },
+    { name: 'onboarding_records', key: 'onboarding', hasCid: false },
+    { name: 'hr_policies', key: 'policies', hasCid: false },
+    { name: 'hr_tickets', key: 'tickets', hasCid: false },
   ];
 
   // Fetch each table individually with safe error handling
-  // Tables may not exist or may not have company_id column
-  async function safeFetch(tableName, cid) {
+  async function safeFetch(tableName, cid, hasCid) {
     try {
-      // First try with company_id filter
-      const res = await client.from(tableName).select('*').eq('company_id', cid).limit(500);
+      let query = client.from(tableName).select('*').limit(500);
+      if (hasCid && cid) query = query.eq('company_id', cid);
+      const res = await query;
       if (res.error) {
-        // If error mentions company_id column, try without filter
-        if (res.error.message && (res.error.message.includes('company_id') || res.error.code === '42703')) {
+        // If the error is about company_id not existing, retry without it
+        if (hasCid && res.error.message && (res.error.message.includes('company_id') || res.error.code === '42703')) {
           const res2 = await client.from(tableName).select('*').limit(500);
           return res2.data || [];
         }
@@ -99,7 +100,7 @@ async function runFullAnalysis() {
   }
 
   const results = await Promise.allSettled(
-    tables.map(t => safeFetch(t.name, cid))
+    tables.map(t => safeFetch(t.name, cid, t.hasCid))
   );
 
   // Store results
