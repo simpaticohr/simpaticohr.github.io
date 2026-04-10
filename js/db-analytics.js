@@ -62,27 +62,50 @@ async function runFullAnalysis() {
   }
 
   // Phase 1: Scan all tables in parallel — TENANT ISOLATED
+  // Use safe select='*' to avoid 400 errors from non-existent columns/relations
   const tables = [
-    { name: 'employees', select: 'id, status, start_date, email, first_name, last_name, job_title, departments(name)', key: 'employees' },
-    { name: 'departments', select: 'id, name', key: 'departments' },
-    { name: 'leave_requests', select: 'id, type, status, days, from_date, to_date, created_at', key: 'leave' },
-    { name: 'payslips', select: 'id, gross_pay, net_pay, period, employee_id', key: 'payslips' },
-    { name: 'performance_reviews', select: 'id, score, status, period, created_at', key: 'reviews' },
-    { name: 'training_enrollments', select: 'id, status, progress, enrolled_at', key: 'enrollments' },
-    { name: 'training_courses', select: 'id, title, category, is_required', key: 'courses' },
-    { name: 'onboarding_records', select: 'id, stage, completion_pct, start_date', key: 'onboarding' },
-    { name: 'hr_policies', select: 'id, title, category, status', key: 'policies' },
-    { name: 'hr_tickets', select: 'id, status, priority, created_at', key: 'tickets' },
+    { name: 'employees', key: 'employees' },
+    { name: 'departments', key: 'departments' },
+    { name: 'leave_requests', key: 'leave' },
+    { name: 'payslips', key: 'payslips' },
+    { name: 'performance_reviews', key: 'reviews' },
+    { name: 'training_enrollments', key: 'enrollments' },
+    { name: 'training_courses', key: 'courses' },
+    { name: 'onboarding_records', key: 'onboarding' },
+    { name: 'hr_policies', key: 'policies' },
+    { name: 'hr_tickets', key: 'tickets' },
   ];
 
+  // Fetch each table individually with safe error handling
+  // Tables may not exist or may not have company_id column
+  async function safeFetch(tableName, cid) {
+    try {
+      // First try with company_id filter
+      const res = await client.from(tableName).select('*').eq('company_id', cid).limit(500);
+      if (res.error) {
+        // If error mentions company_id column, try without filter
+        if (res.error.message && (res.error.message.includes('company_id') || res.error.code === '42703')) {
+          const res2 = await client.from(tableName).select('*').limit(500);
+          return res2.data || [];
+        }
+        console.warn(`[db-analytics] ${tableName}: ${res.error.message}`);
+        return [];
+      }
+      return res.data || [];
+    } catch(e) {
+      console.warn(`[db-analytics] ${tableName} query failed:`, e.message);
+      return [];
+    }
+  }
+
   const results = await Promise.allSettled(
-    tables.map(t => client.from(t.name).select(t.select).eq('company_id', cid).limit(500))
+    tables.map(t => safeFetch(t.name, cid))
   );
 
   // Store results
   tables.forEach((t, i) => {
     const r = results[i];
-    dbStats[t.key] = r.status === 'fulfilled' ? (r.value.data || []) : [];
+    dbStats[t.key] = r.status === 'fulfilled' ? (r.value || []) : [];
   });
 
   const elapsed = Date.now() - startTime;

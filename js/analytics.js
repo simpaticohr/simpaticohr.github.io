@@ -240,12 +240,12 @@ async function renderHiringChart(since) {
   // Try to load from existing pipeline/candidates — TENANT ISOLATED
   const client = sb(); if (!client) return;
   const cid = typeof getCompanyId === 'function' ? getCompanyId() : null;
-  let hireQuery = client.from('candidates').select('stage').gte('created_at', since).limit(500);
+  let hireQuery = client.from('job_applications').select('status').gte('created_at', since).limit(500);
   if (cid) hireQuery = hireQuery.eq('company_id', cid);
   const { data } = await hireQuery;
 
   const stages = ['Applied','Screening','Interview','Offer','Hired'];
-  const counts = stages.map(s => (data||[]).filter(c=>c.stage?.toLowerCase()===s.toLowerCase()).length);
+  const counts = stages.map(s => (data||[]).filter(c=>c.status?.toLowerCase()===s.toLowerCase()).length);
 
   destroyChart('hiring-chart');
   const ctx = document.getElementById('hiring-chart')?.getContext('2d'); if (!ctx) return;

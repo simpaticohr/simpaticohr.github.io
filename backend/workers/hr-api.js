@@ -595,11 +595,11 @@ async function handleAnalyticsSummary(request, env, token, url, corsHeaders) {
   const days  = parseInt(url.searchParams.get('days') || '90');
   const since = new Date(Date.now() - days*24*60*60*1000).toISOString();
 
-  // Time to hire: avg days from created_at to hired
-  const hiresRes = await sbFetch(env, 'GET', `/rest/v1/candidates?stage=eq.Hired&created_at=gte.${since}&select=created_at,hired_at`);
+  // Time to hire: avg days from created_at to updated_at when hired
+  const hiresRes = await sbFetch(env, 'GET', `/rest/v1/job_applications?status=eq.hired&created_at=gte.${since}&select=created_at,updated_at`);
   const hires = hiresRes.ok ? await hiresRes.json() : [];
   const avgTTH = hires.length
-    ? Math.round(hires.reduce((s, h) => s + (new Date(h.hired_at||h.created_at) - new Date(h.created_at)) / (1000*60*60*24), 0) / hires.length)
+    ? Math.round(hires.reduce((s, h) => s + (new Date(h.updated_at||h.created_at) - new Date(h.created_at)) / (1000*60*60*24), 0) / hires.length)
     : null;
 
   // Absenteeism

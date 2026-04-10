@@ -155,7 +155,7 @@ const SCHEMAS = {
   },
   job_posting: {
     required: ['title','department','location','description'],
-    optional: ['employment_type','salary_range','closing_date','skills'],
+    optional: ['employment_type','salary_range','closing_date','skills','syndication_targets'],
     rules: {
       employment_type: v => !v || ['full_time','part_time','contractor','intern'].includes(v) || 'Invalid employment_type',
     }
@@ -323,7 +323,7 @@ const auditBuffer = [];
 async function audit(env, ctx, action, resource, resourceId, meta = {}) {
   const event = {
     timestamp:    new Date().toISOString(),
-    tenant_id:    ctx.tenantId,
+    company_id:    ctx.tenantId,
     actor_id:     ctx.actorId || null,
     actor_email:  ctx.actorEmail || null,
     action,
@@ -565,6 +565,7 @@ route('GET',    '/payroll/payslips/:employeeId',    handleGetPayslips);
 // Recruitment / ATS
 route('POST',   '/recruitment/jobs',                handleCreateJob);
 route('GET',    '/recruitment/jobs',                handleListJobs);
+route('GET',    '/recruitment/public/jobs',         handlePublicJobs);
 route('POST',   '/recruitment/applications',        handleCreateApplication);
 route('POST',   '/interviews/schedule',             handleScheduleInterviewEmail);
 route('GET',    '/recruitment/applications',        handleListApplications);
@@ -582,6 +583,7 @@ route('POST',   '/ai/employee-insight',             handleEmployeeInsight);
 route('POST',   '/ai/sentiment',                    handleSentimentAnalysis);
 route('POST',   '/ai/interview-question',           handleInterviewQuestion);
 route('POST',   '/ai/ats-generator',                handleATSGenerator);
+route('POST',   '/ai/generate-assessment',          handleGenerateAssessment);
 
 // Analytics
 route('GET',    '/analytics/summary',               handleAnalyticsSummary);
@@ -724,7 +726,7 @@ async function handleCreateEmployee(request, env, ctx) {
   if (existing.length) throw new ConflictError(`Employee with email ${body.email} already exists`);
 
   const empNum = `EMP-${Date.now().toString(36).toUpperCase()}`;
-  const payload = { ...sanitize(body), employee_id: empNum, tenant_id: ctx.tenantId, status: 'active', created_by: ctx.actorId };
+  const payload = { ...sanitize(body), employee_id: empNum, company_id: ctx.tenantId, status: 'active', created_by: ctx.actorId };
 
   const res = await withCircuitBreaker(env, 'supabase', () =>
     sbFetch(env, 'POST', '/rest/v1/employees', payload, false, ctx.tenantId)
@@ -816,7 +818,7 @@ async function handleBulkCreateEmployees(request, env, ctx) {
   const results = await Promise.allSettled(employees.map(async emp => {
     validate(emp, 'employee');
     const empNum  = `EMP-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2,5)}`;
-    const res = await sbFetch(env, 'POST', '/rest/v1/employees', { ...sanitize(emp), employee_id: empNum, tenant_id: ctx.tenantId, status: 'active' }, false, ctx.tenantId);
+    const res = await sbFetch(env, 'POST', '/rest/v1/employees', { ...sanitize(emp), employee_id: empNum, company_id: ctx.tenantId, status: 'active' }, false, ctx.tenantId);
     return res.json();
   }));
 
@@ -859,7 +861,7 @@ async function handleUploadDocument(request, env, ctx, [id]) {
 
   const key = `documents/${ctx.tenantId}/${id}/${Date.now()}-${sanitizeFilename(file.name)}`;
   await env.HR_BUCKET.put(key, file.stream(), { httpMetadata: { contentType: file.type || 'application/octet-stream' } });
-  const res = await sbFetch(env, 'POST', '/rest/v1/employee_documents', { employee_id: id, name: file.name, type, file_key: key, tenant_id: ctx.tenantId }, false, ctx.tenantId);
+  const res = await sbFetch(env, 'POST', '/rest/v1/employee_documents', { employee_id: id, name: file.name, type, file_key: key, company_id: ctx.tenantId }, false, ctx.tenantId);
   const [doc] = await res.json();
   await audit(env, ctx, 'document.upload', 'employee_documents', doc.id, { employee_id: id, type });
   return apiResponse({ document: doc }, HTTP.CREATED);
@@ -887,7 +889,7 @@ async function handleStartOnboarding(request, env, ctx) {
   if (!employee_id || !start_date) throw new ValidationError('employee_id and start_date required');
 
   const onRes = await sbFetch(env, 'POST', '/rest/v1/onboarding_records', {
-    employee_id, template_id, start_date, stage: 'not_started', completion_pct: 0, tenant_id: ctx.tenantId
+    employee_id, template_id, start_date, stage: 'not_started', completion_pct: 0, company_id: ctx.tenantId
   }, false, ctx.tenantId);
   const [record] = await onRes.json();
 
@@ -904,7 +906,7 @@ async function handleStartOnboarding(request, env, ctx) {
     onboarding_record_id: record.id,
     title: t.title, category: t.category, status: 'pending',
     due_date: addDays(start_date, t.due_days),
-    tenant_id: ctx.tenantId
+    company_id: ctx.tenantId
   }));
 
   await sbFetch(env, 'POST', '/rest/v1/onboarding_tasks', tasks, false, ctx.tenantId);
@@ -951,7 +953,7 @@ async function handleUploadPolicy(request, env, ctx) {
   await env.HR_BUCKET.put(key, file.stream(), { httpMetadata: { contentType: file.type || 'application/octet-stream' } });
   
   // Try to insert cleanly; if Supabase hr_policies misses version, fallback or assume db defaults version
-  const res = await sbFetch(env, 'POST', '/rest/v1/hr_policies', { name, category: 'general', version: '1.0.0', file_key: key, tenant_id: ctx.tenantId }, false, ctx.tenantId);
+  const res = await sbFetch(env, 'POST', '/rest/v1/hr_policies', { name, category: 'general', version: '1.0.0', file_key: key, company_id: ctx.tenantId }, false, ctx.tenantId);
   const [policy] = await res.json();
   
   await audit(env, ctx, 'policy.upload', 'hr_policies', policy?.id, { name });
@@ -965,12 +967,12 @@ async function handleCreateCourse(request, env, ctx) {
   const body = await safeJson(request);
   if (!body.title) throw new ValidationError('title is required');
 
-  const res = await sbFetch(env, 'POST', '/rest/v1/training_courses', { ...sanitize(body), tenant_id: ctx.tenantId }, false, ctx.tenantId);
+  const res = await sbFetch(env, 'POST', '/rest/v1/training_courses', { ...sanitize(body), company_id: ctx.tenantId }, false, ctx.tenantId);
   const [course] = await res.json();
 
   if (env.VECTORIZE && course.title) {
     const emb = await env.AI.run('@cf/baai/bge-small-en-v1.5', { text: [`${course.title}: ${course.description || ''}`] });
-    await env.VECTORIZE.insert([{ id: course.id, values: emb.data[0], metadata: { title: course.title, type: 'course', tenant_id: ctx.tenantId } }]);
+    await env.VECTORIZE.insert([{ id: course.id, values: emb.data[0], metadata: { title: course.title, type: 'course', company_id: ctx.tenantId } }]);
   }
 
   await invalidateCache(env, `courses:list:${ctx.tenantId}`);
@@ -993,7 +995,7 @@ async function handleEnrollTraining(request, env, ctx) {
   if (!employee_id || !course_id) throw new ValidationError('employee_id and course_id required');
 
   const res = await sbFetch(env, 'POST', '/rest/v1/training_enrollments', {
-    employee_id, course_id, status: 'enrolled', enrolled_at: new Date().toISOString(), tenant_id: ctx.tenantId
+    employee_id, course_id, status: 'enrolled', enrolled_at: new Date().toISOString(), company_id: ctx.tenantId
   }, false, ctx.tenantId);
   const [enrollment] = await res.json();
   await audit(env, ctx, 'training.enroll', 'training_enrollments', enrollment.id, { employee_id, course_id });
@@ -1007,7 +1009,7 @@ async function handleSemanticCourseSearch(request, env, ctx) {
   if (!env.VECTORIZE) throw new ServiceUnavailableError('Vectorize');
 
   const emb     = await env.AI.run('@cf/baai/bge-small-en-v1.5', { text: [query] });
-  const matches = await env.VECTORIZE.query(emb.data[0], { topK, returnMetadata: true, filter: { tenant_id: ctx.tenantId } });
+  const matches = await env.VECTORIZE.query(emb.data[0], { topK, returnMetadata: true, filter: { company_id: ctx.tenantId } });
   const ids     = matches.matches.map(m => m.id);
   if (!ids.length) return apiResponse({ courses: [], scores: [] });
 
@@ -1036,7 +1038,7 @@ async function handleCreateCycle(request, env, ctx) {
   const body = await safeJson(request);
   if (!body.name || !body.start_date || !body.end_date) throw new ValidationError('name, start_date, end_date required');
 
-  const res = await sbFetch(env, 'POST', '/rest/v1/performance_cycles', { ...sanitize(body), tenant_id: ctx.tenantId }, false, ctx.tenantId);
+  const res = await sbFetch(env, 'POST', '/rest/v1/performance_cycles', { ...sanitize(body), company_id: ctx.tenantId }, false, ctx.tenantId);
   const [cycle] = await res.json();
   return apiResponse({ cycle }, HTTP.CREATED);
 }
@@ -1053,7 +1055,7 @@ async function handleSubmitReview(request, env, ctx) {
   validate(body, 'performance_review');
 
   const res = await sbFetch(env, 'POST', '/rest/v1/performance_reviews', {
-    ...sanitize(body), reviewer_id: ctx.actorId, submitted_at: new Date().toISOString(), tenant_id: ctx.tenantId
+    ...sanitize(body), reviewer_id: ctx.actorId, submitted_at: new Date().toISOString(), company_id: ctx.tenantId
   }, false, ctx.tenantId);
   const [review] = await res.json();
   await audit(env, ctx, 'review.submit', 'performance_reviews', review.id, { employee_id: body.employee_id });
@@ -1093,7 +1095,7 @@ async function handleCreateGoal(request, env, ctx) {
   if (!body.title || !body.employee_id) throw new ValidationError('title and employee_id required');
 
   const res = await sbFetch(env, 'POST', '/rest/v1/goals', {
-    ...sanitize(body), progress: 0, status: 'on_track', tenant_id: ctx.tenantId, created_by: ctx.actorId
+    ...sanitize(body), progress: 0, status: 'on_track', company_id: ctx.tenantId, created_by: ctx.actorId
   }, false, ctx.tenantId);
   const [goal] = await res.json();
   return apiResponse({ goal }, HTTP.CREATED);
@@ -1128,7 +1130,7 @@ async function handleSubmitLeave(request, env, ctx) {
   const days = Math.ceil((to - from) / 86400000) + 1;
 
   const res = await sbFetch(env, 'POST', '/rest/v1/leave_requests', {
-    ...sanitize(body), days, status: 'pending', tenant_id: ctx.tenantId, submitted_at: new Date().toISOString()
+    ...sanitize(body), days, status: 'pending', company_id: ctx.tenantId, submitted_at: new Date().toISOString()
   }, false, ctx.tenantId);
   const [leave] = await res.json();
 
@@ -1221,7 +1223,7 @@ async function handleRunPayroll(request, env, ctx) {
   const body = await safeJson(request);
   validate(body, 'payroll_run');
 
-  const runRes = await sbFetch(env, 'POST', '/rest/v1/payroll_runs', { ...body, status: 'processing', initiated_by: ctx.actorId, tenant_id: ctx.tenantId }, false, ctx.tenantId);
+  const runRes = await sbFetch(env, 'POST', '/rest/v1/payroll_runs', { ...body, status: 'processing', initiated_by: ctx.actorId, company_id: ctx.tenantId }, false, ctx.tenantId);
   const [run]  = await runRes.json();
 
   const calcRes = await handleCalculatePayroll(new Request('http://internal', { method: 'POST', body: JSON.stringify({ period: body.period }) }), env, ctx);
@@ -1230,7 +1232,7 @@ async function handleRunPayroll(request, env, ctx) {
 
   // Persist individual payslips
   await sbFetch(env, 'POST', '/rest/v1/payslips', payslips.map(p => ({
-    ...p, period: body.period, pay_date: body.pay_date, payroll_run_id: run.id, tenant_id: ctx.tenantId
+    ...p, period: body.period, pay_date: body.pay_date, payroll_run_id: run.id, company_id: ctx.tenantId
   })), false, ctx.tenantId);
 
   await sbFetch(env, 'PATCH', `/rest/v1/payroll_runs?id=eq.${run.id}`, { status: 'completed', total_gross: totals.gross, total_net: totals.net, employee_count: totals.count }, false, ctx.tenantId);
@@ -1289,7 +1291,7 @@ async function handleCreateJob(request, env, ctx) {
   const body = await safeJson(request);
   validate(body, 'job_posting');
 
-  const res = await sbFetch(env, 'POST', '/rest/v1/jobs', { ...sanitize(body), status: 'open', tenant_id: ctx.tenantId, created_by: ctx.actorId }, false, ctx.tenantId);
+  const res = await sbFetch(env, 'POST', '/rest/v1/jobs', { ...sanitize(body), status: 'open', company_id: ctx.tenantId, created_by: ctx.actorId }, false, ctx.tenantId);
   const [job] = await res.json();
   await invalidateCache(env, `analytics:summary:${ctx.tenantId}`);
   return apiResponse({ job }, HTTP.CREATED);
@@ -1300,6 +1302,19 @@ async function handleListJobs(request, env, ctx, _, url) {
   const status = url.searchParams.get('status') || 'open';
   const res    = await sbFetch(env, 'GET', `/rest/v1/jobs?status=eq.${status}&select=*&order=created_at.desc`, null, false, ctx.tenantId);
   return apiResponse({ jobs: await res.json() });
+}
+
+async function handlePublicJobs(request, env, ctx, _, url) {
+  // Unauthenticated endpoint for embeddable Careers Widget
+  const company_id = url.searchParams.get('company_id');
+  if (!company_id) throw new ValidationError('company_id parameter is required for public job listings');
+
+  // Pass company_id as the tenant parameter to sbFetch to auto-filter and isolate tenant records securely
+  const res = await sbFetch(env, 'GET', `/rest/v1/jobs?status=eq.open&select=id,title,department,location,employment_type,salary_min,description,created_at&order=created_at.desc`, null, false, company_id);
+  const jobs = await res.json();
+  
+  // Return formatted array for the widget
+  return apiResponse({ jobs });
 }
 
 async function handleCreateApplication(request, env, ctx) {
@@ -1357,7 +1372,7 @@ Return ONLY valid JSON in format: {"match_score": 85, "reason": "Brief 1-sentenc
   }
 
   const res = await sbFetch(env, 'POST', '/rest/v1/job_applications', {
-    ...sanitize(body), status, applied_at: new Date().toISOString(), tenant_id: ctx.tenantId
+    ...sanitize(body), status, applied_at: new Date().toISOString(), company_id: ctx.tenantId
   }, false, ctx.tenantId);
   const [app] = await res.json();
   
@@ -1373,7 +1388,7 @@ Return ONLY valid JSON in format: {"match_score": 85, "reason": "Brief 1-sentenc
           round: "AI Auto-Screen",
           token: interviewToken,
           status: "scheduled",
-          tenant_id: ctx.tenantId,
+          company_id: ctx.tenantId,
           date: new Date().toISOString().split('T')[0],
           start_time: "Flexible",
           end_time: "Flexible",
@@ -1519,7 +1534,7 @@ async function handleAIChat(request, env, ctx) {
     try {
       const lastMsg = messages.at(-1).content;
       const emb     = await env.AI.run('@cf/baai/bge-small-en-v1.5', { text: [lastMsg] });
-      const rag     = await env.VECTORIZE.query(emb.data[0], { topK: 4, returnMetadata: true, filter: { tenant_id: ctx.tenantId } });
+      const rag     = await env.VECTORIZE.query(emb.data[0], { topK: 4, returnMetadata: true, filter: { company_id: ctx.tenantId } });
       ragContext     = rag.matches.filter(m => m.score > 0.7).map(m => m.metadata.text).join('\n---\n');
     } catch (e) { console.warn('RAG query failed:', e.message); }
   }
@@ -1606,6 +1621,52 @@ Include 2-4 logical actions. Keep it practical for enterprise HR.`;
   } catch (e) {
     throw new AppError('Failed to parse AI-generated rule', HTTP.SERVER_ERROR, 'PARSE_ERROR', result.response);
   }
+}
+
+async function handleGenerateAssessment(request, env, ctx) {
+  requireRole(ctx, 'hr', 'admin', 'superadmin');
+  const body = await safeJson(request);
+  const { job_title, department, tech_stack, culture, difficulty, question_count = 5 } = body;
+  
+  if (!job_title) throw new ValidationError('job_title required');
+
+  const prompt = `You are an expert technical recruiter and industrial-organizational psychologist. 
+Design a highly specific, proctored assessment quiz for a ${difficulty || 'mid-level'} ${job_title} in the ${department || 'company'}.
+Tech Stack / Needs: ${tech_stack || 'Standard for role'}
+Company Culture: ${culture || 'Professional'}
+
+Output exactly ${question_count} questions. Include multiple-choice and short-answer questions. 
+Return ONLY valid JSON in this exact schema (no conversation, no markdown blocks):
+{
+  "assessment_title": "string",
+  "questions": [
+    {
+      "id": "q1",
+      "type": "mcq|short_answer",
+      "question": "string",
+      "options": ["A", "B", "C", "D"], 
+      "correct_answer": "string",
+      "scoring_rubric": "Instructions for the AI grader on what to look for in short answers"
+    }
+  ]
+}`;
+
+  const result = await env.AI.run('@cf/meta/llama-3.1-8b-instruct', {
+    messages: [
+      { role: 'system', content: prompt }
+    ],
+    max_tokens: 2000
+  });
+
+  const cleaned = result.response.replace(/```json|```/g, '').trim();
+  let assessment;
+  try {
+    assessment = JSON.parse(cleaned);
+  } catch (e) {
+    throw new AppError('AI returned invalid JSON', HTTP.SERVER_ERROR, 'AI_PARSE_ERROR');
+  }
+
+  return apiResponse({ assessment });
 }
 
 async function handleEmployeeInsight(request, env, ctx) {
@@ -1856,18 +1917,18 @@ async function sbFetch(env, method, path, body, countOnly = false, tenantId = 'd
   if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_KEY) throw new ServiceUnavailableError('Database');
 
   // ── TENANT ISOLATION: Only inject tenant filter for tables that have tenant_id ──
-  // Tables without tenant_id: job_applications, jobs, interviews, employees (core schema)
+  // Tables without company_id: job_applications, jobs, interviews, employees (core schema)
   // We use service_role key which bypasses RLS, so tenant isolation is opt-in per table
   let finalPath = path;
-  const TENANT_AWARE_TABLES = ['employees', 'leave_requests', 'payroll_runs', 'payslips',
+  const TENANT_AWARE_TABLES = ['leave_requests', 'payroll_runs', 'payslips',
     'training_courses', 'training_enrollments', 'onboarding_records', 'onboarding_tasks',
     'performance_reviews', 'goals', 'notifications', 'audit_logs', 'employee_documents',
-    'jobs', 'job_applications', 'interviews', 'hr_policies'];
+    'hr_policies'];
   if (method === 'GET' && tenantId && tenantId !== 'default') {
     const tableName = (path.match(/\/rest\/v1\/([a-z_]+)/) || [])[1];
     if (tableName && TENANT_AWARE_TABLES.includes(tableName)) {
       const separator = finalPath.includes('?') ? '&' : '?';
-      finalPath += `${separator}tenant_id=eq.${tenantId}`;
+      finalPath += `${separator}company_id=eq.${tenantId}`;
     }
   }
 
@@ -1888,9 +1949,9 @@ async function sbFetch(env, method, path, body, countOnly = false, tenantId = 'd
 
   const response = await fetch(url, opts);
 
-  if (!response.ok && response.status >= 500) {
+  if (!response.ok) {
     const err = await response.text().catch(() => 'unknown');
-    throw new AppError(`Database error: ${err}`, HTTP.SERVER_ERROR, 'DB_ERROR');
+    throw new AppError(`Database error: ${err}`, response.status >= 500 ? HTTP.SERVER_ERROR : response.status, 'DB_ERROR');
   }
 
   if (countOnly) {

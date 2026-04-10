@@ -111,6 +111,42 @@ CREATE POLICY "tenant_own_payslips" ON payslips
     )
   );
 
+-- Company Admins / HR: can read, insert and update payroll runs for their tenant
+CREATE POLICY "tenant_all_payroll_runs" ON payroll_runs
+  FOR ALL TO authenticated
+  USING (
+    tenant_id = COALESCE(
+      (auth.jwt()->'app_metadata'->>'tenant_id'),
+      (auth.jwt()->'user_metadata'->>'tenant_id'),
+      'SIMP_PRO_MAIN'
+    )
+  )
+  WITH CHECK (
+    tenant_id = COALESCE(
+      (auth.jwt()->'app_metadata'->>'tenant_id'),
+      (auth.jwt()->'user_metadata'->>'tenant_id'),
+      'SIMP_PRO_MAIN'
+    )
+  );
+
+-- Company Admins / HR: can insert and update ALL payslips for their tenant
+CREATE POLICY "tenant_all_payslips" ON payslips
+  FOR ALL TO authenticated
+  USING (
+    tenant_id = COALESCE(
+      (auth.jwt()->'app_metadata'->>'tenant_id'),
+      (auth.jwt()->'user_metadata'->>'tenant_id'),
+      'SIMP_PRO_MAIN'
+    )
+  )
+  WITH CHECK (
+    tenant_id = COALESCE(
+      (auth.jwt()->'app_metadata'->>'tenant_id'),
+      (auth.jwt()->'user_metadata'->>'tenant_id'),
+      'SIMP_PRO_MAIN'
+    )
+  );
+
 -- Authenticated users: can read leave requests from own tenant
 CREATE POLICY "tenant_read_leave" ON leave_requests
   FOR SELECT TO authenticated

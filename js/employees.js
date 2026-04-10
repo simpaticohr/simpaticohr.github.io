@@ -48,12 +48,25 @@ async function loadCurrentUser() {
     const el = document.getElementById('user-avatar');
     if (el) el.textContent = initials;
 
-    // load org name
+    // load org name — try multiple table names as the schema may vary
     const companyId = getCompanyId();
     if (companyId) {
-      const { data: profile } = await client.from('org_profiles').select('name').eq('id', companyId).single();
-      const orgEl = document.getElementById('org-name');
-      if (orgEl && profile) orgEl.textContent = profile.name;
+      try {
+        // Try 'companies' table first (most common)
+        let profile = null;
+        const { data: companyData, error: companyErr } = await client.from('companies').select('name').eq('id', companyId).maybeSingle();
+        if (!companyErr && companyData) {
+          profile = companyData;
+        } else {
+          // Fallback: try 'org_profiles' table
+          const { data: orgData } = await client.from('org_profiles').select('name').eq('id', companyId).maybeSingle();
+          if (orgData) profile = orgData;
+        }
+        const orgEl = document.getElementById('org-name');
+        if (orgEl && profile) orgEl.textContent = profile.name;
+      } catch(e) {
+        console.warn('[employees] Could not load org name:', e.message);
+      }
     }
   }
 }
@@ -105,18 +118,40 @@ async function loadEmployees() {
     return;
   }
 
-  let query = client
-    .from('employees')
-    .select(`
-      id, first_name, last_name, email, job_title, employment_type,
-      start_date, location, status, avatar_url,
-      departments(name),
-      manager:employees!manager_id(first_name, last_name)
-    `)
-    .eq('company_id', cid)
-    .order('first_name');
-
-  const { data, error } = await query;
+  // First try with FK relations (departments, manager), fall back to simple select if schema doesn't support it
+  let data = null, error = null;
+  try {
+    const complexRes = await client
+      .from('employees')
+      .select(`
+        id, first_name, last_name, email, job_title, employment_type,
+        start_date, location, status, avatar_url,
+        departments(name),
+        manager:employees!manager_id(first_name, last_name)
+      `)
+      .eq('company_id', cid)
+      .order('first_name');
+    
+    if (complexRes.error) {
+      // FK relations not available — try simple select
+      console.warn('[employees] Complex query failed, falling back to simple select:', complexRes.error.message);
+      const simpleRes = await client
+        .from('employees')
+        .select('*')
+        .eq('company_id', cid)
+        .order('first_name');
+      data = simpleRes.data;
+      error = simpleRes.error;
+    } else {
+      data = complexRes.data;
+      error = complexRes.error;
+    }
+  } catch(e) {
+    console.warn('[employees] Query exception, trying simple select:', e.message);
+    const simpleRes = await client.from('employees').select('*').eq('company_id', cid).order('first_name');
+    data = simpleRes.data;
+    error = simpleRes.error;
+  }
 
   showTableLoading(false);
 
