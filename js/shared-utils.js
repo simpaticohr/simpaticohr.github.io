@@ -56,8 +56,9 @@
     if (token) {
       headers['Authorization'] = 'Bearer ' + token;
     }
-    if (CONFIG.tenantId) {
-      headers['X-Tenant-ID'] = CONFIG.tenantId;
+    const tenantId = CONFIG.tenantId || (typeof getCompanyId === 'function' ? getCompanyId() : null);
+    if (tenantId) {
+      headers['X-Tenant-ID'] = tenantId;
     }
     return headers;
   }

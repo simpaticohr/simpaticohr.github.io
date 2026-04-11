@@ -70,7 +70,7 @@ async function loadAllData() {
       client.from('employees').select('id, first_name, last_name, status, start_date, job_title, email, departments(name)'),
       client.from('leave_requests').select('id, type, status, days, from_date, created_at, employees(first_name, last_name)').order('created_at', { ascending: false }).limit(50),
       client.from('performance_reviews').select('id, score, status, period, employees(first_name, last_name)').not('score','is',null).limit(100),
-      client.from('training_enrollments').select('id, status, progress, employees(first_name, last_name), training_courses(title)').order('enrolled_at', { ascending: false }).limit(100),
+      client.from('training_enrollments').select('id, status, progress, employees(first_name, last_name), training_courses(title)').order('created_at', { ascending: false }).limit(100),
       client.from('departments').select('id, name'),
     ]);
 

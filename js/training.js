@@ -53,7 +53,7 @@ async function loadCourses() {
   const client = sb(); if (!client) return;
   const cid = typeof getCompanyId === 'function' ? getCompanyId() : null;
   let query = client.from('training_courses')
-    .select('id, title, description, category, duration_hours, is_required, content_url, thumbnail_key, created_at')
+    .select('*')
     .order('created_at', { ascending: false });
   if (cid) query = query.eq('company_id', cid);
   const { data, error } = await query;
@@ -110,12 +110,12 @@ async function loadEnrollments() {
   const { data, error } = await client
     .from('training_enrollments')
     .select(`
-      id, status, progress, enrolled_at, completed_at, due_date,
+      *,
       employees(first_name, last_name),
-      training_courses(id, title, is_required)
+      training_courses(*)
     `)
     .eq('company_id', cid)
-    .order('enrolled_at', { ascending: false });
+    .order('created_at', { ascending: false });
 
   if (error) { console.error(error); return; }
   allEnrollments = data || [];
@@ -165,9 +165,9 @@ async function loadComplianceReport() {
   const { data, error } = await client
     .from('training_enrollments')
     .select(`
-      id, due_date, status,
+      *,
       employees(first_name, last_name),
-      training_courses(title, is_required)
+      training_courses(*)
     `)
     .eq('company_id', cid)
     .eq('training_courses.is_required', true)
@@ -386,7 +386,12 @@ if (typeof window.authHeaders === 'undefined') {
         }
       }
     }
-    return token ? { 'Authorization': 'Bearer ' + token } : {};
+    const tenantId = typeof getCompanyId === 'function' ? getCompanyId() : 'default';
+    return {
+      ...(token ? { 'Authorization': 'Bearer ' + token } : {}),
+      'X-Tenant-ID': tenantId,
+      'apikey': window.SIMPATICO_CONFIG?.supabaseAnonKey || ''
+    };
   };
 }
 if (typeof window.formatEnum === 'undefined') {
