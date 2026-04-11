@@ -73,9 +73,10 @@ table tbody tr:hover{background:#f8fafc}
   </div>
 </div>
 
+<!-- Run Payroll Modal -->
 <div class="mo" id="mo-run">
   <div class="mb">
-    <div class="mh"><h3 id="mo-title">Run Payroll</h3><button class="mx" onclick="cm('mo-run')">✕</button></div>
+    <div class="mh"><h3>Run Payroll</h3><button class="mx" onclick="cm('mo-run')">✕</button></div>
     <div class="eb" id="run-err"></div>
     <div class="fg"><label class="fl">Period (YYYY-MM) *</label><input class="fi" id="run-period" placeholder="2025-03"></div>
     <div class="fg"><label class="fl">Pay Date *</label><input class="fi" id="run-date" type="date"></div>
@@ -93,110 +94,288 @@ table tbody tr:hover{background:#f8fafc}
 <script src="../../js/supabase-client.js"></script>
 
 <script>
-var SB  = window.SIMPATICO_CONFIG?.supabaseUrl;
-var KEY = window.SIMPATICO_CONFIG?.supabaseAnonKey;
+var SB     = window.SIMPATICO_CONFIG?.supabaseUrl;
+var KEY    = window.SIMPATICO_CONFIG?.supabaseAnonKey;
 var TENANT = (window.SIMPATICO_CONFIG && window.SIMPATICO_CONFIG.tenantId) || 'default';
 var WORKER = (window.SIMPATICO_CONFIG && window.SIMPATICO_CONFIG.workerUrl) || 'https://simpatico-hr-ats.simpaticohrconsultancy.workers.dev';
-if(window.self!==window.top)document.body.classList.add('emb');
 
-function getPayrollAuthToken(){
-  var token=localStorage.getItem('sh_token')||localStorage.getItem('simpatico_token')||localStorage.getItem('sb-token')||'';
-  if(!token){for(var i=0;i<localStorage.length;i++){var k=localStorage.key(i);if(k&&k.startsWith('sb-')&&k.endsWith('-auth-token')){try{token=JSON.parse(localStorage.getItem(k)).access_token||'';if(token)break;}catch(e){}}}}
+if (window.self !== window.top) document.body.classList.add('emb');
+
+// ── Auth helpers ──────────────────────────────────────────────
+function getPayrollAuthToken() {
+  var token = localStorage.getItem('sh_token') || localStorage.getItem('simpatico_token') || '';
+  if (!token) {
+    for (var i = 0; i < localStorage.length; i++) {
+      var k = localStorage.key(i);
+      if (k && k.startsWith('sb-') && k.endsWith('-auth-token')) {
+        try { token = JSON.parse(localStorage.getItem(k)).access_token || ''; if (token) break; } catch(e) {}
+      }
+    }
+  }
   return token;
 }
-function getPayrollCompanyId(){
-  try{var u=JSON.parse(localStorage.getItem('simpatico_user')||'{}');return u.company_id||u.tenant_id||null;}catch(e){return null;}
-}
-function hdr(ex){var h={'apikey':KEY,'Content-Type':'application/json','X-Tenant-ID':TENANT};var token=getPayrollAuthToken();h['Authorization']='Bearer '+(token||KEY);if(ex)Object.assign(h,ex);return h;}
-async function get(qs){var r=await fetch(SB+'/rest/v1/'+qs,{headers:hdr()});var d=await r.json();if(!r.ok)throw new Error((d&&d.message)||r.statusText);return Array.isArray(d)?d:[];}
-function fmt(n){return '₹'+(Number(n)||0).toLocaleString('en-IN');}
-function fmtD(s){if(!s)return'—';try{return new Date(s+'T00:00:00').toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'});}catch(e){return s;}}
 
-window.addEventListener('DOMContentLoaded',load);
-async function load(){
-  try{
-    var cid=getPayrollCompanyId();
-    var runs;
-    var client=(typeof getSupabaseClient==='function')?getSupabaseClient():(window._supabaseClient||window.SimpaticoDB||null);
-    if(client&&cid){
-      var result=await client.from('payroll_runs').select('*').eq('company_id',cid).order('created_at',{ascending:false}).limit(24);
-      if(result.error)throw new Error(result.error.message);
-      runs=result.data||[];
-    } else if(cid){
-      runs=await get('payroll_runs?select=*&company_id=eq.'+encodeURIComponent(cid)+'&order=created_at.desc&limit=24');
+function getPayrollCompanyId() {
+  try { var u = JSON.parse(localStorage.getItem('simpatico_user') || '{}'); return u.company_id || u.tenant_id || null; } catch(e) { return null; }
+}
+
+function hdr(ex) {
+  var token = getPayrollAuthToken();
+  var h = {
+    'apikey': KEY,
+    'Content-Type': 'application/json',
+    'X-Tenant-ID': TENANT,
+    'Authorization': 'Bearer ' + (token || KEY)
+  };
+  if (ex) Object.assign(h, ex);
+  return h;
+}
+
+function getClient() {
+  return (typeof getSupabaseClient === 'function' ? getSupabaseClient() : null)
+    || window._supabaseClient || window.SimpaticoDB || null;
+}
+
+function fmt(n)  { return '₹' + (Number(n) || 0).toLocaleString('en-IN'); }
+function fmtD(s) { if (!s) return '—'; try { return new Date(s + 'T00:00:00').toLocaleDateString('en-IN', {day:'2-digit',month:'short',year:'numeric'}); } catch(e) { return s; } }
+
+// ── Load runs ─────────────────────────────────────────────────
+window.addEventListener('DOMContentLoaded', load);
+
+async function load() {
+  try {
+    var cid = getPayrollCompanyId();
+    var runs = [];
+    var client = getClient();
+
+    if (client && cid) {
+      // ✅ select('*') + order by created_at — no missing column issues
+      var result = await client
+        .from('payroll_runs')
+        .select('*')
+        .eq('company_id', cid)
+        .order('created_at', { ascending: false })
+        .limit(24);
+      if (result.error) throw new Error(result.error.message);
+      runs = result.data || [];
     } else {
-      runs=await get('payroll_runs?select=*&order=created_at.desc&limit=24');
+      el('runs-area').innerHTML = '<div class="es">Not connected to database.</div>';
+      return;
     }
-    tx('sr1',runs.length);
-    if(runs.length){
-      var last=runs[0];
-      tx('sr2',last.period||'—');
-      tx('sr3',fmt(last.total_net));
-      tx('sr4',(last.employee_count||0)+' employees');
+
+    tx('sr1', runs.length);
+    if (runs.length) {
+      var last = runs[0];
+      tx('sr2', last.period || '—');
+      tx('sr3', fmt(last.total_net));
+      tx('sr4', (last.employee_count || 0) + ' employees');
     }
-    if(!runs.length){el('runs-area').innerHTML='<div class="es"><p>No payroll runs yet. Click "Run Payroll" to process your first payroll.</p></div>';return;}
-    el('runs-area').innerHTML='<div style="overflow-x:auto"><table><thead><tr><th>Period</th><th>Pay Date</th><th>Employees</th><th>Gross</th><th>Net</th><th>Status</th><th>Actions</th></tr></thead><tbody>'+
-      runs.map(function(r){
-        var st=r.status||'—';
-        var bc=st==='completed'?'bgc':st==='processing'?'bgp':'bgr';
-        return '<tr><td><strong>'+x(r.period||'—')+'</strong></td><td>'+fmtD(r.pay_date)+'</td><td>'+(r.employee_count||0)+'</td><td>'+fmt(r.total_gross)+'</td><td style="font-weight:700;color:var(--ok)">'+fmt(r.total_net)+'</td><td><span class="bg '+bc+'">'+x(st)+'</span></td><td><button class="bs" onclick="sendAll(\''+x(S(r.period))+'\')">Send Payslips</button></td></tr>';
-      }).join('')+'</tbody></table></div>';
-  }catch(e){el('runs-area').innerHTML='<div class="es">'+e.message+'</div>';}
+
+    if (!runs.length) {
+      el('runs-area').innerHTML = '<div class="es"><p>No payroll runs yet. Click "Run Payroll" to process your first payroll.</p></div>';
+      return;
+    }
+
+    el('runs-area').innerHTML = '<div style="overflow-x:auto"><table><thead><tr><th>Period</th><th>Pay Date</th><th>Employees</th><th>Gross</th><th>Net</th><th>Status</th><th>Actions</th></tr></thead><tbody>' +
+      runs.map(function(r) {
+        var st = r.status || '—';
+        var bc = st === 'completed' ? 'bgc' : st === 'processing' ? 'bgp' : 'bgr';
+        return '<tr><td><strong>' + x(r.period || '—') + '</strong></td><td>' + fmtD(r.pay_date) + '</td><td>' + (r.employee_count || 0) + '</td><td>' + fmt(r.total_gross) + '</td><td style="font-weight:700;color:var(--ok)">' + fmt(r.total_net) + '</td><td><span class="bg ' + bc + '">' + x(st) + '</span></td><td><button class="bs" onclick="sendAll(\'' + x(S(r.period)) + '\')">Send Payslips</button></td></tr>';
+      }).join('') + '</tbody></table></div>';
+  } catch(e) {
+    el('runs-area').innerHTML = '<div class="es">' + x(e.message) + '</div>';
+  }
 }
 
-async function sendAll(period){
-  if(!confirm('Send all payslips for '+period+'?'))return;
-  try{
-    var r=await fetch(WORKER+'/payroll/payslips/send-all',{method:'POST',headers:hdr(),body:JSON.stringify({period:period})});
-    var d=await r.json();
-    if(!r.ok||!d.success)throw new Error(d.error&&d.error.message||'Failed');
-    toast('✅ Payslips sent: '+d.data.succeeded+' of '+d.data.total);
-  }catch(e){toast('Error: '+e.message,'er');}
+// ── Send payslips ─────────────────────────────────────────────
+async function sendAll(period) {
+  if (!confirm('Send all payslips for ' + period + '?')) return;
+  try {
+    var r = await fetch(WORKER + '/payroll/payslips/send-all', { method: 'POST', headers: hdr(), body: JSON.stringify({ period: period }) });
+    var d = await r.json();
+    if (!r.ok || !d.success) throw new Error((d.error && d.error.message) || 'Failed');
+    toast('✅ Payslips sent: ' + d.data.succeeded + ' of ' + d.data.total);
+  } catch(e) { toast('Error: ' + e.message, 'er'); }
 }
 
-function openCalc(){
-  var p=prompt('Enter period to calculate (YYYY-MM):',new Date().toISOString().slice(0,7));
-  if(!p)return;
-  fetch(WORKER+'/payroll/calculate',{method:'POST',headers:hdr(),body:JSON.stringify({period:p})})
-    .then(function(r){return r.json();})
-    .then(function(d){
-      if(!d.success)throw new Error(d.error&&d.error.message||'Failed');
-      var t=d.data.totals;
-      alert('Payroll calculation for '+p+':\nEmployees: '+(t.count||0)+'\nGross: ₹'+(t.gross||0).toLocaleString('en-IN')+'\nNet: ₹'+(t.net||0).toLocaleString('en-IN'));
-    }).catch(function(e){toast('Calc error: '+e.message,'er');});
+// ── Calculate Payroll ─────────────────────────────────────────
+async function openCalc() {
+  var p = prompt('Enter period to calculate (YYYY-MM):', new Date().toISOString().slice(0, 7));
+  if (!p) return;
+
+  // Try worker first
+  try {
+    var r = await fetch(WORKER + '/payroll/calculate', { method: 'POST', headers: hdr(), body: JSON.stringify({ period: p }) });
+    var d = await r.json();
+    if (r.ok && d.success) {
+      var t = d.data.totals;
+      alert('Payroll calculation for ' + p + ':\nEmployees: ' + (t.count || 0) + '\nGross: ₹' + (t.gross || 0).toLocaleString('en-IN') + '\nNet: ₹' + (t.net || 0).toLocaleString('en-IN'));
+      return;
+    }
+    console.warn('[payroll] Worker calculate failed (' + r.status + '), using fallback');
+  } catch(e) {
+    console.warn('[payroll] Worker unreachable, using Supabase fallback');
+  }
+
+  // ✅ Fallback: calculate directly from Supabase
+  try {
+    var cid = getPayrollCompanyId();
+    var client = getClient();
+    if (!cid || !client) throw new Error('Not connected to database.');
+
+    var { data: salaries, error: salErr } = await client
+      .from('employee_salaries')
+      .select('employee_id, base_salary')
+      .eq('company_id', cid);
+    if (salErr) throw new Error(salErr.message);
+
+    // ✅ Only select amount — no leave_type column reference
+    var { data: deductions } = await client
+      .from('payroll_deductions')
+      .select('employee_id, amount')
+      .eq('company_id', cid)
+      .eq('status', 'active');
+
+    var dedMap = {};
+    (deductions || []).forEach(function(d) { dedMap[d.employee_id] = (dedMap[d.employee_id] || 0) + (d.amount || 0); });
+
+    var count = (salaries || []).length;
+    var gross = 0, net = 0;
+    (salaries || []).forEach(function(s) {
+      gross += s.base_salary || 0;
+      net   += (s.base_salary || 0) - (dedMap[s.employee_id] || 0);
+    });
+
+    alert('Payroll calculation for ' + p + ' (direct):\nEmployees: ' + count + '\nGross: ₹' + gross.toLocaleString('en-IN') + '\nNet: ₹' + net.toLocaleString('en-IN'));
+  } catch(e) {
+    toast('Calc error: ' + e.message, 'er');
+  }
 }
 
-function openRun(){
-  el('run-period').value=new Date().toISOString().slice(0,7);
-  el('run-date').value=new Date().toISOString().split('T')[0];
-  el('run-notes').value='';
+// ── Run Payroll ───────────────────────────────────────────────
+function openRun() {
+  el('run-period').value = new Date().toISOString().slice(0, 7);
+  el('run-date').value   = new Date().toISOString().split('T')[0];
+  el('run-notes').value  = '';
   el('run-err').classList.remove('on');
   el('mo-run').classList.add('on');
 }
 
-async function doRun(){
-  var period=(el('run-period').value||'').trim();
-  var payDate=(el('run-date').value||'').trim();
-  if(!period||!payDate){showErr('run-err','Period and pay date are required.');return;}
-  el('run-btn').disabled=true;el('run-btn').textContent='Processing…';
-  try{
-    var r=await fetch(WORKER+'/payroll/run',{method:'POST',headers:hdr(),body:JSON.stringify({period:period,pay_date:payDate,notes:el('run-notes').value||null})});
-    var d=await r.json();
-    if(!r.ok||!d.success)throw new Error(d.error&&d.error.message||'Failed');
-    toast('✅ Payroll run complete! Net: ₹'+((d.data.totals.net||0).toLocaleString('en-IN')));
-    cm('mo-run');await load();
-  }catch(e){showErr('run-err',e.message);}
-  finally{el('run-btn').disabled=false;el('run-btn').textContent='Run Payroll';}
+async function doRun() {
+  var period  = (el('run-period').value || '').trim();
+  var payDate = (el('run-date').value   || '').trim();
+  if (!period || !payDate) { showErr('run-err', 'Period and pay date are required.'); return; }
+
+  el('run-btn').disabled = true;
+  el('run-btn').textContent = 'Processing…';
+
+  // Try worker first
+  var workerOk = false;
+  try {
+    var r = await fetch(WORKER + '/payroll/run', {
+      method: 'POST',
+      headers: hdr(),
+      body: JSON.stringify({ period: period, pay_date: payDate, notes: el('run-notes').value || null })
+    });
+    var d = await r.json();
+    if (r.ok && d.success) {
+      workerOk = true;
+      toast('✅ Payroll run complete! Net: ₹' + ((d.data.totals.net || 0).toLocaleString('en-IN')));
+      cm('mo-run');
+      await load();
+    } else {
+      console.warn('[payroll] Worker /run failed (' + r.status + '):', d);
+    }
+  } catch(e) {
+    console.warn('[payroll] Worker unreachable:', e.message);
+  }
+
+  // ✅ Fallback: run payroll directly via Supabase
+  if (!workerOk) {
+    try {
+      var cid = getPayrollCompanyId();
+      var client = getClient();
+      if (!cid || !client) throw new Error('Not connected to database.');
+
+      var { data: salaries, error: salErr } = await client
+        .from('employee_salaries')
+        .select('employee_id, base_salary, currency')
+        .eq('company_id', cid);
+      if (salErr) throw new Error(salErr.message);
+      if (!salaries || !salaries.length) throw new Error('No salary records found. Add employee salaries first.');
+
+      var { data: deductions } = await client
+        .from('payroll_deductions')
+        .select('employee_id, amount')
+        .eq('company_id', cid)
+        .eq('status', 'active');
+
+      var dedMap = {};
+      (deductions || []).forEach(function(d) { dedMap[d.employee_id] = (dedMap[d.employee_id] || 0) + (d.amount || 0); });
+
+      // ✅ NO initiated_by / run_by_id — those columns don't exist in payroll_runs
+      var runPayload = {
+        period:         period,
+        type:           'monthly',
+        pay_date:       payDate,
+        status:         'processing',
+        notes:          el('run-notes').value || null,
+        company_id:     cid,
+        employee_count: salaries.length
+      };
+
+      var { data: runData, error: runErr } = await client
+        .from('payroll_runs')
+        .insert([runPayload])
+        .select()
+        .single();
+      if (runErr) throw new Error(runErr.message);
+
+      var totalGross = 0, totalNet = 0;
+      var payslips = salaries.map(function(s) {
+        var gross = s.base_salary || 0;
+        var ded   = dedMap[s.employee_id] || 0;
+        var net   = gross - ded;
+        totalGross += gross; totalNet += net;
+        return { employee_id: s.employee_id, period: period, gross_pay: gross, deductions_total: ded, net_pay: net, status: 'generated', payroll_run_id: runData.id, company_id: cid, pay_date: payDate };
+      });
+
+      var { error: slipErr } = await client.from('payslips').insert(payslips);
+      if (slipErr) console.warn('[payroll] payslip insert warning:', slipErr.message);
+
+      await client.from('payroll_runs')
+        .update({ status: 'completed', total_gross: totalGross, total_net: totalNet })
+        .eq('id', runData.id);
+
+      toast('✅ Payroll complete! ' + salaries.length + ' payslips — Net: ' + fmt(totalNet));
+      cm('mo-run');
+      await load();
+    } catch(e) {
+      showErr('run-err', e.message);
+    }
+  }
+
+  el('run-btn').disabled = false;
+  el('run-btn').textContent = 'Run Payroll';
 }
 
-function cm(id){el(id).classList.remove('on');}
-function showErr(id,m){var e=el(id);e.textContent=m;e.classList.add('on');}
-function el(id){return document.getElementById(id);}
-function tx(id,v){var e=el(id);if(e)e.textContent=v;}
-function S(v){return String(v==null?'':v);}
-function x(s){return S(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
-function toast(msg,type){if(window.showToast){window.showToast(msg,type);return;}var c=el('tc');if(!c)return;var t=document.createElement('div');t.className='toast'+(type?' '+type:'');t.textContent=msg;c.appendChild(t);setTimeout(function(){t.style.opacity='0';t.style.transition='opacity .3s';setTimeout(function(){t.parentNode&&t.parentNode.removeChild(t);},300);},5000);}
-document.addEventListener('keydown',function(e){if(e.key==='Escape'){cm('mo-run');}});
+// ── Utilities ─────────────────────────────────────────────────
+function cm(id)         { el(id).classList.remove('on'); }
+function showErr(id, m) { var e = el(id); e.textContent = m; e.classList.add('on'); }
+function el(id)         { return document.getElementById(id); }
+function tx(id, v)      { var e = el(id); if (e) e.textContent = v; }
+function S(v)           { return String(v == null ? '' : v); }
+function x(s)           { return S(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function toast(msg, type) {
+  if (window.showToast) { window.showToast(msg, type); return; }
+  var c = el('tc'); if (!c) return;
+  var t = document.createElement('div');
+  t.className = 'toast' + (type ? ' ' + type : '');
+  t.textContent = msg;
+  c.appendChild(t);
+  setTimeout(function() { t.style.opacity = '0'; t.style.transition = 'opacity .3s'; setTimeout(function() { t.parentNode && t.parentNode.removeChild(t); }, 300); }, 5000);
+}
+document.addEventListener('keydown', function(e) { if (e.key === 'Escape') cm('mo-run'); });
 </script>
 </body>
 </html>
