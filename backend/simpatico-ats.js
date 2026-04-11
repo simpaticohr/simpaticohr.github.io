@@ -451,8 +451,8 @@ function requireRole(ctx, ...roles) {
   // e.g. "super_admin" matches "superadmin", "company_admin" matches "companyadmin"
   const normalize = r => (r || '').toLowerCase().replace(/_/g, '');
   const normalizedActor = normalize(ctx.actorRole);
-  // Superadmin / super_admin always has access to everything
-  if (normalizedActor === 'superadmin') return;
+  // Superadmin, employer, and companyadmin always have full tenant access
+  if (['superadmin', 'employer', 'companyadmin'].includes(normalizedActor)) return;
   const allowed = roles.map(normalize);
   if (!allowed.includes(normalizedActor)) throw new ForbiddenError(`Required roles: ${roles.join(', ')}`);
 }
@@ -1632,7 +1632,7 @@ Include 2-4 logical actions. Keep it practical for enterprise HR.`;
 }
 
 async function handleGenerateAssessment(request, env, ctx) {
-  requireRole(ctx, 'hr', 'admin', 'superadmin');
+  requireRole(ctx, 'hr', 'admin', 'superadmin', 'employer', 'company_admin', 'hr_manager');
   
   const body = await request.json().catch(() => ({}));
   const { job_title, department, tech_stack, culture, difficulty, question_count = 5 } = body;
