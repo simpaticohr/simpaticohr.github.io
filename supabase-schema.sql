@@ -354,6 +354,18 @@ CREATE POLICY "Own payslips" ON payslips
   FOR SELECT TO authenticated
   USING (employee_id IN (SELECT id FROM employees WHERE email = auth.jwt()->>'email'));
 
+-- HR staff can insert payslips (for payroll processing)
+CREATE POLICY "HR insert payslips" ON payslips
+  FOR INSERT TO authenticated
+  WITH CHECK (
+    EXISTS (
+      SELECT 1 FROM employees e
+      JOIN users u ON e.id = u.auth_id
+      WHERE e.email = auth.jwt()->>'email'
+      AND u.role IN ('hr', 'hr_manager', 'company_admin', 'payroll', 'admin', 'superadmin')
+    )
+  );
+
 -- ════════════════════════════════════════════════════════
 -- FUNCTIONS
 -- ════════════════════════════════════════════════════════

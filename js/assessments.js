@@ -90,24 +90,47 @@ async function saveAssessment() {
   btn.textContent = 'Saving...';
 
   try {
-    // Save to the hr_policies table as a JSON document since it enforces tenant isolation
-    const payload = {
-      name: currentAssessment.assessment_title || 'New Assessment',
-      category: 'Assessment',
-      version: '1.0',
-      url: JSON.stringify(currentAssessment) // Store JSON in URL field temporarily for ATS prototype
-    };
-
-    const res = await workerFetch('/rest/v1/hr_policies', {
-      method: 'POST',
-      body: JSON.stringify(payload)
-    });
-
-    if (res.error && !res.success) throw new Error(res.error.message || 'Failed to save');
+    // Get current user's company_id from session
+    const companyId = sessionStorage.getItem('company_id') || 
+                      sessionStorage.getItem('tenant_id') ||
+                      (typeof getCompanyId === 'function' ? getCompanyId() : null);
     
-    showToast('Assessment saved to Tenant Library', 'success');
+    if (!companyId) {
+      throw new Error('No company linked to your account');
+    }
+
+    // Get user profile for created_by_id
+    const client = typeof getSupabaseClient === 'function' ? getSupabaseClient() : window._supabaseClient;
+    if (!client) throw new Error('Database not connected');
+
+    const { data: { user } } = await client.auth.getUser();
+    const userEmail = user?.email;
+    
+    const { data: userProfile } = await client
+      .from('users')
+      .select('id')
+      .eq('auth_id', user.id)
+      .single();
+
+    // Save to proper assessments table
+    const { data, error } = await client
+      .from('assessments')
+      .insert({
+        assessment_title: currentAssessment.assessment_title || 'New Assessment',
+        questions: currentAssessment.questions || [],
+        difficulty: currentAssessment.difficulty || null,
+        created_by_id: userProfile?.id || null,
+        company_id: companyId
+      })
+      .select();
+
+    if (error) throw new Error(error.message);
+    
+    showToast('Assessment saved successfully', 'success');
+    console.log('[assessments] Assessment saved:', data);
   } catch(e) {
     showToast('Failed to save: ' + e.message, 'error');
+    console.error('[assessments] Save error:', e);
   } finally {
     btn.disabled = false;
     btn.textContent = 'Save Database';

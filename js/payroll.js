@@ -35,11 +35,17 @@ async function loadUser() {
     try {
       const { data: sesData } = await client.auth.getSession();
       user = sesData?.session?.user || null;
-    } catch(e) {}
+    } catch(e) {
+      console.error('[payroll] Error loading session:', e.message);
+    }
   }
   if (!user) {
-    const { data: { user: u } } = await client.auth.getUser();
-    user = u;
+    try {
+      const { data: { user: u } } = await client.auth.getUser();
+      user = u;
+    } catch(e) {
+      console.error('[payroll] Error getting user:', e.message);
+    }
   }
   if (user) {
     const el = document.getElementById('user-avatar');
@@ -266,7 +272,9 @@ window.calculatePayroll = async function() {
   if (!period) { showToast('Enter a pay period first', 'error'); return; }
   setText('run-preview', 'Calculating…');
 
-  const companyId = typeof getCompanyId === 'function' ? getCompanyId() : null;
+  const companyId = sessionStorage.getItem('company_id') || 
+                     sessionStorage.getItem('tenant_id') ||
+                     (typeof getCompanyId === 'function' ? getCompanyId() : null);
 
   // Try Worker API first
   try {
@@ -335,8 +343,10 @@ window.executePayroll = async function() {
   const notes   = document.getElementById('run-notes')?.value.trim();
   if (!period) { showToast('Pay period required', 'error'); return; }
 
-  // ★ Validate & auto-resolve company_id
-  let companyId = typeof getCompanyId === 'function' ? getCompanyId() : null;
+  // ★ Validate & auto-resolve company_id — check sessionStorage FIRST (from auth)
+  let companyId = sessionStorage.getItem('company_id') || 
+                   sessionStorage.getItem('tenant_id') ||
+                   (typeof getCompanyId === 'function' ? getCompanyId() : null);
   if (!companyId) {
     try {
       const client = sb();
@@ -347,11 +357,17 @@ window.executePayroll = async function() {
           try {
             const { data: sesData } = await client.auth.getSession();
             authUser = sesData?.session?.user || null;
-          } catch(e) {}
+          } catch(e) {
+            console.error('[payroll] Error getting session for company_id:', e.message);
+          }
         }
         if (!authUser) {
-          const { data: { user: u } } = await client.auth.getUser();
-          authUser = u;
+          try {
+            const { data: { user: u } } = await client.auth.getUser();
+            authUser = u;
+          } catch(e) {
+            console.error('[payroll] Error getting user for company_id:', e.message);
+          }
         }
         if (authUser) {
           const { data: profiles } = await client
@@ -365,10 +381,14 @@ window.executePayroll = async function() {
             stored.company_id = companyId;
             stored.tenant_id = companyId;
             localStorage.setItem('simpatico_user', JSON.stringify(stored));
+          } else {
+            console.warn('[payroll] User found but no company_id in profile');
           }
         }
       }
-    } catch (e) { /* silent */ }
+    } catch (e) { 
+      console.error('[payroll] Error resolving company_id:', e.message);
+    }
   }
   if (!companyId) {
     showToast('No company linked to your account. Cannot run payroll.', 'error');
@@ -428,6 +448,21 @@ window.executePayroll = async function() {
         dedMap[d.employee_id] = (dedMap[d.employee_id] || 0) + (d.amount || 0);
       });
 
+      // 2b. Get unpaid leave days (approved unpaid leave requests for this period)
+      const { data: unpaidLeaves } = await client
+        .from('leave_requests')
+        .select('employee_id, days')
+        .eq('company_id', companyId)
+        .eq('status', 'approved')
+        .eq('leave_type', 'unpaid')
+        .gte('start_date', period + '-01')
+        .lt('start_date', period.split('-')[0] + '-' + (parseInt(period.split('-')[1]) + 1).toString().padStart(2, '0') + '-01');
+
+      const unpaidLeaveMap = {};
+      (unpaidLeaves || []).forEach(ul => {
+        unpaidLeaveMap[ul.employee_id] = (unpaidLeaveMap[ul.employee_id] || 0) + (ul.days || 0);
+      });
+
       // 3. Create payroll run record
       const { data: runData, error: runErr } = await client
         .from('payroll_runs')
@@ -441,12 +476,26 @@ window.executePayroll = async function() {
       
       if (runErr) throw new Error('Could not create payroll run: ' + runErr.message);
 
-      // 4. Generate payslips
+      // 4. Generate payslips with unpaid leave adjustment
       let totalGross = 0, totalNet = 0;
       const payslips = salaries.map(s => {
         const gross = s.base_salary || 0;
         const ded = dedMap[s.employee_id] || 0;
-        const net = gross - ded;
+        const unpaidDays = unpaidLeaveMap[s.employee_id] || 0;
+        const dailyRate = gross / 22; // Standard 22 working days per month
+        const unpaidAdj = dailyRate * unpaidDays;
+        const net = Math.max(0, gross - ded - unpaidAdj);
+        
+        // Validate payslip data
+        if (net > gross) {
+          console.error('[payroll] Invalid payslip: net exceeds gross', { employee_id: s.employee_id, gross, net, ded, unpaidAdj });
+          throw new Error(`Net pay (${net}) exceeds gross (${gross}) for employee ${s.employee_id}. Check deductions and unpaid leave data.`);
+        }
+        if (ded > gross) {
+          console.error('[payroll] Invalid payslip: deductions exceed gross', { employee_id: s.employee_id, gross, ded });
+          throw new Error(`Deductions (${ded}) exceed gross (${gross}) for employee ${s.employee_id}. Check deduction amounts.`);
+        }
+        
         totalGross += gross;
         totalNet += net;
         return {
@@ -464,7 +513,10 @@ window.executePayroll = async function() {
         .from('payslips')
         .insert(payslips);
       
-      if (slipErr) console.warn('[payroll] Payslip insert warning:', slipErr.message);
+      if (slipErr) {
+        console.error('[payroll] Payslip insert error:', slipErr.message);
+        throw new Error('Failed to save payslips: ' + slipErr.message);
+      }
 
       // 5. Update run status
       await client
