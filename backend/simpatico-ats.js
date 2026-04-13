@@ -2319,31 +2319,43 @@ Return ONLY valid JSON in format: {"match_score": 85, "reason": "Brief 1-sentenc
       Date.now() + 7 * 24 * 60 * 60 * 1000,
     ).toISOString(); // 7 day expiry
     const intvPayload = {
+      application_id: app.id,
       candidate_name: app.candidate_name,
       candidate_email: app.candidate_email,
       job_id: job.id,
-      job_title: job.title,
-      position: job.title,
-      round: "AI Auto-Screen",
       token: interviewToken,
-      status: "scheduled",
+      token_type: "single",
+      interview_type: "ai_voice",
+      interview_role: job.title,
+      interview_level: "auto",
+      status: "pending",
       company_id: ctx.tenantId,
-      date: new Date().toISOString().split("T")[0],
-      start_time: "Flexible",
-      end_time: "Flexible",
-      duration_minutes: 20,
+      question_count: 5,
+      interview_language: "en",
+      max_attempts: 1,
+      attempts_used: 0,
       expires_at: expiresAt,
-      match_score: match_score,
+      created_at: new Date().toISOString(),
     };
 
-    await sbFetch(
-      env,
-      "POST",
-      "/rest/v1/interviews",
-      intvPayload,
-      false,
-      ctx.tenantId,
-    );
+    try {
+      const intvRes = await sbFetch(
+        env,
+        "POST",
+        "/rest/v1/interviews",
+        intvPayload,
+        false,
+        ctx.tenantId,
+      );
+      if (!intvRes.ok) {
+        const errBody = await intvRes.text().catch(() => "unknown");
+        console.error("[ATS] Interview insert failed:", intvRes.status, errBody);
+        autoInterview = false; // Mark as not scheduled so frontend shows correct state
+      }
+    } catch (intvErr) {
+      console.error("[ATS] Interview scheduling exception:", intvErr.message);
+      autoInterview = false;
+    }
 
     const baseUrl = env.FRONTEND_URL || "https://simpaticohr.github.io";
     const meetingLink = `${baseUrl}/interview/proctored-room.html?token=${interviewToken}`;
