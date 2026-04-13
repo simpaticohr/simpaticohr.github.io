@@ -291,6 +291,7 @@ function toggleView(v) {
 
 // ── Add Employee ──
 function openAddModal() { openModal('add-modal'); }
+window.openAdd = openAddModal;
 
 async function saveEmployee() {
   const btn = document.getElementById('save-btn');

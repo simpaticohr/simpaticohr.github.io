@@ -225,12 +225,28 @@ window.createReviewCycle = async function() {
   if (!name) { showToast('Cycle name required', 'error'); return; }
 
   try {
-    const res = await fetch(`${PERF_CONFIG.workerUrl}/performance/cycles`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...authHeaders() },
-      body: JSON.stringify({ name, start_date: start, end_date: end, type, scope }),
-    });
-    if (!res.ok) throw new Error('Failed to create cycle');
+    const client = sb();
+    if (!client) throw new Error('Database not connected');
+    const cid = typeof getCompanyId === 'function' ? getCompanyId() : null;
+    if (!cid) throw new Error('No company context available');
+
+    const { error } = await client
+      .from('review_cycles')
+      .insert([{
+        name, start_date: start, end_date: end, type, scope,
+        company_id: cid, status: 'active', tenant_id: cid
+      }]);
+
+    if (error) {
+      console.warn('[Performance] Direct insert failed, falling back to worker:', error.message);
+      const res = await fetch(`${PERF_CONFIG.workerUrl}/performance/cycles`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify({ name, start_date: start, end_date: end, type, scope }),
+      });
+      if (!res.ok) throw new Error('Failed to create cycle via worker');
+    }
+    
     showToast('Review cycle launched!', 'success');
     closeModal('review-cycle-modal');
     await Promise.all([loadCycles(), loadReviews()]);

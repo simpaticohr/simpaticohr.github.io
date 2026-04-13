@@ -37,7 +37,7 @@ async function loadEmployeeSelect() {
   const client = sb(); if (!client) return;
   const cid = typeof getCompanyId === 'function' ? getCompanyId() : null;
   let query = client.from('employees').select('id,first_name,last_name').eq('status','active').order('first_name');
-  if (cid) query = query.eq('company_id', cid);
+  if (cid) query = query.eq('tenant_id', cid);
   const { data } = await query;
   const sel = document.getElementById('leave-employee'); if (!sel) return;
   (data||[]).forEach(e => {
@@ -62,7 +62,7 @@ async function loadLeave() {
       employees(first_name, last_name),
       approver:employees!approver_id(first_name, last_name)
     `)
-    .eq('company_id', cid)
+    .eq('tenant_id', cid)
     .order('created_at', { ascending: false });
 
   if (error) { console.error(error); return; }
@@ -118,10 +118,9 @@ window.rejectLeave  = async (id) => updateLeaveStatus(id, 'rejected');
 
 async function updateLeaveStatus(id, status) {
   try {
-    const res = await fetch(`${OPS_CONFIG.workerUrl}/leave/${id}/${status}`, {
-      method: 'PATCH', headers: { 'Content-Type': 'application/json', ...authHeaders() },
-    });
-    if (!res.ok) throw new Error('Failed to update leave');
+    const client = sb(); if (!client) throw new Error('Database not connected');
+    const { error } = await client.from('leave_requests').update({ status }).eq('id', id);
+    if (error) throw new Error(error.message);
     showToast(`Leave ${status}`, 'success');
     await loadLeave();
   } catch (err) { showToast(err.message, 'error'); }
@@ -139,14 +138,21 @@ window.submitLeaveRequest = async function() {
   if (!empId || !from || !to) { showToast('Employee and dates required', 'error'); return; }
 
   const days = Math.round((new Date(to) - new Date(from)) / (1000*60*60*24)) + 1;
+  const cid = typeof getCompanyId === 'function' ? getCompanyId() : 'SIMP_PRO_MAIN';
 
   try {
-    const res = await fetch(`${OPS_CONFIG.workerUrl}/leave`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...authHeaders() },
-      body: JSON.stringify({ employee_id: empId, type, from_date: from, to_date: to, days, reason }),
-    });
-    if (!res.ok) throw new Error('Failed to submit request');
+    const client = sb(); if (!client) throw new Error('Database not connected');
+    const { error } = await client.from('leave_requests').insert([{
+      employee_id: empId,
+      type: type,
+      from_date: from,
+      to_date: to,
+      days: days,
+      reason: reason || null,
+      status: 'pending',
+      tenant_id: cid
+    }]);
+    if (error) throw new Error(error.message || 'Failed to submit request');
     showToast('Leave request submitted', 'success');
     closeModal('leave-modal');
     await loadLeave();
@@ -158,10 +164,14 @@ async function loadPolicies() {
   const client = sb(); if (!client) return;
   const cid = typeof getCompanyId === 'function' ? getCompanyId() : null;
   if (!cid) { const c = document.getElementById('policies-list'); if (c) c.innerHTML = '<div class="hr-empty" style="grid-column:1/-1"><p>No policies uploaded yet.</p></div>'; return; }
-  const { data } = await client.from('hr_policies').select('id, name, category, version, file_key, updated_at').eq('company_id', cid).order('updated_at', { ascending: false });
+  let res = await client.from('hr_policies').select('id, name, category, version, file_key, updated_at').eq('tenant_id', cid).order('updated_at', { ascending: false });
+  if (res.error) {
+    console.warn('[Policies] Query with tenant_id failed, falling back:', res.error);
+    res = await client.from('hr_policies').select('id, name, category, version, file_key, updated_at').order('updated_at', { ascending: false });
+  }
 
   const container = document.getElementById('policies-list'); if (!container) return;
-  const policies = data || [];
+  const policies = res.data || [];
   if (policies.length === 0) {
     container.innerHTML = '<div class="hr-empty" style="grid-column:1/-1"><p>No policies uploaded yet.</p></div>';
     return;
@@ -230,7 +240,7 @@ async function loadTickets() {
       employees(first_name, last_name),
       assignee:employees!assignee_id(first_name, last_name)
     `)
-    .eq('company_id', cid)
+    .eq('tenant_id', cid)
     .order('created_at', { ascending: false });
 
   if (error) { console.error(error); return; }
@@ -270,7 +280,7 @@ window.loadOrgChart = async function() {
   const client = sb(); if (!client) return;
   const cid = typeof getCompanyId === 'function' ? getCompanyId() : null;
   if (!cid) { const c = document.getElementById('org-chart'); if (c) c.innerHTML = '<p style="text-align:center;color:var(--hr-text-muted)">No org data available.</p>'; return; }
-  const { data } = await client.from('employees').select('id, first_name, last_name, job_title, manager_id, departments(name)').eq('status', 'active').eq('company_id', cid);
+  const { data } = await client.from('employees').select('id, first_name, last_name, job_title, manager_id, departments(name)').eq('status', 'active').eq('tenant_id', cid);
 
   const employees = data || [];
   const container = document.getElementById('org-chart'); if (!container) return;
