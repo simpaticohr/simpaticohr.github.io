@@ -55,7 +55,7 @@ async function loadCourses() {
   let query = client.from('training_courses')
     .select('*')
     .order('created_at', { ascending: false });
-  if (cid) query = query.eq('company_id', cid);
+  if (cid) query = query.eq('tenant_id', cid);
   let { data, error } = await query;
 
   // Fallback: if company_id column doesn't exist yet (400), retry without it
@@ -121,7 +121,7 @@ async function loadEnrollments() {
       employees(first_name, last_name),
       training_courses(*)
     `)
-    .eq('company_id', cid)
+    .eq('tenant_id', cid)
     .order('enrolled_at', { ascending: false });
 
   // Fallback: if company_id column doesn't exist yet on training_enrollments
@@ -185,7 +185,7 @@ async function loadComplianceReport() {
       employees(first_name, last_name),
       training_courses(*)
     `)
-    .eq('company_id', cid)
+    .eq('tenant_id', cid)
     .eq('training_courses.is_required', true)
     .or(`due_date.lte.${soon},status.eq.overdue`)
     .order('due_date');
@@ -320,7 +320,7 @@ function loadEnrollSelects() {
   if (empSel && sb()) {
     let query = sb().from('employees').select('id,first_name,last_name').eq('status','active').order('first_name');
     const cid = typeof getCompanyId === 'function' ? getCompanyId() : null;
-    if (cid) query = query.eq('company_id', cid);
+    if (cid) query = query.eq('tenant_id', cid);
     query.then(({ data }) => {
         (data||[]).forEach(e => {
           const opt = document.createElement('option');
@@ -441,4 +441,5 @@ if (typeof window.showToast === 'undefined') {
     c.appendChild(t); setTimeout(() => t.remove(), 3800);
   };
 }
+
 

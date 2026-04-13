@@ -84,7 +84,7 @@ async function loadDepartments() {
   const client = sb(); if (!client) return;
   let query = client.from('departments').select('id, name').order('name');
   const cid = getCompanyId();
-  if (cid) query = query.eq('company_id', cid);
+  if (cid) query = query.eq('tenant_id', cid);
   const { data, error } = await query;
 
   if (error) { console.error(error); return; }
@@ -129,7 +129,7 @@ async function loadEmployees() {
         departments(name),
         manager:employees!manager_id(first_name, last_name)
       `)
-      .eq('company_id', cid)
+      .eq('tenant_id', cid)
       .order('first_name');
     
     if (complexRes.error) {
@@ -138,7 +138,7 @@ async function loadEmployees() {
       const simpleRes = await client
         .from('employees')
         .select('*')
-        .eq('company_id', cid)
+        .eq('tenant_id', cid)
         .order('first_name');
       data = simpleRes.data;
       error = simpleRes.error;
@@ -148,7 +148,7 @@ async function loadEmployees() {
     }
   } catch(e) {
     console.warn('[employees] Query exception, trying simple select:', e.message);
-    const simpleRes = await client.from('employees').select('*').eq('company_id', cid).order('first_name');
+    const simpleRes = await client.from('employees').select('*').eq('tenant_id', cid).order('first_name');
     data = simpleRes.data;
     error = simpleRes.error;
   }
@@ -781,4 +781,5 @@ if (typeof window.showToast === 'undefined') {
     setTimeout(() => t.remove(), 3800);
   };
 }
+
 

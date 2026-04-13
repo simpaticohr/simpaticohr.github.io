@@ -44,7 +44,7 @@ async function loadEmployeeSelects() {
   const client = sb(); if (!client) return;
   const cid = typeof getCompanyId === 'function' ? getCompanyId() : null;
   let query = client.from('employees').select('id, first_name, last_name').eq('status', 'active').order('first_name');
-  if (cid) query = query.eq('company_id', cid);
+  if (cid) query = query.eq('tenant_id', cid);
   const { data } = await query;
 
   ['ob-employee','ob-buddy'].forEach(selId => {
@@ -62,7 +62,7 @@ async function loadTemplates() {
   const client = sb(); if (!client) return;
   const cid = typeof getCompanyId === 'function' ? getCompanyId() : null;
   let query = client.from('onboarding_templates').select('id, name').order('name');
-  if (cid) query = query.eq('company_id', cid);
+  if (cid) query = query.eq('tenant_id', cid);
   const { data } = await query;
 
   const sel = document.getElementById('ob-template'); if (!sel) return;
@@ -84,7 +84,7 @@ async function loadOnboarding() {
       employees(id, first_name, last_name, job_title, departments(name)),
       onboarding_tasks(id, title, due_date, status, notes)
     `)
-    .eq('company_id', cid)
+    .eq('tenant_id', cid)
     .order('start_date', { ascending: false });
 
   if (error) { console.error(error); return; }
@@ -238,4 +238,5 @@ if (typeof window.showToast === 'undefined') {
     setTimeout(() => t.remove(), 3800);
   };
 }
+
 

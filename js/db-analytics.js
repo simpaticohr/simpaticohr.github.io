@@ -81,7 +81,7 @@ async function runFullAnalysis() {
   async function safeFetch(tableName, cid, hasCid) {
     try {
       let query = client.from(tableName).select('*').limit(500);
-      if (hasCid && cid) query = query.eq('company_id', cid);
+      if (hasCid && cid) query = query.eq('tenant_id', cid);
       const res = await query;
       if (res.error) {
         // If the error is about company_id not existing, retry without it
@@ -699,3 +699,4 @@ if (typeof window.showToast === 'undefined') {
     setTimeout(() => t.remove(), 3800);
   };
 }
+

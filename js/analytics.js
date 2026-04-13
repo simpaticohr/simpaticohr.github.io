@@ -58,13 +58,13 @@ async function loadAnalytics() {
     { data: departments },
     { data: terminated },
   ] = await Promise.all([
-    client.from('employees').select('id, status, start_date, departments(id,name)').eq('company_id', cid),
-    client.from('leave_requests').select('type, days, status').eq('company_id', cid).gte('created_at', since),
-    client.from('performance_reviews').select('score, employees(department_id)').eq('company_id', cid).not('score','is',null),
-    client.from('training_enrollments').select('status').eq('company_id', cid).gte('enrolled_at', since),
-    client.from('payslips').select('gross_pay, net_pay, period').eq('company_id', cid).order('period'),
-    client.from('departments').select('id, name').eq('company_id', cid),
-    client.from('employees').select('id').eq('company_id', cid).eq('status','terminated').gte('updated_at', since),
+    client.from('employees').select('id, status, start_date, departments(id,name)').eq('tenant_id', cid),
+    client.from('leave_requests').select('type, days, status').eq('tenant_id', cid).gte('created_at', since),
+    client.from('performance_reviews').select('score, employees(department_id)').eq('tenant_id', cid).not('score','is',null),
+    client.from('training_enrollments').select('status').eq('tenant_id', cid).gte('enrolled_at', since),
+    client.from('payslips').select('gross_pay, net_pay, period').eq('tenant_id', cid).order('period'),
+    client.from('departments').select('id, name').eq('tenant_id', cid),
+    client.from('employees').select('id').eq('tenant_id', cid).eq('status','terminated').gte('updated_at', since),
   ]);
 
   const active    = (employees||[]).filter(e => e.status === 'active');
@@ -241,7 +241,7 @@ async function renderHiringChart(since) {
   const client = sb(); if (!client) return;
   const cid = typeof getCompanyId === 'function' ? getCompanyId() : null;
   let hireQuery = client.from('job_applications').select('status').gte('created_at', since).limit(500);
-  if (cid) hireQuery = hireQuery.eq('company_id', cid);
+  if (cid) hireQuery = hireQuery.eq('tenant_id', cid);
   const { data } = await hireQuery;
 
   const stages = ['Applied','Screening','Interview','Offer','Hired'];
@@ -344,4 +344,5 @@ if (typeof window.showToast === 'undefined') {
     c.appendChild(t); setTimeout(()=>t.remove(),3800);
   };
 }
+
 

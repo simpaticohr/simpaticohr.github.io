@@ -64,7 +64,7 @@ async function loadPayslips() {
       id, period, gross_pay, deductions_total, net_pay, status, payslip_key, paid_at,
       employees(id, first_name, last_name, departments(name))
     `)
-    .eq('company_id', cid)
+    .eq('tenant_id', cid)
     .order('created_at', { ascending: false });
 
   if (error) { console.error(error); return; }
@@ -146,7 +146,7 @@ async function loadSalaryRegister() {
       id, base_salary, currency, employment_type, effective_date,
       employees(id, first_name, last_name, job_title, departments(name))
     `)
-    .eq('company_id', cid)
+    .eq('tenant_id', cid)
     .order('effective_date', { ascending: false });
 
   if (error) { console.error(error); return; }
@@ -187,7 +187,7 @@ async function loadPayrollRuns() {
       id, period, type, total_gross, total_net, employee_count, status, pay_date, notes, created_at,
       run_by:employees!run_by_id(first_name, last_name)
     `)
-    .eq('company_id', cid)
+    .eq('tenant_id', cid)
     .order('created_at', { ascending: false });
 
   if (error) { console.error(error); return; }
@@ -230,7 +230,7 @@ async function loadDeductions() {
       id, type, amount, frequency, start_date, end_date, status,
       employees(first_name, last_name)
     `)
-    .eq('company_id', cid)
+    .eq('tenant_id', cid)
     .order('created_at', { ascending: false });
 
   if (error) { console.error(error); return; }
@@ -662,4 +662,5 @@ if (typeof window.showToast === 'undefined') {
     c.appendChild(t); setTimeout(()=>t.remove(),3800);
   };
 }
+
 

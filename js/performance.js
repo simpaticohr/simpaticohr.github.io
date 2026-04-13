@@ -38,7 +38,7 @@ async function loadCycles() {
   const client = sb(); if (!client) return;
   const cid = typeof getCompanyId === 'function' ? getCompanyId() : null;
   let query = client.from('review_cycles').select('id, name, type, start_date, end_date, status').order('created_at', { ascending: false });
-  if (cid) query = query.eq('company_id', cid);
+  if (cid) query = query.eq('tenant_id', cid);
   const { data } = await query;
   allCycles = data || [];
 
@@ -64,7 +64,7 @@ async function loadReviews() {
       employees(id, first_name, last_name, job_title, departments(name)),
       reviewer:employees!reviewer_id(first_name, last_name)
     `)
-    .eq('company_id', cid)
+    .eq('tenant_id', cid)
     .order('created_at', { ascending: false });
 
   if (error) { console.error(error); return; }
@@ -132,7 +132,7 @@ async function loadGoals() {
       id, title, description, period, progress, status, due_date,
       employees(first_name, last_name)
     `)
-    .eq('company_id', cid)
+    .eq('tenant_id', cid)
     .order('due_date');
 
   if (error) { console.error(error); return; }
@@ -344,3 +344,4 @@ if (typeof window.showToast === 'undefined') {
     c.appendChild(t); setTimeout(() => t.remove(), 3800);
   };
 }
+

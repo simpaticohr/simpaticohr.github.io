@@ -431,7 +431,7 @@ const auditBuffer = [];
 async function audit(env, ctx, action, resource, resourceId, meta = {}) {
   const event = {
     timestamp: new Date().toISOString(),
-    company_id: ctx.tenantId,
+    tenant_id: ctx.tenantId,
     actor_id: ctx.actorId || null,
     actor_email: ctx.actorEmail || null,
     action,
@@ -984,7 +984,7 @@ async function handleCreateEmployee(request, env, ctx) {
   const payload = {
     ...sanitize(body),
     employee_id: empNum,
-    company_id: ctx.tenantId,
+    tenant_id: ctx.tenantId,
     status: "active",
     created_by: ctx.actorId,
   };
@@ -1150,7 +1150,7 @@ async function handleBulkCreateEmployees(request, env, ctx) {
         {
           ...sanitize(emp),
           employee_id: empNum,
-          company_id: ctx.tenantId,
+          tenant_id: ctx.tenantId,
           status: "active",
         },
         false,
@@ -1234,7 +1234,7 @@ async function handleUploadDocument(request, env, ctx, [id]) {
       name: file.name,
       type,
       file_key: key,
-      company_id: ctx.tenantId,
+      tenant_id: ctx.tenantId,
     },
     false,
     ctx.tenantId,
@@ -1286,7 +1286,7 @@ async function handleStartOnboarding(request, env, ctx) {
       start_date,
       stage: "not_started",
       completion_pct: 0,
-      company_id: ctx.tenantId,
+      tenant_id: ctx.tenantId,
     },
     false,
     ctx.tenantId,
@@ -1312,7 +1312,7 @@ async function handleStartOnboarding(request, env, ctx) {
     category: t.category,
     status: "pending",
     due_date: addDays(start_date, t.due_days),
-    company_id: ctx.tenantId,
+    tenant_id: ctx.tenantId,
   }));
 
   await sbFetch(
@@ -1422,7 +1422,7 @@ async function handleUploadPolicy(request, env, ctx) {
       category: "general",
       version: "1.0.0",
       file_key: key,
-      company_id: ctx.tenantId,
+      tenant_id: ctx.tenantId,
     },
     false,
     ctx.tenantId,
@@ -1444,7 +1444,7 @@ async function handleCreateCourse(request, env, ctx) {
     env,
     "POST",
     "/rest/v1/training_courses",
-    { ...sanitize(body), company_id: ctx.tenantId },
+    { ...sanitize(body), tenant_id: ctx.tenantId },
     false,
     ctx.tenantId,
   );
@@ -1461,7 +1461,7 @@ async function handleCreateCourse(request, env, ctx) {
         metadata: {
           title: course.title,
           type: "course",
-          company_id: ctx.tenantId,
+          tenant_id: ctx.tenantId,
         },
       },
     ]);
@@ -1503,7 +1503,7 @@ async function handleEnrollTraining(request, env, ctx) {
       course_id,
       status: "enrolled",
       enrolled_at: new Date().toISOString(),
-      company_id: ctx.tenantId,
+      tenant_id: ctx.tenantId,
     },
     false,
     ctx.tenantId,
@@ -1530,7 +1530,7 @@ async function handleSemanticCourseSearch(request, env, ctx) {
   const matches = await env.VECTORIZE.query(emb.data[0], {
     topK,
     returnMetadata: true,
-    filter: { company_id: ctx.tenantId },
+    filter: { tenant_id: ctx.tenantId },
   });
   const ids = matches.matches.map((m) => m.id);
   if (!ids.length) return apiResponse({ courses: [], scores: [] });
@@ -1582,7 +1582,7 @@ async function handleCreateCycle(request, env, ctx) {
     env,
     "POST",
     "/rest/v1/performance_cycles",
-    { ...sanitize(body), company_id: ctx.tenantId },
+    { ...sanitize(body), tenant_id: ctx.tenantId },
     false,
     ctx.tenantId,
   );
@@ -1616,7 +1616,7 @@ async function handleSubmitReview(request, env, ctx) {
       ...sanitize(body),
       reviewer_id: ctx.actorId,
       submitted_at: new Date().toISOString(),
-      company_id: ctx.tenantId,
+      tenant_id: ctx.tenantId,
     },
     false,
     ctx.tenantId,
@@ -1693,7 +1693,7 @@ async function handleCreateGoal(request, env, ctx) {
       ...sanitize(body),
       progress: 0,
       status: "on_track",
-      company_id: ctx.tenantId,
+      tenant_id: ctx.tenantId,
       created_by: ctx.actorId,
     },
     false,
@@ -1753,7 +1753,7 @@ async function handleSubmitLeave(request, env, ctx) {
       ...sanitize(body),
       days,
       status: "pending",
-      company_id: ctx.tenantId,
+      tenant_id: ctx.tenantId,
       submitted_at: new Date().toISOString(),
     },
     false,
@@ -1953,7 +1953,7 @@ async function handleRunPayroll(request, env, ctx) {
       ...body,
       status: "processing",
       initiated_by: ctx.actorId,
-      company_id: ctx.tenantId,
+      tenant_id: ctx.tenantId,
     },
     false,
     ctx.tenantId,
@@ -1981,7 +1981,7 @@ async function handleRunPayroll(request, env, ctx) {
       period: body.period,
       pay_date: body.pay_date,
       payroll_run_id: run.id,
-      company_id: ctx.tenantId,
+      tenant_id: ctx.tenantId,
     })),
     false,
     ctx.tenantId,
@@ -2144,7 +2144,7 @@ async function handleCreateJob(request, env, ctx) {
     {
       ...sanitize(body),
       status: "open",
-      company_id: ctx.tenantId,
+      tenant_id: ctx.tenantId,
       created_by: ctx.actorId,
     },
     false,
@@ -2306,7 +2306,7 @@ Return ONLY valid JSON in format: {"match_score": 85, "reason": "Brief 1-sentenc
       ...sanitize(body),
       status,
       applied_at: new Date().toISOString(),
-      company_id: ctx.tenantId,
+      tenant_id: ctx.tenantId,
     },
     false,
     ctx.tenantId,
@@ -2329,7 +2329,7 @@ Return ONLY valid JSON in format: {"match_score": 85, "reason": "Brief 1-sentenc
       interview_role: job.title,
       interview_level: "auto",
       status: "pending",
-      company_id: ctx.tenantId,
+      tenant_id: ctx.tenantId,
       question_count: 5,
       interview_language: "en",
       max_attempts: 1,
@@ -2551,7 +2551,7 @@ async function handleAIChat(request, env, ctx) {
       const rag = await env.VECTORIZE.query(emb.data[0], {
         topK: 4,
         returnMetadata: true,
-        filter: { company_id: ctx.tenantId },
+        filter: { tenant_id: ctx.tenantId },
       });
       ragContext = rag.matches
         .filter((m) => m.score > 0.7)
@@ -2851,7 +2851,7 @@ async function handleSaveAssessment(request, env, ctx) {
 
   const payload = {
     ...body,
-    company_id: ctx.tenantId,
+    tenant_id: ctx.tenantId,
     created_by_id: ctx.actorId,
     status: "draft",
   };
