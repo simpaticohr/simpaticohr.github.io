@@ -2291,6 +2291,13 @@ Return ONLY valid JSON in format: {"match_score": 85, "reason": "Brief 1-sentenc
     }
   }
 
+  if (body.skills !== undefined) {
+    body.candidate_skills = body.skills;
+    delete body.skills;
+  }
+  delete body.source;
+  delete body.resume_text;
+
   const res = await sbFetch(
     env,
     "POST",
