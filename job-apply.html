@@ -289,14 +289,14 @@
             const skills    = document.getElementById('skills').value.trim();
 
             try {
-                // ── Step 1: Upload PDF to Supabase Storage ───────────────
+                // ── Step 1: Convert to Base64 (Bypass Frontend RLS) ──────
+                const base64Resume = await new Promise((resolve, reject) => {
+                    const reader = new FileReader();
+                    reader.readAsDataURL(resumeFile);
+                    reader.onload = () => resolve(reader.result);
+                    reader.onerror = error => reject(error);
+                });
                 const filePath = `resumes/${Date.now()}-${Math.random().toString(36).slice(2)}.${resumeFile.name.split('.').pop()}`;
-                const { error: uploadError } = await supabaseClient.storage
-                    .from('hr-documents').upload(filePath, resumeFile);
-                if (uploadError) throw uploadError;
-
-                const { data: { publicUrl } } = supabaseClient.storage
-                    .from('hr-documents').getPublicUrl(filePath);
 
                 // ── Step 2: Extract plain text for AI scoring ────────────
                 // PDF parsing is server-side; we send the skills summary as resume_text.
@@ -319,7 +319,8 @@
                         candidate_name:  `${firstName} ${lastName}`,
                         candidate_email: email,
                         job_id:          jobId,
-                        resume_url:      publicUrl,
+                        resume_base64:   base64Resume,
+                        resume_filename: filePath,
                         resume_text:     resumeText,
                         skills:          skills,
                         source:          'careers_page',

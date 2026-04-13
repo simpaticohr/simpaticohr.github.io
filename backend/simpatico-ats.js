@@ -2197,6 +2197,39 @@ async function handleCreateApplication(request, env, ctx) {
   if (!body.job_id || !body.candidate_email)
     throw new ValidationError("job_id and candidate_email required");
 
+  // 0. Base64 Upload Handling (Bypass Frontend RLS limit)
+  if (body.resume_base64 && body.resume_filename) {
+    try {
+      const base64Data = body.resume_base64.split(",")[1] || body.resume_base64;
+      const binaryStr = atob(base64Data);
+      const fileBytes = new Uint8Array(binaryStr.length);
+      for (let i = 0; i < binaryStr.length; i++) {
+        fileBytes[i] = binaryStr.charCodeAt(i);
+      }
+      
+      const uploadRes = await fetch(`${env.SUPABASE_URL}/storage/v1/object/hr-documents/${body.resume_filename}`, {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${env.SUPABASE_SERVICE_KEY}`,
+          "apikey": env.SUPABASE_SERVICE_KEY,
+          "Content-Type": "application/pdf",
+          "x-upsert": "true"
+        },
+        body: fileBytes
+      });
+      
+      if (uploadRes.ok) {
+        body.resume_url = `${env.SUPABASE_URL}/storage/v1/object/public/hr-documents/${body.resume_filename}`;
+      } else {
+        console.error("Worker upload error:", await uploadRes.text());
+      }
+    } catch(e) {
+      console.error("Worker upload exception:", e);
+    }
+    delete body.resume_base64;
+    delete body.resume_filename;
+  }
+
   // 1. Fetch Job Listing to check for Auto-Shortlist / requirements
   const jobRes = await sbFetch(
     env,
