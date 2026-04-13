@@ -2265,7 +2265,6 @@ Return ONLY valid JSON in format: {"match_score": 85, "reason": "Brief 1-sentenc
       match_score = analysis.match_score || null;
       ai_summary = analysis.reason;
 
-      body.ai_summary = ai_summary;
       // We assume job_applications has a JSONB metadata or similar, but to be perfectly safe,
       // we'll append the ai_summary to the resume_text or note field if metadata isn't strictly defined.
       body.resume_text =
