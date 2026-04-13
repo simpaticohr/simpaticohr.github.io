@@ -2535,7 +2535,24 @@ async function syncWithSupabase() {
             .eq('company_id', companyId)
             .order('created_at', { ascending: false });
         if (!intRes.error && intRes.data) {
-            DataStore.update(data => { data.interviews = intRes.data; });
+            DataStore.update(data => { 
+                data.interviews = intRes.data.map(dbInt => ({
+                    id: dbInt.id,
+                    candidateName: dbInt.candidate_name || 'Candidate',
+                    candidateEmail: dbInt.candidate_email || '',
+                    candidatePhone: dbInt.candidate_phone || '',
+                    position: dbInt.interview_role || 'Position',
+                    round: dbInt.interview_level || 'Round',
+                    date: dbInt.created_at ? dbInt.created_at.split('T')[0] : new Date().toISOString().split('T')[0],
+                    startTime: '10:00',
+                    endTime: '10:45',
+                    interviewer: 'Recruiting Team',
+                    mode: dbInt.interview_type === 'ai_voice' ? 'proctored' : 'video',
+                    status: dbInt.status === 'pending' ? 'scheduled' : (dbInt.status || 'scheduled'),
+                    token: dbInt.token || '',
+                    job_id: dbInt.job_id
+                }));
+            });
             synced++;
         } else if (intRes.error) {
             console.warn('[sync] Interviews fetch error:', intRes.error.message);
@@ -2915,13 +2932,13 @@ async function loadExternalModule(sectionId, href) {
                     continue;
                 }
             } else {
-                if (oldScript.textContent.includes('window.self !== window.top')) continue;
+                // Ensure inline scripts are executed (removed skipping condition to allow module logic)
                 jsCode = oldScript.textContent;
             }
 
             jsCode = jsCode.replace(/(const|let)\s+(SB_URL|SB_ANON|TENANT|WORKER_URL|AN_CONFIG|_sb|sbHeaders|allEmployees|filtered|currentView|editingId|avatarColors|statusBadge|statusLabel|typeLabel|conversations|currentConvId|messages|activeContexts|isStreaming|currentUserInitials|AI_CONFIG|CANDIDATES|STAGES|STAGE_KEYS|TRIG_LABELS|ACT_LABELS|STAGE_COLORS|ICON_MAP|INTEGRATIONS|pendingAI|SLA_CONFIG|TEMPLATES|KR|KL|actCount|EMP_CONFIG|PAY_CONFIG|OPS_CONFIG|OB_CONFIG|PERF_CONFIG|TR_CONFIG|allPayslips|allSalaries|allRuns|allDeductions|allLeave|allTickets|onboardingRecords|allReviews|allGoals|allCycles|allCourses|allEnrollments|currentTabId|departments|THUMB_PALETTES|THUMB_ICONS|ESC_MAP|AVATAR_COLORS|AVATAR_COLORS|API|SB_URL|SB_KEY|runs|data|client|result|profile|companyId|cid|authUser|token|key)\s*=/g, 'var $2 =');
             
-            jsCode = jsCode.replace(/document\.addEventListener\(\s*['"`]DOMContentLoaded['"`]/g, "window.addEventListener('SimpaticoSPA'");
+            jsCode = jsCode.replace(/(document|window)\.addEventListener\(\s*['"`]DOMContentLoaded['"`]/g, "window.addEventListener('SimpaticoSPA'");
 
             const newScript = document.createElement('script');
             newScript.textContent = jsCode;
@@ -3626,33 +3643,43 @@ const user = JSON.parse(localStorage.getItem('simpatico_user') || '{}');
     const language = document.getElementById('intLanguage')?.value || 'en-IN';
     const experienceLevel = document.getElementById('intExperienceLevel')?.value || 'mid';
 
-    const newInterview = {
+    // DB Payload aligned with exact schema
+    const dbPayload = {
         candidate_name: candidateName,
         candidate_email: candidateEmail,
         candidate_phone: candidatePhone,
-        position, round, date, 
-        start_time: startTime, 
-        end_time: endTime,
-        interviewer, 
-        interviewer_email: interviewerEmail, 
-        mode,
-        meeting_link: meetingLink, 
-        notes,
-        proctor_settings: proctorSettings,
-        token,           
-        interview_link: interviewLink,
+        interview_role: position,
+        interview_level: round,
+        interview_type: mode === 'proctored' ? 'ai_voice' : 'human_live',
+        token_type: mode === 'proctored' ? 'shortlist' : 'custom',
+        token,
+        status: mode === 'proctored' ? 'pending' : 'scheduled',
         job_id: selectedJobId,
-        status: 'scheduled',
         company_id: user.company_id || user.tenant_id || null,
-      tenant_id: (JSON.parse(localStorage.getItem('simpatico_user') || '{}')).tenant_id || ''
+        created_at: new Date().toISOString(),
+        expires_at: new Date(new Date().getTime() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+        question_count: 5,
+        max_attempts: 1
+    };
+
+    // Local Payload for immediate UI rendering (camelCase API expectations)
+    const localPayload = {
+        id: crypto.randomUUID(), // Fallback ID
+        candidateName, candidateEmail, candidatePhone,
+        position, round, date, startTime, endTime,
+        interviewer, interviewerEmail: interviewerEmail || '', 
+        mode, meetingLink, notes,
+        proctorSettings, token, interviewLink, job_id: selectedJobId, status: 'scheduled'
     };
 
     try {
-        const { data, error } = await SimpaticoDB.from('interviews').insert([newInterview]).select();
+        const { data, error } = await SimpaticoDB.from('interviews').insert([dbPayload]).select();
         if (error) throw error;
 
+        if (data && data.length > 0) localPayload.id = data[0].id;
+
         DataStore.update(data => {
-            data.interviews.unshift(data[0] || newInterview);
+            data.interviews.unshift(localPayload);
             data.activities.unshift({
                 type: mode === 'proctored' ? 'proctored' : 'interview',
                 title: `Interview Scheduled: ${candidateName}`,
@@ -3704,9 +3731,9 @@ const user = JSON.parse(localStorage.getItem('simpatico_user') || '{}');
 
     if (sendEmail || sendInterviewerEmail) {
         const recipientType = sendEmail && sendInterviewerEmail ? 'both' : sendEmail ? 'candidate' : 'interviewer';
-        sendEmailNotification({ ...newInterview, interviewLink, token }, recipientType).then(result => {
+        sendEmailNotification({ ...localPayload, interviewLink, token }, recipientType).then(result => {
             DataStore.update(data => {
-                const stored = data.interviews.find(i => i.id === newInterview.id);
+                const stored = data.interviews.find(i => i.id === localPayload.id);
                 if (stored) {
                     stored.notificationLog = stored.notificationLog || [];
                     stored.notificationLog.push({ type: 'email', success: result.success, timestamp: Date.now(), recipients: recipientType });
@@ -3730,11 +3757,11 @@ const user = JSON.parse(localStorage.getItem('simpatico_user') || '{}');
     }
 
     if (sendWhatsApp && candidatePhone) {
-        const intWithLink = { ...newInterview, interviewLink, token };
+        const intWithLink = { ...localPayload, interviewLink, token };
         setTimeout(async () => {
             const result = await sendWhatsAppNotification(intWithLink);
             DataStore.update(data => {
-                const stored = data.interviews.find(i => i.id === newInterview.id);
+                const stored = data.interviews.find(i => i.id === localPayload.id);
                 if (stored) {
                     stored.notificationLog = stored.notificationLog || [];
                     stored.notificationLog.push({ type: 'whatsapp', success: result.success, method: result.method, timestamp: Date.now() });
