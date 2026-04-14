@@ -82,12 +82,20 @@ function getCompanyId() {
 // ── Departments ──
 async function loadDepartments() {
   const client = sb(); if (!client) return;
-  let query = client.from('departments').select('id, name').order('name');
   const cid = getCompanyId();
-  if (cid) query = query.eq('tenant_id', cid);
-  const { data, error } = await query;
+  
+  let data = null, error = null;
+  if (cid) {
+    let res = await client.from('departments').select('id, name').eq('tenant_id', cid).order('name');
+    if (res.error) res = await client.from('departments').select('id, name').eq('company_id', cid).order('name');
+    if (res.error) res = await client.from('departments').select('id, name').order('name');
+    data = res.data; error = res.error;
+  } else {
+    let res = await client.from('departments').select('id, name').order('name');
+    data = res.data; error = res.error;
+  }
 
-  if (error) { console.error(error); return; }
+  if (error) { console.error('Departments load error:', error); }
   departments = data || [];
 
   // populate department selects
@@ -118,37 +126,31 @@ async function loadEmployees() {
     return;
   }
 
-  // First try with FK relations (departments, manager), fall back to simple select if schema doesn't support it
   let data = null, error = null;
   try {
-    const complexRes = await client
-      .from('employees')
-      .select(`
-        id, first_name, last_name, email, job_title, employment_type,
-        start_date, location, status, avatar_url,
-        departments(name),
-        manager:employees!manager_id(first_name, last_name)
-      `)
-      .eq('company_id', cid)
-      .order('first_name');
+    const complexQuery = `id, first_name, last_name, email, job_title, employment_type, start_date, location, status, avatar_url, departments(name), manager:employees!manager_id(first_name, last_name)`;
     
-    if (complexRes.error) {
-      // FK relations not available — try simple select
-      console.warn('[employees] Complex query failed, falling back to simple select:', complexRes.error.message);
-      const simpleRes = await client
-        .from('employees')
-        .select('*')
-        .eq('company_id', cid)
-        .order('first_name');
-      data = simpleRes.data;
-      error = simpleRes.error;
-    } else {
-      data = complexRes.data;
-      error = complexRes.error;
+    // Attempt 1: company_id
+    let res = await client.from('employees').select(complexQuery).eq('company_id', cid).order('first_name');
+    
+    // Attempt 2: tenant_id
+    if (res.error) res = await client.from('employees').select(complexQuery).eq('tenant_id', cid).order('first_name');
+    
+    // Attempt 3: no tenant filter (table lacks tenant columns)
+    if (res.error) res = await client.from('employees').select(complexQuery).order('first_name');
+
+    // Attempt 4: basic select (relations missing)
+    if (res.error) {
+       res = await client.from('employees').select('*').eq('company_id', cid).order('first_name');
+       if (res.error) res = await client.from('employees').select('*').eq('tenant_id', cid).order('first_name');
+       if (res.error) res = await client.from('employees').select('*').order('first_name');
     }
+    
+    data = res.data;
+    error = res.error;
   } catch(e) {
     console.warn('[employees] Query exception, trying simple select:', e.message);
-    const simpleRes = await client.from('employees').select('*').eq('company_id', cid).order('first_name');
+    const simpleRes = await client.from('employees').select('*').order('first_name');
     data = simpleRes.data;
     error = simpleRes.error;
   }
