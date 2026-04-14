@@ -766,6 +766,7 @@ route("POST", "/email/interview-invite", handleInterviewEmail);
 // Notifications
 route("GET", "/notifications", handleListNotifications);
 route("PATCH", "/notifications/:id/read", handleMarkNotificationRead);
+route("POST", "/notifications/whatsapp", handleWhatsAppNotification);
 
 // AI Intelligence
 route("POST", "/ai/chat", handleAIChat);
@@ -3434,6 +3435,42 @@ async function sendEmail(env, { to, subject, html, replyTo }) {
   if (!res.ok)
     console.error(`Email send failed [${subject}]:`, await res.text());
   return res;
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// § 16.5 WHATSAPP AUTOMATION
+// ──────────────────────────────────────────────────────────────────────────────
+async function handleWhatsAppNotification(request, env, ctx) {
+  const body = await safeJson(request);
+  const { phone, message } = body;
+
+  if (!phone) throw new ValidationError("Phone number is required");
+
+  // If credentials are not set, return simulated success to trigger wa.me fallback
+  if (!env.WHATSAPP_TOKEN || !env.WHATSAPP_PHONE_ID) {
+    console.warn("WHATSAPP_TOKEN not set - triggering wa.me frontend link.");
+    return apiResponse({ success: true, method: "fallback_wame" });
+  }
+
+  const res = await fetch(`https://graph.facebook.com/v19.0/${env.WHATSAPP_PHONE_ID}/messages`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${env.WHATSAPP_TOKEN}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      messaging_product: "whatsapp",
+      to: phone.replace(/[^0-9]/g, ""),
+      type: "text",
+      text: { body: message }
+    })
+  });
+
+  if (!res.ok) {
+    throw new AppError(`WhatsApp API Error: ${await res.text()}`, 500, "WA_ERROR");
+  }
+
+  return apiResponse({ success: true, method: "api" });
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
