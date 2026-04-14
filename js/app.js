@@ -124,7 +124,7 @@ async function loadDashboardData(companyId) {
   currentCompanyId = companyId;
   try {
     const [jobs, apps, ints] = await Promise.all([
-      sbFetch("jobs", "select=*&order=created_at.desc&limit=50"),
+      sbFetch("jobs", "select=*,job_applications(count)&order=created_at.desc&limit=50"),
       sbFetch("job_applications", "select=*,jobs(*)&order=created_at.desc&limit=100"),
       sbFetch("interviews", "select=*&order=created_at.desc&limit=50")
     ]);
@@ -260,7 +260,7 @@ function renderJobsTable(jobs) {
       '<td><div style="font-weight:600;">' + _e(job.title || 'Untitled') + '</div>' +
         '<div style="font-size:0.75rem;color:var(--gray-500);">' + _e(job.location || 'Remote') + ' • ' + _e(job.level || 'Mid-Level') + '</div></td>' +
       '<td>' + _e(job.department || '-') + '</td>' +
-      '<td><span style="font-weight:600;color:var(--primary);">' + (job.applications_count || 0) + '</span></td>' +
+      '<td><span style="font-weight:600;color:var(--primary);">' + ((job.job_applications && job.job_applications[0] ? job.job_applications[0].count : job.applications_count) || 0) + '</span></td>' +
       '<td><span class="badge badge-' + (status === 'active' ? 'success' : status === 'draft' ? 'gray' : 'warning') + '">' + _e(status) + '</span></td>' +
       '<td style="font-size:0.85rem;color:var(--gray-500);">' + formatDate(job.created_at) + '</td>' +
       '<td><div style="display:flex;gap:4px;">' +
@@ -317,7 +317,7 @@ function renderInterviewsTable(ints) {
 // ==========================================
 async function loadJobs() {
   try {
-    const jobs = await sbFetch("jobs", "select=*&order=created_at.desc&limit=50");
+    const jobs = await sbFetch("jobs", "select=*,job_applications(count)&order=created_at.desc&limit=50");
     renderJobsTable(Array.isArray(jobs) ? jobs : []);
   } catch (e) {
     console.error('Error loading jobs:', e);

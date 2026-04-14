@@ -276,29 +276,7 @@ window.calculatePayroll = async function() {
                      sessionStorage.getItem('tenant_id') ||
                      (typeof getCompanyId === 'function' ? getCompanyId() : null);
 
-  // Try Worker API first
-  try {
-    const res = await fetch(`${PAY_CONFIG.workerUrl}/payroll/calculate`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...authHeaders() },
-      body: JSON.stringify({ period }),
-    });
-    if (res.ok) {
-      const data = await res.json();
-      const d = data.data || data;
-      document.getElementById('run-preview').innerHTML = `
-        <strong>${d.employee_count || d.count || '?'}</strong> employees &nbsp;|&nbsp;
-        Gross: <strong>${formatCurrency(d.total_gross || d.gross)}</strong> &nbsp;|&nbsp;
-        Deductions: <span style="color:var(--hr-danger)">-${formatCurrency(d.deductions_total || d.deductions || 0)}</span> &nbsp;|&nbsp;
-        Net: <strong style="color:var(--hr-success)">${formatCurrency(d.total_net || d.net)}</strong>`;
-      return;
-    }
-    console.warn('[payroll] Worker calculate failed or requires upgrade — using direct Supabase backend fallback');
-  } catch (e) {
-    console.warn('[payroll] Worker unreachable:', e.message);
-  }
-
-  // Fallback: Direct Supabase calculation
+  // Direct Supabase calculation
   try {
     if (!companyId) throw new Error('No company linked to account.');
     const client = sb();
@@ -397,35 +375,13 @@ window.executePayroll = async function() {
 
   showToast('Processing payroll…', 'info');
   
-  // Try Worker API first
-  let workerSuccess = false;
+  // Direct Supabase payroll processing
   try {
-    const res = await fetch(`${PAY_CONFIG.workerUrl}/payroll/run`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...authHeaders() },
-      body: JSON.stringify({ period, pay_date: payDate, type, notes }),
-    });
-    const result = await res.json();
-    if (res.ok && result.success !== false) {
-      showToast(`Payroll run complete — ${result.employee_count || result.data?.totals?.count || '?'} payslips generated`, 'success');
-      workerSuccess = true;
-    } else {
-      console.warn('[payroll] Worker rejected request - proceeding to direct Supabase fallback.');
-      throw new Error(result.error || 'Server rejected payroll run.');
-    }
-  } catch (err) {
-    console.warn('[payroll] Worker unreachable or failed:', err.message, '— trying Supabase fallback');
-    showToast('Payroll processing failed securely via API: ' + err.message, 'error');
-  }
+    const client = sb();
+    if (!client) throw new Error('Database not connected');
 
-  // Fallback: Direct Supabase payroll processing
-  if (!workerSuccess) {
-    try {
-      const client = sb();
-      if (!client) throw new Error('Database not connected');
-
-      // 1. Get all active employees with salaries
-      const { data: salaries, error: salErr } = await client
+    // 1. Get all active employees with salaries
+    const { data: salaries, error: salErr } = await client
         .from('employee_salaries')
         .select('employee_id, base_salary, currency')
         .eq('company_id', companyId);
@@ -530,7 +486,6 @@ window.executePayroll = async function() {
       closeModal('run-payroll-modal');
       return;
     }
-  }
 
   
   closeModal('run-payroll-modal');
