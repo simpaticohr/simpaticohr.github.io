@@ -246,14 +246,18 @@
 
   function formatDate(dateStr) {
     if (!dateStr) return '—';
-    return new Date(dateStr).toLocaleDateString('en-IN', {
+    var d = new Date(dateStr);
+    if (isNaN(d.getTime())) return '—';
+    return d.toLocaleDateString('en-IN', {
       day: 'numeric', month: 'short', year: 'numeric'
     });
   }
 
   function formatDateTime(dateStr) {
     if (!dateStr) return 'N/A';
-    return new Date(dateStr).toLocaleString('en-IN', {
+    var d = new Date(dateStr);
+    if (isNaN(d.getTime())) return 'N/A';
+    return d.toLocaleString('en-IN', {
       day: 'numeric', month: 'short', year: 'numeric',
       hour: '2-digit', minute: '2-digit'
     });

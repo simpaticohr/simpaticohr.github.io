@@ -1253,7 +1253,7 @@
                     <h1>Job Postings</h1>
                     <div class="breadcrumb-nav"><a href="#" onclick="navigateTo('dashboard')">Dashboard</a> / Job Postings</div>
                 </div>
-                <button class="btn-primary-custom" data-bs-toggle="modal" data-bs-target="#createJobModal" onclick="document.getElementById('createJobForm').reset(); document.getElementById('editJobId').value=''; document.querySelector('#createJobModal .modal-title').innerHTML='<i class=\'fas fa-briefcase me-2\' style=\'color:var(--primary)\'></i>Create New Job Posting';">
+                <button class="btn-primary-custom" data-bs-toggle="modal" data-bs-target="#createJobModal" onclick="document.getElementById('createJobForm').reset(); document.getElementById('editJobId').value=''; document.querySelector('#createJobModal .modal-title').innerHTML='<i class=\'fas fa-briefcase me-2\' style=\'color:var(--primary)\'></i>Create New Job Posting'; if(document.getElementById('synLinkedIn')) document.getElementById('synLinkedIn').checked = localStorage.getItem('simpatico_syn_linkedin') === 'true'; if(document.getElementById('synIndeed')) document.getElementById('synIndeed').checked = localStorage.getItem('simpatico_syn_indeed') === 'true';">
                     <i class="fas fa-plus"></i> Create Job Posting
                 </button>
             </div>
@@ -3552,20 +3552,55 @@ async function handleCreateJob(e, status = 'open') {
         skills_required: skills ? skills.split(',').map(s => s.trim()).filter(Boolean) : [],
         description: notes ? (description + '\n\nNotes: ' + notes) : description,
         status, 
-        company_id: user.tenant_id || user.company_id
+        company_id: user.tenant_id || user.company_id,
+        syndication_targets
     };
 
     try {
         let insertedData;
+        let syndicationResult = null;
+
         if (isEdit) {
+            // Edits go direct to Supabase (no syndication needed on updates)
             const { data, error } = await SimpaticoDB.from('jobs').update(newJob).eq('id', editJobId).select();
             if (error) throw error;
             insertedData = data;
         } else {
-            newJob.created_at = new Date().toISOString();
-            const { data, error } = await SimpaticoDB.from('jobs').insert([newJob]).select();
-            if (error) throw error;
-            insertedData = data;
+            // NEW jobs route through the Worker backend so syndication fires
+            const workerUrl = window.SIMPATICO_CONFIG?.workerUrl || 'https://simpatico-hr-ats.simpaticohrconsultancy.workers.dev';
+            const tenantId = typeof getCompanyId === 'function' ? getCompanyId() : (user.tenant_id || user.company_id || 'default');
+
+            // Get a fresh auth token from the live Supabase session
+            let freshToken = '';
+            if (window.SimpaticoDB?.auth?.getSession) {
+                try {
+                    const { data: sessionData } = await SimpaticoDB.auth.getSession();
+                    freshToken = sessionData?.session?.access_token || '';
+                } catch(tokenErr) { console.warn('[CreateJob] Session refresh failed:', tokenErr.message); }
+            }
+            if (!freshToken && typeof getAuthToken === 'function') {
+                freshToken = getAuthToken();
+            }
+
+            const headers = { 'Content-Type': 'application/json', 'X-Tenant-ID': tenantId };
+            if (freshToken) headers['Authorization'] = 'Bearer ' + freshToken;
+            if (window.SIMPATICO_CONFIG?.supabaseAnonKey) headers['apikey'] = window.SIMPATICO_CONFIG.supabaseAnonKey;
+
+            const res = await fetch(`${workerUrl}/recruitment/jobs`, {
+                method: 'POST',
+                headers,
+                body: JSON.stringify(newJob)
+            });
+
+            if (!res.ok) {
+                const errJson = await res.json().catch(() => ({}));
+                throw new Error(errJson.error?.message || `Server error (${res.status})`);
+            }
+
+            const resJson = await res.json();
+            const jobData = resJson.data?.job || resJson.job;
+            insertedData = jobData ? [jobData] : [];
+            syndicationResult = resJson.data?.syndication || null;
         }
 
         DataStore.update(state => {
@@ -3599,6 +3634,15 @@ async function handleCreateJob(e, status = 'open') {
         let msg = status === 'draft' ? '📝 Job saved as draft' : `✅ Job "${title}" published successfully!`;
         if (isEdit) msg = `✅ Job "${title}" updated successfully!`;
         showToast(msg);
+
+        // Show syndication feedback if platforms were targeted
+        if (syndicationResult && syndicationResult.platforms_queued && syndicationResult.platforms_queued.length > 0) {
+            const platformNames = syndicationResult.platforms_queued.map(p => p === 'linkedin' ? 'LinkedIn' : p === 'indeed' ? 'Indeed' : p).join(' & ');
+            setTimeout(() => showToast(`📡 Syndication queued → ${platformNames}`, 'success'), 800);
+        } else if (!isEdit && syndication_targets.length > 0) {
+            const platformNames = syndication_targets.map(p => p === 'linkedin' ? 'LinkedIn' : p === 'indeed' ? 'Indeed' : p).join(' & ');
+            setTimeout(() => showToast(`📡 Syndication queued → ${platformNames}`, 'success'), 800);
+        }
     } catch (err) {
         showToast('Error saving job: ' + err.message, 'error');
         console.error(err);

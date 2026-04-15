@@ -1245,11 +1245,26 @@ async function fetchCandidates() {
       var name = app.candidate_name || app.candidate_email || 'Unnamed Candidate';
 
       var now = new Date().toISOString();
-      var timeline = [{ ico: '📥', color: '#4f46e5', title: 'Application Received', date: formatDate(app.created_at || now) }];
-      if (app.match_score) timeline.push({ ico: '📄', color: '#7c3aed', title: 'AI Match Score: ' + app.match_score + '%', date: formatDate(app.created_at || now) });
-      if (app.status === 'rejected') timeline.push({ ico: '🚫', color: '#ef4444', title: 'Application Rejected', date: formatDate(app.updated_at || app.created_at || now) });
-      else if (app.status !== 'applied') timeline.push({ ico: '🔀', color: '#0ea5e9', title: 'Moved to ' + formatEnum(app.status), date: formatDate(app.updated_at || app.created_at || now) });
-      if (app.status === 'interview' || app.status === 'screening') timeline.push({ ico: '📅', color: '#10b981', title: 'Interview Scheduled (AI Auto)', date: formatDate(app.updated_at || app.created_at || now) });
+      // Use applied_at (set by backend) with fallbacks to created_at and now
+      var appDate = app.applied_at || app.created_at || now;
+      var updateDate = app.updated_at || appDate;
+      // Safe date formatter that catches Invalid Date
+      function safeDate(d) {
+        if (!d) return '—';
+        var parsed = new Date(d);
+        if (isNaN(parsed.getTime())) return '—';
+        return typeof formatDate === 'function' ? formatDate(d) : parsed.toLocaleDateString('en-IN', { day:'numeric', month:'short', year:'numeric' });
+      }
+      var timeline = [{ ico: '📥', color: '#4f46e5', title: 'Application Received', date: safeDate(appDate) }];
+      if (app.match_score) timeline.push({ ico: '📄', color: '#7c3aed', title: 'AI Match Score: ' + app.match_score + '%', date: safeDate(appDate) });
+      if (app.status === 'rejected') timeline.push({ ico: '🚫', color: '#ef4444', title: 'Application Rejected', date: safeDate(updateDate) });
+      else if (app.status !== 'applied') timeline.push({ ico: '🔀', color: '#0ea5e9', title: 'Moved to ' + formatEnum(app.status), date: safeDate(updateDate) });
+      // Only show "Interview Scheduled (AI Auto)" if there's actual evidence of auto-scheduling
+      if ((app.status === 'interview' || app.status === 'screening') && app.match_score && app.match_score >= 70) {
+        timeline.push({ ico: '📅', color: '#10b981', title: 'Interview Scheduled (AI Auto)', date: safeDate(updateDate) });
+      } else if ((app.status === 'interview' || app.status === 'screening') && !app.match_score) {
+        timeline.push({ ico: '📅', color: '#f59e0b', title: 'Moved to Interview Stage', date: safeDate(updateDate) });
+      }
 
       return {
         id:           app.id,
