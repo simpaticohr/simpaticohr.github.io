@@ -478,6 +478,38 @@ async function doSave() {
         } else throw e2;
       }
       showSuc('✅ Employee updated successfully!');
+
+      // ── Auto-update salary record ──
+      if (sal && sal > 0) {
+        try {
+          var tenantId = TENANT;
+          try {
+            var u = JSON.parse(localStorage.getItem('simpatico_user') || '{}');
+            tenantId = u.company_id || u.tenant_id || TENANT;
+          } catch(e4) {}
+          
+          var existingSal = await sbSelect('employee_salaries', 'select=id&employee_id=eq.' + encodeURIComponent(EDIT) + '&limit=1');
+          if (existingSal.length > 0) {
+            await sbUpdate('employee_salaries', existingSal[0].id, {
+              base_salary: sal,
+              employment_type: etype || 'full_time'
+            });
+          } else {
+            await sbInsert('employee_salaries', {
+              employee_id: EDIT,
+              base_salary: sal,
+              currency: 'INR',
+              employment_type: etype || 'full_time',
+              effective_date: startd || new Date().toISOString().split('T')[0],
+              tenant_id: tenantId,
+              company_id: tenantId
+            });
+          }
+        } catch (salUpdErr) {
+          console.warn('[employees] Salary update failed:', salUpdErr.message);
+        }
+      }
+
       setTimeout(function(){cm();load();},800);
 
     } else {
@@ -504,6 +536,34 @@ async function doSave() {
       }
 
       showSuc('✅ Employee added! Welcome email will be sent.');
+
+      // ── Auto-create salary record for payroll ──
+      if (sal && sal > 0) {
+        try {
+          // Get the newly created employee's UUID
+          var newEmp = await sbSelect('employees', 'select=id&employee_id=eq.' + encodeURIComponent(payload.employee_id) + '&limit=1');
+          if (newEmp.length > 0) {
+            var tenantId = TENANT;
+            try {
+              var u = JSON.parse(localStorage.getItem('simpatico_user') || '{}');
+              tenantId = u.company_id || u.tenant_id || TENANT;
+            } catch(e3) {}
+            await sbInsert('employee_salaries', {
+              employee_id: newEmp[0].id,
+              base_salary: sal,
+              currency: 'INR',
+              employment_type: etype || 'full_time',
+              effective_date: startd || new Date().toISOString().split('T')[0],
+              tenant_id: tenantId,
+              company_id: tenantId
+            });
+            console.log('[employees] Auto-created salary record:', sal);
+          }
+        } catch(salErr) {
+          console.warn('[employees] Salary record creation failed (non-blocking):', salErr.message);
+        }
+      }
+
       setTimeout(function(){cm();load();},900);
     }
 
