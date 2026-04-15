@@ -129,7 +129,7 @@ select.fi{cursor:pointer}
       <div class="th"><span class="tt">All Employees</span><span id="ec" style="font-size:.78rem;color:var(--dim)"></span></div>
       <div id="ld" class="ls">Loading employees…</div>
       <div style="overflow-x:auto">
-        <table id="et" style="display:none"><thead><tr><th>Employee</th><th>Department</th><th>Role</th><th>Type</th><th>Start Date</th><th>Status</th><th>Actions</th></tr></thead><tbody id="tb"></tbody></table>
+        <table id="et" style="display:none"><thead><tr><th>Employee</th><th>Department</th><th>Role</th><th>Type</th><th>Manager</th><th>Start Date</th><th>Status</th><th>Actions</th></tr></thead><tbody id="tb"></tbody></table>
       </div>
       <div id="te" class="es" style="display:none"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg><h5>No employees found</h5><p>Add your first employee to get started.</p><button class="btn bp" style="margin-top:14px" onclick="openAdd()">＋ Add Employee</button></div>
     </div>
@@ -246,18 +246,18 @@ window.addEventListener('DOMContentLoaded', load);
 async function load() {
   show('ld'); hide('et'); hide('te');
   try {
-    // Try full column set first; fall back if column missing
     var cols = 'id,employee_id,first_name,last_name,email,job_title,department,status,start_date,employment_type,phone,manager_id,location,salary';
     var data;
     try {
-      data = await sbSelect('employees', 'select=' + cols + '&order=created_at.desc&limit=500');
+      data = await sbSelect('employees', 'select=' + cols + ',manager:employees!manager_id(first_name,last_name)&order=created_at.desc&limit=500');
     } catch(e2) {
       if ((e2.code || '') === '42703' || (e2.message || '').indexOf('does not exist') >= 0) {
         // Optional column missing — retry with core columns only
         var core = 'id,employee_id,first_name,last_name,email,job_title,department,status,start_date,employment_type,phone,manager_id';
-        data = await sbSelect('employees', 'select=' + core + '&order=created_at.desc&limit=500');
       } else throw e2;
     }
+    // Optional fallback if the join fails
+    if (!data) data = await sbSelect('employees', 'select=' + core + '&order=created_at.desc&limit=500');
     ALL = data.filter(function(e) { return e && e.id; });
     ROWS = ALL.slice();
     renderStats();
@@ -335,6 +335,8 @@ function renderTable() {
     var fn=S(e.first_name), ln=S(e.last_name);
     var nm=(fn+' '+ln).trim()||'—';
     var id=S(e.id), st=S(e.status);
+    var mgrNode = e.manager || {};
+    var mgrName = mgrNode.first_name ? ((mgrNode.first_name+' '+(mgrNode.last_name||'')).trim()) : '—';
     return '<tr>'
       +'<td><div style="display:flex;align-items:center;gap:10px">'
       +'<div class="av" style="background:'+col(nm)+'">'+ini(fn,ln)+'</div>'
@@ -344,6 +346,7 @@ function renderTable() {
       +'<td>'+x(e.department||'—')+'</td>'
       +'<td>'+x(e.job_title||'—')+'</td>'
       +'<td>'+x(TL[e.employment_type]||e.employment_type||'—')+'</td>'
+      +'<td>'+x(mgrName)+'</td>'
       +'<td>'+fmtD(e.start_date)+'</td>'
       +'<td><span class="bg '+(BG[st]||'bgn')+'">'+x(SL[st]||st||'—')+'</span></td>'
       +'<td style="white-space:nowrap">'
