@@ -552,12 +552,142 @@ window.exportPayroll = function() {
   }
 };
 
-window.editSalary = id => { openModal('edit-salary-modal'); };
-window.viewRunDetails = id => showToast('Run details feature activated', 'success');
-window.openAddDeductionModal = () => { openModal('add-deduction-modal'); };
-window.openSalaryUpdateModal = () => showToast('Bulk salary update sync started', 'success');
-window.saveSalary = () => { showToast('Salary updated successfully', 'success'); closeModal('edit-salary-modal'); };
-window.saveDeduction = () => { showToast('Deduction added successfully', 'success'); closeModal('add-deduction-modal'); };
+// ── Salary CRUD ──
+window.openAddSalaryModal = async function() {
+  document.getElementById('salary-modal-title').textContent = 'Add Salary';
+  document.getElementById('edit-salary-id').value = '';
+  document.getElementById('edit-salary-amount').value = '';
+  document.getElementById('salary-effective-date').valueAsDate = new Date();
+
+  // Populate employee select
+  const sel = document.getElementById('salary-employee');
+  if (sel && sel.options.length <= 1) {
+    const client = sb(); if (!client) return;
+    const cid = typeof getCompanyId === 'function' ? getCompanyId() : null;
+    let query = client.from('employees').select('id,first_name,last_name').eq('status','active').order('first_name');
+    if (cid) query = query.eq('tenant_id', cid);
+    const { data } = await query;
+    (data || []).forEach(e => {
+      const opt = document.createElement('option');
+      opt.value = e.id; opt.textContent = `${e.first_name} ${e.last_name}`;
+      sel.appendChild(opt);
+    });
+  }
+  sel.value = '';
+  openModal('edit-salary-modal');
+};
+
+window.editSalary = async function(id) {
+  const salary = allSalaries.find(s => s.id === id);
+  if (!salary) { showToast('Salary record not found', 'error'); return; }
+
+  await window.openAddSalaryModal();
+  document.getElementById('salary-modal-title').textContent = 'Edit Salary';
+  document.getElementById('edit-salary-id').value = id;
+  document.getElementById('salary-employee').value = salary.employee_id || '';
+  document.getElementById('edit-salary-amount').value = salary.base_salary || '';
+  document.getElementById('salary-currency').value = salary.currency || 'INR';
+  document.getElementById('salary-emp-type').value = salary.employment_type || 'full_time';
+  if (salary.effective_date) document.getElementById('salary-effective-date').value = salary.effective_date;
+};
+
+window.saveSalary = async function() {
+  const empId   = document.getElementById('salary-employee')?.value;
+  const amount  = parseFloat(document.getElementById('edit-salary-amount')?.value);
+  const currency = document.getElementById('salary-currency')?.value || 'INR';
+  const empType = document.getElementById('salary-emp-type')?.value || 'full_time';
+  const effDate = document.getElementById('salary-effective-date')?.value;
+  const editId  = document.getElementById('edit-salary-id')?.value;
+
+  if (!empId) { showToast('Select an employee', 'error'); return; }
+  if (!amount || amount <= 0) { showToast('Enter a valid salary amount', 'error'); return; }
+
+  const cid = typeof getCompanyId === 'function' ? getCompanyId() : 'SIMP_PRO_MAIN';
+
+  const payload = {
+    employee_id: empId,
+    base_salary: amount,
+    currency: currency,
+    employment_type: empType,
+    effective_date: effDate || new Date().toISOString().slice(0,10),
+    company_id: cid,
+    tenant_id: cid,
+  };
+
+  try {
+    const client = sb(); if (!client) throw new Error('Database not connected');
+
+    if (editId) {
+      // Update existing
+      const { error } = await client.from('employee_salaries').update(payload).eq('id', editId);
+      if (error) throw new Error(error.message);
+      showToast('Salary updated', 'success');
+    } else {
+      // Insert new
+      const { error } = await client.from('employee_salaries').insert([payload]);
+      if (error) throw new Error(error.message);
+      showToast('Salary added', 'success');
+    }
+    closeModal('edit-salary-modal');
+    await loadSalaryRegister();
+  } catch(err) {
+    showToast(err.message, 'error');
+  }
+};
+
+window.openSalaryUpdateModal = () => showToast('Bulk salary update — use Add Salary for individual records', 'info');
+window.viewRunDetails = id => showToast('Run details — view payslips in the Payslips tab', 'info');
+
+// ── Deduction CRUD ──
+window.openAddDeductionModal = async function() {
+  // Populate employee select if needed
+  const sel = document.getElementById('deduction-employee');
+  if (sel && sel.options.length <= 1) {
+    const client = sb(); if (!client) return;
+    const cid = typeof getCompanyId === 'function' ? getCompanyId() : null;
+    let query = client.from('employees').select('id,first_name,last_name').eq('status','active').order('first_name');
+    if (cid) query = query.eq('tenant_id', cid);
+    const { data } = await query;
+    (data || []).forEach(e => {
+      const opt = document.createElement('option');
+      opt.value = e.id; opt.textContent = `${e.first_name} ${e.last_name}`;
+      sel.appendChild(opt);
+    });
+  }
+  openModal('add-deduction-modal');
+};
+
+window.saveDeduction = async function() {
+  const empId  = document.getElementById('deduction-employee')?.value;
+  const type   = document.getElementById('deduction-type')?.value?.trim();
+  const amount = parseFloat(document.getElementById('deduction-amount')?.value);
+
+  if (!empId) { showToast('Select an employee', 'error'); return; }
+  if (!type)  { showToast('Enter deduction type', 'error'); return; }
+  if (!amount || amount <= 0) { showToast('Enter a valid amount', 'error'); return; }
+
+  const cid = typeof getCompanyId === 'function' ? getCompanyId() : 'SIMP_PRO_MAIN';
+
+  try {
+    const client = sb(); if (!client) throw new Error('Database not connected');
+    const { error } = await client.from('payroll_deductions').insert([{
+      employee_id: empId,
+      type: type,
+      amount: amount,
+      frequency: 'monthly',
+      status: 'active',
+      start_date: new Date().toISOString().slice(0,10),
+      company_id: cid,
+      tenant_id: cid,
+    }]);
+    if (error) throw new Error(error.message);
+    showToast('Deduction added', 'success');
+    closeModal('add-deduction-modal');
+    await loadDeductions();
+  } catch(err) {
+    showToast(err.message, 'error');
+  }
+};
 
 function setNextPayrollDate() {
   const today = new Date();
