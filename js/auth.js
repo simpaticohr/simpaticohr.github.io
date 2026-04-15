@@ -76,7 +76,7 @@ class AuthManager {
         contact_phone: adminData.phone,
         subscription_plan: 'trial',
         subscription_start: new Date().toISOString().split('T')[0],
-        subscription_end: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+        subscription_end: new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
         features: companyData.features || { proctoring: true, whatsapp: true, ai_jd: true, automation: true }
       }).select().single();
       if (compError) throw compError;
