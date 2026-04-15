@@ -1,7 +1,10 @@
 /**
  * trial-guard.js — Simpatico HR Platform
  * ═══════════════════════════════════════════════════════════════════
- * Trial enforcement: 2-day free trial with countdown banner + paywall
+ * Trial enforcement: 2-day free trial with strict usage limits
+ *   • 1 job posting
+ *   • 1 proctored interview
+ *   • 2-day duration
  * Load AFTER supabase-client.js and shared-utils.js on dashboard pages.
  * ═══════════════════════════════════════════════════════════════════
  */
@@ -10,6 +13,10 @@
   'use strict';
 
   const TRIAL_DAYS = 2;
+  const TRIAL_LIMITS = {
+    max_jobs: 1,
+    max_interviews: 1,
+  };
 
   function sb() {
     if (typeof getSupabaseClient === 'function') return getSupabaseClient();
@@ -43,6 +50,27 @@
     } catch(e) {
       console.warn('[trial-guard] Error checking trial:', e.message);
       return null;
+    }
+  }
+
+  // ── Check usage counts for trial limits ──
+  async function checkTrialUsage(companyId) {
+    const client = sb();
+    if (!client || !companyId) return { jobs: 0, interviews: 0 };
+
+    try {
+      const [jobsRes, interviewsRes] = await Promise.all([
+        client.from('jobs').select('id', { count: 'exact', head: true }).eq('company_id', companyId),
+        client.from('interviews').select('id', { count: 'exact', head: true }).eq('company_id', companyId),
+      ]);
+
+      return {
+        jobs: jobsRes.count || 0,
+        interviews: interviewsRes.count || 0,
+      };
+    } catch(e) {
+      console.warn('[trial-guard] Error checking usage:', e.message);
+      return { jobs: 0, interviews: 0 };
     }
   }
 
@@ -80,8 +108,8 @@
     return { status: 'trial_active', plan, remaining, hoursLeft, daysLeft };
   }
 
-  // ── Render trial banner ──
-  function showTrialBanner(info) {
+  // ── Render trial banner with usage limits ──
+  function showTrialBanner(info, usage) {
     // Remove any existing banner
     document.getElementById('trial-banner')?.remove();
 
@@ -90,15 +118,23 @@
 
     if (info.status === 'trial_active') {
       const urgent = info.hoursLeft <= 12;
+      const jobsUsed = usage.jobs || 0;
+      const intUsed = usage.interviews || 0;
+      const jobsLeft = Math.max(0, TRIAL_LIMITS.max_jobs - jobsUsed);
+      const intLeft = Math.max(0, TRIAL_LIMITS.max_interviews - intUsed);
+
       banner.innerHTML = `
         <div style="
           background: ${urgent ? 'linear-gradient(135deg, #dc2626 0%, #b91c1c 100%)' : 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)'};
-          color: white; padding: 10px 20px; display: flex; align-items: center; justify-content: center; gap: 12px;
+          color: white; padding: 10px 20px; display: flex; align-items: center; justify-content: center; gap: 16px;
           font-size: 13px; font-weight: 600; position: fixed; top: 0; left: 0; right: 0; z-index: 99999;
-          box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+          box-shadow: 0 2px 8px rgba(0,0,0,0.15); flex-wrap: wrap;
         ">
           <span style="display:flex;align-items:center;gap:6px;">
-            ${urgent ? '⚠️' : '⏱️'} Free trial: <strong>${info.hoursLeft <= 48 ? info.hoursLeft + ' hours' : info.daysLeft + ' day' + (info.daysLeft > 1 ? 's' : '')} remaining</strong>
+            ${urgent ? '⚠️' : '⏱️'} Trial: <strong>${info.hoursLeft <= 48 ? info.hoursLeft + 'h' : info.daysLeft + 'd'} left</strong>
+          </span>
+          <span style="opacity:0.8;font-size:12px;">
+            📋 Jobs: ${jobsUsed}/${TRIAL_LIMITS.max_jobs} &nbsp;|&nbsp; 🎙️ Interviews: ${intUsed}/${TRIAL_LIMITS.max_interviews}
           </span>
           <a href="/platform/pricing.html" style="
             background: rgba(255,255,255,0.2); color: white; padding: 5px 16px; border-radius: 6px;
@@ -108,14 +144,13 @@
             Upgrade Now →
           </a>
           <button onclick="this.closest('#trial-banner').style.display='none';document.body.style.paddingTop='0'" style="
-            background: none; border: none; color: rgba(255,255,255,0.7); cursor: pointer; font-size: 16px; margin-left: 8px;
+            background: none; border: none; color: rgba(255,255,255,0.7); cursor: pointer; font-size: 16px; margin-left: 4px;
           ">×</button>
         </div>
       `;
 
       document.body.prepend(banner);
-      // Push content down
-      document.body.style.paddingTop = '40px';
+      document.body.style.paddingTop = '42px';
     }
   }
 
@@ -150,7 +185,7 @@
           </h2>
           <p style="color: #64748b; font-size: 0.95rem; line-height: 1.6; margin-bottom: 24px;">
             Your ${TRIAL_DAYS}-day trial has expired. Upgrade to continue using all features including
-            AI-powered recruitment, proctored interviews, payroll, and full HR automation.
+            AI recruitment, payroll, proctored interviews, and full HR automation.
           </p>
 
           <div style="display: flex; flex-direction: column; gap: 10px; margin-bottom: 24px;">
@@ -158,7 +193,7 @@
               <span style="font-size:16px">✓</span> Unlimited Job Postings & AI Screening
             </div>
             <div style="display:flex;align-items:center;gap:10px;padding:12px 16px;background:#eff6ff;border-radius:10px;font-size:13px;color:#1d4ed8;">
-              <span style="font-size:16px">✓</span> Proctored Video Interviews
+              <span style="font-size:16px">✓</span> Unlimited Proctored Interviews
             </div>
             <div style="display:flex;align-items:center;gap:10px;padding:12px 16px;background:#faf5ff;border-radius:10px;font-size:13px;color:#7c3aed;">
               <span style="font-size:16px">✓</span> Full HR Suite: Payroll, Attendance, Training
@@ -179,7 +214,7 @@
           </div>
 
           <div style="margin-top: 16px; display: flex; justify-content: center; gap: 20px; font-size: 12px; color: #94a3b8;">
-            <a href="mailto:hr@simpaticohrconsultancy.com" style="color: #64748b; text-decoration: none;">
+            <a href="mailto:simpaticohrconsultancy@gmail.com" style="color: #64748b; text-decoration: none;">
               📧 Contact Sales
             </a>
             <span>|</span>
@@ -199,6 +234,79 @@
     document.body.appendChild(overlay);
   }
 
+  // ── Show limit-hit modal (blocks the action, not the whole page) ──
+  function showLimitReached(type) {
+    document.getElementById('trial-limit-modal')?.remove();
+
+    const title = type === 'job' ? 'Job Posting Limit Reached' : 'Interview Limit Reached';
+    const msg = type === 'job'
+      ? `Your free trial includes <strong>1 job posting</strong>. Upgrade your plan to post unlimited jobs.`
+      : `Your free trial includes <strong>1 proctored interview</strong>. Upgrade to conduct unlimited interviews.`;
+
+    const modal = document.createElement('div');
+    modal.id = 'trial-limit-modal';
+    modal.innerHTML = `
+      <div style="
+        position: fixed; inset: 0; z-index: 100001;
+        background: rgba(15, 23, 42, 0.7); backdrop-filter: blur(6px);
+        display: flex; align-items: center; justify-content: center;
+        animation: trialFadeIn 0.2s ease;
+      " onclick="if(event.target===this)this.remove()">
+        <div style="
+          background: white; border-radius: 16px; padding: 36px 32px;
+          max-width: 440px; width: 90%; text-align: center;
+          box-shadow: 0 20px 50px rgba(0,0,0,0.25);
+          animation: trialSlideUp 0.3s ease;
+        ">
+          <div style="width: 56px; height: 56px; margin: 0 auto 16px; border-radius: 50%;
+            background: linear-gradient(135deg, #fee2e2, #fecaca);
+            display: flex; align-items: center; justify-content: center; font-size: 24px;">🔒</div>
+
+          <h3 style="font-size: 1.2rem; font-weight: 800; color: #0f172a; margin-bottom: 8px;">${title}</h3>
+          <p style="color: #64748b; font-size: 0.9rem; line-height: 1.6; margin-bottom: 20px;">${msg}</p>
+
+          <div style="display: flex; gap: 10px;">
+            <button onclick="this.closest('#trial-limit-modal').remove()" style="
+              flex: 1; padding: 12px; border-radius: 10px; background: #f1f5f9;
+              color: #475569; font-weight: 600; font-size: 14px; border: none; cursor: pointer;
+              font-family: inherit;
+            ">Cancel</button>
+            <a href="/platform/pricing.html" style="
+              flex: 1; padding: 12px; border-radius: 10px;
+              background: linear-gradient(135deg, #4f46e5, #7c3aed);
+              color: white; text-decoration: none; font-weight: 700; font-size: 14px;
+              display: flex; align-items: center; justify-content: center;
+              transition: all 0.2s;
+            ">Upgrade Now</a>
+          </div>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(modal);
+  }
+
+  // ── Public: Check if a trial action is allowed ──
+  // Returns true if allowed, shows modal and returns false if not
+  async function canPerformTrialAction(actionType) {
+    const info = window._simpaticoTrialInfo;
+    if (!info || info.status === 'paid') return true;
+    if (info.status === 'expired') return false;
+
+    const companyId = getCompanyId();
+    const usage = await checkTrialUsage(companyId);
+
+    if (actionType === 'create_job' && usage.jobs >= TRIAL_LIMITS.max_jobs) {
+      showLimitReached('job');
+      return false;
+    }
+    if (actionType === 'create_interview' && usage.interviews >= TRIAL_LIMITS.max_interviews) {
+      showLimitReached('interview');
+      return false;
+    }
+
+    return true;
+  }
+
   // ── Main init ──
   async function initTrialGuard() {
     const company = await checkTrialStatus();
@@ -206,6 +314,7 @@
 
     const info = getTrialInfo(company);
     window._simpaticoTrialInfo = info; // expose for other modules
+    window._simpaticoTrialLimits = TRIAL_LIMITS;
 
     switch (info.status) {
       case 'paid':
@@ -213,11 +322,14 @@
         console.log('[trial-guard] Paid plan:', info.plan);
         break;
 
-      case 'trial_active':
-        // Show countdown banner
-        showTrialBanner(info);
-        console.log(`[trial-guard] Trial active: ${info.hoursLeft}h remaining`);
+      case 'trial_active': {
+        // Check usage and show countdown banner with limits
+        const usage = await checkTrialUsage(company.id);
+        window._simpaticoTrialUsage = usage;
+        showTrialBanner(info, usage);
+        console.log(`[trial-guard] Trial active: ${info.hoursLeft}h remaining | Jobs: ${usage.jobs}/${TRIAL_LIMITS.max_jobs} | Interviews: ${usage.interviews}/${TRIAL_LIMITS.max_interviews}`);
         break;
+      }
 
       case 'expired':
         // Show paywall
@@ -237,6 +349,8 @@
     setTimeout(initTrialGuard, 500);
   }
 
-  // Expose for manual re-check
+  // Expose for manual re-check and action gating
   window.checkTrialStatus = initTrialGuard;
+  window.canPerformTrialAction = canPerformTrialAction;
+  window.TRIAL_LIMITS = TRIAL_LIMITS;
 })();

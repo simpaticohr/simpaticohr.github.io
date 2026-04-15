@@ -325,6 +325,10 @@ async function loadJobs() {
 }
 
 async function publishJob() {
+  if (typeof canPerformTrialAction === 'function') {
+    const allowed = await canPerformTrialAction('create_job');
+    if (!allowed) return;
+  }
   const title = document.getElementById('newJobTitle').value;
   if (!title) { showToast('Job title is required', 'error'); return; }
   try {
@@ -348,6 +352,10 @@ async function publishJob() {
 }
 
 async function saveJobDraft() {
+  if (typeof canPerformTrialAction === 'function') {
+    const allowed = await canPerformTrialAction('create_job');
+    if (!allowed) return;
+  }
   const title = document.getElementById('newJobTitle').value;
   if (!title) { showToast('Job title is required', 'error'); return; }
   try {

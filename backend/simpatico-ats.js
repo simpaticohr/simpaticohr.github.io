@@ -3964,7 +3964,11 @@ function registrationWelcomeHtml(name, companyName, type) {
 
   const nextSteps =
     type === "company"
-      ? `<li>Post your first job opening</li><li>Configure your hiring pipeline</li><li>Invite your HR team members</li><li>Set up AI-powered interview proctoring</li>`
+      ? `<li style="margin-bottom:8px">Post your first job opening (1 included in free trial)</li>
+         <li style="margin-bottom:8px">Configure your hiring pipeline</li>
+         <li style="margin-bottom:8px">Invite your HR team members</li>
+         <li style="margin-bottom:8px">Run an AI Proctored Interview (1 included in free trial)</li>
+         <li style="margin-top:16px; color:#b91c1c;"><em>Note: Your free trial includes 1 job post and 1 interview, and is valid for 2 days.</em></li>`
       : `<li>Complete your profile</li><li>Upload your latest resume</li><li>Browse job openings</li><li>Prepare with AI mock interviews</li>`;
 
   return `
