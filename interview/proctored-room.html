@@ -182,7 +182,6 @@
             letter-spacing:1px; text-transform:uppercase;
         }
         .ai-subtitle-text {
-            display: none !important; /* 🔥 THIS HIDES THE SUBTITLES */
             margin-top:10px; font-size:17px; font-weight:500;
             color:rgba(255,255,255,.92); text-shadow:0 2px 12px rgba(0,0,0,.7);
             max-width:650px; text-align:center; line-height:1.55;
@@ -191,7 +190,6 @@
         .ai-subtitle-text.show { opacity:1; }
 
         .live-transcript {
-            display: none !important; /* Hides live transcription like Mercor/Zara */
             position:absolute; bottom:120px; left:50%; transform:translateX(-50%);
             z-index:22; max-width:600px; width:90%; text-align:center;
             pointer-events:none;
@@ -236,6 +234,26 @@
         }
         .self-cam-status.ok { background:rgba(16,185,129,.2); color:#34d399; }
         .self-cam-status.warn { background:rgba(239,68,68,.2); color:#f87171; }
+
+        .screen-cam {
+            position:absolute; bottom:20px; right:210px;
+            width:180px; height:135px; border-radius:16px;
+            overflow:hidden; border:2px solid var(--border);
+            background:var(--bg-surface); z-index:15;
+            box-shadow:0 8px 30px rgba(0,0,0,.4);
+            transition:border-color .3s;
+        }
+        .screen-cam video { width:100%; height:100%; object-fit:cover; }
+        .screen-cam-label {
+            position:absolute; bottom:6px; left:8px; font-size:10px;
+            color:rgba(255,255,255,.7); background:rgba(0,0,0,.5);
+            padding:2px 8px; border-radius:4px; font-weight:600;
+        }
+        .screen-cam-status {
+            position:absolute; top:6px; right:8px; font-size:9px;
+            padding:2px 6px; border-radius:4px; font-weight:700;
+            background:rgba(239,68,68,.2); color:#f87171; animation:blink 1.5s infinite;
+        }
 
         .skills-overlay {
             position:absolute; top:60px; left:16px; z-index:15;
@@ -390,6 +408,7 @@
 
         @media(max-width:900px) {
             .self-cam { width:120px; height:90px; bottom:90px; right:12px; }
+            .screen-cam { width:120px; height:90px; bottom:90px; right:140px; }
             .ai-orb { width:90px; height:90px; font-size:32px; }
             .ai-subtitle-text { font-size:14px; }
             .skills-overlay { display:none; }
@@ -426,6 +445,7 @@
         <div class="checks">
             <div class="chk"><div class="chk-icon chk-wait" id="c1"><i class="fas fa-video"></i></div> Camera Access</div>
             <div class="chk"><div class="chk-icon chk-wait" id="c2"><i class="fas fa-microphone"></i></div> Microphone Access</div>
+            <div class="chk"><div class="chk-icon chk-wait" id="c-screen"><i class="fas fa-desktop"></i></div> Screen Sharing (Requested Next)</div>
             <div class="chk"><div class="chk-icon chk-wait" id="c3"><i class="fas fa-user-check"></i></div> Face Detection</div>
             <div class="chk"><div class="chk-icon chk-wait" id="c4"><i class="fas fa-volume-up"></i></div> Speaker / Audio Output</div>
             <div class="chk"><div class="chk-icon chk-wait" id="c5"><i class="fas fa-robot"></i></div> AI Engine Connected</div>
@@ -477,7 +497,7 @@
         </div>
         <div class="tb-center">
             <div class="phase-pill" id="phasePill">INITIALIZING</div>
-            <div class="trust-pill">
+            <div class="trust-pill" style="display:none;">
                 <span class="trust-label">Trust</span>
                 <div class="trust-ring">
                     <svg width="28" height="28">
@@ -533,11 +553,18 @@
                     <div class="self-cam-label">You</div>
                     <div class="self-cam-status ok" id="selfCamStatus">Face OK</div>
                 </div>
+
+                <div class="screen-cam" id="screenCam">
+                    <video id="screenVid" autoplay muted playsinline></video>
+                    <div class="screen-cam-label">Screen</div>
+                    <div class="screen-cam-status">REC</div>
+                </div>
             </div>
 
             <div class="video-controls">
                 <button class="vc-btn" id="vcCam" onclick="toggleCam()"><i class="fas fa-video"></i></button>
                 <button class="vc-btn active-mic" id="vcMic" onclick="toggleMic()"><i class="fas fa-microphone"></i></button>
+                <button class="vc-btn active-mic" id="vcScreen" onclick="toggleScreenShare()"><i class="fas fa-desktop"></i></button>
                 <button class="vc-btn" onclick="goFullscreen()"><i class="fas fa-expand"></i></button>
                 <button class="vc-btn end" onclick="endSession()"><i class="fas fa-phone-slash"></i></button>
             </div>
@@ -583,6 +610,7 @@ let user  = {};
 // STATE
 // ══════════════════════════════════════════════════════════════
 let mediaStream   = null;
+let screenStream  = null;
 let interviewMeta = null;
 let job           = null;
 let candidateResume = null;
@@ -607,6 +635,7 @@ let preferredVoice = null;
 let procLogs = [];
 let tabSwitchCount    = 0;
 let faceCheckInterval = null;
+let isScreenShared = false;
 
 // ══════════════════════════════════════════════════════════════
 // 🧠 DYNAMIC INTERVIEW ENGINE
@@ -798,6 +827,8 @@ ${Object.entries(this.skillsCovered).map(([s,d]) => `- ${s}: Score ${d.score}/10
     },
 
     updateSkillsUI() {
+        // Disabled for candidate view (typical enterprise platforms do not show live skills assessment)
+        /*
         const overlay = document.getElementById('skillsOverlay');
         const list    = document.getElementById('skillsList');
         if (!overlay || !list) return;
@@ -813,6 +844,7 @@ ${Object.entries(this.skillsCovered).map(([s,d]) => `- ${s}: Score ${d.score}/10
                 <span class="skill-score" style="color:${color}">${score > 0 ? score+'%' : '—'}</span>
             </div>`;
         }
+        */
     },
 
     getOverallScore() {
@@ -1076,10 +1108,9 @@ async function setupMedia() {
             const hasBlockingError = interviewMeta === null ||
                 interviewMeta?.status === 'completed' ||
                 (interviewMeta?.expires_at && new Date(interviewMeta.expires_at) < new Date());
-            if (!hasBlockingError || !magicToken) {
-                // Still allow camera test even with error, but disable begin
-            }
-            document.getElementById('btnBegin').disabled = hasBlockingError && !!magicToken;
+            
+            const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+            document.getElementById('btnBegin').disabled = hasBlockingError || !magicToken || !SR;
         }, 2500);
     } catch(err) {
         setChk('c1', 'fail');
@@ -1163,9 +1194,37 @@ function animateViz() {
 // START SESSION
 // ══════════════════════════════════════════════════════════════
 async function startSession() {
+    if (!screenStream) {
+        try {
+            screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
+            setChk('c-screen', 'pass');
+            isScreenShared = true;
+            document.getElementById('vcScreen').classList.add('active-mic');
+            document.getElementById('vcScreen').classList.remove('off');
+
+            screenStream.getVideoTracks()[0].addEventListener('ended', () => {
+                isScreenShared = false;
+                document.getElementById('vcScreen').classList.remove('active-mic');
+                document.getElementById('vcScreen').classList.add('off');
+                trust = Math.max(0, trust - 20);
+                updateTrust();
+                addProcLog('danger', 'Screen sharing stopped');
+                logProcEvent('screen_share_stopped', 'critical');
+                showToast('danger', '⚠️ Screen sharing stopped! Please share your screen again.');
+                const tb = document.getElementById('topbar');
+                tb.classList.add('violation');
+            });
+        } catch (e) {
+            showSetupError('Screen sharing access is strictly required to proceed with this proctored interview.');
+            setChk('c-screen', 'fail');
+            return;
+        }
+    }
+
     document.getElementById('setupOverlay').style.display = 'none';
     document.getElementById('interviewApp').style.display = 'flex';
     document.getElementById('selfVid').srcObject = mediaStream;
+    document.getElementById('screenVid').srcObject = screenStream;
 
     // Mark started in Supabase
     if (interviewMeta?.id) {
@@ -1191,7 +1250,15 @@ async function startSession() {
 function aiSpeak(text) {
     return new Promise((resolve) => {
         isSpeaking = true;
-        stopListening();
+        window.activeSpeakResolve = resolve;
+
+        // Ensure recognition stays active to allow barge-in
+        if (!isListening && !isProcessing && recognition) {
+            try { recognition.start(); } catch(e) {}
+            isListening = true;
+            startSilenceDetection();
+        }
+
         setOrbState('speaking');
 
         const cleanText = text.replace(/\*\*/g, '').replace(/\n/g, ' ').replace(/\s+/g, ' ').trim();
@@ -1216,16 +1283,24 @@ function aiSpeak(text) {
         window.ttsKeepAlive = []; // 🔥 MAGIC FIX 1: This array stops Chrome from deleting the voice mid-sentence!
 
         function speakNext() {
+            if (!isSpeaking) return; // Abort if barge-in occurred
+
             if (idx >= chunks.length) {
                 isSpeaking = false;
                 subtitle.classList.remove('show');
-                resolve();
+                
+                if (window.activeSpeakResolve) {
+                    window.activeSpeakResolve();
+                    window.activeSpeakResolve = null;
+                }
 
                 setTimeout(() => {
-                    finalTranscript   = '';
-                    currentTranscript = '';
-                    lastSpeechTime    = 0;
-                    startListening();
+                    if(!isProcessing && !isListening) {
+                        finalTranscript   = '';
+                        currentTranscript = '';
+                        lastSpeechTime    = 0;
+                        startListening();
+                    }
                 }, 800);
                 return;
             }
@@ -1236,8 +1311,8 @@ function aiSpeak(text) {
             u.rate = 1.0; u.pitch = 1.0; u.volume = 1.0;
             subtitle.textContent = chunks[idx];
             
-            u.onend  = () => { idx++; speakNext(); };
-            u.onerror = (e) => { console.warn("TTS Error:", e); idx++; speakNext(); };
+            u.onend  = () => { if (isSpeaking) { idx++; speakNext(); } };
+            u.onerror = (e) => { console.warn("TTS Error:", e); if (isSpeaking) { idx++; speakNext(); } };
             
             speechSynth.speak(u);
         }
@@ -1260,12 +1335,12 @@ function setOrbState(state) {
 // SPEECH RECOGNITION
 // ══════════════════════════════════════════════════════════════
 function startListening() {
-    if (!recognition || isSpeaking || isProcessing) return;
+    if (!recognition || isProcessing) return;
     isListening = true;
     finalTranscript = '';
     currentTranscript = '';
     lastSpeechTime = 0;
-    setOrbState('listening');
+    if (!isSpeaking) setOrbState('listening');
     document.getElementById('listenViz').classList.add('active');
     document.getElementById('vcMic').classList.add('active-mic');
     document.getElementById('liveTranscript').textContent = '';
@@ -1283,23 +1358,48 @@ function stopListening() {
 }
 
 function restartListening() {
-    if (!isListening || isSpeaking || isProcessing) return;
+    if (!isListening || isProcessing) return;
     try { recognition.stop(); } catch(e) {}
     setTimeout(() => {
-        if (isListening && !isSpeaking && !isProcessing) {
+        if (isListening && !isProcessing) {
             try { recognition.start(); } catch(e) {}
         }
     }, 200);
 }
 
 function handleSpeechResult(e) {
-    if (isSpeaking || isProcessing) return;
+    if (isProcessing) return;
     let interim = '', final = '';
     for (let i = e.resultIndex; i < e.results.length; i++) {
         const t = e.results[i][0].transcript;
         if (e.results[i].isFinal) { final += t + ' '; }
         else                       { interim += t; }
     }
+
+    if (isSpeaking) {
+        const tempText = (finalTranscript + currentTranscript + final + interim).trim();
+        const wordsExt = tempText.split(/\s+/).filter(Boolean);
+        
+        if (wordsExt.length > 2) {
+            // Initiate Barge-in
+            speechSynth.cancel();
+            isSpeaking = false;
+            document.getElementById('aiSubtitleText').classList.remove('show');
+            setOrbState('listening');
+            showToast('info', '🗣️ You interrupted the AI');
+            
+            if (window.activeSpeakResolve) {
+                window.activeSpeakResolve();
+                window.activeSpeakResolve = null;
+            }
+        } else {
+            // Buffer words to verify it's not noise
+            if (final) { finalTranscript += final; }
+            if (interim) { currentTranscript = interim; }
+            return;
+        }
+    }
+
     if (final)   { finalTranscript   += final;   lastSpeechTime = Date.now(); }
     if (interim) { currentTranscript  = interim;  lastSpeechTime = Date.now(); }
 
@@ -1309,19 +1409,22 @@ function handleSpeechResult(e) {
     liveEl.className   = `live-transcript-text ${final ? 'final' : ''}`;
 
     const totalWords = fullText.split(/\s+/).filter(Boolean).length;
-    if (totalWords > 0) document.getElementById('aiStatusText').textContent = `LISTENING · ${totalWords} words`;
+    if (totalWords > 0 && !isSpeaking) document.getElementById('aiStatusText').textContent = `LISTENING · ${totalWords} words`;
 }
 
 function startSilenceDetection() {
     clearTimeout(silenceTimer);
     function check() {
-        if (!isListening || isSpeaking || isProcessing) return;
-        const fullText       = (finalTranscript + currentTranscript).trim();
-        const words          = fullText.split(/\s+/).filter(Boolean).length;
-        const timeSinceSpeech = Date.now() - lastSpeechTime;
-        if (words >= MIN_ANSWER_WORDS && lastSpeechTime > 0 && timeSinceSpeech >= SILENCE_THRESHOLD) {
-            submitVoiceAnswer(fullText);
-            return;
+        if (!isListening || isProcessing) return; // Kept alive during isSpeaking
+        
+        if (!isSpeaking) {
+            const fullText       = (finalTranscript + currentTranscript).trim();
+            const words          = fullText.split(/\s+/).filter(Boolean).length;
+            const timeSinceSpeech = Date.now() - lastSpeechTime;
+            if (words >= MIN_ANSWER_WORDS && lastSpeechTime > 0 && timeSinceSpeech >= SILENCE_THRESHOLD) {
+                submitVoiceAnswer(fullText);
+                return;
+            }
         }
         silenceTimer = setTimeout(check, 300);
     }
@@ -1438,6 +1541,15 @@ function startProctoring() {
             selfCam.classList.add('face-ok');
             selfCam.classList.remove('face-warn');
         }
+
+        // Screen share enforcement check
+        if (!isScreenShared) {
+            trust = Math.max(0, trust - 5);
+            updateTrust();
+            addProcLog('danger', 'Continuous missing screen share');
+            showToast('danger', '⚠️ You must share your screen during this interview.');
+        }
+
     }, 8000);
 }
 
@@ -1488,6 +1600,43 @@ function toggleCam() {
         addProcLog('danger', 'Camera OFF');
         logProcEvent('camera_off', 'high');
         showToast('danger', '⚠️ Camera is required! Trust score reduced.');
+    }
+}
+
+async function toggleScreenShare() {
+    if (isScreenShared) {
+        // Stop current share
+        if (screenStream) screenStream.getTracks().forEach(t => t.stop());
+        isScreenShared = false;
+        document.getElementById('vcScreen').classList.remove('active-mic');
+        document.getElementById('vcScreen').classList.add('off');
+        trust = Math.max(0, trust - 15);
+        updateTrust();
+        addProcLog('danger', 'Screen Share OFF');
+        logProcEvent('screen_share_stopped', 'high');
+        showToast('danger', '⚠️ Screen sharing is required!');
+    } else {
+        try {
+            screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
+            isScreenShared = true;
+            document.getElementById('screenVid').srcObject = screenStream;
+            document.getElementById('vcScreen').classList.add('active-mic');
+            document.getElementById('vcScreen').classList.remove('off');
+            
+            screenStream.getVideoTracks()[0].addEventListener('ended', () => {
+                isScreenShared = false;
+                document.getElementById('vcScreen').classList.remove('active-mic');
+                document.getElementById('vcScreen').classList.add('off');
+                trust = Math.max(0, trust - 20);
+                updateTrust();
+                addProcLog('danger', 'Screen sharing stopped externally');
+                logProcEvent('screen_share_stopped', 'critical');
+                showToast('danger', '⚠️ Screen sharing disconnected! Please re-share.');
+            });
+            showToast('info', '✅ Screen sharing restored!');
+        } catch (e) {
+            showToast('danger', 'Failed to share screen. It is required!');
+        }
     }
 }
 
@@ -1590,6 +1739,7 @@ async function endSession() {
     } catch(e) { console.warn('Save error:', e); }
 
     if (mediaStream) mediaStream.getTracks().forEach(t => t.stop());
+    if (screenStream) screenStream.getTracks().forEach(t => t.stop());
     if (audioCtx)    audioCtx.close().catch(() => {});
 
     renderResultsScreen(score, violations);
@@ -1598,51 +1748,20 @@ async function endSession() {
 function renderResultsScreen(score, violations) {
     document.getElementById('interviewApp').innerHTML = `
         <div style="display:flex;align-items:center;justify-content:center;min-height:100vh;padding:20px;background:var(--bg-dark)">
-            <div style="background:var(--bg-card);border-radius:24px;padding:50px;max-width:520px;width:100%;text-align:center;border:1px solid var(--border)">
-                <div style="font-size:52px;margin-bottom:16px">${score >= 60 ? '🎉' : score >= 35 ? '📝' : '😔'}</div>
-                <h2 style="font-size:24px;margin-bottom:6px">Interview Complete!</h2>
-                <p style="color:var(--text-dim);font-size:14px;margin-bottom:28px;line-height:1.6">
-                    Your AI voice interview has been recorded and scored. The hiring team will review your performance.
+            <div style="background:var(--bg-card);border-radius:24px;padding:50px;max-width:480px;width:100%;text-align:center;border:1px solid var(--border);box-shadow:0 0 80px rgba(99,102,241,.1)">
+                <div style="font-size:64px;margin-bottom:20px;color:var(--success)"><i class="fas fa-check-circle"></i></div>
+                <h2 style="font-size:26px;margin-bottom:12px;font-weight:800;color:var(--text)">Interview Completed</h2>
+                <p style="color:var(--text-dim);font-size:15px;margin-bottom:32px;line-height:1.6">
+                    Thank you for your time. Your interview has been successfully submitted and our hiring team will review it shortly.
                 </p>
-                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:28px">
-                    <div style="background:var(--bg-surface);padding:16px;border-radius:12px">
-                        <div style="font-size:28px;font-weight:900;color:${score>=70?'var(--success)':score>=40?'var(--warning)':'var(--danger)'}">${score}%</div>
-                        <div style="font-size:11px;color:var(--text-muted);margin-top:2px">Overall Score</div>
-                    </div>
-                    <div style="background:var(--bg-surface);padding:16px;border-radius:12px">
-                        <div style="font-size:28px;font-weight:900;color:${trust>=70?'var(--success)':trust>=40?'var(--warning)':'var(--danger)'}">${trust}%</div>
-                        <div style="font-size:11px;color:var(--text-muted);margin-top:2px">Trust Score</div>
-                    </div>
-                    <div style="background:var(--bg-surface);padding:16px;border-radius:12px">
-                        <div style="font-size:28px;font-weight:900;color:var(--primary)">${engine.questionCount}</div>
-                        <div style="font-size:11px;color:var(--text-muted);margin-top:2px">Questions</div>
-                    </div>
+                <div style="padding:16px;background:var(--bg-surface);border-radius:12px;border:1px solid var(--border);margin-bottom:32px">
+                    <p style="font-size:14px;font-weight:600;color:var(--text-muted);margin:0">
+                        You may now close this window and disconnect.
+                    </p>
                 </div>
-                ${Object.keys(engine.skillsCovered).length ? `
-                <div style="text-align:left;margin-bottom:24px;background:var(--bg-surface);border-radius:12px;padding:16px">
-                    <div style="font-size:11px;font-weight:700;color:var(--text-muted);margin-bottom:10px;text-transform:uppercase;letter-spacing:.5px">Skills Assessed</div>
-                    ${Object.entries(engine.skillsCovered).map(([skill, data]) => {
-                        const avg   = data.score;
-                        const color = avg >= 70 ? 'var(--success)' : avg >= 40 ? 'var(--warning)' : 'var(--danger)';
-                        return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
-                            <span style="min-width:90px;font-size:12px;color:var(--text-dim)">${skill}</span>
-                            <div style="flex:1;height:6px;background:var(--bg-dark);border-radius:3px;overflow:hidden">
-                                <div style="width:${avg}%;height:100%;background:${color};border-radius:3px"></div>
-                            </div>
-                            <span style="font-size:12px;font-weight:700;color:${color};min-width:35px;text-align:right">${avg}%</span>
-                        </div>`;
-                    }).join('')}
-                </div>` : ''}
-                ${engine.strongAreas.length ? `<div style="text-align:left;margin-bottom:12px"><span style="font-size:11px;color:var(--success);font-weight:700">✅ Strong: </span><span style="font-size:12px;color:var(--text-dim)">${engine.strongAreas.join(', ')}</span></div>` : ''}
-                ${engine.weakAreas.length ? `<div style="text-align:left;margin-bottom:20px"><span style="font-size:11px;color:var(--danger);font-weight:700">⚠️ Needs Work: </span><span style="font-size:12px;color:var(--text-dim)">${engine.weakAreas.join(', ')}</span></div>` : ''}
-                ${violations > 0
-                    ? `<div style="background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.2);border-radius:10px;padding:10px 14px;margin-bottom:20px;font-size:12px;color:#f87171;text-align:left"><strong>⚠️ ${violations} proctoring violation${violations>1?'s':''} detected.</strong> Visible to hiring team.</div>`
-                    : `<div style="background:rgba(16,185,129,.08);border:1px solid rgba(16,185,129,.2);border-radius:10px;padding:10px 14px;margin-bottom:20px;font-size:12px;color:#34d399;text-align:left">✅ Clean proctoring record — no violations detected.</div>`
-                }
-                <p style="font-size:13px;color:var(--text-muted);margin-bottom:24px">You should hear back within a few business days. Good luck! 🍀</p>
-                <a href="../dashboard/candidate.html" style="display:inline-flex;align-items:center;gap:6px;padding:12px 28px;background:var(--primary);color:#fff;border-radius:12px;text-decoration:none;font-weight:700;font-size:14px">
-                    <i class="fas fa-arrow-left"></i> Back to Dashboard
-                </a>
+                <button onclick="window.close()" style="display:inline-flex;align-items:center;gap:8px;padding:14px 32px;background:var(--bg-surface);color:var(--text);border:1px solid var(--border);border-radius:14px;cursor:pointer;font-weight:700;font-size:15px;transition:all 0.2s" onmouseover="this.style.background='var(--border)'" onmouseout="this.style.background='var(--bg-surface)'">
+                    <i class="fas fa-times"></i> Close Window
+                </button>
             </div>
         </div>`;
 }
