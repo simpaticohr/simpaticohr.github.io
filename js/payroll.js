@@ -292,12 +292,12 @@ window.calculatePayroll = async function() {
     const { data: salaries, error: salErr } = await client
       .from('employee_salaries')
       .select('employee_id, base_salary')
-      .eq('company_id', companyId);
+      .eq('tenant_id', companyId);
 
     const { data: deductions } = await client
       .from('payroll_deductions')
       .select('employee_id, amount')
-      .eq('company_id', companyId)
+      .eq('tenant_id', companyId)
       .eq('status', 'active');
 
     const dedMap = {};
@@ -391,7 +391,7 @@ window.executePayroll = async function() {
     const { data: salaries, error: salErr } = await client
         .from('employee_salaries')
         .select('employee_id, base_salary, currency')
-        .eq('company_id', companyId);
+        .eq('tenant_id', companyId);
       
       if (salErr) throw new Error('Could not fetch salary data: ' + salErr.message);
       if (!salaries || salaries.length === 0) {
@@ -403,7 +403,7 @@ window.executePayroll = async function() {
       const { data: deductions } = await client
         .from('payroll_deductions')
         .select('employee_id, amount, type')
-        .eq('company_id', companyId)
+        .eq('tenant_id', companyId)
         .eq('status', 'active');
 
       const dedMap = {};
@@ -415,7 +415,7 @@ window.executePayroll = async function() {
       const { data: unpaidLeaves } = await client
         .from('leave_requests')
         .select('employee_id, days')
-        .eq('company_id', companyId)
+        .eq('tenant_id', companyId)
         .eq('status', 'approved')
         .eq('leave_type', 'unpaid')
         .gte('start_date', period + '-01')
@@ -432,7 +432,7 @@ window.executePayroll = async function() {
         .insert([{
           period, type: type || 'monthly', pay_date: payDate,
           status: 'processing', notes: notes || null,
-          company_id: companyId, employee_count: salaries.length
+          tenant_id: companyId, company_id: companyId, employee_count: salaries.length
         }])
         .select()
         .single();
@@ -467,7 +467,7 @@ window.executePayroll = async function() {
           deductions_total: ded, net_pay: net,
           status: 'generated',
           payroll_run_id: runData.id,
-          company_id: companyId,
+          tenant_id: companyId, company_id: companyId,
           pay_date: payDate
         };
       });
