@@ -2380,29 +2380,30 @@ Return ONLY valid JSON in format: {"match_score": 85, "reason": "Brief 1-sentenc
     }
   }
 
-  if (body.skills !== undefined) {
-    body.candidate_skills = body.skills;
-    delete body.skills;
-  }
-  delete body.source;
   // Preserve resume_text for the candidate profile drawer
-  // (was previously deleted, causing "No resume summary available")
   const storedResumeText = body.resume_text || null;
-  delete body.resume_text;
+
+  // Explicitly whitelist only columns that exist on the job_applications table.
+  // Using ...sanitize(body) caused PGRST204 errors when unknown fields
+  // (e.g. client_id, candidate_skills, source) leaked into the INSERT payload.
+  const insertPayload = {
+    candidate_name:   (body.candidate_name || '').trim().slice(0, 500),
+    candidate_email:  (body.candidate_email || '').trim().slice(0, 500),
+    job_id:           body.job_id,
+    status,
+    match_score:      match_score,
+    ai_summary:       ai_summary || null,
+    resume_text:      storedResumeText,
+    resume_url:       body.resume_url || null,
+    applied_at:       new Date().toISOString(),
+    tenant_id:        ctx.tenantId,
+  };
 
   const res = await sbFetch(
     env,
     "POST",
     "/rest/v1/job_applications",
-    {
-      ...sanitize(body),
-      status,
-      match_score: match_score,
-      ai_summary: ai_summary || null,
-      resume_text: storedResumeText,
-      applied_at: new Date().toISOString(),
-      company_id: ctx.tenantId,
-    },
+    insertPayload,
     false,
     ctx.tenantId,
   );
