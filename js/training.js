@@ -30,15 +30,22 @@ const THUMB_PALETTES = {
 };
 const THUMB_ICONS = { compliance:'🛡️', technical:'💻', leadership:'🎯', soft_skills:'🤝', onboarding:'🚀' };
 
-document.addEventListener('DOMContentLoaded', async () => {
-  await Promise.all([
-    loadUser(),
-    loadCourses(),
-    loadEnrollments(),
-    loadComplianceReport(),
-  ]);
-  loadEnrollSelects();
-});
+(function() {
+  async function boot() {
+    await Promise.all([
+      loadUser(),
+      loadCourses(),
+      loadEnrollments(),
+      loadComplianceReport(),
+    ]);
+    loadEnrollSelects();
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', boot);
+  } else {
+    setTimeout(boot, 100);
+  }
+})();
 
 async function loadUser() {
   const client = sb(); if (!client) return;

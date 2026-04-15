@@ -20,10 +20,17 @@ let allReviews = [];
 let allGoals   = [];
 let allCycles  = [];
 
-document.addEventListener('DOMContentLoaded', async () => {
-  await Promise.all([loadUser(), loadCycles(), loadReviews(), loadGoals()]);
-  renderNineBox();
-});
+(function() {
+  async function boot() {
+    await Promise.all([loadUser(), loadCycles(), loadReviews(), loadGoals()]);
+    renderNineBox();
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', boot);
+  } else {
+    setTimeout(boot, 100);
+  }
+})();
 
 async function loadUser() {
   const client = sb(); if (!client) return;

@@ -19,9 +19,19 @@ function sb() {
 let allAttendance = [];
 let attEmployees  = [];
 
-document.addEventListener('DOMContentLoaded', async () => {
-  await Promise.all([loadAttUser(), loadAttEmployees(), loadAttendance()]);
-});
+// Auto-init: supports both fresh page load AND dynamic module injection
+// (When loaded via loadExternalModule, DOMContentLoaded already fired)
+(function attInit() {
+  async function boot() {
+    await Promise.all([loadAttUser(), loadAttEmployees(), loadAttendance()]);
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', boot);
+  } else {
+    // DOM already ready (loaded dynamically) — small delay for DOM injection
+    setTimeout(boot, 100);
+  }
+})();
 
 async function loadAttUser() {
   const client = sb(); if (!client) return;

@@ -22,10 +22,17 @@ let allSalaries   = [];
 let allRuns       = [];
 let allDeductions = [];
 
-document.addEventListener('DOMContentLoaded', async () => {
-  await Promise.all([loadUser(), loadPayslips(), loadSalaryRegister(), loadPayrollRuns(), loadDeductions()]);
-  setNextPayrollDate();
-});
+(function() {
+  async function boot() {
+    await Promise.all([loadUser(), loadPayslips(), loadSalaryRegister(), loadPayrollRuns(), loadDeductions()]);
+    setNextPayrollDate();
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', boot);
+  } else {
+    setTimeout(boot, 100);
+  }
+})();
 
 async function loadUser() {
   const client = sb(); if (!client) return;

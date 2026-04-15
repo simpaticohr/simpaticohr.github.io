@@ -18,18 +18,23 @@ function sb() {
 
 let onboardingRecords = [];
 
-document.addEventListener('DOMContentLoaded', async () => {
-  await Promise.all([
-    loadUser(),
-    loadEmployeeSelects(),
-    loadTemplates(),
-    loadOnboarding(),
-  ]);
-
-  // Set default start date
-  const startInput = document.getElementById('ob-start');
-  if (startInput) startInput.valueAsDate = new Date();
-});
+(function() {
+  async function boot() {
+    await Promise.all([
+      loadUser(),
+      loadEmployeeSelects(),
+      loadTemplates(),
+      loadOnboarding(),
+    ]);
+    const startInput = document.getElementById('ob-start');
+    if (startInput) startInput.valueAsDate = new Date();
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', boot);
+  } else {
+    setTimeout(boot, 100);
+  }
+})();
 
 async function loadUser() {
   const client = sb(); if (!client) return;

@@ -20,9 +20,16 @@ function sb() {
 let allLeave   = [];
 let allTickets = [];
 
-document.addEventListener('DOMContentLoaded', async () => {
-  await Promise.all([loadUser(), loadLeave(), loadPolicies(), loadTickets(), loadEmployeeSelect()]);
-});
+(function() {
+  async function boot() {
+    await Promise.all([loadUser(), loadLeave(), loadPolicies(), loadTickets(), loadEmployeeSelect()]);
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', boot);
+  } else {
+    setTimeout(boot, 100);
+  }
+})();
 
 async function loadUser() {
   const client = sb(); if (!client) return;

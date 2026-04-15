@@ -26,18 +26,24 @@ let departments  = [];
 let currentView  = 'list';
 
 // ── Init ──
-document.addEventListener('DOMContentLoaded', async () => {
-  await Promise.all([
-    loadCurrentUser(),
-    loadDepartments(),
-    loadEmployees(),
-  ]);
-
-  const empId = new URLSearchParams(location.search).get('id');
-  if (empId && document.getElementById('profile-main')) {
-    renderProfilePage(empId);
+(function() {
+  async function boot() {
+    await Promise.all([
+      loadCurrentUser(),
+      loadDepartments(),
+      loadEmployees(),
+    ]);
+    const empId = new URLSearchParams(location.search).get('id');
+    if (empId && document.getElementById('profile-main')) {
+      renderProfilePage(empId);
+    }
   }
-});
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', boot);
+  } else {
+    setTimeout(boot, 100);
+  }
+})();
 
 // ── Auth ──
 async function loadCurrentUser() {
