@@ -36,7 +36,7 @@ class AuthManager {
       const { data, error } = await this.db.auth.signInWithOAuth({
         provider,
         options: {
-          redirectTo: `${window.SITE_URL}/auth/callback`
+          redirectTo: `${window.location.origin}/platform/auth-callback.html?role=candidate`
         }
       });
       if (error) throw error;

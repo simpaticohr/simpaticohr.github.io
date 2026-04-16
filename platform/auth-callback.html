@@ -1,128 +1,304 @@
-﻿<!DOCTYPE html>
-<html><head><meta charset="UTF-8"><title>Signing in...</title></head>
-<body style="font-family:Inter,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;background:#f8fafc">
-<div style="text-align:center">
-  <div style="width:40px;height:40px;border:3px solid #e2e8f0;border-top-color:#3b82f6;border-radius:50%;animation:spin 0.8s linear infinite;margin:0 auto 16px"></div>
-  <p id="msg" style="color:#64748b">Signing you in...</p>
-</div>
-<style>@keyframes spin{to{transform:rotate(360deg)}}</style>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Signing in... — SimpaticoHR</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Inter', sans-serif;
+      min-height: 100vh;
+      background: linear-gradient(135deg, #0F172A, #1E293B);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #fff;
+    }
+    .container { text-align: center; max-width: 420px; padding: 24px; }
+    .spinner {
+      width: 48px; height: 48px;
+      border: 4px solid rgba(255,255,255,0.1);
+      border-top-color: #3b82f6;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      margin: 0 auto 20px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    h2 { font-size: 20px; font-weight: 700; margin-bottom: 8px; }
+    p  { color: rgba(255,255,255,0.5); font-size: 14px; line-height: 1.5; }
+    .error-box {
+      background: rgba(239,68,68,0.1);
+      border: 1px solid rgba(239,68,68,0.25);
+      border-radius: 12px;
+      padding: 20px;
+      margin-top: 20px;
+      display: none;
+    }
+    .error-box h3 { color: #F87171; font-size: 16px; margin-bottom: 8px; }
+    .error-box p  { color: rgba(255,255,255,0.6); font-size: 13px; }
+    .error-box a  {
+      display: inline-block; margin-top: 14px;
+      color: #60A5FA; text-decoration: none; font-weight: 600;
+      transition: color 0.2s;
+    }
+    .error-box a:hover { color: #93C5FD; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="spinner" id="spinner"></div>
+    <h2 id="statusTitle">Signing you in…</h2>
+    <p id="statusText">Please wait while we verify your identity</p>
+
+    <div class="error-box" id="errorBox">
+      <h3>Authentication Failed</h3>
+      <p id="errorMsg">Something went wrong during sign-in.</p>
+      <a href="login.html">← Back to Login</a>
+    </div>
+  </div>
+
+<!-- ─── Scripts ──────────────────────────────────────────────────── -->
 <script src="../js/hr-config.js"></script>
-<script src="../js/shared-utils.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <script>
+// ═══════════════════════════════════════════════════════════════════
+// Google OAuth Callback Handler — SimpaticoHR
+// Uses the Supabase JS SDK to establish a proper authenticated session
+// ═══════════════════════════════════════════════════════════════════
+
 const SB_URL = window.SIMPATICO_CONFIG?.supabaseUrl;
 const SB_KEY = window.SIMPATICO_CONFIG?.supabaseAnonKey;
 
 const ROLE_ROUTES = {
-    hr: '../dashboard/hr.html',
-    hr_manager: '../dashboard/hr.html',
-    company_admin: '../dashboard/hr.html',
-    interviewer: '../dashboard/hr.html',
-    candidate: '../dashboard/candidate.html',
-    super_admin: 'super-admin.html'
+  hr:            '../dashboard/hr.html',
+  hr_manager:    '../dashboard/hr.html',
+  company_admin: '../dashboard/hr.html',
+  interviewer:   '../dashboard/hr.html',
+  candidate:     '../dashboard/candidate.html',
+  super_admin:   'super-admin.html'
 };
 
 const TAB_ALLOWED = {
-    hr: ['hr','hr_manager','company_admin','interviewer'],
-    candidate: ['candidate'],
-    super_admin: ['super_admin']
+  hr:          ['hr', 'hr_manager', 'company_admin', 'interviewer'],
+  candidate:   ['candidate'],
+  super_admin: ['super_admin']
 };
 
+// ─── Helpers ────────────────────────────────────────────────────
 function showError(msg) {
-    document.getElementById('msg').textContent = msg;
-    document.querySelector('div > div').style.display = 'none';
-    setTimeout(() => { window.location.href = 'login.html'; }, 4000);
+  document.getElementById('spinner').style.display = 'none';
+  document.getElementById('statusTitle').style.display = 'none';
+  document.getElementById('statusText').style.display = 'none';
+  document.getElementById('errorBox').style.display = 'block';
+  document.getElementById('errorMsg').textContent = msg;
+  setTimeout(() => { window.location.href = 'login.html'; }, 5000);
 }
 
+function setStatus(title, text) {
+  document.getElementById('statusTitle').textContent = title;
+  document.getElementById('statusText').textContent = text;
+}
+
+/**
+ * Clear only Simpatico-specific keys — NOT the entire localStorage.
+ * This preserves Supabase SDK auth storage (sb-*-auth-token).
+ */
+function clearPreviousSession() {
+  const simpaticoKeys = [
+    'simpatico_token', 'simpatico_user', 'simpatico_refresh',
+    'simpatico_company', 'sh_token'
+  ];
+  simpaticoKeys.forEach(k => {
+    localStorage.removeItem(k);
+    sessionStorage.removeItem(k);
+  });
+  console.log('[auth-callback] Cleared previous Simpatico session keys');
+}
+
+// ─── Main ───────────────────────────────────────────────────────
 async function init() {
-    // FIX 1: IMMEDIATELY WIPE OLD CACHE
-    // This stops the new user from seeing the previous user's dashboard data
-    localStorage.clear();
-    sessionStorage.clear();
+  try {
+    // § 1.  CLEAR PREVIOUS SESSION (targeted, not full wipe)
+    clearPreviousSession();
 
-    const hash = Object.fromEntries(new URLSearchParams(window.location.hash.slice(1)));
-    const params = new URLSearchParams(window.location.search);
+    // § 2.  PARSE URL
+    const hash   = Object.fromEntries(new URLSearchParams(window.location.hash.slice(1)));
+    const params  = new URLSearchParams(window.location.search);
     const selectedRole = params.get('role') || 'candidate';
-    const token = hash.access_token;
 
-    if (!token) { window.location.href = 'login.html'; return; }
+    const accessToken  = hash.access_token;
+    const refreshToken = hash.refresh_token;
 
-    // Get Supabase auth user
-    const r = await fetch(SB_URL + '/auth/v1/user', {
-        headers: { 'apikey': SB_KEY, 'Authorization': 'Bearer ' + token }
-    });
-    const authUser = await r.json();
-    if (!authUser.id) { showError('Authentication failed. Redirecting...'); return; }
-
-    // Check custom users table to see if they are registered/invited
-    const ur = await fetch(SB_URL + '/rest/v1/users?email=eq.' + encodeURIComponent(authUser.email) + '&select=*&limit=1', {
-        headers: { 'apikey': SB_KEY, 'Authorization': 'Bearer ' + token }
-    });
-    const users = await ur.json();
-
-    let role;
-    if (users && users.length > 0) {
-        // Existing user — validate role matches tab
-        role = users[0].role;
-        const allowed = TAB_ALLOWED[selectedRole] || [];
-        if (!allowed.includes(role)) {
-            showError('Access denied. Your account is not a ' + selectedRole + ' account. Redirecting to login...');
-            return;
-        }
-    } else {
-        // FIX 2: STRICT SAAS AUTHORIZATION FOR NEW USERS
-        
-        // Block Google signup for Super Admins entirely
-        if (selectedRole === 'super_admin') {
-            showError('Super Admin accounts cannot be created via Google. Redirecting...');
-            return;
-        }
-
-        // If they are trying to log in as HR, but aren't in the database yet: DENY THEM.
-        // In Enterprise SaaS, HR users must be invited by an admin first.
-        if (selectedRole === 'hr') {
-            showError('Access Denied: Unregistered Email. Please ask your company administrator to invite you to the platform first.');
-            
-            // Optional: Sign them out of Supabase auth completely so they aren't lurking as an orphaned auth user
-            await fetch(SB_URL + '/auth/v1/logout', {
-                method: 'POST',
-                headers: { 'apikey': SB_KEY, 'Authorization': 'Bearer ' + token }
-            });
-            return; 
-        }
-
-        // If you allow OPEN signups for Candidates, let them create an account here
-        if (selectedRole === 'candidate') {
-            role = 'candidate';
-            await fetch(SB_URL + '/rest/v1/users', {
-                method: 'POST',
-                headers: {
-                    'apikey': SB_KEY,
-                    'Authorization': 'Bearer ' + token,
-                    'Content-Type': 'application/json',
-                    'Prefer': 'return=representation'
-                },
-                body: JSON.stringify({
-                    name: authUser.user_metadata?.full_name || authUser.email,
-                    email: authUser.email,
-                    role: role,
-                    is_active: true,
-                    created_at: new Date().toISOString()
-                })
-            });
-        }
+    if (!accessToken) {
+      console.warn('[auth-callback] No access_token in hash — redirecting to login');
+      window.location.href = 'login.html';
+      return;
     }
 
-    // Finally, set the fresh tokens and route them to the dashboard
-    localStorage.setItem('simpatico_token', token);
-    localStorage.setItem('simpatico_user', JSON.stringify({
-        id: authUser.id,
-        email: authUser.email,
-        role: role,
-        name: authUser.user_metadata?.full_name || authUser.email
-    }));
+    // § 3.  INITIALIZE SUPABASE SDK  &  SET SESSION
+    //       This is the critical fix: the SDK now holds a real authenticated session,
+    //       so all dashboard modules that use SimpaticoDB/getSupabaseClient() will work.
+    const sb = window.supabase.createClient(SB_URL, SB_KEY);
 
-    window.location.href = ROLE_ROUTES[role] || '../dashboard/hr.html';
+    const { data: sessionData, error: sessionError } = await sb.auth.setSession({
+      access_token:  accessToken,
+      refresh_token: refreshToken || ''
+    });
+
+    if (sessionError || !sessionData?.user) {
+      console.error('[auth-callback] setSession failed:', sessionError);
+      showError('Session verification failed. Please try again.');
+      return;
+    }
+
+    const authUser = sessionData.user;
+    const session  = sessionData.session;
+
+    // Make the SDK client globally available for dashboard modules
+    window._supabaseClient = sb;
+    window.SimpaticoDB     = sb;
+
+    setStatus('Welcome!', `Signed in as ${authUser.email}`);
+    console.log('[auth-callback] Authenticated:', authUser.email, authUser.app_metadata?.provider);
+
+    // § 4.  CHECK USERS TABLE FOR EXISTING PROFILE
+    const { data: existingUsers, error: usersError } = await sb
+      .from('users')
+      .select('*, companies(*)')
+      .eq('email', authUser.email)
+      .limit(1);
+
+    if (usersError) {
+      console.warn('[auth-callback] Error querying users table:', usersError.message);
+    }
+
+    let profile = existingUsers?.[0] || null;
+    let role;
+
+    if (profile) {
+      // ── Existing user — validate role matches the selected tab ──
+      role = profile.role;
+      const allowed = TAB_ALLOWED[selectedRole] || [];
+      if (!allowed.includes(role)) {
+        showError(`Access denied. Your account role "${role}" does not match the "${selectedRole}" portal. Redirecting…`);
+        return;
+      }
+
+      // Ensure auth_id is linked (in case profile was created before OAuth)
+      if (!profile.auth_id || profile.auth_id !== authUser.id) {
+        await sb
+          .from('users')
+          .update({ auth_id: authUser.id })
+          .eq('id', profile.id);
+        console.log('[auth-callback] Linked auth_id to existing profile');
+      }
+
+    } else {
+      // ── New user — enforce SaaS authorization rules ──
+
+      // Block Super Admin self-registration via Google
+      if (selectedRole === 'super_admin') {
+        showError('Super Admin accounts cannot be created via Google. Redirecting…');
+        return;
+      }
+
+      // Block unregistered HR users (must be invited by admin)
+      if (selectedRole === 'hr') {
+        showError('Access Denied: Unregistered email. Please ask your company administrator to invite you first.');
+        // Sign them out so they don't linger as an orphaned auth user
+        await sb.auth.signOut();
+        return;
+      }
+
+      // Allow open candidate self-registration
+      if (selectedRole === 'candidate') {
+        role = 'candidate';
+        const newProfile = {
+          auth_id:    authUser.id,
+          email:      authUser.email,
+          full_name:  authUser.user_metadata?.full_name || authUser.user_metadata?.name || authUser.email.split('@')[0],
+          role:       'candidate',
+          is_active:  true,
+          created_at: new Date().toISOString()
+        };
+
+        const { data: created, error: createError } = await sb
+          .from('users')
+          .insert(newProfile)
+          .select('*, companies(*)')
+          .single();
+
+        if (createError) {
+          console.error('[auth-callback] Profile creation failed:', createError.message);
+          // Non-fatal: user can still proceed with basic info,
+          // but log it so we can investigate
+          if (createError.message.includes('duplicate') || createError.code === '23505') {
+            // Profile exists but wasn't found earlier (possible RLS issue)
+            // Try fetching by auth_id as fallback
+            const { data: retryProfile } = await sb
+              .from('users')
+              .select('*, companies(*)')
+              .eq('auth_id', authUser.id)
+              .limit(1);
+            profile = retryProfile?.[0] || null;
+            if (profile) role = profile.role;
+          }
+        } else if (created) {
+          profile = created;
+          console.log('[auth-callback] Created candidate profile:', profile.id || profile.email);
+        }
+      }
+    }
+
+    // § 5.  PERSIST SESSION — consistent shape with email/password login
+    localStorage.setItem('simpatico_token', session.access_token);
+    if (session.refresh_token) {
+      localStorage.setItem('simpatico_refresh', session.refresh_token);
+    }
+
+    const userToStore = {
+      id:         authUser.id,
+      email:      authUser.email,
+      role:       role || 'candidate',
+      full_name:  profile?.full_name || authUser.user_metadata?.full_name || authUser.user_metadata?.name || authUser.email.split('@')[0],
+      company_id: profile?.company_id || null,
+      tenant_id:  profile?.company_id || null
+    };
+    localStorage.setItem('simpatico_user', JSON.stringify(userToStore));
+
+    // Store company info if available (for modules that need it)
+    if (profile?.companies) {
+      localStorage.setItem('simpatico_company', JSON.stringify(profile.companies));
+    }
+
+    // Update last_login (best-effort)
+    if (profile?.id) {
+      sb.from('users')
+        .update({ last_login: new Date().toISOString() })
+        .eq('id', profile.id)
+        .then(() => console.log('[auth-callback] Updated last_login'))
+        .catch(() => {});
+    }
+
+    // § 6.  REDIRECT TO DASHBOARD
+    const finalRole = role || 'candidate';
+    const target = ROLE_ROUTES[finalRole] || '../dashboard/candidate.html';
+    console.log('[auth-callback] Redirecting to:', target, '(role:', finalRole + ')');
+
+    setTimeout(() => {
+      window.location.href = target;
+    }, 800);
+
+  } catch (err) {
+    console.error('[auth-callback] Unexpected error:', err);
+    showError(err.message || 'An unexpected error occurred. Redirecting to login…');
+  }
 }
+
+// Run on page load
 init();
 </script>
-</body></html>
+</body>
+</html>
