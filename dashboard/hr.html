@@ -2700,7 +2700,16 @@ async function sendWhatsAppNotification(int) {
                     token: int.token
                 })
             });
-            if (res.ok) return { success: true, method: 'api' };
+            if (res.ok) {
+                const data = await res.json().catch(() => ({}));
+                if (data.method === 'fallback_wame') {
+                    const cleanPhone = phone.replace(/\D/g, '');
+                    const waUrl = `https://wa.me/${cleanPhone}?text=${encodeURIComponent(message)}`;
+                    window.open(waUrl, '_blank');
+                    return { success: true, method: 'fallback_wame' };
+                }
+                return { success: true, method: 'api' };
+            }
         } catch(e) {
             console.warn('[WhatsApp] API call failed, falling back to wa.me', e);
         }
@@ -3266,14 +3275,33 @@ function renderJobTable() {
             <td>${escapeHtml(job.type)}</td>
             <td>${job.applications || 0}</td>
             <td><span class="status-badge ${job.status}">${capitalize(job.status)}</span></td>
-            <td>${formatDate(job.createdAt)}</td>
+            <td>${formatDate(job.createdAt || job.created_at)}</td>
             <td>
+                <button class="btn-sm-action" style="color:#0a66c2;" title="Share on LinkedIn" onclick="shareJobToLinkedIn(${index})"><i class="fab fa-linkedin"></i></button>
                 <button class="btn-sm-action view" title="View" onclick="viewJob(${index})"><i class="fas fa-eye"></i></button>
                 <button class="btn-sm-action edit" title="Edit" onclick="editJob(${index})"><i class="fas fa-pen"></i></button>
                 <button class="btn-sm-action delete" title="Delete" onclick="deleteJob(${index})"><i class="fas fa-trash"></i></button>
             </td>
         </tr>
     `).join('');
+}
+
+function shareJobToLinkedIn(index) {
+    const job = appData.jobs[index];
+    if (!job) return;
+    
+    // Fallback ID if not yet saved to DB
+    const jobId = job.id || job.job_id || Math.random().toString(36).substr(2, 9);
+    const title = job.title || 'a new role';
+    const location = job.location || 'Remote';
+    const type = job.type || 'Full-time';
+    
+    const jobUrl = window.location.origin + '/job-apply.html?job_id=' + jobId + '&role=' + encodeURIComponent(title);
+    const shareText = `We are hiring for a ${title}!\n\n📍 Location: ${location}\n👔 Employment: ${type}\n\nApply now: ${jobUrl}\n\n#hiring #${title.replace(/\\s+/g, '')} #jobs`;
+    const linkedInShareUrl = \`https://www.linkedin.com/feed/?shareActive=true&text=\${encodeURIComponent(shareText)}\`;
+    
+    showToast('🚀 Opening LinkedIn for manual sharing...', 'info');
+    window.open(linkedInShareUrl, '_blank', 'noopener,noreferrer');
 }
 
 // ===== INTERVIEW TABLE =====

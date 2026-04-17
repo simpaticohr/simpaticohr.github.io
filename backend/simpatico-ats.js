@@ -3542,7 +3542,7 @@ async function sendEmail(env, { to, subject, html, replyTo }) {
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      from: env.EMAIL_FROM || "Simpatico HR <noreply@simpaticohr.in>",
+      from: env.EMAIL_FROM || "Simpatico HR <hr@ats.simpaticohr.in>",
       to: Array.isArray(to) ? to : [to],
       subject,
       html,
@@ -3550,8 +3550,11 @@ async function sendEmail(env, { to, subject, html, replyTo }) {
     }),
   });
 
-  if (!res.ok)
-    console.error(`Email send failed [${subject}]:`, await res.text());
+  if (!res.ok) {
+    const errorText = await res.text();
+    console.error(`Email send failed [${subject}]:`, errorText);
+    throw new AppError(`Email delivery failed: ${errorText}`, 500, "EMAIL_ERROR");
+  }
   return res;
 }
 
