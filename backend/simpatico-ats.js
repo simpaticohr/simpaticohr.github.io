@@ -732,6 +732,10 @@ route("POST", "/ai/onboarding-checklist", handleOnboardingChecklist);
 // Training
 route("POST", "/training/courses", handleCreateCourse);
 route("GET", "/training/courses", handleListCourses);
+route("POST", "/api/training_courses", handleCreateCourse);
+route("GET", "/api/training_courses", handleListCourses);
+route("POST", "/api/training-courses", handleCreateCourse);
+route("GET", "/api/training-courses", handleListCourses);
 route("POST", "/training/enroll", handleEnrollTraining);
 route("POST", "/training/semantic-search", handleSemanticCourseSearch);
 route("POST", "/training/remind/:id", handleSendReminder);
@@ -788,6 +792,7 @@ route("POST", "/ai/interview-question", handleInterviewQuestion);
 route("POST", "/ai/ats-generator", handleATSGenerator);
 route("POST", "/ai/generate-assessment", handleGenerateAssessment);
 route("POST", "/ai/assessments", handleSaveAssessment);
+route("POST", "/ai/generate-course", handleGenerateCourse);
 
 // Candidate Assessments
 route("POST", "/candidates/:id/assessments/:assessmentId/assign", handleAssignAssessment);
@@ -1462,7 +1467,7 @@ async function handleCreateCourse(request, env, ctx) {
     env,
     "POST",
     "/rest/v1/training_courses",
-    { ...sanitize(body), tenant_id: ctx.tenantId },
+    { ...sanitize(body), tenant_id: ctx.tenantId, company_id: ctx.tenantId },
     false,
     ctx.tenantId,
   );
@@ -2928,6 +2933,30 @@ CRITICAL: Return ONLY valid JSON (no markdown, no code blocks) in this exact for
       { code: "AI_SERVICE_ERROR" },
     );
   }
+}
+
+async function handleGenerateCourse(request, env, ctx) {
+  requireAuth(ctx);
+  const { title } = await safeJson(request);
+  if (!title) throw new ValidationError("title required");
+  
+  const prompt = `You are an expert Corporate Trainer and LMS AI. Generate a professional course outline for a corporate training course titled "${title}". 
+Return ONLY valid JSON with these fields:
+{"description": "A compelling 2-3 sentence overview of what employees will learn...", "duration_hours": 2.5}`;
+  
+  const result = await env.AI.run("@cf/meta/llama-3.1-8b-instruct", {
+    messages: [{ role: "user", content: prompt }],
+    max_tokens: 300,
+  });
+  
+  const cleaned = result.response.replace(/```json|```/g, "").trim();
+  let data;
+  try {
+    data = JSON.parse(cleaned);
+  } catch (e) {
+    data = { description: result.response.substring(0, 200), duration_hours: 1.0 };
+  }
+  return apiResponse(data);
 }
 
 async function handleSaveAssessment(request, env, ctx) {
