@@ -778,6 +778,11 @@ route("GET", "/recruitment/applications", handleListApplications);
 route("PATCH", "/recruitment/applications/:id", handleUpdateApplication);
 route("POST", "/ai/generate-jd", handleGenerateJD);
 route("POST", "/email/interview-invite", handleInterviewEmail);
+// Client Interview Management
+route("GET", "/client/interviews", handleListClientInterviews);
+route("POST", "/client/interviews/create", handleCreateInterview);
+route("POST", "/interviews/validate", handleValidateInterview);
+route("POST", "/interviews/submit", handleSubmitInterview);
 // Notifications
 route("GET", "/notifications", handleListNotifications);
 route("PATCH", "/notifications/:id/read", handleMarkNotificationRead);
@@ -4265,3 +4270,175 @@ Return as JSON:
   }
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// § CLIENT INTERVIEW MANAGEMENT HANDLERS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+async function handleListClientInterviews(request, env, ctx, _, url) {
+  requireAuth(ctx);
+  const companyId = url.searchParams.get("company_id") || ctx.tenantId;
+  const status = url.searchParams.get("status");
+  let qp = `select=*&order=created_at.desc&limit=50`;
+  if (status) qp += `&status=eq.${status}`;
+  if (companyId && companyId !== "default") qp += `&company_id=eq.${companyId}`;
+
+  const res = await sbFetch(
+    env,
+    "GET",
+    `/rest/v1/interviews?${qp}`,
+    null,
+    false,
+    ctx.tenantId,
+  );
+  if (!res.ok) {
+    const errText = await res.text().catch(() => "unknown");
+    throw new AppError(`Failed to list interviews: ${errText}`, res.status, "DB_ERROR");
+  }
+  return apiResponse({ interviews: await res.json() });
+}
+
+async function handleCreateInterview(request, env, ctx) {
+  requireAuth(ctx);
+  const body = await safeJson(request);
+
+  if (!body.candidate_name || !body.candidate_email) {
+    throw new ValidationError("candidate_name and candidate_email are required");
+  }
+
+  const token = body.token || Array.from(crypto.getRandomValues(new Uint8Array(24)))
+    .map(b => b.toString(36).padStart(2, "0")).join("").slice(0, 32);
+
+  const payload = {
+    candidate_name: body.candidate_name,
+    candidate_email: body.candidate_email,
+    candidate_phone: body.candidate_phone || null,
+    interview_role: body.interview_role || body.position || "General",
+    interview_level: body.interview_level || body.round || "screening",
+    interview_type: body.interview_type || "human_live",
+    token_type: body.token_type || "custom",
+    token,
+    status: body.status || "scheduled",
+    job_id: body.job_id || null,
+    company_id: body.company_id || ctx.tenantId,
+    question_count: body.question_count || 5,
+    max_attempts: body.max_attempts || 1,
+    created_at: new Date().toISOString(),
+    expires_at: body.expires_at || new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+  };
+
+  const res = await sbFetch(
+    env,
+    "POST",
+    "/rest/v1/interviews",
+    payload,
+    false,
+    ctx.tenantId,
+  );
+  if (!res.ok) {
+    const errText = await res.text().catch(() => "unknown");
+    throw new AppError(`Failed to create interview: ${errText}`, res.status, "DB_ERROR");
+  }
+  const [interview] = await res.json();
+
+  await audit(env, ctx, "interview.create", "interviews", interview?.id, {
+    candidate_email: body.candidate_email,
+    role: body.interview_role || body.position,
+  });
+
+  return apiResponse({ interview, token }, HTTP.CREATED);
+}
+
+async function handleValidateInterview(request, env, ctx) {
+  const { token } = await safeJson(request);
+  if (!token) throw new ValidationError("token is required");
+
+  const res = await sbFetch(
+    env,
+    "GET",
+    `/rest/v1/interviews?token=eq.${encodeURIComponent(token)}&select=*`,
+    null,
+    false,
+    ctx.tenantId,
+  );
+  const interviews = await res.json();
+  const interview = interviews?.[0];
+
+  if (!interview) {
+    return apiResponse({ valid: false, reason: "Interview not found" }, HTTP.NOT_FOUND);
+  }
+
+  if (interview.status === "completed") {
+    return apiResponse({ valid: false, reason: "Interview already completed" });
+  }
+
+  if (interview.expires_at && new Date(interview.expires_at) < new Date()) {
+    return apiResponse({ valid: false, reason: "Interview link has expired" });
+  }
+
+  if (interview.max_attempts && interview.attempts_used >= interview.max_attempts) {
+    return apiResponse({ valid: false, reason: "Maximum attempts reached" });
+  }
+
+  return apiResponse({
+    valid: true,
+    interview: {
+      id: interview.id,
+      candidate_name: interview.candidate_name,
+      interview_role: interview.interview_role,
+      interview_level: interview.interview_level,
+      interview_type: interview.interview_type,
+      question_count: interview.question_count,
+      status: interview.status,
+    },
+  });
+}
+
+async function handleSubmitInterview(request, env, ctx) {
+  const body = await safeJson(request);
+  const { token, responses, score, feedback } = body;
+
+  if (!token) throw new ValidationError("token is required");
+
+  const getRes = await sbFetch(
+    env,
+    "GET",
+    `/rest/v1/interviews?token=eq.${encodeURIComponent(token)}&select=*`,
+    null,
+    false,
+    ctx.tenantId,
+  );
+  const interviews = await getRes.json();
+  const interview = interviews?.[0];
+
+  if (!interview) throw new NotFoundError("Interview");
+
+  const updatePayload = {
+    status: "completed",
+    attempts_used: (interview.attempts_used || 0) + 1,
+    completed_at: new Date().toISOString(),
+  };
+
+  if (score !== undefined) updatePayload.score = score;
+  if (feedback) updatePayload.feedback = feedback;
+
+  const res = await sbFetch(
+    env,
+    "PATCH",
+    `/rest/v1/interviews?id=eq.${interview.id}`,
+    updatePayload,
+    false,
+    ctx.tenantId,
+  );
+
+  if (!res.ok) {
+    const errText = await res.text().catch(() => "unknown");
+    throw new AppError(`Failed to submit interview: ${errText}`, res.status, "DB_ERROR");
+  }
+
+  await audit(env, ctx, "interview.submit", "interviews", interview.id, {
+    score,
+    candidate: interview.candidate_email,
+  });
+
+  return apiResponse({ submitted: true, interview_id: interview.id });
+}
