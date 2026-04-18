@@ -16,8 +16,9 @@
   // ═══════════════════════════════════════════════
 
   // In-memory cache of the latest valid access token from Supabase auth.
+  // Stored on window so it survives if this script is loaded multiple times.
   // Updated by onAuthStateChange listener in getSupabaseClient().
-  var _liveAccessToken = '';
+  if (!window._simpatico_liveToken) window._simpatico_liveToken = '';
 
   /**
    * Returns the best available auth token.
@@ -25,7 +26,7 @@
    */
   function getAuthToken() {
     // 1. Prefer the live token kept fresh by onAuthStateChange
-    if (_liveAccessToken) return _liveAccessToken;
+    if (window._simpatico_liveToken) return window._simpatico_liveToken;
 
     // 2. Fallback: primary localStorage keys
     let token = localStorage.getItem('sh_token')
@@ -114,8 +115,8 @@
     // Keep the in-memory token cache fresh on every auth event
     // (sign-in, token refresh, sign-out, etc.)
     window._supabaseClient.auth.onAuthStateChange(function (_event, session) {
-      _liveAccessToken = session?.access_token || '';
-      if (_liveAccessToken) {
+      window._simpatico_liveToken = session?.access_token || '';
+      if (window._simpatico_liveToken) {
         console.log('[shared-utils] Auth token refreshed (' + _event + ')');
       }
     });
@@ -124,7 +125,7 @@
     window._supabaseClient.auth.getSession().then(function (result) {
       var session = result?.data?.session;
       if (session?.access_token) {
-        _liveAccessToken = session.access_token;
+        window._simpatico_liveToken = session.access_token;
         console.log('[shared-utils] Auth token seeded from existing session');
       }
     }).catch(function () { /* ignore – token stays empty, falls back to localStorage */ });

@@ -167,6 +167,14 @@ window.startOnboarding = async function() {
 
   showToast('Starting onboarding…', 'info');
   try {
+    // Ensure we have a fresh, non-expired auth token before calling the API
+    const client = sb();
+    if (client) {
+      const { data } = await client.auth.getSession();
+      if (data?.session?.access_token) {
+        window._simpatico_liveToken = data.session.access_token;
+      }
+    }
     const res = await fetch(`${OB_CONFIG.workerUrl}/onboarding/start`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...authHeaders() },
