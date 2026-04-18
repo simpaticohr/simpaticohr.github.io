@@ -15,18 +15,25 @@
   // § 1.  AUTH TOKEN — Single retrieval function
   // ═══════════════════════════════════════════════
 
+  // In-memory cache of the latest valid access token from Supabase auth.
+  // Updated by onAuthStateChange listener in getSupabaseClient().
+  var _liveAccessToken = '';
+
   /**
-   * Returns the best available auth token from localStorage.
-   * Priority: sh_token → simpatico_token → sb-*-auth-token
+   * Returns the best available auth token.
+   * Priority: live Supabase token → sh_token → simpatico_token → sb-*-auth-token (localStorage)
    */
   function getAuthToken() {
-    // Primary keys
+    // 1. Prefer the live token kept fresh by onAuthStateChange
+    if (_liveAccessToken) return _liveAccessToken;
+
+    // 2. Fallback: primary localStorage keys
     let token = localStorage.getItem('sh_token')
              || localStorage.getItem('simpatico_token')
              || localStorage.getItem('sb-token')
              || '';
 
-    // Fallback: scan for Supabase auto-generated key
+    // 3. Fallback: scan for Supabase auto-generated key
     if (!token) {
       for (let i = 0; i < localStorage.length; i++) {
         const k = localStorage.key(i);
@@ -103,6 +110,25 @@
       CONFIG.supabaseAnonKey
     );
     window.SimpaticoDB = window._supabaseClient;
+
+    // Keep the in-memory token cache fresh on every auth event
+    // (sign-in, token refresh, sign-out, etc.)
+    window._supabaseClient.auth.onAuthStateChange(function (_event, session) {
+      _liveAccessToken = session?.access_token || '';
+      if (_liveAccessToken) {
+        console.log('[shared-utils] Auth token refreshed (' + _event + ')');
+      }
+    });
+
+    // Seed the cache immediately from the current session
+    window._supabaseClient.auth.getSession().then(function (result) {
+      var session = result?.data?.session;
+      if (session?.access_token) {
+        _liveAccessToken = session.access_token;
+        console.log('[shared-utils] Auth token seeded from existing session');
+      }
+    }).catch(function () { /* ignore – token stays empty, falls back to localStorage */ });
+
     return window._supabaseClient;
   }
 
