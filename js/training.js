@@ -1,13 +1,13 @@
 /**
- * training.js — Simpatico HR Platform
- * Training & LMS: Supabase + Cloudflare AI + R2 + Vectorize for semantic course search
- */
+* training.js â€” Simpatico HR Platform
+* Training & LMS: Supabase + Cloudflare AI + R2 + Vectorize for semantic course search
+*/
 
 const TR_CONFIG = {
-  supabaseUrl: window.SIMPATICO_CONFIG?.supabaseUrl    || '',
+  supabaseUrl: window.SIMPATICO_CONFIG?.supabaseUrl || '',
   supabaseKey: window.SIMPATICO_CONFIG?.supabaseAnonKey || '',
-  workerUrl:   window.SIMPATICO_CONFIG?.workerUrl       || 'https://simpatico-hr-ats.simpaticohrconsultancy.workers.dev',
-  r2PublicUrl: window.SIMPATICO_CONFIG?.r2PublicUrl     || 'https://files.simpaticohr.in',
+  workerUrl: window.SIMPATICO_CONFIG?.workerUrl || 'https://simpatico-hr-ats.simpaticohrconsultancy.workers.dev',
+  r2PublicUrl: window.SIMPATICO_CONFIG?.r2PublicUrl || 'https://files.simpaticohr.in',
 };
 
 function sb() {
@@ -17,20 +17,20 @@ function sb() {
   return null;
 }
 
-let allCourses       = [];
-let allEnrollments   = [];
-let currentTabId     = 'tab-courses';
+let allCourses = [];
+let allEnrollments = [];
+let currentTabId = 'tab-courses';
 
 const THUMB_PALETTES = {
-  compliance:  ['#ef4444','#b91c1c'],
-  technical:   ['#0ea5e9','#0369a1'],
-  leadership:  ['#f59e0b','#b45309'],
-  soft_skills: ['#10b981','#047857'],
-  onboarding:  ['#8b5cf6','#6d28d9'],
+  compliance: ['#ef4444', '#b91c1c'],
+  technical: ['#0ea5e9', '#0369a1'],
+  leadership: ['#f59e0b', '#b45309'],
+  soft_skills: ['#10b981', '#047857'],
+  onboarding: ['#8b5cf6', '#6d28d9'],
 };
-const THUMB_ICONS = { compliance:'🛡️', technical:'💻', leadership:'🎯', soft_skills:'🤝', onboarding:'🚀' };
+const THUMB_ICONS = { compliance: 'ðŸ›¡ï¸', technical: 'ðŸ’»', leadership: 'ðŸŽ¯', soft_skills: 'ðŸ¤', onboarding: 'ðŸš€' };
 
-(function() {
+(function () {
   async function boot() {
     await Promise.all([
       loadUser(),
@@ -52,7 +52,7 @@ async function loadUser() {
   const { data: { user } } = await client.auth.getUser();
   if (user) {
     const el = document.getElementById('user-avatar');
-    if (el) el.textContent = user.email?.slice(0,2).toUpperCase() || 'U';
+    if (el) el.textContent = user.email?.slice(0, 2).toUpperCase() || 'U';
   }
 }
 
@@ -65,9 +65,9 @@ async function loadCourses() {
   if (cid) query = query.eq('tenant_id', cid);
   let { data, error } = await query;
 
-  // Fallback: if company_id column doesn't exist yet (400), retry without it
-  if (error && (error.code === '42703' || (error.message && error.message.includes('company_id')))) {
-    console.warn('[training] company_id not found on training_courses, retrying without filter');
+  // Fallback: if tenant_id/company_id column doesn't exist yet (400), retry without it
+  if (error && (error.code === '42703' || (error.message && (error.message.includes('tenant_id') || error.message.includes('company_id'))))) {
+    console.warn('[training] tenant_id/company_id not found on training_courses, retrying without filter');
     const fallback = await client.from('training_courses').select('*').order('created_at', { ascending: false });
     data = fallback.data; error = fallback.error;
   }
@@ -76,7 +76,7 @@ async function loadCourses() {
   allCourses = data || [];
 
   setText('stat-courses', allCourses.length);
-  setText('stat-courses-sub', `${allCourses.filter(c=>c.is_required).length} compliance required`);
+  setText('stat-courses-sub', `${allCourses.filter(c => c.is_required).length} compliance required`);
 
   renderCourses(allCourses);
 }
@@ -88,24 +88,24 @@ function renderCourses(list) {
     return;
   }
   grid.innerHTML = list.map(c => {
-    const pal = THUMB_PALETTES[c.category] || ['#6366f1','#4338ca'];
-    const ico = THUMB_ICONS[c.category] || '📚';
+    const pal = THUMB_PALETTES[c.category] || ['#6366f1', '#4338ca'];
+    const ico = THUMB_ICONS[c.category] || 'ðŸ“š';
     return `
     <div class="course-card" onclick="openCourse('${c.id}')">
       <div class="course-thumb" style="--thumb-a:${pal[0]};--thumb-b:${pal[1]}">
         ${c.thumbnail_key
-          ? `<img src="${TR_CONFIG.r2PublicUrl}/${c.thumbnail_key}" style="width:100%;height:100%;object-fit:cover">`
-          : `<span class="thumb-icon">${ico}</span>`
-        }
+        ? `<img src="${TR_CONFIG.r2PublicUrl}/${c.thumbnail_key}" style="width:100%;height:100%;object-fit:cover">`
+        : `<span class="thumb-icon">${ico}</span>`
+      }
         <span class="thumb-badge">${formatEnum(c.category)}</span>
       </div>
       <div class="course-body">
         <div class="course-title">${c.title}</div>
-        <div class="course-meta">${c.description ? c.description.slice(0,90)+'…' : 'No description'}</div>
+        <div class="course-meta">${c.description ? c.description.slice(0, 90) + 'â€¦' : 'No description'}</div>
         ${c.is_required ? '<span class="hr-badge hr-badge-danger">Compliance Required</span>' : ''}
       </div>
       <div class="course-footer">
-        <div class="course-stat">⏱ <strong>${c.duration_hours || '—'}h</strong></div>
+        <div class="course-stat">â± <strong>${c.duration_hours || 'â€”'}h</strong></div>
         <div style="display:flex;gap:6px">
           <button class="hr-btn hr-btn-ghost hr-btn-sm" onclick="event.stopPropagation();enrollCourseModal('${c.id}')">Enroll</button>
           <button class="hr-btn hr-btn-ghost hr-btn-sm" onclick="event.stopPropagation();editCourse('${c.id}')">Edit</button>
@@ -119,7 +119,7 @@ async function loadEnrollments() {
   const client = sb(); if (!client) return;
   const cid = typeof getCompanyId === 'function' ? getCompanyId() : null;
   if (!cid) { allEnrollments = []; renderEnrollmentsTable([]); return; }
-  const thirtyDaysAgo = new Date(Date.now() - 30*24*60*60*1000).toISOString();
+  const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
 
   let { data, error } = await client
     .from('training_enrollments')
@@ -131,9 +131,9 @@ async function loadEnrollments() {
     .eq('tenant_id', cid)
     .order('enrolled_at', { ascending: false });
 
-  // Fallback: if company_id column doesn't exist yet on training_enrollments
-  if (error && (error.code === '42703' || (error.message && error.message.includes('company_id')))) {
-    console.warn('[training] company_id filter failed on training_enrollments, retrying without');
+  // Fallback: if tenant_id/company_id column doesn't exist yet on training_enrollments
+  if (error && (error.code === '42703' || (error.message && (error.message.includes('tenant_id') || error.message.includes('company_id'))))) {
+    console.warn('[training] tenant_id/company_id filter failed on training_enrollments, retrying without');
     const fallback = await client.from('training_enrollments')
       .select('*, employees(first_name, last_name), training_courses(*)')
       .order('enrolled_at', { ascending: false });
@@ -144,7 +144,7 @@ async function loadEnrollments() {
   allEnrollments = data || [];
 
   const completions = allEnrollments.filter(e => e.status === 'completed' && new Date(e.completed_at) >= new Date(thirtyDaysAgo)).length;
-  const learners    = new Set(allEnrollments.map(e => e.employees ? `${e.employees.first_name}_${e.employees.last_name}` : null).filter(Boolean)).size;
+  const learners = new Set(allEnrollments.map(e => e.employees ? `${e.employees.first_name}_${e.employees.last_name}` : null).filter(Boolean)).size;
   setText('stat-completions', completions);
   setText('stat-learners', learners);
 
@@ -154,19 +154,19 @@ async function loadEnrollments() {
 function renderEnrollmentsTable(list) {
   const tbody = document.getElementById('enrollments-tbody'); if (!tbody) return;
   tbody.innerHTML = list.slice(0, 50).map(e => {
-    const emp    = e.employees;
+    const emp = e.employees;
     const course = e.training_courses;
-    const name   = emp ? `${emp.first_name} ${emp.last_name}` : '—';
-    const pct    = e.progress || (e.status === 'completed' ? 100 : 0);
-    const badge  = e.status === 'completed'
+    const name = emp ? `${emp.first_name} ${emp.last_name}` : 'â€”';
+    const pct = e.progress || (e.status === 'completed' ? 100 : 0);
+    const badge = e.status === 'completed'
       ? '<span class="hr-badge hr-badge-active">Completed</span>'
       : e.status === 'in_progress'
-      ? '<span class="hr-badge hr-badge-info">In Progress</span>'
-      : '<span class="hr-badge hr-badge-pending">Enrolled</span>';
+        ? '<span class="hr-badge hr-badge-info">In Progress</span>'
+        : '<span class="hr-badge hr-badge-pending">Enrolled</span>';
     return `<tr>
       <td><span class="primary-text">${name}</span></td>
-      <td>${course?.title || '—'}</td>
-      <td>${e.enrolled_at ? new Date(e.enrolled_at).toLocaleDateString() : '—'}</td>
+      <td>${course?.title || 'â€”'}</td>
+      <td>${e.enrolled_at ? new Date(e.enrolled_at).toLocaleDateString() : 'â€”'}</td>
       <td>
         <div style="display:flex;align-items:center;gap:10px">
           <div class="hr-progress-bar" style="width:80px"><div class="hr-progress-fill" style="width:${pct}%"></div></div>
@@ -182,8 +182,8 @@ async function loadComplianceReport() {
   const client = sb(); if (!client) return;
   const cid = typeof getCompanyId === 'function' ? getCompanyId() : null;
   if (!cid) return;
-  const today = new Date().toISOString().slice(0,10);
-  const soon  = new Date(Date.now() + 30*24*60*60*1000).toISOString().slice(0,10);
+  const today = new Date().toISOString().slice(0, 10);
+  const soon = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
 
   let { data, error } = await client
     .from('training_enrollments')
@@ -197,9 +197,9 @@ async function loadComplianceReport() {
     .or(`due_date.lte.${soon},status.eq.overdue`)
     .order('due_date');
 
-  // Fallback: if company_id column doesn't exist yet
-  if (error && (error.code === '42703' || (error.message && error.message.includes('company_id')))) {
-    console.warn('[training] company_id filter failed on compliance query, retrying without');
+  // Fallback: if tenant_id/company_id column doesn't exist yet
+  if (error && (error.code === '42703' || (error.message && (error.message.includes('tenant_id') || error.message.includes('company_id'))))) {
+    console.warn('[training] tenant_id/company_id filter failed on compliance query, retrying without');
     const fallback = await client.from('training_enrollments')
       .select('*, employees(first_name, last_name), training_courses(*)')
       .eq('training_courses.is_required', true)
@@ -218,19 +218,19 @@ async function loadComplianceReport() {
     return;
   }
   tbody.innerHTML = compliance.map(e => {
-    const emp  = e.employees;
-    const name = emp ? `${emp.first_name} ${emp.last_name}` : '—';
-    const due  = e.due_date ? new Date(e.due_date) : null;
+    const emp = e.employees;
+    const name = emp ? `${emp.first_name} ${emp.last_name}` : 'â€”';
+    const due = e.due_date ? new Date(e.due_date) : null;
     const isOverdue = due && due < new Date() && e.status !== 'completed';
     const badge = e.status === 'completed'
       ? '<span class="hr-badge hr-badge-active">Done</span>'
       : isOverdue
-      ? '<span class="hr-badge hr-badge-danger">Overdue</span>'
-      : '<span class="hr-badge hr-badge-pending">Pending</span>';
+        ? '<span class="hr-badge hr-badge-danger">Overdue</span>'
+        : '<span class="hr-badge hr-badge-pending">Pending</span>';
     return `<tr>
       <td><span class="primary-text">${name}</span></td>
-      <td>${e.training_courses?.title || '—'}</td>
-      <td style="${isOverdue?'color:var(--hr-danger)':''}">${due ? due.toLocaleDateString() : '—'}</td>
+      <td>${e.training_courses?.title || 'â€”'}</td>
+      <td style="${isOverdue ? 'color:var(--hr-danger)' : ''}">${due ? due.toLocaleDateString() : 'â€”'}</td>
       <td>${badge}</td>
       <td><button class="hr-btn hr-btn-ghost hr-btn-sm" onclick="sendReminder('${e.id}')">Send Reminder</button></td>
     </tr>`;
@@ -238,73 +238,109 @@ async function loadComplianceReport() {
 }
 
 function filterCourses() {
-  const q    = (document.getElementById('course-search')?.value || '').toLowerCase();
-  const cat  = document.getElementById('category-filter')?.value || '';
+  const q = (document.getElementById('course-search')?.value || '').toLowerCase();
+  const cat = document.getElementById('category-filter')?.value || '';
   const list = allCourses.filter(c =>
-    (!q || c.title.toLowerCase().includes(q) || (c.description||'').toLowerCase().includes(q)) &&
+    (!q || c.title.toLowerCase().includes(q) || (c.description || '').toLowerCase().includes(q)) &&
     (!cat || c.category === cat)
   );
   renderCourses(list);
 }
 window.filterCourses = filterCourses;
 
-// ── Create Course ──
+// â”€â”€ Create Course â”€â”€
 window.openCreateCourseModal = () => openModal('create-course-modal');
 
-window.saveCourse = async function() {
+/**
+ * Ensures the Supabase session is fresh and returns valid auth headers.
+ * This prevents 401s caused by expired tokens.
+ */
+async function getFreshAuthHeaders() {
+  const client = sb();
+  if (client) {
+    try {
+      const { data } = await client.auth.getSession();
+      if (data?.session?.access_token) {
+        window._simpatico_liveToken = data.session.access_token;
+      }
+    } catch (e) {
+      console.warn('[training] Failed to refresh session:', e.message);
+    }
+  }
+  return typeof window.authHeaders === 'function' ? window.authHeaders() : {};
+}
+
+window.saveCourse = async function () {
+  console.log('[training.js saveCourse] Starting course creation...');
   const title = document.getElementById('course-title')?.value.trim();
   if (!title) { showToast('Course title required', 'error'); return; }
 
   const payload = {
     title,
-    description:    document.getElementById('course-desc')?.value.trim() || null,
-    category:       document.getElementById('course-category')?.value,
+    description: document.getElementById('course-desc')?.value.trim() || null,
+    category: document.getElementById('course-category')?.value,
     duration_hours: parseFloat(document.getElementById('course-duration')?.value) || null,
-    content_url:    document.getElementById('course-url')?.value.trim() || null,
-    is_required:    document.getElementById('course-required')?.checked || false,
+    content_url: document.getElementById('course-url')?.value.trim() || null,
+    is_required: document.getElementById('course-required')?.checked || false,
   };
 
   try {
+    const headers = await getFreshAuthHeaders();
+    console.log('[training.js saveCourse] Headers:', { hasAuth: !!headers.Authorization, tenantId: headers['X-Tenant-ID'] });
     const res = await fetch(`${TR_CONFIG.workerUrl}/training/courses`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      headers: { ...headers, 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     });
     const result = await res.json();
-    if (!res.ok) throw new Error(result.error || 'Failed to create course');
+    if (!res.ok) {
+      const errMsg = result.error?.message || result.error || result.message || 'Failed to create course';
+      throw new Error(errMsg);
+    }
     showToast('Course created!', 'success');
     closeModal('create-course-modal');
     await loadCourses();
   } catch (err) { showToast(err.message, 'error'); }
 };
 
-// ── AI Course Generation via Cloudflare AI ──
-window.generateCourseWithAI = async function() {
+// â”€â”€ AI Course Generation via Cloudflare AI â”€â”€
+window.generateCourseWithAI = async function () {
   const title = document.getElementById('course-title')?.value.trim();
   if (!title) { showToast('Enter a course title first', 'error'); return; }
   showToast('Generating course with AI…', 'info');
 
   try {
+    const headers = await getFreshAuthHeaders();
     const res = await fetch(`${TR_CONFIG.workerUrl}/ai/generate-course`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      headers: { ...headers, 'Content-Type': 'application/json' },
       body: JSON.stringify({ title }),
     });
-    const { description, duration_hours } = await res.json();
+    const json = await res.json();
+    if (!res.ok) {
+      const errMsg = json.error?.message || json.error || json.message || 'AI generation failed';
+      throw new Error(errMsg);
+    }
+    // Backend wraps response in apiResponse: { success, data: { description, duration_hours } }
+    const aiData = json.data || json;
     const descEl = document.getElementById('course-desc');
-    const durEl  = document.getElementById('course-duration');
-    if (descEl && description) descEl.value = description;
-    if (durEl && duration_hours) durEl.value = duration_hours;
+    const durEl = document.getElementById('course-duration');
+    if (descEl && aiData.description) descEl.value = aiData.description;
+    if (durEl && aiData.duration_hours) durEl.value = aiData.duration_hours;
     showToast('AI generated course details', 'success');
-  } catch { showToast('AI generation failed', 'error'); }
+  } catch (err) {
+    console.error('[training] AI generation error:', err);
+    showToast(err.message || 'AI generation failed', 'error');
+  }
 };
 
-// ── Semantic course search via Cloudflare Vectorize ──
-window.semanticSearch = async function(query) {
+// â”€â”€ Semantic course search via Cloudflare Vectorize â”€â”€
+window.semanticSearch = async function (query) {
   try {
+    const headers = await getFreshAuthHeaders();
     const res = await fetch(`${TR_CONFIG.workerUrl}/training/semantic-search`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      headers: { ...headers, 'Content-Type': 'application/json' },
       body: JSON.stringify({ query }),
     });
     const { courses } = await res.json();
@@ -312,7 +348,7 @@ window.semanticSearch = async function(query) {
   } catch { filterCourses(); }
 };
 
-// ── Enroll ──
+// â”€â”€ Enroll â”€â”€
 function loadEnrollSelects() {
   const coursesSel = document.getElementById('enroll-course');
   if (coursesSel) {
@@ -322,19 +358,19 @@ function loadEnrollSelects() {
       coursesSel.appendChild(opt);
     });
   }
-  // Employees — filtered by company_id
+  // Employees â€” filtered by company_id
   const empSel = document.getElementById('enroll-employees');
   if (empSel && sb()) {
-    let query = sb().from('employees').select('id,first_name,last_name').eq('status','active').order('first_name');
+    let query = sb().from('employees').select('id,first_name,last_name').eq('status', 'active').order('first_name');
     const cid = typeof getCompanyId === 'function' ? getCompanyId() : null;
     if (cid) query = query.eq('tenant_id', cid);
     query.then(({ data }) => {
-        (data||[]).forEach(e => {
-          const opt = document.createElement('option');
-          opt.value = e.id; opt.textContent = `${e.first_name} ${e.last_name}`;
-          empSel.appendChild(opt);
-        });
+      (data || []).forEach(e => {
+        const opt = document.createElement('option');
+        opt.value = e.id; opt.textContent = `${e.first_name} ${e.last_name}`;
+        empSel.appendChild(opt);
       });
+    });
   }
 }
 
@@ -345,19 +381,20 @@ window.enrollCourseModal = (courseId) => {
   openModal('enroll-modal');
 };
 
-window.enrollEmployees = async function() {
-  const courseId   = document.getElementById('enroll-course')?.value;
-  const sel        = document.getElementById('enroll-employees');
-  const empIds     = sel ? Array.from(sel.selectedOptions).map(o => o.value) : [];
-  const due        = document.getElementById('enroll-due')?.value || null;
+window.enrollEmployees = async function () {
+  const courseId = document.getElementById('enroll-course')?.value;
+  const sel = document.getElementById('enroll-employees');
+  const empIds = sel ? Array.from(sel.selectedOptions).map(o => o.value) : [];
+  const due = document.getElementById('enroll-due')?.value || null;
 
   if (!courseId) { showToast('Select a course', 'error'); return; }
   if (empIds.length === 0) { showToast('Select at least one employee', 'error'); return; }
 
   try {
+    const headers = await getFreshAuthHeaders();
     const res = await fetch(`${TR_CONFIG.workerUrl}/training/enroll`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      headers: { ...headers, 'Content-Type': 'application/json' },
       body: JSON.stringify({ course_id: courseId, employee_ids: empIds, due_date: due }),
     });
     if (!res.ok) throw new Error('Enrollment failed');
@@ -367,57 +404,58 @@ window.enrollEmployees = async function() {
   } catch (err) { showToast(err.message, 'error'); }
 };
 
-window.sendReminder = async function(enrollmentId) {
+window.sendReminder = async function (enrollmentId) {
   try {
+    const headers = await getFreshAuthHeaders();
     await fetch(`${TR_CONFIG.workerUrl}/training/remind/${enrollmentId}`, {
-      method: 'POST', headers: authHeaders(),
+      method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' },
     });
     showToast('Reminder sent', 'success');
   } catch { showToast('Failed to send reminder', 'error'); }
 };
 
-window.openCourse = function(id) {
+window.openCourse = function (id) {
   location.href = `course-viewer.html?id=${id}`;
 };
-window.editCourse = function(id) {
+window.editCourse = function (id) {
   // Pre-fill the course modal with existing data for editing
   const course = allCourses.find(c => c.id === id);
   if (!course) { showToast('Course not found', 'error'); return; }
   const titleEl = document.getElementById('course-title');
-  const descEl  = document.getElementById('course-desc');
-  const catEl   = document.getElementById('course-category');
-  const durEl   = document.getElementById('course-duration');
-  const urlEl   = document.getElementById('course-url');
-  const reqEl   = document.getElementById('course-required');
+  const descEl = document.getElementById('course-desc');
+  const catEl = document.getElementById('course-category');
+  const durEl = document.getElementById('course-duration');
+  const urlEl = document.getElementById('course-url');
+  const reqEl = document.getElementById('course-required');
   if (titleEl) titleEl.value = course.title || '';
-  if (descEl)  descEl.value  = course.description || '';
-  if (catEl)   catEl.value   = course.category || '';
-  if (durEl)   durEl.value   = course.duration_hours || '';
-  if (urlEl)   urlEl.value   = course.content_url || '';
-  if (reqEl)   reqEl.checked = course.is_required || false;
+  if (descEl) descEl.value = course.description || '';
+  if (catEl) catEl.value = course.category || '';
+  if (durEl) durEl.value = course.duration_hours || '';
+  if (urlEl) urlEl.value = course.content_url || '';
+  if (reqEl) reqEl.checked = course.is_required || false;
   openModal('create-course-modal');
 };
 
-// ── Tab switching ──
-window.switchTab = function(btn, tabId) {
+// â”€â”€ Tab switching â”€â”€
+window.switchTab = function (btn, tabId) {
   document.querySelectorAll('.hr-tab').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
-  ['tab-courses','tab-paths','tab-compliance','tab-enrollments'].forEach(id => {
+  ['tab-courses', 'tab-paths', 'tab-compliance', 'tab-enrollments'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.style.display = id === tabId ? 'block' : 'none';
   });
   currentTabId = tabId;
 };
 
-// ── Utility functions: use shared-utils.js if loaded, else define locally ──
+// â”€â”€ Utility functions: use shared-utils.js if loaded, else define locally â”€â”€
 if (typeof window.authHeaders === 'undefined') {
-  window.authHeaders = function() {
-    let token = localStorage.getItem('simpatico_token') || localStorage.getItem('sb-token') || '';
+  window.authHeaders = function () {
+    let token = window._simpatico_liveToken || ''; if (!token) { token = localStorage.getItem('sh_token') || localStorage.getItem('simpatico_token') || localStorage.getItem('sb-token') || ''; }
     if (!token) {
       for (let i = 0; i < localStorage.length; i++) {
         const k = localStorage.key(i);
         if (k && k.startsWith('sb-') && k.endsWith('-auth-token')) {
-          try { token = JSON.parse(localStorage.getItem(k)).access_token; } catch(e){}
+          try { token = JSON.parse(localStorage.getItem(k)).access_token; } catch (e) { }
         }
       }
     }
@@ -430,23 +468,21 @@ if (typeof window.authHeaders === 'undefined') {
   };
 }
 if (typeof window.formatEnum === 'undefined') {
-  window.formatEnum = function(s) { return (s||'').replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase()); };
+  window.formatEnum = function (s) { return (s || '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()); };
 }
 if (typeof window.setText === 'undefined') {
-  window.setText = function(id, v) { const el = document.getElementById(id); if (el) el.textContent = v; };
+  window.setText = function (id, v) { const el = document.getElementById(id); if (el) el.textContent = v; };
 }
 if (typeof window.openModal === 'undefined') {
-  window.openModal  = id => { const el = document.getElementById(id); if(el) { el.classList.add('open'); el.classList.add('active'); } };
+  window.openModal = id => { const el = document.getElementById(id); if (el) { el.classList.add('open'); el.classList.add('active'); } };
 }
 if (typeof window.closeModal === 'undefined') {
-  window.closeModal = id => { const el = document.getElementById(id); if(el) { el.classList.remove('open'); el.classList.remove('active'); } };
+  window.closeModal = id => { const el = document.getElementById(id); if (el) { el.classList.remove('open'); el.classList.remove('active'); } };
 }
 if (typeof window.showToast === 'undefined') {
-  window.showToast = (msg, type='info') => {
+  window.showToast = (msg, type = 'info') => {
     const c = document.getElementById('toasts'); if (!c) return;
     const t = document.createElement('div'); t.className = `hr-toast ${type}`; t.textContent = msg;
     c.appendChild(t); setTimeout(() => t.remove(), 3800);
   };
 }
-
-
