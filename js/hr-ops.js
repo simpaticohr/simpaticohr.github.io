@@ -62,17 +62,31 @@ async function loadLeave() {
   const today = new Date().toISOString().slice(0,10);
   const thirtyDaysAgo = new Date(Date.now()-30*24*60*60*1000).toISOString().slice(0,10);
 
-  const { data, error } = await client
+  let { data, error } = await client
     .from('leave_requests')
     .select(`
       id, type, from_date, to_date, days, reason, status, created_at,
-      employees(first_name, last_name),
+      employees!employee_id(first_name, last_name),
       approver:employees!approver_id(first_name, last_name)
     `)
     .eq('tenant_id', cid)
     .order('created_at', { ascending: false });
 
-  if (error) { console.error(error); return; }
+  // Fallback: if tenant_id column doesn't exist, retry without filter
+  if (error && (error.code === '42703' || error.message?.includes('tenant_id'))) {
+    console.warn('[leaves] tenant_id filter failed, retrying without:', error.message);
+    const fb = await client
+      .from('leave_requests')
+      .select(`
+        id, type, from_date, to_date, days, reason, status, created_at,
+        employees!employee_id(first_name, last_name),
+        approver:employees!approver_id(first_name, last_name)
+      `)
+      .order('created_at', { ascending: false });
+    data = fb.data; error = fb.error;
+  }
+
+  if (error) { console.error('[leaves] Load error:', error); return; }
   allLeave = data || [];
 
   const pending  = allLeave.filter(l => l.status === 'pending').length;
@@ -240,17 +254,31 @@ async function loadTickets() {
   const client = sb(); if (!client) return;
   const cid = typeof getCompanyId === 'function' ? getCompanyId() : null;
   if (!cid) { allTickets = []; renderTickets([]); return; }
-  const { data, error } = await client
+  let { data, error } = await client
     .from('hr_tickets')
     .select(`
       id, ticket_number, category, subject, priority, status, created_at,
-      employees(first_name, last_name),
+      employees!employee_id(first_name, last_name),
       assignee:employees!assignee_id(first_name, last_name)
     `)
     .eq('tenant_id', cid)
     .order('created_at', { ascending: false });
 
-  if (error) { console.error(error); return; }
+  // Fallback: if tenant_id column doesn't exist, retry without filter
+  if (error && (error.code === '42703' || error.message?.includes('tenant_id'))) {
+    console.warn('[tickets] tenant_id filter failed, retrying without:', error.message);
+    const fb = await client
+      .from('hr_tickets')
+      .select(`
+        id, ticket_number, category, subject, priority, status, created_at,
+        employees!employee_id(first_name, last_name),
+        assignee:employees!assignee_id(first_name, last_name)
+      `)
+      .order('created_at', { ascending: false });
+    data = fb.data; error = fb.error;
+  }
+
+  if (error) { console.error('[tickets] Load error:', error); return; }
   allTickets = data || [];
   setText('stat-tickets', allTickets.filter(t => t.status === 'open').length);
   renderTickets(allTickets);
