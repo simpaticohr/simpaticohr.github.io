@@ -565,10 +565,54 @@
                 <button class="vc-btn" id="vcCam" onclick="toggleCam()"><i class="fas fa-video"></i></button>
                 <button class="vc-btn active-mic" id="vcMic" onclick="toggleMic()"><i class="fas fa-microphone"></i></button>
                 <button class="vc-btn active-mic" id="vcScreen" onclick="toggleScreenShare()"><i class="fas fa-desktop"></i></button>
+                <button class="vc-btn code-toggle" id="vcCode" onclick="CodeEditor.toggle()" title="Toggle Code Editor"><i class="fas fa-code"></i></button>
                 <button class="vc-btn" onclick="goFullscreen()"><i class="fas fa-expand"></i></button>
                 <button class="vc-btn end" onclick="endSession()"><i class="fas fa-phone-slash"></i></button>
             </div>
         </div>
+    </div>
+</div>
+
+
+<!-- CODE EDITOR PANEL -->
+<div class="code-editor-panel" id="codeEditorPanel">
+    <div class="code-header">
+        <div class="code-header-left">
+            <div class="code-header-title"><i class="fas fa-code"></i> Code Challenge</div>
+        </div>
+        <button class="code-close-btn" onclick="CodeEditor.hide()"><i class="fas fa-times"></i></button>
+    </div>
+    <div class="code-challenge-info">
+        <div class="code-challenge-title" id="codeTitle">Challenge</div>
+        <div class="code-challenge-desc" id="codeDescription">Write your solution below.</div>
+    </div>
+    <div class="code-lang-bar">
+        <button class="lang-btn active" data-lang="javascript" onclick="CodeEditor.setLanguage('javascript')">
+            <i class="fab fa-js-square"></i> JavaScript
+        </button>
+        <button class="lang-btn" data-lang="python" onclick="CodeEditor.setLanguage('python')">
+            <i class="fab fa-python"></i> Python
+        </button>
+        <button class="lang-btn" data-lang="typescript" onclick="CodeEditor.setLanguage('typescript')">
+            <i class="fas fa-code"></i> TypeScript
+        </button>
+        <button class="lang-btn" data-lang="sql" onclick="CodeEditor.setLanguage('sql')">
+            <i class="fas fa-database"></i> SQL
+        </button>
+        <button class="lang-btn" data-lang="java" onclick="CodeEditor.setLanguage('java')">
+            <i class="fab fa-java"></i> Java
+        </button>
+    </div>
+    <div class="code-editor-body">
+        <div id="monacoContainer"></div>
+    </div>
+    <div class="code-footer">
+        <div class="code-footer-left">
+            <i class="fas fa-keyboard"></i> <span id="codeLineCount">Lines: 0</span>
+        </div>
+        <button class="code-submit-btn" id="codeSubmitBtn" onclick="CodeEditor.submitCode()">
+            <i class="fas fa-paper-plane"></i> Submit
+        </button>
     </div>
 </div>
 
@@ -577,7 +621,10 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="../js/hr-config.js"></script>
 <script src="../js/shared-utils.js"></script>
+<link rel="stylesheet" href="interview-enhancements.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.45.0/min/vs/loader.min.js"></script>
 <script src="../js/supabase-client.js"></script>
+<script src="interview-enhancements.js"></script>
 <script>
 // ══════════════════════════════════════════════════════════════
 // CONFIG
@@ -1237,6 +1284,19 @@ async function startSession() {
     startProctoring();
     initAudioVisualizer();
 
+    // Initialize face monitoring (real detection via canvas analysis)
+    if (window.FaceMonitor) {
+        FaceMonitor.init(document.getElementById('selfVid'));
+    }
+
+    // Initialize Monaco code editor
+    if (typeof require !== 'undefined') {
+        require.config({ paths: { 'vs': 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.45.0/min/vs' }});
+        require(['vs/editor/editor.main'], function() {
+            if (window.CodeEditor) CodeEditor.init();
+        });
+    }
+
     try { await document.documentElement.requestFullscreen(); } catch(e) {}
 
     setOrbState('thinking');
@@ -1742,28 +1802,32 @@ async function endSession() {
     if (screenStream) screenStream.getTracks().forEach(t => t.stop());
     if (audioCtx)    audioCtx.close().catch(() => {});
 
+    if (window.FaceMonitor) FaceMonitor.stop();
+    if (window.CodeEditor) CodeEditor.hide();
     renderResultsScreen(score, violations);
 }
 
 function renderResultsScreen(score, violations) {
-    document.getElementById('interviewApp').innerHTML = `
-        <div style="display:flex;align-items:center;justify-content:center;min-height:100vh;padding:20px;background:var(--bg-dark)">
-            <div style="background:var(--bg-card);border-radius:24px;padding:50px;max-width:480px;width:100%;text-align:center;border:1px solid var(--border);box-shadow:0 0 80px rgba(99,102,241,.1)">
-                <div style="font-size:64px;margin-bottom:20px;color:var(--success)"><i class="fas fa-check-circle"></i></div>
-                <h2 style="font-size:26px;margin-bottom:12px;font-weight:800;color:var(--text)">Interview Completed</h2>
-                <p style="color:var(--text-dim);font-size:15px;margin-bottom:32px;line-height:1.6">
-                    Thank you for your time. Your interview has been successfully submitted and our hiring team will review it shortly.
-                </p>
-                <div style="padding:16px;background:var(--bg-surface);border-radius:12px;border:1px solid var(--border);margin-bottom:32px">
-                    <p style="font-size:14px;font-weight:600;color:var(--text-muted);margin:0">
-                        You may now close this window and disconnect.
+    // Use enhanced results renderer if available
+    if (window.ResultsRenderer) {
+        const codeSubmissions = window.CodeEditor ? CodeEditor.getSubmissions() : [];
+        document.getElementById('interviewApp').innerHTML = ResultsRenderer.render(score, violations, engine, trust, codeSubmissions);
+    } else {
+        // Fallback to simple screen
+        document.getElementById('interviewApp').innerHTML = `
+            <div style="display:flex;align-items:center;justify-content:center;min-height:100vh;padding:20px;background:var(--bg-dark)">
+                <div style="background:var(--bg-card);border-radius:24px;padding:50px;max-width:480px;width:100%;text-align:center;border:1px solid var(--border);box-shadow:0 0 80px rgba(99,102,241,.1)">
+                    <div style="font-size:64px;margin-bottom:20px;color:var(--success)"><i class="fas fa-check-circle"></i></div>
+                    <h2 style="font-size:26px;margin-bottom:12px;font-weight:800;color:var(--text)">Interview Completed</h2>
+                    <p style="color:var(--text-dim);font-size:15px;margin-bottom:32px;line-height:1.6">
+                        Thank you for your time. Your interview has been successfully submitted and our hiring team will review it shortly.
                     </p>
+                    <button onclick="window.close()" style="display:inline-flex;align-items:center;gap:8px;padding:14px 32px;background:var(--bg-surface);color:var(--text);border:1px solid var(--border);border-radius:14px;cursor:pointer;font-weight:700;font-size:15px;transition:all 0.2s">
+                        <i class="fas fa-times"></i> Close Window
+                    </button>
                 </div>
-                <button onclick="window.close()" style="display:inline-flex;align-items:center;gap:8px;padding:14px 32px;background:var(--bg-surface);color:var(--text);border:1px solid var(--border);border-radius:14px;cursor:pointer;font-weight:700;font-size:15px;transition:all 0.2s" onmouseover="this.style.background='var(--border)'" onmouseout="this.style.background='var(--bg-surface)'">
-                    <i class="fas fa-times"></i> Close Window
-                </button>
-            </div>
-        </div>`;
+            </div>`;
+    }
 }
 
 // ══════════════════════════════════════════════════════════════
