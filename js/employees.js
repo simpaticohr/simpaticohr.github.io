@@ -607,7 +607,7 @@ window.openAiInsight = async function(empId) {
   try {
     const res = await fetch(`${EMP_CONFIG.workerUrl}/ai/employee-insight`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      headers: { 'Content-Type': 'application/json', ...(typeof window.authHeaders === 'function' ? window.authHeaders() : {}) },
       body: JSON.stringify({ employee_id: empId }),
     });
     const { insight } = await res.json();

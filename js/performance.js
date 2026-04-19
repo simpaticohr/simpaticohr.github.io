@@ -46,7 +46,15 @@ async function loadCycles() {
   const cid = typeof getCompanyId === 'function' ? getCompanyId() : null;
   let query = client.from('review_cycles').select('id, name, type, start_date, end_date, status').order('created_at', { ascending: false });
   if (cid) query = query.eq('tenant_id', cid);
-  const { data } = await query;
+  let { data, error } = await query;
+
+  if (error && (error.code === '42703' || (error.message && (error.message.includes('tenant_id') || error.message.includes('company_id'))))) {
+    console.warn('[performance] tenant_id/company_id not found on review_cycles, retrying without filter');
+    const fallback = await client.from('review_cycles').select('id, name, type, start_date, end_date, status').order('created_at', { ascending: false });
+    data = fallback.data; error = fallback.error;
+  }
+
+  if (error) { console.error(error); return; }
   allCycles = data || [];
 
   const sel = document.getElementById('cycle-filter'); if (!sel) return;
@@ -64,15 +72,29 @@ async function loadReviews() {
   const client = sb(); if (!client) return;
   const cid = typeof getCompanyId === 'function' ? getCompanyId() : null;
   if (!cid) { allReviews = []; renderReviews([]); return; }
-  const { data, error } = await client
+  let { data, error } = await client
     .from('performance_reviews')
     .select(`
       id, period, score, status, created_at, cycle_id,
-      employees(id, first_name, last_name, job_title, departments(name)),
+      employees:employees!employee_id(id, first_name, last_name, job_title, departments(name)),
       reviewer:employees!reviewer_id(first_name, last_name)
     `)
     .eq('tenant_id', cid)
     .order('created_at', { ascending: false });
+
+  if (error && (error.code === '42703' || (error.message && (error.message.includes('tenant_id') || error.message.includes('company_id'))))) {
+    console.warn('[performance] tenant_id/company_id not found on performance_reviews, retrying without filter');
+    const fallback = await client
+    .from('performance_reviews')
+    .select(`
+      id, period, score, status, created_at, cycle_id,
+      employees:employees!employee_id(id, first_name, last_name, job_title, departments(name)),
+      reviewer:employees!reviewer_id(first_name, last_name)
+    `)
+    
+    .order('created_at', { ascending: false });
+    data = fallback.data; error = fallback.error;
+  }
 
   if (error) { console.error(error); return; }
   allReviews = data || [];
@@ -133,7 +155,7 @@ async function loadGoals() {
   const client = sb(); if (!client) return;
   const cid = typeof getCompanyId === 'function' ? getCompanyId() : null;
   if (!cid) { allGoals = []; renderGoals([]); return; }
-  const { data, error } = await client
+  let { data, error } = await client
     .from('performance_goals')
     .select(`
       id, title, description, period, progress, status, due_date,
@@ -141,6 +163,19 @@ async function loadGoals() {
     `)
     .eq('tenant_id', cid)
     .order('due_date');
+
+  if (error && (error.code === '42703' || (error.message && (error.message.includes('tenant_id') || error.message.includes('company_id'))))) {
+    console.warn('[performance] tenant_id/company_id not found on performance_goals, retrying without filter');
+    const fallback = await client
+    .from('performance_goals')
+    .select(`
+      id, title, description, period, progress, status, due_date,
+      employees(first_name, last_name)
+    `)
+    
+    .order('due_date');
+    data = fallback.data; error = fallback.error;
+  }
 
   if (error) { console.error(error); return; }
   allGoals = data || [];
@@ -220,16 +255,24 @@ function renderNineBox() {
 }
 
 // ── Review Cycle ──
-window.openReviewCycleModal = () => openModal('review-cycle-modal');
+window.openReviewCycleModal = () => {
+  const d = new Date();
+  const defName = `Q${Math.floor(d.getMonth()/3)+1} ${d.getFullYear()} Performance Review`;
+  const nameInput = document.getElementById('cycle-name');
+  if (nameInput && !nameInput.value) nameInput.value = defName;
+  openModal('review-cycle-modal');
+};
 
 window.createReviewCycle = async function() {
-  const name  = document.getElementById('cycle-name')?.value.trim();
-  const start = document.getElementById('cycle-start')?.value;
-  const end   = document.getElementById('cycle-end')?.value;
-  const type  = document.getElementById('cycle-type')?.value;
-  const scope = document.getElementById('cycle-scope')?.value;
-
-  if (!name) { showToast('Cycle name required', 'error'); return; }
+  let name = document.getElementById('cycle-name')?.value.trim();
+  if (!name) { 
+     const d = new Date();
+     name = `Q${Math.floor(d.getMonth()/3)+1} ${d.getFullYear()} Performance Review`;
+  }
+  const start = document.getElementById('cycle-start')?.value || new Date().toISOString().split('T')[0];
+  const end   = document.getElementById('cycle-end')?.value || new Date(Date.now() + 90 * 86400000).toISOString().split('T')[0];
+  const type  = document.getElementById('cycle-type')?.value || 'annual';
+  const scope = document.getElementById('cycle-scope')?.value || 'all';
 
   try {
     const client = sb();
@@ -248,7 +291,7 @@ window.createReviewCycle = async function() {
       console.warn('[Performance] Direct insert failed, falling back to worker:', error.message);
       const res = await fetch(`${PERF_CONFIG.workerUrl}/performance/cycles`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        headers: { 'Content-Type': 'application/json', ...(typeof window.authHeaders === 'function' ? window.authHeaders() : {}) },
         body: JSON.stringify({ name, start_date: start, end_date: end, type, scope }),
       });
       if (!res.ok) throw new Error('Failed to create cycle via worker');
@@ -266,7 +309,7 @@ window.generateAIFeedback = async function(reviewId) {
   try {
     const res = await fetch(`${PERF_CONFIG.workerUrl}/ai/performance-feedback`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      headers: { 'Content-Type': 'application/json', ...(typeof window.authHeaders === 'function' ? window.authHeaders() : {}) },
       body: JSON.stringify({ review_id: reviewId }),
     });
     const { feedback } = await res.json();

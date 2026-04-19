@@ -583,20 +583,21 @@ async function verifyViaSupabase(token, env) {
   });
   if (!res.ok) throw new AuthError("Invalid or expired remote token");
   const user = await res.json();
-  // Fetch their profile using the service key to get role
-  const pRes = await fetch(
-    `${env.SUPABASE_URL}/rest/v1/users?auth_id=eq.${user.id}&select=role`,
-    {
-      headers: {
-        apikey: env.SUPABASE_SERVICE_KEY,
-        Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
+  let role = user.app_metadata?.role || user.user_metadata?.role || "viewer";
+  if (role === "viewer") {
+    const pRes = await fetch(
+      `${env.SUPABASE_URL}/rest/v1/employees?auth_id=eq.${user.id}&select=role`,
+      {
+        headers: {
+          apikey: env.SUPABASE_SERVICE_KEY,
+          Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
+        },
       },
-    },
-  );
-  let role = "viewer";
-  if (pRes.ok) {
-    const profs = await pRes.json();
-    if (profs && profs.length > 0) role = profs[0].role || "viewer";
+    );
+    if (pRes.ok) {
+      const profs = await pRes.json();
+      if (profs && profs.length > 0) role = profs[0].role || "viewer";
+    }
   }
   return { sub: user.id, email: user.email, role };
 }
@@ -1609,7 +1610,7 @@ async function handleCreateCycle(request, env, ctx) {
   const res = await sbFetch(
     env,
     "POST",
-    "/rest/v1/performance_cycles",
+    "/rest/v1/review_cycles",
     { ...sanitize(body), tenant_id: ctx.tenantId },
     false,
     ctx.tenantId,
@@ -1623,7 +1624,7 @@ async function handleListCycles(request, env, ctx) {
   const res = await sbFetch(
     env,
     "GET",
-    `/rest/v1/performance_cycles?select=*&order=start_date.desc`,
+    `/rest/v1/review_cycles?select=*&order=start_date.desc`,
     null,
     false,
     ctx.tenantId,
@@ -1665,7 +1666,7 @@ async function handleGetEmployeeReviews(request, env, ctx, [employeeId]) {
   const res = await sbFetch(
     env,
     "GET",
-    `/rest/v1/performance_reviews?employee_id=eq.${employeeId}&select=*,performance_cycles(name)&order=submitted_at.desc`,
+    `/rest/v1/performance_reviews?employee_id=eq.${employeeId}&select=*,review_cycles(name)&order=submitted_at.desc`,
     null,
     false,
     ctx.tenantId,
@@ -1716,7 +1717,7 @@ async function handleCreateGoal(request, env, ctx) {
   const res = await sbFetch(
     env,
     "POST",
-    "/rest/v1/goals",
+    "/rest/v1/performance_goals",
     {
       ...sanitize(body),
       progress: 0,
@@ -1738,7 +1739,7 @@ async function handleListGoals(request, env, ctx, _, url) {
   const res = await sbFetch(
     env,
     "GET",
-    `/rest/v1/goals?select=*${qp}&order=created_at.desc`,
+    `/rest/v1/performance_goals?select=*${qp}&order=created_at.desc`,
     null,
     false,
     ctx.tenantId,
@@ -1752,7 +1753,7 @@ async function handleUpdateGoal(request, env, ctx, [id]) {
   const res = await sbFetch(
     env,
     "PATCH",
-    `/rest/v1/goals?id=eq.${id}`,
+    `/rest/v1/performance_goals?id=eq.${id}`,
     sanitize(body),
     false,
     ctx.tenantId,
