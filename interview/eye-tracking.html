@@ -1,207 +1,1410 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Eye Tracking Module - SimpaticoHR</title>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <title>Eye Tracking & Gaze Analysis — SimpaticoHR</title>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&display=swap"
+        rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+    <!-- MediaPipe Face Mesh for REAL eye tracking -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"
+        crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js" crossorigin="anonymous"></script>
     <style>
-        *{margin:0;padding:0;box-sizing:border-box}
-        body{font-family:'Inter',sans-serif;background:#0F172A;color:#E2E8F0;min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:30px}
-        .module-card{background:#1E293B;border-radius:16px;padding:30px;max-width:700px;width:100%;border:1px solid #334155}
-        h1{font-size:22px;font-weight:800;margin-bottom:6px;display:flex;align-items:center;gap:10px}
-        h1 i{color:#4F46E5}
-        .subtitle{color:#64748B;font-size:14px;margin-bottom:24px}
-        .camera-area{position:relative;width:100%;height:400px;background:#000;border-radius:12px;overflow:hidden;margin-bottom:20px}
-        .camera-area video{width:100%;height:100%;object-fit:cover}
-        .gaze-dot{position:absolute;width:20px;height:20px;background:rgba(79,70,229,.7);border:2px solid #818CF8;border-radius:50%;transform:translate(-50%,-50%);transition:all .15s;z-index:10;pointer-events:none;box-shadow:0 0 15px rgba(79,70,229,.5)}
-        .eye-boxes{position:absolute;inset:0;pointer-events:none}
-        .face-outline{position:absolute;border:2px solid #10B981;border-radius:8px;transition:all .2s}
-        .eye-region{position:absolute;border:1px solid #FCD34D;border-radius:4px;transition:all .2s}
-        .stats-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:20px}
-        .stat-item{background:#0F172A;border-radius:10px;padding:14px;text-align:center;border:1px solid #334155}
-        .stat-val{font-size:24px;font-weight:800}
-        .stat-lbl{font-size:11px;color:#64748B;margin-top:4px;text-transform:uppercase;letter-spacing:.5px}
-        .heatmap-area{width:100%;height:200px;background:#0F172A;border-radius:10px;border:1px solid #334155;position:relative;overflow:hidden;margin-bottom:16px}
-        .heatmap-area canvas{width:100%;height:100%}
-        .log-area{max-height:200px;overflow-y:auto;background:#0F172A;border-radius:10px;padding:12px;border:1px solid #334155;font-size:12px}
-        .log-entry{padding:4px 0;border-bottom:1px solid #1E293B;display:flex;gap:8px}
-        .log-time{color:#475569;min-width:55px}
-        .log-msg{color:#94A3B8}
-        .log-msg.warning{color:#F59E0B}
-        .log-msg.error{color:#EF4444}
-        .controls{display:flex;gap:10px;margin-bottom:20px}
-        .ctrl-btn{padding:10px 20px;border-radius:10px;border:none;font-size:13px;font-weight:600;cursor:pointer;font-family:'Inter',sans-serif;display:flex;align-items:center;gap:6px}
-        .ctrl-start{background:#4F46E5;color:#fff}
-        .ctrl-stop{background:#DC2626;color:#fff}
-        .ctrl-cal{background:#334155;color:#E2E8F0}
+        :root {
+            --bg-dark: #07070c;
+            --bg-card: #0f0f17;
+            --bg-surface: #16162a;
+            --bg-elevated: #1e1e38;
+            --border: #252540;
+            --border-light: #2f2f4a;
+            --primary: #6366f1;
+            --primary-bright: #818cf8;
+            --primary-glow: rgba(99, 102, 241, .4);
+            --accent: #22d3ee;
+            --success: #10b981;
+            --warning: #f59e0b;
+            --danger: #ef4444;
+            --text: #e8e8f0;
+            --text-dim: #8b8ba7;
+            --text-muted: #525272;
+            --gradient-primary: linear-gradient(135deg, #6366f1 0%, #a855f7 50%, #ec4899 100%);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        html,
+        body {
+            font-family: 'Inter', sans-serif;
+            background: var(--bg-dark);
+            color: var(--text);
+            min-height: 100vh;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        ::selection {
+            background: var(--primary-glow);
+            color: #fff;
+        }
+
+        .ambient {
+            position: fixed;
+            inset: 0;
+            pointer-events: none;
+            z-index: 0;
+            background:
+                radial-gradient(ellipse at 20% 20%, rgba(99, 102, 241, .08), transparent 50%),
+                radial-gradient(ellipse at 80% 80%, rgba(168, 85, 247, .06), transparent 50%);
+        }
+
+        body {
+            display: flex;
+            align-items: flex-start;
+            justify-content: center;
+            padding: 32px 20px;
+            position: relative;
+        }
+
+        .module-card {
+            background: linear-gradient(180deg, var(--bg-card), #0a0a14);
+            border: 1px solid var(--border);
+            border-radius: 24px;
+            padding: 32px;
+            max-width: 820px;
+            width: 100%;
+            position: relative;
+            z-index: 1;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, .4);
+        }
+
+        /* Header */
+        .header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 24px;
+            padding-bottom: 20px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+        }
+
+        .header-icon {
+            width: 44px;
+            height: 44px;
+            border-radius: 12px;
+            background: var(--gradient-primary);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+            color: #fff;
+            box-shadow: 0 4px 20px var(--primary-glow);
+        }
+
+        h1 {
+            font-size: 20px;
+            font-weight: 800;
+            letter-spacing: -0.02em;
+        }
+
+        .subtitle {
+            color: var(--text-dim);
+            font-size: 13px;
+            margin-top: 2px;
+        }
+
+        .status-pill {
+            padding: 6px 14px;
+            border-radius: 20px;
+            font-size: 10px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .status-pill.idle {
+            background: rgba(100, 116, 139, .15);
+            color: var(--text-dim);
+            border: 1px solid var(--border);
+        }
+
+        .status-pill.active {
+            background: rgba(16, 185, 129, .15);
+            color: #6ee7b7;
+            border: 1px solid rgba(16, 185, 129, .3);
+        }
+
+        .status-pill.calibrating {
+            background: rgba(245, 158, 11, .15);
+            color: #fcd34d;
+            border: 1px solid rgba(245, 158, 11, .3);
+            animation: pulse 1.5s infinite;
+        }
+
+        @keyframes pulse {
+
+            0%,
+            100% {
+                opacity: 1;
+            }
+
+            50% {
+                opacity: .6;
+            }
+        }
+
+        .status-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: currentColor;
+            box-shadow: 0 0 6px currentColor;
+        }
+
+        /* Error banner */
+        #eyeError {
+            display: none;
+            padding: 12px 16px;
+            background: linear-gradient(135deg, rgba(239, 68, 68, .15), rgba(239, 68, 68, .05));
+            border: 1px solid rgba(239, 68, 68, .3);
+            border-radius: 12px;
+            font-size: 13px;
+            color: #fca5a5;
+            margin-bottom: 20px;
+            line-height: 1.5;
+            align-items: flex-start;
+            gap: 10px;
+        }
+
+        #eyeError.show {
+            display: flex;
+        }
+
+        /* Camera Area */
+        .camera-area {
+            position: relative;
+            width: 100%;
+            height: 420px;
+            background: #000;
+            border-radius: 16px;
+            overflow: hidden;
+            margin-bottom: 20px;
+            border: 1px solid var(--border-light);
+            box-shadow:
+                0 10px 40px rgba(0, 0, 0, .5),
+                0 0 40px rgba(99, 102, 241, .08);
+        }
+
+        .camera-area video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transform: scaleX(-1);
+        }
+
+        .camera-canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 5;
+            transform: scaleX(-1);
+        }
+
+        .gaze-dot {
+            position: absolute;
+            width: 24px;
+            height: 24px;
+            background: radial-gradient(circle, rgba(99, 102, 241, .8), rgba(99, 102, 241, .2));
+            border: 2px solid var(--primary-bright);
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+            transition: all .15s cubic-bezier(.4, 0, .2, 1);
+            z-index: 10;
+            pointer-events: none;
+            box-shadow:
+                0 0 20px rgba(99, 102, 241, .6),
+                0 0 40px rgba(99, 102, 241, .3);
+        }
+
+        .gaze-dot::before {
+            content: '';
+            position: absolute;
+            inset: 6px;
+            background: var(--primary-bright);
+            border-radius: 50%;
+            animation: gazePulse 1.5s infinite;
+        }
+
+        @keyframes gazePulse {
+
+            0%,
+            100% {
+                transform: scale(1);
+                opacity: 1;
+            }
+
+            50% {
+                transform: scale(1.3);
+                opacity: .5;
+            }
+        }
+
+        /* Placeholder when no video */
+        .camera-placeholder {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 14px;
+            color: var(--text-muted);
+            z-index: 1;
+        }
+
+        .camera-placeholder.hidden {
+            display: none;
+        }
+
+        .camera-placeholder i {
+            font-size: 48px;
+            opacity: .5;
+        }
+
+        .camera-placeholder-text {
+            font-size: 13px;
+            font-weight: 500;
+            text-align: center;
+        }
+
+        /* Overlay info */
+        .camera-overlay-top {
+            position: absolute;
+            top: 14px;
+            left: 14px;
+            right: 14px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            z-index: 15;
+            pointer-events: none;
+        }
+
+        .ml-badge {
+            padding: 6px 12px;
+            background: rgba(0, 0, 0, .6);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, .1);
+            border-radius: 8px;
+            font-size: 10px;
+            font-weight: 700;
+            color: #fff;
+            letter-spacing: .5px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .ml-badge i {
+            color: var(--primary-bright);
+        }
+
+        .fps-badge {
+            padding: 6px 10px;
+            background: rgba(0, 0, 0, .6);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, .1);
+            border-radius: 8px;
+            font-size: 10px;
+            color: #6ee7b7;
+            font-family: 'JetBrains Mono', monospace;
+            font-weight: 600;
+        }
+
+        /* Controls */
+        .controls {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 24px;
+            flex-wrap: wrap;
+        }
+
+        .ctrl-btn {
+            padding: 11px 20px;
+            border-radius: 11px;
+            border: none;
+            font-size: 13px;
+            font-weight: 700;
+            cursor: pointer;
+            font-family: 'Inter', sans-serif;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            transition: all .2s cubic-bezier(.4, 0, .2, 1);
+            letter-spacing: .2px;
+        }
+
+        .ctrl-start {
+            background: var(--gradient-primary);
+            color: #fff;
+            box-shadow: 0 4px 16px var(--primary-glow);
+        }
+
+        .ctrl-start:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 24px var(--primary-glow);
+        }
+
+        .ctrl-stop {
+            background: linear-gradient(135deg, var(--danger), #dc2626);
+            color: #fff;
+            box-shadow: 0 4px 16px rgba(239, 68, 68, .3);
+        }
+
+        .ctrl-stop:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 24px rgba(239, 68, 68, .4);
+        }
+
+        .ctrl-cal {
+            background: var(--bg-elevated);
+            color: var(--text);
+            border: 1px solid var(--border);
+        }
+
+        .ctrl-cal:hover {
+            background: var(--bg-surface);
+            transform: translateY(-1px);
+        }
+
+        .ctrl-btn:disabled {
+            opacity: .4;
+            cursor: not-allowed;
+            transform: none !important;
+        }
+
+        /* Stats Grid */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 12px;
+            margin-bottom: 24px;
+        }
+
+        .stat-item {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            padding: 16px;
+            text-align: center;
+            position: relative;
+            overflow: hidden;
+            transition: all .2s;
+        }
+
+        .stat-item:hover {
+            transform: translateY(-2px);
+            border-color: var(--border-light);
+        }
+
+        .stat-item::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 2px;
+        }
+
+        .stat-item.attention::before {
+            background: linear-gradient(90deg, #10b981, #06b6d4);
+        }
+
+        .stat-item.deviations::before {
+            background: linear-gradient(90deg, #f59e0b, #ec4899);
+        }
+
+        .stat-item.lookaway::before {
+            background: linear-gradient(90deg, #ef4444, #b91c1c);
+        }
+
+        .stat-item.blinks::before {
+            background: linear-gradient(90deg, #22d3ee, #0ea5e9);
+        }
+
+        .stat-val {
+            font-size: 28px;
+            font-weight: 900;
+            letter-spacing: -.02em;
+            margin-bottom: 4px;
+            font-variant-numeric: tabular-nums;
+            line-height: 1;
+        }
+
+        .stat-lbl {
+            font-size: 10px;
+            color: var(--text-muted);
+            margin-top: 6px;
+            text-transform: uppercase;
+            letter-spacing: .8px;
+            font-weight: 600;
+        }
+
+        .stat-sub {
+            font-size: 10px;
+            color: var(--text-dim);
+            margin-top: 2px;
+        }
+
+        /* Section title */
+        .section-title {
+            font-size: 13px;
+            font-weight: 800;
+            text-transform: uppercase;
+            letter-spacing: .8px;
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            color: var(--text);
+        }
+
+        .section-title-icon {
+            width: 26px;
+            height: 26px;
+            border-radius: 7px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 11px;
+        }
+
+        .section-title-icon.heatmap {
+            background: rgba(245, 158, 11, .15);
+            color: #fcd34d;
+        }
+
+        .section-title-icon.log {
+            background: rgba(59, 130, 246, .15);
+            color: #60a5fa;
+        }
+
+        .section-title-icon.metrics {
+            background: rgba(99, 102, 241, .15);
+            color: var(--primary-bright);
+        }
+
+        /* Heatmap */
+        .heatmap-wrap {
+            margin-bottom: 24px;
+        }
+
+        .heatmap-area {
+            width: 100%;
+            height: 220px;
+            background: #0a0a14;
+            border-radius: 12px;
+            border: 1px solid var(--border);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .heatmap-area canvas {
+            width: 100%;
+            height: 100%;
+        }
+
+        .heatmap-legend {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-top: 10px;
+            padding: 10px 14px;
+            background: var(--bg-surface);
+            border-radius: 10px;
+            font-size: 11px;
+        }
+
+        .heatmap-legend-label {
+            color: var(--text-muted);
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: .5px;
+        }
+
+        .heatmap-gradient {
+            flex: 1;
+            height: 10px;
+            background: linear-gradient(90deg,
+                    rgba(99, 102, 241, 0) 0%,
+                    rgba(99, 102, 241, .3) 30%,
+                    rgba(168, 85, 247, .6) 60%,
+                    rgba(236, 72, 153, .9) 100%);
+            border-radius: 5px;
+            border: 1px solid var(--border-light);
+        }
+
+        .heatmap-scale {
+            display: flex;
+            justify-content: space-between;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 10px;
+            color: var(--text-dim);
+            min-width: 60px;
+        }
+
+        /* Log */
+        .log-area {
+            max-height: 240px;
+            overflow-y: auto;
+            background: #0a0a14;
+            border-radius: 12px;
+            padding: 8px;
+            border: 1px solid var(--border);
+            font-size: 12px;
+        }
+
+        .log-area::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        .log-area::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        .log-area::-webkit-scrollbar-thumb {
+            background: var(--border-light);
+            border-radius: 3px;
+        }
+
+        .log-entry {
+            padding: 8px 10px;
+            border-radius: 8px;
+            display: flex;
+            align-items: flex-start;
+            gap: 10px;
+            margin-bottom: 3px;
+            transition: background .2s;
+        }
+
+        .log-entry:hover {
+            background: var(--bg-surface);
+        }
+
+        .log-time {
+            color: var(--text-muted);
+            min-width: 68px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 11px;
+            font-weight: 600;
+            flex-shrink: 0;
+        }
+
+        .log-icon {
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 9px;
+            flex-shrink: 0;
+            margin-top: 1px;
+        }
+
+        .log-icon.info {
+            background: rgba(99, 102, 241, .15);
+            color: var(--primary-bright);
+        }
+
+        .log-icon.warning {
+            background: rgba(245, 158, 11, .15);
+            color: #fcd34d;
+        }
+
+        .log-icon.error {
+            background: rgba(239, 68, 68, .15);
+            color: #fca5a5;
+        }
+
+        .log-icon.success {
+            background: rgba(16, 185, 129, .15);
+            color: #6ee7b7;
+        }
+
+        .log-msg {
+            color: var(--text);
+            flex: 1;
+            font-weight: 500;
+            line-height: 1.4;
+        }
+
+        .log-msg.warning {
+            color: #fcd34d;
+        }
+
+        .log-msg.error {
+            color: #fca5a5;
+        }
+
+        .log-msg.success {
+            color: #6ee7b7;
+        }
+
+        /* Model loading overlay */
+        .model-loading {
+            position: absolute;
+            inset: 0;
+            background: rgba(10, 10, 20, .9);
+            backdrop-filter: blur(10px);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 14px;
+            z-index: 20;
+            border-radius: 16px;
+        }
+
+        .model-loading.hidden {
+            display: none;
+        }
+
+        .spinner {
+            width: 40px;
+            height: 40px;
+            border: 3px solid var(--border);
+            border-top-color: var(--primary);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        .model-loading-text {
+            font-size: 13px;
+            color: var(--text);
+            font-weight: 600;
+        }
+
+        .model-loading-sub {
+            font-size: 11px;
+            color: var(--text-dim);
+            text-align: center;
+            max-width: 280px;
+        }
+
+        @media (max-width: 700px) {
+            .stats-grid {
+                grid-template-columns: 1fr 1fr;
+            }
+
+            .module-card {
+                padding: 20px;
+            }
+
+            .camera-area {
+                height: 280px;
+            }
+        }
     </style>
 </head>
+
 <body>
+    <div class="ambient"></div>
+
     <div class="module-card">
-        <h1><i class="fas fa-eye"></i> Eye Tracking Module</h1>
-        <p class="subtitle">Real-time gaze tracking and attention monitoring for proctored interviews</p>
-        <div id="eyeError" style="display:none;padding:10px 14px;background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.3);border-radius:10px;font-size:13px;color:#F87171;margin-bottom:16px"></div>
+        <div class="header">
+            <div class="header-left">
+                <div class="header-icon"><i class="fas fa-eye"></i></div>
+                <div>
+                    <h1>Eye Tracking & Gaze Analysis</h1>
+                    <p class="subtitle">Real-time ML-powered attention monitoring</p>
+                </div>
+            </div>
+            <div class="status-pill idle" id="statusPill">
+                <div class="status-dot"></div>
+                <span id="statusText">Idle</span>
+            </div>
+        </div>
+
+        <div id="eyeError"></div>
 
         <div class="camera-area" id="cameraArea">
             <video id="trackVideo" autoplay muted playsinline></video>
+            <canvas class="camera-canvas" id="meshCanvas"></canvas>
             <div class="gaze-dot" id="gazeDot" style="display:none"></div>
-            <div class="eye-boxes" id="eyeBoxes"></div>
+
+            <div class="camera-overlay-top">
+                <div class="ml-badge">
+                    <i class="fas fa-microchip"></i>
+                    <span>MediaPipe Face Mesh</span>
+                </div>
+                <div class="fps-badge" id="fpsBadge">-- FPS</div>
+            </div>
+
+            <div class="camera-placeholder" id="camPlaceholder">
+                <i class="fas fa-video-slash"></i>
+                <div class="camera-placeholder-text">
+                    Click "Start Tracking" to begin<br>
+                    <span style="font-size:11px;opacity:.7">Uses your webcam for real-time eye tracking</span>
+                </div>
+            </div>
+
+            <div class="model-loading hidden" id="modelLoading">
+                <div class="spinner"></div>
+                <div class="model-loading-text">Loading ML Models</div>
+                <div class="model-loading-sub">Initializing MediaPipe Face Mesh (468 facial landmarks). This may take a
+                    few seconds...</div>
+            </div>
         </div>
 
         <div class="controls">
-            <button class="ctrl-btn ctrl-start" id="btnStartTrack" onclick="startTracking()"><i class="fas fa-play"></i> Start Tracking</button>
-            <button class="ctrl-btn ctrl-stop" id="btnStopTrack" onclick="stopTracking()" style="display:none"><i class="fas fa-stop"></i> Stop</button>
-            <button class="ctrl-btn ctrl-cal" onclick="calibrate()"><i class="fas fa-crosshairs"></i> Calibrate</button>
+            <button class="ctrl-btn ctrl-start" id="btnStartTrack" onclick="startTracking()">
+                <i class="fas fa-play"></i> Start Tracking
+            </button>
+            <button class="ctrl-btn ctrl-stop" id="btnStopTrack" onclick="stopTracking()" style="display:none">
+                <i class="fas fa-stop"></i> Stop
+            </button>
+            <button class="ctrl-btn ctrl-cal" onclick="calibrate()" id="btnCalibrate" disabled>
+                <i class="fas fa-crosshairs"></i> Calibrate
+            </button>
+            <button class="ctrl-btn ctrl-cal" onclick="resetStats()" id="btnReset">
+                <i class="fas fa-rotate"></i> Reset
+            </button>
         </div>
 
+        <!-- Stats Grid -->
+        <div class="section-title">
+            <div class="section-title-icon metrics"><i class="fas fa-chart-line"></i></div>
+            Live Metrics
+        </div>
         <div class="stats-grid">
-            <div class="stat-item"><div class="stat-val" id="attScore" style="color:#10B981">100%</div><div class="stat-lbl">Attention Score</div></div>
-            <div class="stat-item"><div class="stat-val" id="gazeDeviations" style="color:#F59E0B">0</div><div class="stat-lbl">Gaze Deviations</div></div>
-            <div class="stat-item"><div class="stat-val" id="lookAway" style="color:#EF4444">0</div><div class="stat-lbl">Looked Away</div></div>
+            <div class="stat-item attention">
+                <div class="stat-val" id="attScore" style="color:#10b981">100%</div>
+                <div class="stat-lbl">Attention</div>
+                <div class="stat-sub" id="attSub">Focused</div>
+            </div>
+            <div class="stat-item deviations">
+                <div class="stat-val" id="gazeDeviations" style="color:#f59e0b">0</div>
+                <div class="stat-lbl">Deviations</div>
+                <div class="stat-sub">Gaze off-center</div>
+            </div>
+            <div class="stat-item lookaway">
+                <div class="stat-val" id="lookAway" style="color:#ef4444">0</div>
+                <div class="stat-lbl">Looked Away</div>
+                <div class="stat-sub">Major events</div>
+            </div>
+            <div class="stat-item blinks">
+                <div class="stat-val" id="blinkCount" style="color:#22d3ee">0</div>
+                <div class="stat-lbl">Blinks</div>
+                <div class="stat-sub" id="blinkRate">0/min</div>
+            </div>
         </div>
 
-        <h3 style="font-size:14px;margin-bottom:10px;display:flex;align-items:center;gap:6px"><i class="fas fa-fire" style="color:#F59E0B"></i> Gaze Heatmap</h3>
-        <div class="heatmap-area"><canvas id="heatmapCanvas"></canvas></div>
+        <!-- Heatmap -->
+        <div class="heatmap-wrap">
+            <div class="section-title">
+                <div class="section-title-icon heatmap"><i class="fas fa-fire"></i></div>
+                Gaze Heatmap
+            </div>
+            <div class="heatmap-area">
+                <canvas id="heatmapCanvas"></canvas>
+            </div>
+            <div class="heatmap-legend">
+                <span class="heatmap-legend-label">Density</span>
+                <div class="heatmap-scale"><span>Low</span></div>
+                <div class="heatmap-gradient"></div>
+                <div class="heatmap-scale"><span>High</span></div>
+            </div>
+        </div>
 
-        <h3 style="font-size:14px;margin-bottom:10px;display:flex;align-items:center;gap:6px"><i class="fas fa-list" style="color:#3B82F6"></i> Tracking Log</h3>
+        <!-- Log -->
+        <div class="section-title">
+            <div class="section-title-icon log"><i class="fas fa-list"></i></div>
+            Event Log
+        </div>
         <div class="log-area" id="trackLog"></div>
     </div>
 
     <script>
-        let videoStream = null;
-        let tracking = false;
-        let trackInterval = null;
-        let attentionScore = 100;
-        let deviations = 0;
-        let lookAwayCount = 0;
-        let gazePoints = [];
-        let heatmapCtx = null;
-        let logEntries = [];
+        'use strict';
 
-        // Setup canvas
-        const canvas = document.getElementById('heatmapCanvas');
-        canvas.width = canvas.parentElement.offsetWidth;
-        canvas.height = 200;
-        heatmapCtx = canvas.getContext('2d');
-        heatmapCtx.fillStyle = '#0F172A';
-        heatmapCtx.fillRect(0, 0, canvas.width, canvas.height);
+        // ═══════════════════════════════════════════════════════════
+        // ELITE EYE TRACKING MODULE
+        // Uses MediaPipe Face Mesh for REAL eye tracking
+        // ═══════════════════════════════════════════════════════════
+
+        const state = {
+            videoStream: null,
+            tracking: false,
+            faceMesh: null,
+            camera: null,
+            animationId: null,
+
+            // Metrics
+            attentionScore: 100,
+            deviations: 0,
+            lookAwayCount: 0,
+            blinkCount: 0,
+            lastBlinkTime: 0,
+            blinkStartTime: Date.now(),
+            isBlinking: false,
+
+            // Tracking state
+            consecutiveLookAway: 0,
+            lookAwayStartTime: null,
+            calibrated: false,
+            calibrationData: null,
+
+            // FPS calculation
+            frameCount: 0,
+            fpsTime: Date.now(),
+            fps: 0,
+
+            // Heatmap
+            gazePoints: [],
+            heatmapCtx: null,
+
+            // Logs
+            logEntries: [],
+
+            // Canvas refs
+            meshCanvas: null,
+            meshCtx: null,
+            video: null,
+        };
+
+        // MediaPipe Face Mesh landmark indices
+        const LANDMARKS = {
+            // Left eye (from user perspective)
+            LEFT_EYE: [33, 7, 163, 144, 145, 153, 154, 155, 133, 173, 157, 158, 159, 160, 161, 246],
+            LEFT_IRIS: [468, 469, 470, 471, 472],
+            // Right eye
+            RIGHT_EYE: [362, 382, 381, 380, 374, 373, 390, 249, 263, 466, 388, 387, 386, 385, 384, 398],
+            RIGHT_IRIS: [473, 474, 475, 476, 477],
+            // Face outline key points
+            FACE_OVAL: [10, 338, 297, 332, 284, 251, 389, 356, 454, 323, 361, 288, 397, 365, 379, 378, 400, 377, 152, 148, 176, 149, 150, 136, 172, 58, 132, 93, 234, 127, 162, 21, 54, 103, 67, 109],
+        };
+
+        function init() {
+            state.video = document.getElementById('trackVideo');
+            state.meshCanvas = document.getElementById('meshCanvas');
+            state.meshCtx = state.meshCanvas.getContext('2d');
+
+            const heatmapCanvas = document.getElementById('heatmapCanvas');
+            heatmapCanvas.width = heatmapCanvas.parentElement.offsetWidth;
+            heatmapCanvas.height = 220;
+            state.heatmapCtx = heatmapCanvas.getContext('2d');
+            state.heatmapCtx.fillStyle = '#0a0a14';
+            state.heatmapCtx.fillRect(0, 0, heatmapCanvas.width, heatmapCanvas.height);
+
+            addLog('info', 'Eye tracking module initialized');
+            addLog('info', 'Click "Start Tracking" to request camera access');
+        }
 
         async function startTracking() {
             try {
-                videoStream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480, facingMode: 'user' } });
-                document.getElementById('trackVideo').srcObject = videoStream;
+                document.getElementById('modelLoading').classList.remove('hidden');
+                document.getElementById('camPlaceholder').classList.add('hidden');
+                setStatus('calibrating', 'Initializing...');
+
+                // Request camera
+                state.videoStream = await navigator.mediaDevices.getUserMedia({
+                    video: {
+                        width: { ideal: 640 },
+                        height: { ideal: 480 },
+                        facingMode: 'user'
+                    }
+                });
+                state.video.srcObject = state.videoStream;
+
+                await new Promise(resolve => state.video.onloadedmetadata = resolve);
+
+                // Set canvas size
+                state.meshCanvas.width = state.video.videoWidth;
+                state.meshCanvas.height = state.video.videoHeight;
+
+                addLog('success', 'Camera access granted');
+                addLog('info', 'Loading MediaPipe Face Mesh model...');
+
+                // Initialize MediaPipe
+                state.faceMesh = new FaceMesh({
+                    locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`
+                });
+
+                state.faceMesh.setOptions({
+                    maxNumFaces: 2,  // Detect up to 2 faces (for multi-person detection)
+                    refineLandmarks: true,  // Enable iris tracking
+                    minDetectionConfidence: 0.5,
+                    minTrackingConfidence: 0.5,
+                });
+
+                state.faceMesh.onResults(onFaceMeshResults);
+
+                // Start camera feed to MediaPipe
+                state.camera = new Camera(state.video, {
+                    onFrame: async () => {
+                        if (state.tracking) {
+                            await state.faceMesh.send({ image: state.video });
+                        }
+                    },
+                    width: 640,
+                    height: 480
+                });
+
+                await state.camera.start();
+
+                state.tracking = true;
+                state.blinkStartTime = Date.now();
+
                 document.getElementById('btnStartTrack').style.display = 'none';
                 document.getElementById('btnStopTrack').style.display = 'flex';
+                document.getElementById('btnCalibrate').disabled = false;
                 document.getElementById('gazeDot').style.display = 'block';
-                tracking = true;
-                addLog('info', 'Eye tracking started');
+                document.getElementById('modelLoading').classList.add('hidden');
 
-                // Simulate tracking (in production, use TensorFlow.js face-landmarks-detection)
-                trackInterval = setInterval(simulateTracking, 200);
+                setStatus('active', 'Tracking');
+                addLog('success', '✓ MediaPipe Face Mesh loaded (468 landmarks)');
+                addLog('success', '✓ Eye tracking active');
+
             } catch (e) {
+                console.error('Tracking error:', e);
+                document.getElementById('modelLoading').classList.add('hidden');
+                document.getElementById('camPlaceholder').classList.remove('hidden');
+                setStatus('idle', 'Idle');
+
                 const errEl = document.getElementById('eyeError');
-                errEl.textContent = 'Camera access is required for eye tracking. Please allow camera permission and try again.';
-                errEl.style.display = 'block';
+                errEl.innerHTML = `<i class="fas fa-exclamation-triangle" style="font-size:16px;margin-top:1px;flex-shrink:0"></i>
+                <div><strong>Failed to start tracking.</strong><br>
+                ${e.message || 'Camera access denied or ML model failed to load.'}<br>
+                <span style="font-size:11px;color:var(--text-muted)">Make sure you grant camera permission and use a modern browser.</span></div>`;
+                errEl.classList.add('show');
+                addLog('error', 'Failed to start: ' + (e.message || 'Unknown error'));
+            }
+        }
+
+        function onFaceMeshResults(results) {
+            if (!state.tracking) return;
+
+            // Update FPS
+            state.frameCount++;
+            const now = Date.now();
+            if (now - state.fpsTime >= 1000) {
+                state.fps = state.frameCount;
+                state.frameCount = 0;
+                state.fpsTime = now;
+                document.getElementById('fpsBadge').textContent = state.fps + ' FPS';
+            }
+
+            // Clear canvas
+            state.meshCtx.save();
+            state.meshCtx.clearRect(0, 0, state.meshCanvas.width, state.meshCanvas.height);
+
+            // Multi-person detection
+            if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 1) {
+                state.attentionScore = Math.max(0, state.attentionScore - 2);
+                if (state.frameCount % 30 === 0) { // Log only occasionally
+                    addLog('error', `⚠️ Multiple people detected (${results.multiFaceLandmarks.length} faces)`);
+                }
+            }
+
+            if (!results.multiFaceLandmarks || results.multiFaceLandmarks.length === 0) {
+                // No face detected
+                state.consecutiveLookAway++;
+                if (state.consecutiveLookAway === 5) {
+                    addLog('error', 'Face not detected');
+                    state.attentionScore = Math.max(0, state.attentionScore - 5);
+                }
+                state.meshCtx.restore();
+                updateStats();
+                return;
+            }
+
+            state.consecutiveLookAway = 0;
+            const landmarks = results.multiFaceLandmarks[0];
+
+            // Draw face mesh subtly
+            drawFaceMesh(landmarks);
+
+            // Calculate gaze
+            const gaze = calculateGaze(landmarks);
+
+            // Detect blink
+            detectBlink(landmarks);
+
+            // Update gaze dot position
+            updateGazePosition(gaze);
+
+            // Analyze attention
+            analyzeAttention(gaze);
+
+            state.meshCtx.restore();
+            updateStats();
+        }
+
+        function drawFaceMesh(landmarks) {
+            const ctx = state.meshCtx;
+            const w = state.meshCanvas.width;
+            const h = state.meshCanvas.height;
+
+            // Draw face outline
+            ctx.strokeStyle = 'rgba(16, 185, 129, 0.4)';
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            LANDMARKS.FACE_OVAL.forEach((idx, i) => {
+                const p = landmarks[idx];
+                if (i === 0) ctx.moveTo(p.x * w, p.y * h);
+                else ctx.lineTo(p.x * w, p.y * h);
+            });
+            ctx.closePath();
+            ctx.stroke();
+
+            // Draw eyes
+            ctx.strokeStyle = 'rgba(252, 211, 77, 0.8)';
+            ctx.lineWidth = 1.2;
+
+            // Left eye
+            ctx.beginPath();
+            LANDMARKS.LEFT_EYE.forEach((idx, i) => {
+                const p = landmarks[idx];
+                if (i === 0) ctx.moveTo(p.x * w, p.y * h);
+                else ctx.lineTo(p.x * w, p.y * h);
+            });
+            ctx.closePath();
+            ctx.stroke();
+
+            // Right eye
+            ctx.beginPath();
+            LANDMARKS.RIGHT_EYE.forEach((idx, i) => {
+                const p = landmarks[idx];
+                if (i === 0) ctx.moveTo(p.x * w, p.y * h);
+                else ctx.lineTo(p.x * w, p.y * h);
+            });
+            ctx.closePath();
+            ctx.stroke();
+
+            // Draw iris points
+            ctx.fillStyle = 'rgba(99, 102, 241, 0.9)';
+            [...LANDMARKS.LEFT_IRIS, ...LANDMARKS.RIGHT_IRIS].forEach(idx => {
+                const p = landmarks[idx];
+                if (p) {
+                    ctx.beginPath();
+                    ctx.arc(p.x * w, p.y * h, 2, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            });
+        }
+
+        function calculateGaze(landmarks) {
+            // Use iris center (landmark 468 = left iris center, 473 = right iris center)
+            const leftIris = landmarks[468];
+            const rightIris = landmarks[473];
+
+            if (!leftIris || !rightIris) {
+                // Fallback: use eye corners
+                const leftEye = landmarks[33];
+                const rightEye = landmarks[263];
+                return {
+                    x: (leftEye.x + rightEye.x) / 2,
+                    y: (leftEye.y + rightEye.y) / 2,
+                    confidence: 0.5
+                };
+            }
+
+            // Average iris positions
+            const gazeX = (leftIris.x + rightIris.x) / 2;
+            const gazeY = (leftIris.y + rightIris.y) / 2;
+
+            // Compute eye openness to detect if eyes are looking straight
+            const leftEyeTop = landmarks[159];
+            const leftEyeBottom = landmarks[145];
+            const rightEyeTop = landmarks[386];
+            const rightEyeBottom = landmarks[374];
+
+            const leftOpen = Math.abs(leftEyeTop.y - leftEyeBottom.y);
+            const rightOpen = Math.abs(rightEyeTop.y - rightEyeBottom.y);
+            const avgOpen = (leftOpen + rightOpen) / 2;
+
+            return {
+                x: gazeX,
+                y: gazeY,
+                confidence: avgOpen > 0.01 ? 1.0 : 0.3,
+                eyeOpenness: avgOpen
+            };
+        }
+
+        function detectBlink(landmarks) {
+            const leftEyeTop = landmarks[159];
+            const leftEyeBottom = landmarks[145];
+            const rightEyeTop = landmarks[386];
+            const rightEyeBottom = landmarks[374];
+
+            const leftOpen = Math.abs(leftEyeTop.y - leftEyeBottom.y);
+            const rightOpen = Math.abs(rightEyeTop.y - rightEyeBottom.y);
+            const avgOpen = (leftOpen + rightOpen) / 2;
+
+            // Blink threshold (eye closed when avgOpen < 0.015)
+            const isCurrentlyClosed = avgOpen < 0.012;
+
+            if (isCurrentlyClosed && !state.isBlinking) {
+                state.isBlinking = true;
+            } else if (!isCurrentlyClosed && state.isBlinking) {
+                // Blink complete
+                state.isBlinking = false;
+                const timeSinceLastBlink = Date.now() - state.lastBlinkTime;
+                if (timeSinceLastBlink > 200) { // Debounce
+                    state.blinkCount++;
+                    state.lastBlinkTime = Date.now();
+                }
+            }
+        }
+
+        function updateGazePosition(gaze) {
+            const cameraArea = document.getElementById('cameraArea');
+            const rect = cameraArea.getBoundingClientRect();
+            const areaW = cameraArea.offsetWidth;
+            const areaH = cameraArea.offsetHeight;
+
+            // Mirror X (since video is mirrored)
+            const displayX = (1 - gaze.x) * areaW;
+            const displayY = gaze.y * areaH;
+
+            const dot = document.getElementById('gazeDot');
+            dot.style.left = displayX + 'px';
+            dot.style.top = displayY + 'px';
+
+            // Color based on attention
+            const centerX = areaW / 2;
+            const centerY = areaH / 2;
+            const dist = Math.sqrt((displayX - centerX) ** 2 + (displayY - centerY) ** 2);
+            const maxDist = Math.min(areaW, areaH) * 0.4;
+
+            if (dist < maxDist * 0.6) {
+                dot.style.background = 'radial-gradient(circle, rgba(16,185,129,.8), rgba(16,185,129,.2))';
+                dot.style.borderColor = '#6ee7b7';
+                dot.style.boxShadow = '0 0 20px rgba(16,185,129,.6), 0 0 40px rgba(16,185,129,.3)';
+            } else if (dist < maxDist) {
+                dot.style.background = 'radial-gradient(circle, rgba(245,158,11,.8), rgba(245,158,11,.2))';
+                dot.style.borderColor = '#fcd34d';
+                dot.style.boxShadow = '0 0 20px rgba(245,158,11,.6), 0 0 40px rgba(245,158,11,.3)';
+            } else {
+                dot.style.background = 'radial-gradient(circle, rgba(239,68,68,.8), rgba(239,68,68,.2))';
+                dot.style.borderColor = '#fca5a5';
+                dot.style.boxShadow = '0 0 20px rgba(239,68,68,.6), 0 0 40px rgba(239,68,68,.3)';
+            }
+
+            // Add to heatmap
+            state.gazePoints.push({ x: displayX / areaW, y: displayY / areaH });
+            const canvas = document.getElementById('heatmapCanvas');
+            drawHeatmapPoint(
+                (1 - gaze.x) * canvas.width,
+                gaze.y * canvas.height
+            );
+        }
+
+        function analyzeAttention(gaze) {
+            const cameraArea = document.getElementById('cameraArea');
+            const areaW = cameraArea.offsetWidth;
+            const areaH = cameraArea.offsetHeight;
+
+            // Gaze position in display
+            const displayX = (1 - gaze.x) * areaW;
+            const displayY = gaze.y * areaH;
+
+            const centerX = areaW / 2;
+            const centerY = areaH / 2;
+            const dist = Math.sqrt((displayX - centerX) ** 2 + (displayY - centerY) ** 2);
+            const maxDist = Math.min(areaW, areaH) * 0.4;
+
+            const isLookingAtScreen = dist < maxDist;
+
+            if (!isLookingAtScreen) {
+                if (!state.lookAwayStartTime) {
+                    state.lookAwayStartTime = Date.now();
+                } else if (Date.now() - state.lookAwayStartTime > 1500 && state.frameCount % 60 === 0) {
+                    // Significant look away
+                    state.lookAwayCount++;
+                    state.attentionScore = Math.max(0, state.attentionScore - 3);
+                    addLog('error', `Looked away from screen (${Math.round((Date.now() - state.lookAwayStartTime) / 1000)}s)`);
+                    state.lookAwayStartTime = Date.now(); // Reset for next detection
+                }
+
+                // Minor deviation tracking
+                if (state.frameCount % 90 === 0) {
+                    state.deviations++;
+                    state.attentionScore = Math.max(0, state.attentionScore - 0.5);
+                }
+            } else {
+                state.lookAwayStartTime = null;
+                // Gradually restore attention when looking at screen
+                if (state.frameCount % 120 === 0 && state.attentionScore < 100) {
+                    state.attentionScore = Math.min(100, state.attentionScore + 1);
+                }
+            }
+        }
+
+        function drawHeatmapPoint(x, y) {
+            const ctx = state.heatmapCtx;
+            const radius = 25;
+            const gradient = ctx.createRadialGradient(x, y, 0, x, y, radius);
+            gradient.addColorStop(0, 'rgba(236, 72, 153, 0.25)');
+            gradient.addColorStop(0.5, 'rgba(168, 85, 247, 0.1)');
+            gradient.addColorStop(1, 'rgba(99, 102, 241, 0)');
+            ctx.fillStyle = gradient;
+            ctx.beginPath();
+            ctx.arc(x, y, radius, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        function updateStats() {
+            document.getElementById('attScore').textContent = Math.round(state.attentionScore) + '%';
+            document.getElementById('attScore').style.color =
+                state.attentionScore >= 70 ? '#10b981' :
+                    state.attentionScore >= 40 ? '#f59e0b' : '#ef4444';
+            document.getElementById('attSub').textContent =
+                state.attentionScore >= 70 ? 'Focused' :
+                    state.attentionScore >= 40 ? 'Moderate' : 'Distracted';
+
+            document.getElementById('gazeDeviations').textContent = state.deviations;
+            document.getElementById('lookAway').textContent = state.lookAwayCount;
+            document.getElementById('blinkCount').textContent = state.blinkCount;
+
+            const minutesElapsed = (Date.now() - state.blinkStartTime) / 60000;
+            if (minutesElapsed > 0.1) {
+                const rate = Math.round(state.blinkCount / minutesElapsed);
+                document.getElementById('blinkRate').textContent = rate + '/min';
             }
         }
 
         function stopTracking() {
-            tracking = false;
-            clearInterval(trackInterval);
-            if (videoStream) videoStream.getTracks().forEach(t => t.stop());
+            state.tracking = false;
+
+            if (state.camera) {
+                state.camera.stop();
+                state.camera = null;
+            }
+            if (state.faceMesh) {
+                state.faceMesh.close();
+                state.faceMesh = null;
+            }
+            if (state.videoStream) {
+                state.videoStream.getTracks().forEach(t => t.stop());
+                state.videoStream = null;
+            }
+
             document.getElementById('btnStartTrack').style.display = 'flex';
             document.getElementById('btnStopTrack').style.display = 'none';
+            document.getElementById('btnCalibrate').disabled = true;
             document.getElementById('gazeDot').style.display = 'none';
+            document.getElementById('camPlaceholder').classList.remove('hidden');
+            document.getElementById('fpsBadge').textContent = '-- FPS';
+
+            // Clear mesh canvas
+            state.meshCtx.clearRect(0, 0, state.meshCanvas.width, state.meshCanvas.height);
+
+            setStatus('idle', 'Idle');
             addLog('info', 'Eye tracking stopped');
         }
 
         function calibrate() {
-            addLog('info', 'Calibration started — look at the center of your screen for 3 seconds...');
-            attentionScore = 100;
-            deviations = 0;
-            lookAwayCount = 0;
-            updateStats();
-            setTimeout(() => addLog('info', 'Calibration complete'), 3000);
-        }
+            setStatus('calibrating', 'Calibrating');
+            addLog('info', 'Calibration started — look at the center of your screen...');
 
-        function simulateTracking() {
-            if (!tracking) return;
+            state.calibrated = false;
+            state.attentionScore = 100;
+            state.deviations = 0;
+            state.lookAwayCount = 0;
+            state.gazePoints = [];
 
-            const area = document.getElementById('cameraArea');
-            const w = area.offsetWidth;
-            const h = area.offsetHeight;
-
-            // Simulate gaze point (center-biased with noise)
-            const gazeX = w / 2 + (Math.random() - 0.5) * w * 0.4;
-            const gazeY = h / 2 + (Math.random() - 0.5) * h * 0.4;
-
-            // Move gaze dot
-            const dot = document.getElementById('gazeDot');
-            dot.style.left = gazeX + 'px';
-            dot.style.top = gazeY + 'px';
-
-            // Check if gaze is within acceptable bounds
-            const centerX = w / 2, centerY = h / 2;
-            const dist = Math.sqrt((gazeX - centerX) ** 2 + (gazeY - centerY) ** 2);
-            const maxDist = Math.min(w, h) * 0.35;
-            const isLookingAtScreen = dist < maxDist;
-
-            if (!isLookingAtScreen) {
-                const rng = Math.random();
-                if (rng < 0.3) {
-                    deviations++;
-                    attentionScore = Math.max(0, attentionScore - 1);
-                    addLog('warning', 'Gaze deviation - looking away from screen center');
-                }
-                if (rng < 0.1) {
-                    lookAwayCount++;
-                    attentionScore = Math.max(0, attentionScore - 3);
-                    addLog('error', 'Candidate looked away from screen!');
-                    dot.style.background = 'rgba(239,68,68,.7)';
-                    dot.style.borderColor = '#F87171';
-                } else {
-                    dot.style.background = 'rgba(79,70,229,.7)';
-                    dot.style.borderColor = '#818CF8';
-                }
-            } else {
-                dot.style.background = 'rgba(16,185,129,.7)';
-                dot.style.borderColor = '#34D399';
-            }
-
-            // Add to heatmap
-            gazePoints.push({ x: gazeX / w, y: gazeY / h });
-            drawHeatmapPoint(gazeX / w * canvas.width, gazeY / h * canvas.height);
+            // Clear heatmap
+            const canvas = document.getElementById('heatmapCanvas');
+            state.heatmapCtx.fillStyle = '#0a0a14';
+            state.heatmapCtx.fillRect(0, 0, canvas.width, canvas.height);
 
             updateStats();
+
+            setTimeout(() => {
+                state.calibrated = true;
+                setStatus('active', 'Tracking');
+                addLog('success', '✓ Calibration complete');
+            }, 3000);
         }
 
-        function drawHeatmapPoint(x, y) {
-            const gradient = heatmapCtx.createRadialGradient(x, y, 0, x, y, 20);
-            gradient.addColorStop(0, 'rgba(79, 70, 229, 0.15)');
-            gradient.addColorStop(1, 'rgba(79, 70, 229, 0)');
-            heatmapCtx.fillStyle = gradient;
-            heatmapCtx.fillRect(x - 20, y - 20, 40, 40);
+        function resetStats() {
+            state.attentionScore = 100;
+            state.deviations = 0;
+            state.lookAwayCount = 0;
+            state.blinkCount = 0;
+            state.blinkStartTime = Date.now();
+            state.gazePoints = [];
+
+            // Clear heatmap
+            const canvas = document.getElementById('heatmapCanvas');
+            state.heatmapCtx.fillStyle = '#0a0a14';
+            state.heatmapCtx.fillRect(0, 0, canvas.width, canvas.height);
+
+            updateStats();
+            addLog('info', 'Statistics reset');
         }
 
-        function updateStats() {
-            document.getElementById('attScore').textContent = attentionScore + '%';
-            document.getElementById('attScore').style.color = attentionScore >= 70 ? '#10B981' : attentionScore >= 40 ? '#F59E0B' : '#EF4444';
-            document.getElementById('gazeDeviations').textContent = deviations;
-            document.getElementById('lookAway').textContent = lookAwayCount;
+        function setStatus(type, text) {
+            const pill = document.getElementById('statusPill');
+            pill.className = 'status-pill ' + type;
+            document.getElementById('statusText').textContent = text;
         }
 
         function addLog(level, msg) {
-            const time = new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-            logEntries.unshift({ time, level, msg });
+            const time = new Date().toLocaleTimeString('en-IN', {
+                hour: '2-digit', minute: '2-digit', second: '2-digit'
+            });
+            state.logEntries.unshift({ time, level, msg });
+
+            if (state.logEntries.length > 50) state.logEntries = state.logEntries.slice(0, 50);
+
+            const icons = {
+                info: 'fa-info-circle',
+                warning: 'fa-exclamation-triangle',
+                error: 'fa-times-circle',
+                success: 'fa-check-circle'
+            };
+
             const el = document.getElementById('trackLog');
-            el.innerHTML = logEntries.slice(0, 30).map(l =>
-                `<div class="log-entry"><span class="log-time">${l.time}</span><span class="log-msg ${l.level === 'warning' ? 'warning' : l.level === 'error' ? 'error' : ''}">${l.msg}</span></div>`
-            ).join('');
+            el.innerHTML = state.logEntries.slice(0, 30).map(l => `
+            <div class="log-entry">
+                <span class="log-time">${l.time}</span>
+                <div class="log-icon ${l.level}"><i class="fas ${icons[l.level] || 'fa-info-circle'}"></i></div>
+                <span class="log-msg ${l.level}">${l.msg}</span>
+            </div>
+        `).join('');
         }
 
-        addLog('info', 'Eye tracking module ready. Click "Start Tracking" to begin.');
+        // Initialize on load
+        init();
     </script>
 </body>
+
 </html>
