@@ -359,14 +359,16 @@ window.switchPerfTab = function(btn, tabId) {
 // ── Utility functions: defer to shared-utils.js if loaded ──
 if (typeof window.authHeaders === 'undefined') {
   window.authHeaders = function() {
-    let token = localStorage.getItem('simpatico_token') || localStorage.getItem('sb-token') || '';
-    if (!token) {
-      for (let i = 0; i < localStorage.length; i++) {
-        const k = localStorage.key(i);
-        if (k && k.startsWith('sb-') && k.endsWith('-auth-token')) {
-          try { token = JSON.parse(localStorage.getItem(k)).access_token; } catch(e){}
-        }
+    let token = '';
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && k.startsWith('sb-') && k.endsWith('-auth-token')) {
+        try { token = JSON.parse(localStorage.getItem(k)).access_token || ''; } catch(e){}
+        if (token) break;
       }
+    }
+    if (!token) {
+      token = localStorage.getItem('sh_token') || localStorage.getItem('simpatico_token') || localStorage.getItem('sb-token') || '';
     }
     return token ? { 'Authorization': 'Bearer ' + token } : {};
   };

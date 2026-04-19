@@ -28,25 +28,27 @@
     // 1. Prefer the live token kept fresh by onAuthStateChange
     if (window._simpatico_liveToken) return window._simpatico_liveToken;
 
-    // 2. Fallback: primary localStorage keys
-    let token = localStorage.getItem('sh_token')
-             || localStorage.getItem('simpatico_token')
-             || localStorage.getItem('sb-token')
-             || '';
-
-    // 3. Fallback: scan for Supabase auto-generated key
-    if (!token) {
-      for (let i = 0; i < localStorage.length; i++) {
-        const k = localStorage.key(i);
-        if (k && k.startsWith('sb-') && k.endsWith('-auth-token')) {
-          try {
-            const parsed = JSON.parse(localStorage.getItem(k));
-            token = parsed.access_token || '';
-            if (token) break;
-          } catch (e) { /* skip malformed */ }
-        }
+    // 2. Try to find the Supabase auto-generated key first (freshest from SDK)
+    let token = '';
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && k.startsWith('sb-') && k.endsWith('-auth-token')) {
+        try {
+          const parsed = JSON.parse(localStorage.getItem(k));
+          token = parsed.access_token || '';
+          if (token) break;
+        } catch (e) { /* skip malformed */ }
       }
     }
+
+    // 3. Fallback: primary manual localStorage keys (might be stale)
+    if (!token) {
+      token = localStorage.getItem('sh_token')
+           || localStorage.getItem('simpatico_token')
+           || localStorage.getItem('sb-token')
+           || '';
+    }
+    
     return token;
   }
 
