@@ -784,8 +784,15 @@ ${Object.entries(this.skillsCovered).map(([s,d]) => `- ${s}: Score ${d.score}/10
             const data = await res.json();
             let question = data?.data?.response || data?.response || '';
 
-            // Clean up AI text artifacts
+            // Clean up AI text artifacts and robotic phrases
             question = question.replace(/\[.*?\]/g, '').replace(/\(.*?interviewer.*?\)/gi, '').replace(/^["']|["']$/g, '').trim();
+            // Strip robotic openers that make the interview feel fake
+            question = question
+                .replace(/^(Thank you (for sharing|for that|for your|so much)|Great answer|That's a (great|good|wonderful) (answer|response|point)|Excellent|I appreciate you sharing that)[.,!]?\s*/i, '')
+                .replace(/^(Thanks for|Thank you for) (explaining|describing|walking me through|sharing|telling me about) (that|this)[.,!]?\s*/i, '')
+                .trim();
+            // Ensure it still starts with a capital letter after stripping
+            if (question.length > 0) question = question.charAt(0).toUpperCase() + question.slice(1);
 
             if (!question || question.length < 10) throw new Error("AI returned an empty question");
 
@@ -832,21 +839,35 @@ ${Object.entries(this.skillsCovered).map(([s,d]) => `- ${s}: Score ${d.score}/10
     getPhaseInstructions() {
         const uncovered  = this.skillsToProbe.filter(s => !this.skillsCovered[s] || this.skillsCovered[s].depth < 1);
         const weakSkills = Object.entries(this.skillsCovered).filter(([,v]) => v.score < 40).map(([k]) => k);
+        const strongSkills = Object.entries(this.skillsCovered).filter(([,v]) => v.score >= 70).map(([k]) => k);
+        const lastAnswer = this.history.filter(h => h.role === 'user').slice(-1)[0]?.content || '';
 
         switch (this.phase) {
             case 'intro':
-                return `This is the opening. Greet the candidate warmly and ask them to introduce themselves, focusing on experience relevant to the ${this.jobTitle} role.`;
+                return `Welcome the candidate naturally (like "Hey, thanks for joining! I'm excited to learn about your background."). Ask them to walk you through their journey — what brought them to ${this.jobTitle}, what they're most passionate about technically. Keep it warm and conversational. DO NOT say "Tell me about yourself" — that's generic.`;
             case 'skill_probe':
                 const nextSkill = uncovered[0] || this.skillsToProbe[0] || 'core technical skills';
-                return `Ask a technical question specifically about "${nextSkill}" for a ${this.level} ${this.jobTitle}.${weakSkills.length ? ` Calibrate difficulty knowing they were weak on: ${weakSkills.join(', ')}.` : ''}`;
+                const lastMentioned = lastAnswer.slice(0, 200);
+                if (weakSkills.length > 0 && Math.random() > 0.5) {
+                    return `The candidate was weak on "${weakSkills[0]}". Ask a SIMPLER, more specific question about it — maybe ask them to explain a concept or walk through a basic use case. Don't make them feel bad. Frame it as "I'd love to understand your approach to..."`;
+                }
+                if (strongSkills.length > 0 && Math.random() > 0.6) {
+                    return `The candidate was strong on "${strongSkills[0]}". Push harder — ask about edge cases, scaling challenges, trade-offs they faced, or what they'd do differently. This should feel like a peer-level technical discussion.`;
+                }
+                return `Transition naturally from what they just said and probe "${nextSkill}". Don't just say "Let's talk about ${nextSkill}" — instead, connect it: "You mentioned [something from their answer], that makes me curious about your experience with ${nextSkill}..." Ask something SPECIFIC to the ${this.level} level — not a textbook definition question.`;
             case 'scenario':
-                return `Present a realistic technical scenario relevant to the ${this.jobTitle} role that tests problem-solving and systems thinking at ${this.level} level.`;
+                return `Give them a realistic scenario from the ${this.jobTitle} domain. E.g. "Imagine you join our team and on day one, the main API is hitting 5-second response times under load. Walk me through how you'd diagnose and fix this." Make the scenario specific to ${this.jobTitle}. NEVER ask generic "describe a challenge" questions.`;
             case 'behavioral':
-                return `Ask a behavioral question using STAR format about leadership, collaboration, or handling failure, relevant to a ${this.jobTitle}.`;
+                const behaviors = ['handling a production incident under pressure', 'disagreeing with a technical decision from a senior engineer', 'mentoring a struggling junior developer', 'having to ship something you knew had technical debt', 'navigating a project with unclear requirements'];
+                const pick = behaviors[Math.floor(Math.random() * behaviors.length)];
+                return `Ask about a specific behavioral situation: "${pick}". Frame it conversationally like "I'm curious — have you ever been in a situation where [scenario]? What happened?" Do NOT say "Tell me about a time when..." — that's robotic.`;
             case 'closing':
-                return `Thank the candidate warmly. Mention 2-3 specific things they did well. Explain next steps (team review within a few days). Ask if they have any questions.`;
+                const specificPraise = strongSkills.length > 0 
+                    ? `Mention you were particularly impressed by their depth in ${strongSkills.slice(0,2).join(' and ')}.`
+                    : 'Acknowledge their thoughtful responses.';
+                return `Wrap up naturally. ${specificPraise} Say something like "This was a really good conversation" and briefly explain next steps. Do NOT say "Do you have any questions for me?" — instead say "Before we wrap, is there anything about the role or team you'd like to know?" Keep it SHORT — 2 sentences max.`;
             default:
-                return `Ask the next most relevant question based on the conversation and JD requirements.`;
+                return `Continue the conversation naturally based on what was just discussed. Pick up on something specific the candidate said and dig deeper.`;
         }
     },
 
