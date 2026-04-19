@@ -66,7 +66,7 @@ async function loadLeave() {
     .from('leave_requests')
     .select(`
       id, type, from_date, to_date, days, reason, status, created_at,
-      employees!employee_id(first_name, last_name),
+      employee:employees!employee_id(first_name, last_name),
       approver:employees!approver_id(first_name, last_name)
     `)
     .eq('tenant_id', cid)
@@ -79,9 +79,20 @@ async function loadLeave() {
       .from('leave_requests')
       .select(`
         id, type, from_date, to_date, days, reason, status, created_at,
-        employees!employee_id(first_name, last_name),
+        employee:employees!employee_id(first_name, last_name),
         approver:employees!approver_id(first_name, last_name)
       `)
+      .order('created_at', { ascending: false });
+    data = fb.data; error = fb.error;
+  }
+
+  // Final fallback: if FK hint itself fails, try without any relationship embedding
+  if (error) {
+    console.warn('[leaves] FK hint query failed, trying simple query:', error.message);
+    const fb = await client
+      .from('leave_requests')
+      .select('id, employee_id, type, from_date, to_date, days, reason, status, created_at')
+      .eq('tenant_id', cid)
       .order('created_at', { ascending: false });
     data = fb.data; error = fb.error;
   }
@@ -107,7 +118,7 @@ function renderLeaveTable(list) {
   }
   tbody.innerHTML = list.map(l => {
     const _e = typeof escapeHtml === 'function' ? escapeHtml : s => s;
-    const emp  = l.employees;
+    const emp  = l.employee || l.employees;
     const name = emp ? _e(`${emp.first_name} ${emp.last_name}`) : '—';
     const type = _e((l.type || '').replace('_',' '));
     const badgeClass = { pending:'hr-badge-pending', approved:'hr-badge-active', rejected:'hr-badge-danger' }[l.status] || 'hr-badge-inactive';
@@ -258,7 +269,7 @@ async function loadTickets() {
     .from('hr_tickets')
     .select(`
       id, ticket_number, category, subject, priority, status, created_at,
-      employees!employee_id(first_name, last_name),
+      employee:employees!employee_id(first_name, last_name),
       assignee:employees!assignee_id(first_name, last_name)
     `)
     .eq('tenant_id', cid)
@@ -271,9 +282,20 @@ async function loadTickets() {
       .from('hr_tickets')
       .select(`
         id, ticket_number, category, subject, priority, status, created_at,
-        employees!employee_id(first_name, last_name),
+        employee:employees!employee_id(first_name, last_name),
         assignee:employees!assignee_id(first_name, last_name)
       `)
+      .order('created_at', { ascending: false });
+    data = fb.data; error = fb.error;
+  }
+
+  // Final fallback: try simple query without FK embedding
+  if (error) {
+    console.warn('[tickets] FK hint query failed, trying simple query:', error.message);
+    const fb = await client
+      .from('hr_tickets')
+      .select('id, ticket_number, employee_id, category, subject, priority, status, created_at')
+      .eq('tenant_id', cid)
       .order('created_at', { ascending: false });
     data = fb.data; error = fb.error;
   }
@@ -292,7 +314,7 @@ function renderTickets(list) {
   }
   tbody.innerHTML = list.map(t => {
     const _e = typeof escapeHtml === 'function' ? escapeHtml : s => s;
-    const emp = t.employees;
+    const emp = t.employee || t.employees;
     const assignee = t.assignee ? _e(`${t.assignee.first_name} ${t.assignee.last_name}`) : 'Unassigned';
     const pBadge = { high:'hr-badge-danger', medium:'hr-badge-pending', low:'hr-badge-inactive' }[t.priority] || 'hr-badge-inactive';
     const sBadge = { open:'hr-badge-info', in_progress:'hr-badge-pending', resolved:'hr-badge-active', closed:'hr-badge-inactive' }[t.status] || 'hr-badge-inactive';
@@ -354,7 +376,7 @@ window.switchOpsTab = function(btn, tabId) {
 window.exportLeave = function() {
   const headers = ['Employee','Type','From','To','Days','Status'];
   const rows = allLeave.map(l => [
-    l.employees ? `${l.employees.first_name} ${l.employees.last_name}` : '',
+    l.employees || l.employee ? `${(l.employees || l.employee).first_name} ${(l.employees || l.employee).last_name}` : '',
     l.type, l.from_date, l.to_date, l.days, l.status,
   ]);
   // Use shared downloadCsv if available (handles CSV injection), else fallback
