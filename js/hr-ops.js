@@ -66,8 +66,8 @@ async function loadLeave() {
     .from('leave_requests')
     .select(`
       id, type, from_date, to_date, days, reason, status, created_at,
-      employee:employees!employee_id(first_name, last_name),
-      approver:employees!approver_id(first_name, last_name)
+      employee:employees!leave_requests_employee_id_fkey(first_name, last_name),
+      approver:employees!leave_requests_approver_id_fkey(first_name, last_name)
     `)
     .eq('tenant_id', cid)
     .order('created_at', { ascending: false });
@@ -79,8 +79,8 @@ async function loadLeave() {
       .from('leave_requests')
       .select(`
         id, type, from_date, to_date, days, reason, status, created_at,
-        employee:employees!employee_id(first_name, last_name),
-        approver:employees!approver_id(first_name, last_name)
+        employee:employees!leave_requests_employee_id_fkey(first_name, last_name),
+        approver:employees!leave_requests_approver_id_fkey(first_name, last_name)
       `)
       .order('created_at', { ascending: false });
     data = fb.data; error = fb.error;
@@ -269,8 +269,8 @@ async function loadTickets() {
     .from('hr_tickets')
     .select(`
       id, ticket_number, category, subject, priority, status, created_at,
-      employee:employees!employee_id(first_name, last_name),
-      assignee:employees!assignee_id(first_name, last_name)
+      employee:employees!hr_tickets_employee_id_fkey(first_name, last_name),
+      assignee:employees!hr_tickets_assignee_id_fkey(first_name, last_name)
     `)
     .eq('tenant_id', cid)
     .order('created_at', { ascending: false });
@@ -282,8 +282,8 @@ async function loadTickets() {
       .from('hr_tickets')
       .select(`
         id, ticket_number, category, subject, priority, status, created_at,
-        employee:employees!employee_id(first_name, last_name),
-        assignee:employees!assignee_id(first_name, last_name)
+        employee:employees!hr_tickets_employee_id_fkey(first_name, last_name),
+        assignee:employees!hr_tickets_assignee_id_fkey(first_name, last_name)
       `)
       .order('created_at', { ascending: false });
     data = fb.data; error = fb.error;
