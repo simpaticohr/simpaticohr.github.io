@@ -62,42 +62,41 @@ async function loadLeave() {
   const today = new Date().toISOString().slice(0,10);
   const thirtyDaysAgo = new Date(Date.now()-30*24*60*60*1000).toISOString().slice(0,10);
 
+  // Fetch leave requests (simple query - no FK embedding to avoid ambiguity errors)
   let { data, error } = await client
     .from('leave_requests')
-    .select(`
-      id, type, from_date, to_date, days, reason, status, created_at,
-      employee:employees!leave_requests_employee_id_fkey(first_name, last_name),
-      approver:employees!leave_requests_approver_id_fkey(first_name, last_name)
-    `)
+    .select('id, employee_id, approver_id, type, from_date, to_date, days, reason, status, created_at')
     .eq('tenant_id', cid)
     .order('created_at', { ascending: false });
 
-  // Fallback: if tenant_id column doesn't exist, retry without filter
+  // Fallback: if tenant_id column doesn't exist
   if (error && (error.code === '42703' || error.message?.includes('tenant_id'))) {
     console.warn('[leaves] tenant_id filter failed, retrying without:', error.message);
     const fb = await client
       .from('leave_requests')
-      .select(`
-        id, type, from_date, to_date, days, reason, status, created_at,
-        employee:employees!leave_requests_employee_id_fkey(first_name, last_name),
-        approver:employees!leave_requests_approver_id_fkey(first_name, last_name)
-      `)
-      .order('created_at', { ascending: false });
-    data = fb.data; error = fb.error;
-  }
-
-  // Final fallback: if FK hint itself fails, try without any relationship embedding
-  if (error) {
-    console.warn('[leaves] FK hint query failed, trying simple query:', error.message);
-    const fb = await client
-      .from('leave_requests')
-      .select('id, employee_id, type, from_date, to_date, days, reason, status, created_at')
-      .eq('tenant_id', cid)
+      .select('id, employee_id, approver_id, type, from_date, to_date, days, reason, status, created_at')
       .order('created_at', { ascending: false });
     data = fb.data; error = fb.error;
   }
 
   if (error) { console.error('[leaves] Load error:', error); return; }
+
+  // Fetch employee names separately and join client-side (avoids FK ambiguity)
+  const empIds = [...new Set((data || []).flatMap(l => [l.employee_id, l.approver_id].filter(Boolean)))];
+  let empMap = {};
+  if (empIds.length > 0) {
+    const { data: employees } = await client
+      .from('employees')
+      .select('id, first_name, last_name')
+      .in('id', empIds);
+    (employees || []).forEach(e => { empMap[e.id] = e; });
+  }
+
+  // Attach employee objects to leave records for rendering
+  (data || []).forEach(l => {
+    l.employee = empMap[l.employee_id] || null;
+    l.approver = empMap[l.approver_id] || null;
+  });
   allLeave = data || [];
 
   const pending  = allLeave.filter(l => l.status === 'pending').length;
@@ -265,42 +264,40 @@ async function loadTickets() {
   const client = sb(); if (!client) return;
   const cid = typeof getCompanyId === 'function' ? getCompanyId() : null;
   if (!cid) { allTickets = []; renderTickets([]); return; }
+  // Simple query without FK embedding to avoid ambiguity errors
   let { data, error } = await client
     .from('hr_tickets')
-    .select(`
-      id, ticket_number, category, subject, priority, status, created_at,
-      employee:employees!hr_tickets_employee_id_fkey(first_name, last_name),
-      assignee:employees!hr_tickets_assignee_id_fkey(first_name, last_name)
-    `)
+    .select('id, ticket_number, employee_id, assignee_id, category, subject, priority, status, created_at')
     .eq('tenant_id', cid)
     .order('created_at', { ascending: false });
 
-  // Fallback: if tenant_id column doesn't exist, retry without filter
+  // Fallback: if tenant_id column doesn't exist
   if (error && (error.code === '42703' || error.message?.includes('tenant_id'))) {
     console.warn('[tickets] tenant_id filter failed, retrying without:', error.message);
     const fb = await client
       .from('hr_tickets')
-      .select(`
-        id, ticket_number, category, subject, priority, status, created_at,
-        employee:employees!hr_tickets_employee_id_fkey(first_name, last_name),
-        assignee:employees!hr_tickets_assignee_id_fkey(first_name, last_name)
-      `)
-      .order('created_at', { ascending: false });
-    data = fb.data; error = fb.error;
-  }
-
-  // Final fallback: try simple query without FK embedding
-  if (error) {
-    console.warn('[tickets] FK hint query failed, trying simple query:', error.message);
-    const fb = await client
-      .from('hr_tickets')
-      .select('id, ticket_number, employee_id, category, subject, priority, status, created_at')
-      .eq('tenant_id', cid)
+      .select('id, ticket_number, employee_id, assignee_id, category, subject, priority, status, created_at')
       .order('created_at', { ascending: false });
     data = fb.data; error = fb.error;
   }
 
   if (error) { console.error('[tickets] Load error:', error); return; }
+
+  // Fetch employee names separately and join client-side
+  const tktEmpIds = [...new Set((data || []).flatMap(t => [t.employee_id, t.assignee_id].filter(Boolean)))];
+  let tktEmpMap = {};
+  if (tktEmpIds.length > 0) {
+    const { data: employees } = await client
+      .from('employees')
+      .select('id, first_name, last_name')
+      .in('id', tktEmpIds);
+    (employees || []).forEach(e => { tktEmpMap[e.id] = e; });
+  }
+  (data || []).forEach(t => {
+    t.employee = tktEmpMap[t.employee_id] || null;
+    t.assignee = tktEmpMap[t.assignee_id] || null;
+  });
+
   allTickets = data || [];
   setText('stat-tickets', allTickets.filter(t => t.status === 'open').length);
   renderTickets(allTickets);
