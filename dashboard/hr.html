@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
     <script src="../js/hr-config.js"></script>
@@ -3613,7 +3613,9 @@ async function handleCreateJob(e, status = 'open') {
 
         if (isEdit) {
             // Edits go direct to Supabase (no syndication needed on updates)
-            const { data, error } = await SimpaticoDB.from('jobs').update(newJob).eq('id', editJobId).select();
+            const db = (typeof getSupabaseClient === 'function' ? getSupabaseClient() : null) || window.SimpaticoDB || window._supabaseClient;
+            if (!db) throw new Error('Database not connected');
+            const { data, error } = await db.from('jobs').update(newJob).eq('id', editJobId).select();
             if (error) throw error;
             insertedData = data;
         } else {
@@ -3623,9 +3625,10 @@ async function handleCreateJob(e, status = 'open') {
 
             // Get a fresh auth token from the live Supabase session
             let freshToken = '';
-            if (window.SimpaticoDB?.auth?.getSession) {
+            const dbForSession = (typeof getSupabaseClient === 'function' ? getSupabaseClient() : null) || window.SimpaticoDB || window._supabaseClient;
+            if (dbForSession?.auth?.getSession) {
                 try {
-                    const { data: sessionData } = await SimpaticoDB.auth.getSession();
+                    const { data: sessionData } = await dbForSession.auth.getSession();
                     freshToken = sessionData?.session?.access_token || '';
                 } catch(tokenErr) { console.warn('[CreateJob] Session refresh failed:', tokenErr.message); }
             }
@@ -3818,10 +3821,27 @@ async function handleScheduleInterview(e) {
     };
 
     try {
-        const { data, error } = await SimpaticoDB.from('interviews').insert([dbPayload]).select();
-        if (error) throw error;
-
-        if (data && data.length > 0) localPayload.id = data[0].id;
+        // Get Supabase client safely and refresh session for a fresh token
+        const db = (typeof getSupabaseClient === 'function' ? getSupabaseClient() : null) || window.SimpaticoDB || window._supabaseClient;
+        if (db) {
+            try {
+                const { data: sessionData } = await db.auth.getSession();
+                if (sessionData?.session?.access_token) {
+                    window._simpatico_liveToken = sessionData.session.access_token;
+                }
+            } catch (sessionErr) {
+                console.warn('[interviews] Session refresh failed:', sessionErr.message);
+            }
+            const { data, error } = await db.from('interviews').insert([dbPayload]).select();
+            if (error) {
+                console.error('[interviews] DB insert error:', error);
+                // Don't throw — fall through to local storage so interview is still tracked
+            } else if (data && data.length > 0) {
+                localPayload.id = data[0].id;
+            }
+        } else {
+            console.warn('[interviews] No Supabase client available, saving locally only');
+        }
 
         DataStore.update(data => {
             data.interviews.unshift(localPayload);
@@ -4226,9 +4246,10 @@ async function generateJD() {
 
         // Get a FRESH token from the live Supabase session (auto-refreshes if expired)
         let freshToken = '';
-        if (window.SimpaticoDB?.auth?.getSession) {
+        const dbForJD = (typeof getSupabaseClient === 'function' ? getSupabaseClient() : null) || window.SimpaticoDB || window._supabaseClient;
+        if (dbForJD?.auth?.getSession) {
             try {
-                const { data: sessionData } = await SimpaticoDB.auth.getSession();
+                const { data: sessionData } = await dbForJD.auth.getSession();
                 freshToken = sessionData?.session?.access_token || '';
             } catch(e) { console.warn('[JD] Session refresh failed:', e.message); }
         }
