@@ -1323,9 +1323,9 @@ function aiSpeak(text) {
 
         const cleanText = text.replace(/\*\*/g, '').replace(/\n/g, ' ').replace(/\s+/g, ' ').trim();
         const subtitle  = document.getElementById('aiSubtitleText');
-        subtitle.textContent = cleanText;
-        subtitle.classList.add('show');
-        document.getElementById('listenViz').classList.remove('active');
+        if (subtitle) { subtitle.textContent = cleanText; subtitle.classList.add('show'); }
+        const listenVizEl = document.getElementById('listenViz');
+        if (listenVizEl) listenVizEl.classList.remove('active');
         speechSynth.cancel();
 
         const sentences = cleanText.match(/[^.!?]+[.!?]+/g) || [cleanText];
@@ -1347,21 +1347,24 @@ function aiSpeak(text) {
 
             if (idx >= chunks.length) {
                 isSpeaking = false;
-                subtitle.classList.remove('show');
+                if (subtitle) subtitle.classList.remove('show');
                 
                 if (window.activeSpeakResolve) {
                     window.activeSpeakResolve();
                     window.activeSpeakResolve = null;
                 }
 
-                setTimeout(() => {
-                    if(!isProcessing && !isListening) {
-                        finalTranscript   = '';
-                        currentTranscript = '';
-                        lastSpeechTime    = 0;
-                        startListening();
-                    }
-                }, 800);
+                // Don't restart listening if closing phase or session ended
+                if (engine.phase !== 'closing') {
+                    setTimeout(() => {
+                        if(!isProcessing && !isListening) {
+                            finalTranscript   = '';
+                            currentTranscript = '';
+                            lastSpeechTime    = 0;
+                            startListening();
+                        }
+                    }, 800);
+                }
                 return;
             }
             const u = new SpeechSynthesisUtterance(chunks[idx]);
@@ -1369,7 +1372,7 @@ function aiSpeak(text) {
 
             if (preferredVoice) u.voice = preferredVoice;
             u.rate = 1.0; u.pitch = 1.0; u.volume = 1.0;
-            subtitle.textContent = chunks[idx];
+            if (subtitle) subtitle.textContent = chunks[idx];
             
             u.onend  = () => { if (isSpeaking) { idx++; speakNext(); } };
             u.onerror = (e) => { console.warn("TTS Error:", e); if (isSpeaking) { idx++; speakNext(); } };
@@ -1382,6 +1385,7 @@ function aiSpeak(text) {
 function setOrbState(state) {
     const orb    = document.getElementById('aiOrb');
     const status = document.getElementById('aiStatusText');
+    if (!orb || !status) return;
     orb.classList.remove('speaking', 'listening', 'thinking');
     switch(state) {
         case 'speaking':  orb.classList.add('speaking');  status.textContent = 'AI SPEAKING';   break;
@@ -1396,15 +1400,19 @@ function setOrbState(state) {
 // ══════════════════════════════════════════════════════════════
 function startListening() {
     if (!recognition || isProcessing) return;
+    // Don't start listening if closing phase
+    if (engine.phase === 'closing') return;
     isListening = true;
     finalTranscript = '';
     currentTranscript = '';
     lastSpeechTime = 0;
     if (!isSpeaking) setOrbState('listening');
-    document.getElementById('listenViz').classList.add('active');
-    document.getElementById('vcMic').classList.add('active-mic');
-    document.getElementById('liveTranscript').textContent = '';
-    document.getElementById('liveTranscript').className = 'live-transcript-text';
+    const vizEl = document.getElementById('listenViz');
+    const micEl = document.getElementById('vcMic');
+    const transEl = document.getElementById('liveTranscript');
+    if (vizEl) vizEl.classList.add('active');
+    if (micEl) micEl.classList.add('active-mic');
+    if (transEl) { transEl.textContent = ''; transEl.className = 'live-transcript-text'; }
     try { recognition.start(); } catch(e) {}
     startSilenceDetection();
 }
@@ -1412,8 +1420,10 @@ function startListening() {
 function stopListening() {
     isListening = false;
     clearTimeout(silenceTimer);
-    document.getElementById('listenViz').classList.remove('active');
-    document.getElementById('vcMic').classList.remove('active-mic');
+    const vizEl = document.getElementById('listenViz');
+    const micEl = document.getElementById('vcMic');
+    if (vizEl) vizEl.classList.remove('active');
+    if (micEl) micEl.classList.remove('active-mic');
     try { recognition.stop(); } catch(e) {}
 }
 
@@ -1469,7 +1479,8 @@ function handleSpeechResult(e) {
     liveEl.className   = `live-transcript-text ${final ? 'final' : ''}`;
 
     const totalWords = fullText.split(/\s+/).filter(Boolean).length;
-    if (totalWords > 0 && !isSpeaking) document.getElementById('aiStatusText').textContent = `LISTENING · ${totalWords} words`;
+    const statusEl = document.getElementById('aiStatusText');
+    if (totalWords > 0 && !isSpeaking && statusEl) statusEl.textContent = `LISTENING · ${totalWords} words`;
 }
 
 function startSilenceDetection() {
@@ -1761,11 +1772,27 @@ function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 // END SESSION
 // ══════════════════════════════════════════════════════════════
 async function endSession() {
+    // CRITICAL: Cancel TTS first to stop AI from talking immediately
+    isSpeaking = false;
+    isProcessing = true;
+    isListening = false;
+    try { speechSynth.cancel(); } catch(e) {}
+    clearTimeout(silenceTimer);
     clearInterval(timerInt);
     clearInterval(faceCheckInterval);
-    stopListening();
-    speechSynth.cancel();
-    isProcessing = true;
+    try { if (recognition) recognition.stop(); } catch(e) {}
+
+    // Clear subtitle and transcript immediately
+    const subtitleEl = document.getElementById('aiSubtitleText');
+    const transcriptEl = document.getElementById('liveTranscript');
+    if (subtitleEl) { subtitleEl.textContent = ''; subtitleEl.classList.remove('show'); }
+    if (transcriptEl) transcriptEl.textContent = '';
+
+    // Resolve any pending speak promise
+    if (window.activeSpeakResolve) {
+        window.activeSpeakResolve();
+        window.activeSpeakResolve = null;
+    }
 
     const score      = engine.getOverallScore();
     const violations = procLogs.filter(l => l.level === 'danger').length;
