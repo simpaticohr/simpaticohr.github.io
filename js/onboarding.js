@@ -18,6 +18,25 @@ function sb() {
 
 let onboardingRecords = [];
 
+/**
+ * Ensures the Supabase session is fresh and returns valid auth headers.
+ * This prevents 401s caused by expired tokens.
+ */
+async function getOBFreshAuthHeaders() {
+  const client = sb();
+  if (client) {
+    try {
+      const { data } = await client.auth.getSession();
+      if (data?.session?.access_token) {
+        window._simpatico_liveToken = data.session.access_token;
+      }
+    } catch (e) {
+      console.warn('[onboarding] Failed to refresh session:', e.message);
+    }
+  }
+  return typeof window.authHeaders === 'function' ? window.authHeaders() : {};
+}
+
 (function() {
   async function boot() {
     await Promise.all([
@@ -68,7 +87,13 @@ async function loadTemplates() {
   const cid = typeof getCompanyId === 'function' ? getCompanyId() : null;
   let query = client.from('onboarding_templates').select('id, name').order('name');
   if (cid) query = query.eq('tenant_id', cid);
-  const { data } = await query;
+  const { data, error } = await query;
+
+  // Graceful fallback if onboarding_templates table doesn't exist
+  if (error) {
+    console.warn('[onboarding] Could not load templates:', error.message);
+    return;
+  }
 
   const sel = document.getElementById('ob-template'); if (!sel) return;
   (data || []).forEach(t => {
@@ -82,7 +107,8 @@ async function loadOnboarding() {
   const client = sb(); if (!client) return;
   const cid = typeof getCompanyId === 'function' ? getCompanyId() : null;
   if (!cid) { onboardingRecords = []; updateStats(); renderPipeline(); return; }
-  const { data, error } = await client
+
+  let { data, error } = await client
     .from('onboarding_records')
     .select(`
       id, stage, start_date, completion_pct,
@@ -92,7 +118,21 @@ async function loadOnboarding() {
     .eq('tenant_id', cid)
     .order('start_date', { ascending: false });
 
-  if (error) { console.error(error); return; }
+  // Fallback: if tenant_id column doesn't exist yet (400), retry without it
+  if (error && (error.code === '42703' || (error.message && (error.message.includes('tenant_id') || error.message.includes('company_id'))))) {
+    console.warn('[onboarding] tenant_id filter failed, retrying without');
+    const fallback = await client
+      .from('onboarding_records')
+      .select(`
+        id, stage, start_date, completion_pct,
+        employees(id, first_name, last_name, job_title, departments(name)),
+        onboarding_tasks(id, title, due_date, status, notes)
+      `)
+      .order('start_date', { ascending: false });
+    data = fallback.data; error = fallback.error;
+  }
+
+  if (error) { console.error('[onboarding] Load error:', error); return; }
   onboardingRecords = data || [];
   updateStats();
   renderPipeline();
@@ -110,7 +150,8 @@ function updateStats() {
   setText('stat-progress',  inProgress);
   setText('stat-completed', completed);
   setText('stat-overdue',   overdue);
-  document.getElementById('stat-avg').innerHTML = `${avgPct}<span style="font-size:18px">%</span>`;
+  const avgEl = document.getElementById('stat-avg');
+  if (avgEl) avgEl.innerHTML = `${avgPct}<span style="font-size:18px">%</span>`;
 }
 
 function renderPipeline() {
@@ -167,17 +208,12 @@ window.startOnboarding = async function() {
 
   showToast('Starting onboarding…', 'info');
   try {
-    // Ensure we have a fresh, non-expired auth token before calling the API
-    const client = sb();
-    if (client) {
-      const { data } = await client.auth.getSession();
-      if (data?.session?.access_token) {
-        window._simpatico_liveToken = data.session.access_token;
-      }
-    }
+    const headers = await getOBFreshAuthHeaders();
+    console.log('[onboarding] startOnboarding headers:', { hasAuth: !!headers.Authorization, tenantId: headers['X-Tenant-ID'] });
+
     const res = await fetch(`${OB_CONFIG.workerUrl}/onboarding/start`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      headers: { ...headers, 'Content-Type': 'application/json' },
       body: JSON.stringify({
         employee_id: empId,
         template_id: template || null,
@@ -185,11 +221,15 @@ window.startOnboarding = async function() {
       }),
     });
     const result = await res.json();
-    if (!res.ok) throw new Error(result.error || 'Failed to start onboarding');
+    if (!res.ok) {
+      const errMsg = result.error?.message || result.error || result.message || 'Failed to start onboarding';
+      throw new Error(errMsg);
+    }
     showToast('Onboarding started!', 'success');
     closeModal('start-modal');
     await loadOnboarding();
   } catch (err) {
+    console.error('[onboarding] Start error:', err);
     showToast(err.message, 'error');
   }
 };
@@ -201,14 +241,25 @@ window.saveTemplate      = () => { showToast('Template saved', 'success'); close
 // ── AI-generated checklist suggestions via Cloudflare AI ──
 window.generateAIChecklist = async function(role, department) {
   try {
+    const headers = await getOBFreshAuthHeaders();
     const res = await fetch(`${OB_CONFIG.workerUrl}/ai/onboarding-checklist`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      headers: { ...headers, 'Content-Type': 'application/json' },
       body: JSON.stringify({ role, department }),
     });
-    const { tasks } = await res.json();
-    return tasks || [];
-  } catch { return []; }
+    const json = await res.json();
+    if (!res.ok) {
+      const errMsg = json.error?.message || json.error || 'AI checklist generation failed';
+      console.error('[onboarding] AI checklist error:', errMsg);
+      return [];
+    }
+    // Backend wraps response in apiResponse: { success, data: { tasks, role, department } }
+    const aiData = json.data || json;
+    return aiData.tasks || [];
+  } catch (err) {
+    console.error('[onboarding] AI checklist error:', err);
+    return [];
+  }
 };
 
 // ── Utility functions: defer to shared-utils.js if loaded ──
@@ -251,5 +302,3 @@ if (typeof window.showToast === 'undefined') {
     setTimeout(() => t.remove(), 3800);
   };
 }
-
-
