@@ -1,0 +1,1 @@
+fetch('https://simpatico-hr-ats.simpaticohrconsultancy.workers.dev/performance/cycles', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Testing', start_date: '2026-04-19', end_date: '2026-06-19', type: 'annual', scope: 'all' }) }).then(r=>r.json()).then(console.log);

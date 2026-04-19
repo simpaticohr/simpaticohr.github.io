@@ -1611,10 +1611,14 @@ async function handleCreateCycle(request, env, ctx) {
     env,
     "POST",
     "/rest/v1/review_cycles",
-    { ...sanitize(body), tenant_id: ctx.tenantId },
+    { ...sanitize(body), status: "active", company_id: ctx.tenantId, tenant_id: ctx.tenantId },
     false,
     ctx.tenantId,
   );
+  if (!res.ok) {
+    const errText = await res.text().catch(() => "unknown");
+    throw new AppError(`Failed to create review cycle: ${errText}`, res.status, "DB_ERROR");
+  }
   const [cycle] = await res.json();
   return apiResponse({ cycle }, HTTP.CREATED);
 }
@@ -1728,6 +1732,10 @@ async function handleCreateGoal(request, env, ctx) {
     false,
     ctx.tenantId,
   );
+  if (!res.ok) {
+    const errText = await res.text().catch(() => "unknown");
+    throw new AppError(`Failed to create goal: ${errText}`, res.status, "DB_ERROR");
+  }
   const [goal] = await res.json();
   return apiResponse({ goal }, HTTP.CREATED);
 }
