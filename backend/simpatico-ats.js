@@ -3742,6 +3742,8 @@ async function handleScheduleInterviewEmail(request, env, ctx) {
     mode,
     meetingLink,
     notes,
+    interviewLink,
+    token, // From frontend: unique string for the candidate
     interviewerEmail, // optional — cc the interviewer if provided
   } = body;
 
@@ -3767,10 +3769,16 @@ async function handleScheduleInterviewEmail(request, env, ctx) {
       proctored: "🔒 Proctored (AI-Monitored)",
     }[mode] || mode;
 
-  const meetingSection = meetingLink
-    ? `<tr><td style="padding:8px 0;color:#6b7280;font-size:14px;">Link</td>
-           <td style="padding:8px 0;font-weight:600;font-size:14px;"><a href="${meetingLink}" style="color:#4f46e5;">Join Meeting</a></td></tr>`
-    : "";
+  let meetingSection = "";
+  if (interviewLink && token) {
+    meetingSection = `<tr><td style="padding:8px 0;color:#6b7280;font-size:14px;">Access Room</td>
+           <td style="padding:8px 0;font-weight:600;font-size:14px;"><a href="${interviewLink}" style="color:#4f46e5;text-decoration:none;background:#e0e7ff;padding:6px 12px;border-radius:6px;">Join Proctored Room</a></td></tr>
+           <tr><td style="padding:8px 0;color:#6b7280;font-size:14px;">Access Token</td>
+           <td style="padding:8px 0;font-weight:600;font-size:14px;"><code style="background:#f3f4f6;padding:4px 8px;border-radius:4px;color:#111827;letter-spacing:1px;user-select:all;">${token}</code></td></tr>`;
+  } else if (meetingLink) {
+    meetingSection = `<tr><td style="padding:8px 0;color:#6b7280;font-size:14px;">Link</td>
+           <td style="padding:8px 0;font-weight:600;font-size:14px;"><a href="${meetingLink}" style="color:#4f46e5;">Join Meeting</a></td></tr>`;
+  }
 
   const notesSection = notes
     ? `<div style="margin-top:20px;background:#fef3c7;border-left:4px solid #f59e0b;padding:12px 16px;border-radius:6px;font-size:14px;color:#92400e;">
