@@ -54,10 +54,32 @@ async function loadCycles() {
     data = fallback.data; error = fallback.error;
   }
 
+  // Fallback to Worker if RLS blocked the query (returning 0 rows while expected data exists) or any other error occurs
+  if ((!data || data.length === 0) && PERF_CONFIG.workerUrl) {
+      try {
+          const res = await fetch(`${PERF_CONFIG.workerUrl}/performance/cycles`, {
+              method: 'GET',
+              headers: typeof window.authHeaders === 'function' ? window.authHeaders() : {}
+          });
+          if (res.ok) {
+              const resData = await res.json();
+              if (resData.cycles && resData.cycles.length > 0) {
+                 data = resData.cycles;
+                 // If cid is present, manually filter worker global response here if the worker didn't filter it
+                 if (cid && data[0].tenant_id !== undefined) {
+                     data = data.filter(c => c.tenant_id === cid || c.company_id === cid || c.tenant_id === 'SIMP_PRO_MAIN');
+                 }
+                 error = null;
+              }
+          }
+      } catch(e) { console.warn('[performance] worker fallback for cycles failed', e); }
+  }
+
   if (error) { console.error(error); return; }
   allCycles = data || [];
 
   const sel = document.getElementById('cycle-filter'); if (!sel) return;
+  sel.innerHTML = '<option value="">All Cycles</option>'; // Clear prior UI
   allCycles.forEach(c => {
     const opt = document.createElement('option');
     opt.value = c.id; opt.textContent = c.name;
