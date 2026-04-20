@@ -57,6 +57,13 @@ async function loadCycles() {
   // Fallback to Worker if RLS blocked the query (returning 0 rows while expected data exists) or any other error occurs
   if ((!data || data.length === 0) && PERF_CONFIG.workerUrl) {
       try {
+          const { data: sessionData } = await client.auth.getSession();
+          if (sessionData?.session?.access_token) {
+              window._simpatico_liveToken = sessionData.session.access_token;
+          }
+      } catch (e) { console.warn('[performance] loadCycles session refresh failed', e.message); }
+
+      try {
           const res = await fetch(`${PERF_CONFIG.workerUrl}/performance/cycles`, {
               method: 'GET',
               headers: typeof window.authHeaders === 'function' ? window.authHeaders() : {}
