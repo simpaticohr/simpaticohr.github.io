@@ -289,6 +289,17 @@ window.createReviewCycle = async function() {
 
     if (error) {
       console.warn('[Performance] Direct insert failed, falling back to worker:', error.message);
+      
+      // Ensure we have a fresh token before hitting the worker to prevent 401
+      try {
+        const { data: sessionData } = await client.auth.getSession();
+        if (sessionData?.session?.access_token) {
+          window._simpatico_liveToken = sessionData.session.access_token;
+        }
+      } catch (e) {
+        console.warn('[Performance] Session refresh failed:', e.message);
+      }
+
       const res = await fetch(`${PERF_CONFIG.workerUrl}/performance/cycles`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...(typeof window.authHeaders === 'function' ? window.authHeaders() : {}) },
