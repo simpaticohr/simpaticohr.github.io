@@ -262,7 +262,25 @@ window.saveCourse = async function () {
     const client = sb();
     if (!client) throw new Error('Database not connected');
     const { error } = await client.from('training_courses').insert([payload]);
-    if (error) throw new Error(error.message);
+    
+    if (error) {
+      console.warn('[training] Direct insert failed, falling back to worker:', error.message);
+      
+      try {
+          const { data: sessionData } = await client.auth.getSession();
+          if (sessionData?.session?.access_token) {
+              window._simpatico_liveToken = sessionData.session.access_token;
+          }
+      } catch (e) { console.warn('[training] Session refresh failed:', e.message); }
+      
+      const headers = typeof window.authHeaders === 'function' ? window.authHeaders() : {};
+      const res = await fetch(`${TR_CONFIG.workerUrl}/training/courses`, {
+          method: 'POST',
+          headers: { ...headers, 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+      });
+      if (!res.ok) throw new Error('Failed to create training course via worker');
+    }
 
     showToast('Course created!', 'success');
     closeModal('create-course-modal');

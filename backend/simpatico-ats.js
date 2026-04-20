@@ -745,6 +745,7 @@ route("POST", "/training/remind/:id", handleSendReminder);
 route("POST", "/performance/cycles", handleCreateCycle);
 route("GET", "/performance/cycles", handleListCycles);
 route("POST", "/performance/reviews", handleSubmitReview);
+route("GET", "/performance/reviews", handleListReviews);
 route("GET", "/performance/reviews/:employeeId", handleGetEmployeeReviews);
 route("POST", "/ai/performance-feedback", handlePerformanceFeedback);
 
@@ -1671,6 +1672,21 @@ async function handleGetEmployeeReviews(request, env, ctx, [employeeId]) {
     env,
     "GET",
     `/rest/v1/performance_reviews?employee_id=eq.${employeeId}&select=*,review_cycles(name)&order=submitted_at.desc`,
+    null,
+    false,
+    ctx.tenantId,
+  );
+  return apiResponse({ reviews: await res.json() });
+}
+
+async function handleListReviews(request, env, ctx, _, url) {
+  requireAuth(ctx);
+  const cycleId = url?.searchParams.get("cycle_id");
+  const qp = cycleId ? `&cycle_id=eq.${cycleId}` : "";
+  const res = await sbFetch(
+    env,
+    "GET",
+    `/rest/v1/performance_reviews?select=*,review_cycles(name)${qp}&order=submitted_at.desc`,
     null,
     false,
     ctx.tenantId,

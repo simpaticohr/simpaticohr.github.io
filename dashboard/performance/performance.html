@@ -414,9 +414,30 @@ async function apiCall(path, method = 'GET', body = null) {
     const opts = { method, headers: apiHeader() };
     if (body) opts.body = JSON.stringify(body);
     const res = await fetch(API_URL + path, opts);
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || data.message || res.statusText);
-    return data;
+    const payload = await res.json();
+    if (!res.ok) {
+        const msg = payload?.error?.message || payload?.error || payload?.message || res.statusText;
+        throw new Error(msg);
+    }
+    // Worker wraps responses as { success, data, meta }. Unwrap to return the inner data.
+    // Callers that sent { cycles: [...] } / { reviews: [...] } / { goals: [...] } will
+    // receive that inner shape directly. Fall back to the raw payload for legacy responses.
+    if (payload && typeof payload === 'object' && 'success' in payload && 'data' in payload) {
+        return payload.data;
+    }
+    return payload;
+}
+
+// Defensively pluck an array out of a possibly-wrapped worker response.
+// Accepts a bare array, or an object with { <key>: [...] } / { data: [...] } / { rows: [...] }.
+function pluckArray(resp, key) {
+    if (Array.isArray(resp)) return resp;
+    if (resp && typeof resp === 'object') {
+        if (key && Array.isArray(resp[key])) return resp[key];
+        if (Array.isArray(resp.data)) return resp.data;
+        if (Array.isArray(resp.rows)) return resp.rows;
+    }
+    return [];
 }
 
 let allReviews = [], allGoals = [], allCycles = [];
@@ -446,26 +467,39 @@ async function loadAll() {
 async function loadCycles() {
     try {
         const data = await apiCall('/performance/cycles');
-        allCycles = Array.isArray(data) ? data : [];
+        allCycles = pluckArray(data, 'cycles');
         renderCycles();
         populateCycleSelects();
-    } catch(e) { console.error('Cycles error:', e); }
+    } catch(e) {
+        console.error('Cycles error:', e);
+        allCycles = [];
+        renderCycles();
+    }
 }
 
 async function loadReviews() {
     try {
         const data = await apiCall('/performance/reviews');
-        allReviews = Array.isArray(data) ? data : [];
+        allReviews = pluckArray(data, 'reviews');
         renderReviews(allReviews);
-    } catch(e) { console.error('Reviews error:', e); }
+    } catch(e) {
+        console.error('Reviews error:', e);
+        allReviews = [];
+        renderReviews(allReviews);
+    }
 }
 
 async function loadGoals() {
     try {
-        const data = await apiCall('/performance/goals');
-        allGoals = Array.isArray(data) ? data : [];
+        // Worker exposes goals at /goals (not /performance/goals)
+        const data = await apiCall('/goals');
+        allGoals = pluckArray(data, 'goals');
         renderGoals(allGoals);
-    } catch(e) { console.error('Goals error:', e); }
+    } catch(e) {
+        console.error('Goals error:', e);
+        allGoals = [];
+        renderGoals(allGoals);
+    }
 }
 
 // ══════════════════════════════════════════════════════
@@ -763,7 +797,8 @@ async function saveGoal() {
 
     setBtnLoading('save-goal-btn', true);
     try {
-        await apiCall('/performance/goals', 'POST', {
+        // Worker exposes goals at /goals (not /performance/goals)
+        await apiCall('/goals', 'POST', {
             title,
             employee_id: empId,
             description: document.getElementById('goal-desc').value.trim() || null,
@@ -794,7 +829,8 @@ async function updateGoalProgress(id, currentPct) {
     const pct = Math.min(100, Math.max(0, parseInt(newPct)||0));
     const status = pct === 100 ? 'completed' : pct >= 70 ? 'on_track' : pct >= 40 ? 'at_risk' : 'behind';
     try {
-        await apiCall('/performance/goals/' + id, 'PATCH', { progress: pct, status });
+        // Worker exposes goals at /goals/:id (not /performance/goals/:id)
+        await apiCall('/goals/' + id, 'PATCH', { progress: pct, status });
         toast('✅ Progress updated!');
         await loadGoals(); updateStats();
     } catch(e) { toast('Update failed: ' + e.message, 'error'); }
