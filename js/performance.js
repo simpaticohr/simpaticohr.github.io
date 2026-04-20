@@ -113,26 +113,37 @@ async function loadUser() {
 async function loadCycles() {
   try {
     const result = await perfApiCall('/performance/cycles');
-    // Worker may return { cycles: [...] } or an array directly
-    const raw = Array.isArray(result) ? result : (result.cycles || result.data || []);
-    allCycles = raw;
-    console.log(`[performance] Loaded ${allCycles.length} cycles from worker`);
+    // Worker may return { cycles: [...] }, { data: [...] }, or an array directly
+    // Defensively extract an array from any shape of response
+    var parsed = null;
+    if (Array.isArray(result)) {
+      parsed = result;
+    } else if (result && typeof result === 'object') {
+      if (Array.isArray(result.cycles)) parsed = result.cycles;
+      else if (Array.isArray(result.data)) parsed = result.data;
+      else if (Array.isArray(result.rows)) parsed = result.rows;
+    }
+    allCycles = parsed || [];
+    console.log('[performance] Loaded ' + allCycles.length + ' cycles from worker');
   } catch (workerErr) {
     console.warn('[performance] Worker loadCycles failed, trying Supabase fallback:', workerErr.message);
-    // Supabase fallback — best-effort
     allCycles = await loadCyclesFromDB();
   }
+
+  // Safety: ensure allCycles is always an array
+  if (!Array.isArray(allCycles)) allCycles = [];
 
   // Populate the cycle-filter dropdown
   const sel = document.getElementById('cycle-filter'); if (!sel) return;
   sel.innerHTML = '<option value="">All Cycles</option>';
-  allCycles.forEach(c => {
-    const opt = document.createElement('option');
+  for (var ci = 0; ci < allCycles.length; ci++) {
+    var c = allCycles[ci];
+    var opt = document.createElement('option');
     opt.value = c.id; opt.textContent = c.name;
     sel.appendChild(opt);
-  });
+  }
 
-  const active = allCycles.filter(c => c.status === 'active').length;
+  var active = allCycles.filter(function(c) { return c.status === 'active'; }).length;
   setText('stat-cycles', active || allCycles.length || '0');
 }
 
@@ -156,25 +167,22 @@ async function loadCyclesFromDB() {
 }
 
 async function loadReviews() {
-  const cid = typeof getCompanyId === 'function' ? getCompanyId() : null;
+  var cid = typeof getCompanyId === 'function' ? getCompanyId() : null;
   if (!cid) { allReviews = []; renderReviews([]); return; }
 
-  try {
-    const result = await perfApiCall('/performance/reviews');
-    allReviews = Array.isArray(result) ? result : (result.reviews || result.data || []);
-    console.log(`[performance] Loaded ${allReviews.length} reviews from worker`);
-  } catch (workerErr) {
-    console.warn('[performance] Worker loadReviews failed, trying Supabase fallback:', workerErr.message);
-    allReviews = await loadReviewsFromDB(cid);
-  }
+  // Supabase is the primary source for reviews (worker route does not exist)
+  allReviews = await loadReviewsFromDB(cid);
 
-  const pending  = allReviews.filter(r => r.status === 'draft' || r.status === 'in_progress').length;
-  const scores   = allReviews.filter(r => r.score).map(r => r.score);
-  const avgScore = scores.length ? Math.round(scores.reduce((a,b)=>a+b,0)/scores.length) : 0;
+  // Safety: ensure allReviews is always an array
+  if (!Array.isArray(allReviews)) allReviews = [];
+
+  var pending  = allReviews.filter(function(r) { return r.status === 'draft' || r.status === 'in_progress'; }).length;
+  var scores   = allReviews.filter(function(r) { return r.score; }).map(function(r) { return r.score; });
+  var avgScore = scores.length ? Math.round(scores.reduce(function(a,b){return a+b;},0)/scores.length) : 0;
 
   setText('stat-pending', pending);
   setText('stat-avg-score', avgScore || '—');
-  if (avgScore) setText('stat-avg-sub', `${avgScore}/100 average`);
+  if (avgScore) setText('stat-avg-sub', avgScore + '/100 average');
 
   renderReviews(allReviews);
 }
@@ -221,21 +229,19 @@ async function loadReviewsFromDB(cid) {
 }
 
 async function loadGoals() {
-  const cid = typeof getCompanyId === 'function' ? getCompanyId() : null;
+  var cid = typeof getCompanyId === 'function' ? getCompanyId() : null;
   if (!cid) { allGoals = []; renderGoals([]); return; }
 
-  try {
-    const result = await perfApiCall('/performance/goals');
-    allGoals = Array.isArray(result) ? result : (result.goals || result.data || []);
-    console.log(`[performance] Loaded ${allGoals.length} goals from worker`);
-  } catch (workerErr) {
-    console.warn('[performance] Worker loadGoals failed, trying Supabase fallback:', workerErr.message);
-    allGoals = await loadGoalsFromDB(cid);
-  }
+  // Supabase is the primary source for goals (worker route does not exist)
+  allGoals = await loadGoalsFromDB(cid);
 
-  const achieved = allGoals.filter(g => g.status === 'achieved' || g.status === 'completed').length;
-  const pct = allGoals.length ? Math.round(achieved / allGoals.length * 100) : 0;
-  document.getElementById('stat-goals').innerHTML = `${pct}<span style="font-size:18px">%</span>`;
+  // Safety: ensure allGoals is always an array
+  if (!Array.isArray(allGoals)) allGoals = [];
+
+  var achieved = allGoals.filter(function(g) { return g.status === 'achieved' || g.status === 'completed'; }).length;
+  var pct = allGoals.length ? Math.round(achieved / allGoals.length * 100) : 0;
+  var goalsEl = document.getElementById('stat-goals');
+  if (goalsEl) goalsEl.innerHTML = pct + '<span style="font-size:18px">%</span>';
 
   renderGoals(allGoals);
 }
