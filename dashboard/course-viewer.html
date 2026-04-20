@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Training Course Viewer — Simpatico HR</title>
+    <script src="../js/hr-config.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="../js/shared-utils.js"></script>
+    <script src="../js/supabase-client.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #4f46e5;
+            --primary-light: #818cf8;
+            --primary-dark: #3730a3;
+            --success: #10b981;
+            --bg-color: #f8fafc;
+            --text-main: #1e293b;
+            --text-muted: #64748b;
+        }
+
+        * { font-family: 'Inter', sans-serif; box-sizing: border-box; }
+        body { margin: 0; background: var(--bg-color); color: var(--text-main); display: flex; flex-direction: column; min-height: 100vh; }
+
+        .navbar {
+            background: white; border-bottom: 1px solid #e2e8f0; padding: 16px 32px;
+            display: flex; align-items: center; justify-content: space-between;
+            position: sticky; top: 0; z-index: 100;
+        }
+
+        .back-btn {
+            display: inline-flex; align-items: center; gap: 8px; text-decoration: none;
+            color: var(--text-muted); font-weight: 600; font-size: 0.95rem;
+            transition: 0.2s;
+        }
+        .back-btn:hover { color: var(--primary); transform: translateX(-4px); }
+
+        .container { max-width: 900px; margin: 40px auto; padding: 0 20px; flex: 1; width: 100%; }
+
+        .header-card {
+            background: linear-gradient(135deg, #1e1b4b, var(--primary)); border-radius: 16px;
+            padding: 40px; color: white; box-shadow: 0 20px 40px rgba(79, 70, 229, 0.2);
+            position: relative; overflow: hidden; margin-bottom: 30px;
+        }
+        .header-card::after {
+            content:''; position: absolute; top: -50%; right: -20%; width: 400px; height: 400px;
+            background: radial-gradient(circle, rgba(255,255,255,0.1) 0%, transparent 70%); border-radius: 50%;
+        }
+
+        .badge {
+            display: inline-block; padding: 6px 12px; background: rgba(255,255,255,0.2); border-radius: 20px;
+            font-size: 0.8rem; font-weight: 600; text-transform: uppercase; letter-spacing: 1px;
+            backdrop-filter: blur(4px); margin-bottom: 16px;
+        }
+
+        .title { font-size: 2.2rem; font-weight: 800; margin: 0 0 16px 0; line-height: 1.2; }
+        .meta-info { display: flex; gap: 24px; font-size: 0.95rem; opacity: 0.9; }
+        .meta-item { display: flex; align-items: center; gap: 8px; }
+
+        .content-card {
+            background: white; border-radius: 16px; padding: 40px; box-shadow: 0 4px 6px rgba(0,0,0,0.02);
+            border: 1px solid #f1f5f9; display: flex; flex-direction: column; gap: 24px;
+        }
+
+        .description { font-size: 1.05rem; line-height: 1.7; color: #475569; }
+
+        .material-box {
+            background: #f8fafc; border: 2px dashed #cbd5e1; border-radius: 12px; padding: 30px;
+            text-align: center; color: var(--text-muted); display:flex; flex-direction: column; align-items: center; gap: 12px;
+        }
+        .material-box i { font-size: 3rem; color: #94a3b8; }
+        
+        .content-iframe { width: 100%; height: 500px; border: none; border-radius: 10px; box-shadow: inset 0 2px 4px rgba(0,0,0,0.05); background: #f1f5f9; }
+
+        .action-area { display: flex; justify-content: flex-end; margin-top: 20px; border-top: 1px solid #e2e8f0; padding-top: 24px; }
+
+        .btn-complete {
+            background: var(--success); color: white; border: none; padding: 14px 28px; border-radius: 8px;
+            font-size: 1rem; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 8px;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
+        }
+        .btn-complete:hover { transform: translateY(-2px); box-shadow: 0 8px 16px rgba(16, 185, 129, 0.4); }
+        .btn-complete:disabled { background: #cbd5e1; cursor: not-allowed; transform: none; box-shadow: none; color: white; }
+
+        .skeleton { background: linear-gradient(90deg, #e2e8f0 25%, #f1f5f9 50%, #e2e8f0 75%); background-size: 200% 100%; animation: loading 1.5s infinite; border-radius: 4px; }
+        @keyframes loading { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+    </style>
+</head>
+<body>
+
+    <nav class="navbar">
+        <a href="hr.html" class="back-btn"><i class="fas fa-arrow-left"></i> Back to Dashboard</a>
+        <div style="font-weight: 700; color: var(--primary); letter-spacing: 0.5px;">SIMPATICO HR</div>
+    </nav>
+
+    <div class="container" id="app">
+        <div class="header-card">
+            <div class="badge skeleton" id="c-cat" style="width: 100px; height: 24px;"></div>
+            <h1 class="title" id="c-title"><span class="skeleton" style="display:block;width:60%;height:40px"></span></h1>
+            <div class="meta-info">
+                <div class="meta-item"><i class="far fa-clock"></i> <span id="c-dur" class="skeleton" style="width: 60px; height: 20px"></span></div>
+                <div class="meta-item" id="c-req-wrap" style="display:none"><i class="fas fa-shield-alt"></i> Compliance Required</div>
+            </div>
+        </div>
+
+        <div class="content-card">
+            <div>
+                <h3 style="margin-top: 0; color: var(--text-main);">Course Overview</h3>
+                <div class="description" id="c-desc">
+                    <div class="skeleton" style="width:100%;height:20px;margin-bottom:8px"></div>
+                    <div class="skeleton" style="width:80%;height:20px"></div>
+                </div>
+            </div>
+
+            <div id="c-material"></div>
+
+            <div class="action-area">
+                <button id="btn-mark-done" class="btn-complete" disabled>
+                    <i class="fas fa-check-circle"></i> Mark as Completed
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Container -->
+    <div id="toasts" style="position:fixed; bottom:20px; right:20px; z-index:9999;"></div>
+
+    <script>
+        const urlParams = new URLSearchParams(window.location.search);
+        const courseId = urlParams.get('id');
+
+        async function init() {
+            if (!courseId) {
+                document.getElementById('app').innerHTML = '<div style="text-align:center;padding:40px"><h2>Course not found</h2><a href="hr.html">Go back</a></div>';
+                return;
+            }
+
+            const client = window.getSupabaseClient ? window.getSupabaseClient() : window.supabase?.createClient(SIMPATICO_CONFIG.supabaseUrl, SIMPATICO_CONFIG.supabaseAnonKey);
+            if (!client) { showToast('Database connection failed', 'error'); return; }
+
+            // Fetch course
+            const { data: course, error } = await client.from('training_courses').select('*').eq('id', courseId).single();
+            if (error || !course) {
+                document.getElementById('app').innerHTML = `<div style="text-align:center;padding:40px"><h2>Could not load course</h2><p>${error?.message || ''}</p><a href="hr.html">Go back</a></div>`;
+                return;
+            }
+
+            // Render details
+            const el = (id) => document.getElementById(id);
+            el('c-cat').className = 'badge';
+            el('c-cat').textContent = (course.category || 'General').toUpperCase();
+            
+            el('c-title').innerHTML = course.title || 'Untitled Course';
+            el('c-dur').className = '';
+            el('c-dur').textContent = course.duration_hours ? `${course.duration_hours} Hours` : 'Self-paced';
+            
+            if (course.is_required) el('c-req-wrap').style.display = 'flex';
+
+            el('c-desc').innerHTML = course.description ? escapeHtml(course.description).replace(/\n/g, '<br>') : '<i>No description provided.</i>';
+
+            // Handle Content Material
+            const matContainer = el('c-material');
+            if (course.content_url) {
+                let url = course.content_url;
+                if (url.includes('youtube.com/watch?v=')) {
+                    url = url.replace('watch?v=', 'embed/');
+                }
+                matContainer.innerHTML = `<iframe src="${url}" class="content-iframe" allowfullscreen></iframe>
+                                          <div style="text-align:center;margin-top:10px;"><a href="${url}" target="_blank" style="color:var(--primary);font-size:0.9rem;font-weight:600;text-decoration:none">Open in New Tab <i class="fas fa-external-link-alt"></i></a></div>`;
+            } else {
+                matContainer.innerHTML = `
+                    <div class="material-box">
+                        <i class="fas fa-folder-open"></i>
+                        <h4 style="margin:0;color:var(--text-main)">No External Content Linked</h4>
+                        <p style="margin:0;font-size:0.9rem">Please refer to the course overview or attachments provided by your HR team.</p>
+                    </div>`;
+            }
+
+            // Check if current user is enrolled
+            const userEmpId = getEmployeeId();
+            let enrollmentId = null;
+
+            if (userEmpId) {
+                const { data: enrollData } = await client.from('training_enrollments')
+                    .select('*')
+                    .eq('course_id', courseId)
+                    .eq('employee_id', userEmpId)
+                    .single();
+
+                if (enrollData) {
+                    enrollmentId = enrollData.id;
+                    const btn = el('btn-mark-done');
+                    btn.disabled = false;
+                    
+                    if (enrollData.status === 'completed') {
+                        btn.innerHTML = `<i class="fas fa-check-double"></i> Completed on ${new Date(enrollData.completed_at).toLocaleDateString()}`;
+                        btn.style.background = '#0ea5e9'; // Blue for already done
+                        btn.disabled = true;
+                    } else {
+                        btn.onclick = async () => {
+                            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving...';
+                            btn.disabled = true;
+                            const { error: updErr } = await client.from('training_enrollments')
+                                .update({ status: 'completed', progress: 100, completed_at: new Date().toISOString() })
+                                .eq('id', enrollmentId);
+                            
+                            if (updErr) {
+                                showToast(updErr.message, 'error');
+                                btn.innerHTML = '<i class="fas fa-check-circle"></i> Mark as Completed';
+                                btn.disabled = false;
+                            } else {
+                                showToast('Course marked as completed! 🎉', 'success');
+                                btn.innerHTML = `<i class="fas fa-check-double"></i> Completed`;
+                                btn.style.background = '#0ea5e9';
+                            }
+                        };
+                    }
+                } else {
+                     el('btn-mark-done').innerHTML = "Not Enrolled";
+                }
+            } else {
+                el('btn-mark-done').style.display = 'none';
+            }
+        }
+
+        // Helper to get employee ID of logged in user
+        function getEmployeeId() {
+            try {
+                const u = JSON.parse(localStorage.getItem('simpatico_user') || '{}');
+                return u.employee_id || null;
+            } catch(e) { return null; }
+        }
+
+        // Initialize when DOM and utilities are ready
+        setTimeout(init, 300);
+    </script>
+</body>
+</html>
