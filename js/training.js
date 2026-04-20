@@ -62,15 +62,9 @@ async function loadCourses() {
   let query = client.from('training_courses')
     .select('*')
     .order('created_at', { ascending: false });
-  if (cid) query = query.eq('tenant_id', cid);
+  // Removed tenant_id filter because training_courses is a global catalog in the schema.
   let { data, error } = await query;
 
-  // Fallback: if tenant_id/company_id column doesn't exist yet (400), retry without it
-  if (error && (error.code === '42703' || (error.message && (error.message.includes('tenant_id') || error.message.includes('company_id'))))) {
-    console.warn('[training] tenant_id/company_id not found on training_courses, retrying without filter');
-    const fallback = await client.from('training_courses').select('*').order('created_at', { ascending: false });
-    data = fallback.data; error = fallback.error;
-  }
 
   if (error) { console.error(error); return; }
   allCourses = data || [];
@@ -125,20 +119,11 @@ async function loadEnrollments() {
     .from('training_enrollments')
     .select(`
       *,
-      employees(first_name, last_name),
+      employees!inner(first_name, last_name, company_id),
       training_courses(*)
     `)
-    .eq('tenant_id', cid)
+    .eq('employees.company_id', cid)
     .order('enrolled_at', { ascending: false });
-
-  // Fallback: if tenant_id/company_id column doesn't exist yet on training_enrollments
-  if (error && (error.code === '42703' || (error.message && (error.message.includes('tenant_id') || error.message.includes('company_id'))))) {
-    console.warn('[training] tenant_id/company_id filter failed on training_enrollments, retrying without');
-    const fallback = await client.from('training_enrollments')
-      .select('*, employees(first_name, last_name), training_courses(*)')
-      .order('enrolled_at', { ascending: false });
-    data = fallback.data; error = fallback.error;
-  }
 
   if (error) { console.error(error); return; }
   allEnrollments = data || [];
@@ -189,24 +174,13 @@ async function loadComplianceReport() {
     .from('training_enrollments')
     .select(`
       *,
-      employees(first_name, last_name),
+      employees!inner(first_name, last_name, company_id),
       training_courses(*)
     `)
-    .eq('tenant_id', cid)
+    .eq('employees.company_id', cid)
     .eq('training_courses.is_required', true)
     .or(`due_date.lte.${soon},status.eq.overdue`)
     .order('due_date');
-
-  // Fallback: if tenant_id/company_id column doesn't exist yet
-  if (error && (error.code === '42703' || (error.message && (error.message.includes('tenant_id') || error.message.includes('company_id'))))) {
-    console.warn('[training] tenant_id/company_id filter failed on compliance query, retrying without');
-    const fallback = await client.from('training_enrollments')
-      .select('*, employees(first_name, last_name), training_courses(*)')
-      .eq('training_courses.is_required', true)
-      .or(`due_date.lte.${soon},status.eq.overdue`)
-      .order('due_date');
-    data = fallback.data; error = fallback.error;
-  }
 
   if (error) { console.error(error); return; }
   const compliance = (data || []).filter(e => e.training_courses?.is_required);
@@ -285,18 +259,11 @@ window.saveCourse = async function () {
   };
 
   try {
-    const headers = await getFreshAuthHeaders();
-    console.log('[training.js saveCourse] Headers:', { hasAuth: !!headers.Authorization, tenantId: headers['X-Tenant-ID'] });
-    const res = await fetch(`${TR_CONFIG.workerUrl}/training/courses`, {
-      method: 'POST',
-      headers: { ...headers, 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-    const result = await res.json();
-    if (!res.ok) {
-      const errMsg = result.error?.message || result.error || result.message || 'Failed to create course';
-      throw new Error(errMsg);
-    }
+    const client = sb();
+    if (!client) throw new Error('Database not connected');
+    const { error } = await client.from('training_courses').insert([payload]);
+    if (error) throw new Error(error.message);
+
     showToast('Course created!', 'success');
     closeModal('create-course-modal');
     await loadCourses();
