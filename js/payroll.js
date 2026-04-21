@@ -305,10 +305,12 @@ window.calculatePayroll = async function() {
     const client = sb();
     if (!client) throw new Error('Database not connected.');
 
+    const currency = document.getElementById('run-currency')?.value || 'USD';
     const { data: salaries, error: salErr } = await client
       .from('employee_salaries')
       .select('employee_id, base_salary')
-      .eq('tenant_id', companyId);
+      .eq('tenant_id', companyId)
+      .eq('currency', currency);
 
     const { data: deductions } = await client
       .from('payroll_deductions')
@@ -454,11 +456,13 @@ window.executePayroll = async function() {
     const client = sb();
     if (!client) throw new Error('Database not connected');
 
+    const currency = document.getElementById('run-currency')?.value || 'USD';
     // 1. Get all active employees with salaries
     const { data: salaries, error: salErr } = await client
         .from('employee_salaries')
         .select('employee_id, base_salary, currency')
-        .eq('tenant_id', companyId);
+        .eq('tenant_id', companyId)
+        .eq('currency', currency);
       
       if (salErr) throw new Error('Could not fetch salary data: ' + salErr.message);
       if (!salaries || salaries.length === 0) {
@@ -560,8 +564,7 @@ window.executePayroll = async function() {
           deductions_total: totalDeductionsAgg, net_pay: net,
           status: 'generated',
           payroll_run_id: runData.id,
-          tenant_id: companyId, company_id: companyId,
-          pay_date: payDate
+          tenant_id: companyId, company_id: companyId
         };
       });
 
