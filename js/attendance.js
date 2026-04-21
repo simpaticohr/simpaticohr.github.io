@@ -198,7 +198,23 @@ async function executeMarkAttendance(geoPrefix) {
   // Append geo context securely into notes string (or a dedicated DB column once migrated)
   notes = `${geoPrefix} ${notes}`.trim();
 
-  const cid = typeof getCompanyId === 'function' ? getCompanyId() : 'SIMP_PRO_MAIN';
+  let cid = sessionStorage.getItem('company_id') || sessionStorage.getItem('tenant_id') || (typeof getCompanyId === 'function' ? getCompanyId() : null);
+  
+  const client = sb(); 
+  if (!client) { showToast('Database not connected', 'error'); return; }
+
+  if (!cid) {
+     try {
+        const { data: { user } } = await client.auth.getUser();
+        if (user) {
+           const { data: profiles } = await client.from('users').select('company_id').eq('auth_id', user.id).limit(1);
+           if (profiles?.[0]?.company_id) cid = profiles[0].company_id;
+        }
+     } catch(e) {}
+  }
+  
+  if (!cid) { showToast('Tenant mapping missing. Please log in again.', 'error'); return; }
+
   const now = new Date().toISOString();
 
   const payload = {
@@ -232,7 +248,22 @@ window.markAttendance = () => executeMarkAttendance('[GEO: Unverified]');
 
 // ── Bulk Mark ──
 window.bulkMarkPresent = async function() {
-  const cid = typeof getCompanyId === 'function' ? getCompanyId() : 'SIMP_PRO_MAIN';
+  let cid = sessionStorage.getItem('company_id') || sessionStorage.getItem('tenant_id') || (typeof getCompanyId === 'function' ? getCompanyId() : null);
+  const client = sb(); 
+  if(!client) { showToast('Database not connected', 'error'); return; }
+  
+  if (!cid) {
+     try {
+        const { data: { user } } = await client.auth.getUser();
+        if (user) {
+           const { data: profiles } = await client.from('users').select('company_id').eq('auth_id', user.id).limit(1);
+           if (profiles?.[0]?.company_id) cid = profiles[0].company_id;
+        }
+     } catch(e) {}
+  }
+  
+  if (!cid) { showToast('Tenant mapping missing. Please log in again.', 'error'); return; }
+
   const today = new Date().toISOString().slice(0,10);
   const now = new Date().toISOString();
 
@@ -248,7 +279,6 @@ window.bulkMarkPresent = async function() {
   if (records.length === 0) { showToast('No active employees', 'error'); return; }
 
   try {
-    const client = sb(); if (!client) throw new Error('Database not connected');
     const { error } = await client.from('attendance_records').upsert(records, { onConflict: 'employee_id,date' });
     if (error) throw new Error(error.message);
     showToast(`${records.length} employees marked present`, 'success');
