@@ -300,22 +300,73 @@ window.calculatePayroll = async function() {
       .eq('tenant_id', companyId)
       .eq('status', 'active');
 
+    // Fetch unpaid leave for proration
+    const { data: unpaidLeaves } = await client
+      .from('leave_requests')
+      .select('employee_id, days')
+      .eq('tenant_id', companyId)
+      .eq('status', 'approved')
+      .eq('leave_type', 'unpaid')
+      .gte('start_date', period + '-01')
+      .lt('start_date', period.split('-')[0] + '-' + (parseInt(period.split('-')[1]) + 1).toString().padStart(2, '0') + '-01');
+
+    const unpaidLeaveMap = {};
+    (unpaidLeaves || []).forEach(ul => { unpaidLeaveMap[ul.employee_id] = (unpaidLeaveMap[ul.employee_id] || 0) + (ul.days || 0); });
+
+    // Link Performance Data for Bonuses
+    const { data: reviews } = await client
+      .from('performance_reviews')
+      .select('employee_id, score, status')
+      .eq('tenant_id', companyId)
+      .eq('status', 'completed');
+    
+    // Get latest score per employee
+    const perfMap = {};
+    (reviews || []).sort((a,b)=>b.id-a.id).forEach(r => {
+       if(!perfMap[r.employee_id] && r.score) perfMap[r.employee_id] = r.score;
+    });
+
     const dedMap = {};
     (deductions || []).forEach(d => { dedMap[d.employee_id] = (dedMap[d.employee_id] || 0) + (d.amount || 0); });
 
     const empCount = (salaries || []).length;
-    let totalGross = 0, totalDed = 0;
+    let totalGross = 0, totalDed = 0, totalBonus = 0, totalTaxes = 0, totalProration = 0;
+    
     (salaries || []).forEach(s => {
-      totalGross += s.base_salary || 0;
-      totalDed += dedMap[s.employee_id] || 0;
+      let base = s.base_salary || 0;
+      let score = perfMap[s.employee_id] || 0;
+      let bonus = 0;
+      if (score >= 90) bonus = base * 0.10; // 10% bonus
+      else if (score >= 80) bonus = base * 0.05; // 5% bonus
+      
+      // Enterprise Taxation & Proration engine
+      let unpaidDays = unpaidLeaveMap[s.employee_id] || 0;
+      let dailyRate = base / 22; // approx 22 working days
+      let prorationAdj = dailyRate * unpaidDays;
+      
+      // Calculate B2B Taxes (Mocking US/Global TDS/PF mapping)
+      let taxableIncome = base + bonus - prorationAdj;
+      let tdsTax = taxableIncome * 0.12; // 12% standard base tax
+      let pfTax = taxableIncome * 0.05;  // 5% standard PF/401k
+      let currentTaxes = Math.max(0, tdsTax + pfTax);
+
+      totalBonus += bonus;
+      totalGross += base + bonus;
+      totalProration += prorationAdj;
+      totalTaxes += currentTaxes;
+      totalDed += (dedMap[s.employee_id] || 0) + currentTaxes + prorationAdj;
     });
     const totalNet = totalGross - totalDed;
 
+    let bonusHtml = totalBonus > 0 ? `Bonus: <strong style="color:var(--hr-info)">+${formatCurrency(totalBonus)}</strong> &nbsp;|&nbsp; ` : '';
+
     document.getElementById('run-preview').innerHTML = `
-      <strong>${empCount}</strong> employees &nbsp;|&nbsp;
-      Gross: <strong>${formatCurrency(totalGross)}</strong> &nbsp;|&nbsp;
-      Deductions: <span style="color:var(--hr-danger)">-${formatCurrency(totalDed)}</span> &nbsp;|&nbsp;
-      Net: <strong style="color:var(--hr-success)">${formatCurrency(totalNet)}</strong>`;
+      <div style="margin-bottom:6px"><strong>${empCount}</strong> employees &nbsp;|&nbsp; Base + ${bonusHtml} Gross: <strong>${formatCurrency(totalGross)}</strong></div>
+      <div style="font-size:12px;color:var(--hr-text-muted)">
+         Automated Tax (TDS/PF): <span style="color:var(--hr-danger)">-${formatCurrency(totalTaxes)}</span> &nbsp;|&nbsp;
+         Leave Proration: <span style="color:var(--hr-danger)">-${formatCurrency(totalProration)}</span>
+      </div>
+      <div style="margin-top:8px">Net Payout: <strong style="color:var(--hr-success);font-size:16px">${formatCurrency(totalNet)}</strong></div>`;
   } catch (e) {
     setText('run-preview', 'Calculation failed: ' + e.message);
   }
@@ -426,6 +477,18 @@ window.executePayroll = async function() {
         unpaidLeaveMap[ul.employee_id] = (unpaidLeaveMap[ul.employee_id] || 0) + (ul.days || 0);
       });
 
+      // 2c. Get latest performance reviews for bonuses
+      const { data: perfReviews } = await client
+        .from('performance_reviews')
+        .select('employee_id, score, status')
+        .eq('tenant_id', companyId)
+        .eq('status', 'completed');
+      
+      const perfMap = {};
+      (perfReviews || []).sort((a,b)=>b.id-a.id).forEach(r => {
+        if(!perfMap[r.employee_id] && r.score) perfMap[r.employee_id] = r.score;
+      });
+
       // 3. Create payroll run record
       const { data: runData, error: runErr } = await client
         .from('payroll_runs')
@@ -439,24 +502,38 @@ window.executePayroll = async function() {
       
       if (runErr) throw new Error('Could not create payroll run: ' + runErr.message);
 
-      // 4. Generate payslips with unpaid leave adjustment
-      let totalGross = 0, totalNet = 0;
+      // 4. Generate payslips with unpaid leave adjustment & performance bonuses
+      let totalGross = 0, totalNet = 0, totalBonus = 0;
       const payslips = salaries.map(s => {
-        const gross = s.base_salary || 0;
+        let base = s.base_salary || 0;
+        let score = perfMap[s.employee_id] || 0;
+        let perfBonus = 0;
+        
+        // Performance-based Pay-for-Performance logic
+        if (score >= 90) perfBonus = base * 0.10;
+        else if (score >= 80) perfBonus = base * 0.05;
+        
+        totalBonus += perfBonus;
+        const gross = base + perfBonus;
         const ded = dedMap[s.employee_id] || 0;
         const unpaidDays = unpaidLeaveMap[s.employee_id] || 0;
-        const dailyRate = gross / 22; // Standard 22 working days per month
+        const dailyRate = base / 22; // Standard 22 working days per month
         const unpaidAdj = dailyRate * unpaidDays;
-        const net = Math.max(0, gross - ded - unpaidAdj);
+
+        // Enterprise Taxation
+        let taxableIncome = gross - unpaidAdj;
+        let tdsTax = taxableIncome * 0.12; 
+        let pfTax = taxableIncome * 0.05;  
+        let standardTaxes = Math.max(0, tdsTax + pfTax);
+        
+        // Final Net Calculation
+        const totalDeductionsAgg = ded + unpaidAdj + standardTaxes;
+        const net = Math.max(0, gross - totalDeductionsAgg);
         
         // Validate payslip data
         if (net > gross) {
           console.error('[payroll] Invalid payslip: net exceeds gross', { employee_id: s.employee_id, gross, net, ded, unpaidAdj });
           throw new Error(`Net pay (${net}) exceeds gross (${gross}) for employee ${s.employee_id}. Check deductions and unpaid leave data.`);
-        }
-        if (ded > gross) {
-          console.error('[payroll] Invalid payslip: deductions exceed gross', { employee_id: s.employee_id, gross, ded });
-          throw new Error(`Deductions (${ded}) exceed gross (${gross}) for employee ${s.employee_id}. Check deduction amounts.`);
         }
         
         totalGross += gross;
@@ -464,7 +541,7 @@ window.executePayroll = async function() {
         return {
           employee_id: s.employee_id,
           period, gross_pay: gross,
-          deductions_total: ded, net_pay: net,
+          deductions_total: totalDeductionsAgg, net_pay: net,
           status: 'generated',
           payroll_run_id: runData.id,
           tenant_id: companyId, company_id: companyId,

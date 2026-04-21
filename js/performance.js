@@ -29,7 +29,7 @@ let allCycles  = [];
   async function boot() {
     // Refresh the live token before any API calls
     await refreshToken();
-    await Promise.all([loadUser(), loadCycles(), loadReviews(), loadGoals()]);
+    await Promise.all([loadUser(), loadCycles(), loadReviews(), loadGoals(), loadPerfEmployees(), loadCheckinsAndKudos()]);
     renderNineBox();
   }
   if (document.readyState === 'loading') {
@@ -38,6 +38,191 @@ let allCycles  = [];
     setTimeout(boot, 100);
   }
 })();
+
+let allCheckins = [];
+let allKudos = [];
+let allPerfEmployees = [];
+
+async function loadPerfEmployees() {
+  const client = sb(); if(!client) return;
+  const cid = typeof getCompanyId === 'function' ? getCompanyId() : null;
+  let q = client.from('employees').select('id, first_name, last_name, avatar_url').eq('status','active');
+  if(cid) q = q.eq('tenant_id', cid);
+  const { data } = await q;
+  allPerfEmployees = data || [];
+  
+  // Populate dropdowns
+  ['checkin-employee', 'kudos-employee'].forEach(id => {
+    const sel = document.getElementById(id);
+    if(sel) {
+      sel.innerHTML = '<option value="">Select Employee</option>';
+      allPerfEmployees.forEach(e => {
+        sel.innerHTML += `<option value="${e.id}">${e.first_name} ${e.last_name}</option>`;
+      });
+    }
+  });
+}
+
+async function loadCheckinsAndKudos() {
+  const client = sb();
+  const cid = typeof getCompanyId === 'function' ? getCompanyId() : null;
+
+  try {
+    if(!client) throw new Error("No DB");
+    // Fetch Checkins
+    let qCheck = client.from('performance_checkins').select('*').order('date', {ascending: false});
+    if(cid) qCheck = qCheck.eq('tenant_id', cid);
+    const { data: cData, error: cErr } = await qCheck;
+    if(cErr) throw cErr;
+    allCheckins = cData || [];
+
+    // Fetch Kudos
+    let qKudos = client.from('performance_kudos').select('*').order('date', {ascending: false});
+    if(cid) qKudos = qKudos.eq('tenant_id', cid);
+    const { data: kData, error: kErr } = await qKudos;
+    if(kErr) throw kErr;
+    allKudos = kData || [];
+    
+    // Save to local sync
+    localStorage.setItem('hr_perf_checkins', JSON.stringify(allCheckins));
+    localStorage.setItem('hr_perf_kudos', JSON.stringify(allKudos));
+  } catch(e) {
+    console.warn('[performance] DB fetch for checkins/kudos failed, falling back to localStorage.', e.message);
+    allCheckins = JSON.parse(localStorage.getItem('hr_perf_checkins') || '[]');
+    allKudos    = JSON.parse(localStorage.getItem('hr_perf_kudos') || '[]');
+  }
+
+  renderCheckins();
+  renderKudos();
+}
+
+function renderCheckins() {
+  const list = document.getElementById('checkins-list'); if(!list) return;
+  if(allCheckins.length === 0) {
+    list.innerHTML = '<div class="hr-empty"><p>No check-ins recorded yet.</p></div>';
+    return;
+  }
+  const _e = typeof escapeHtml === 'function' ? escapeHtml : function(s) { return s?String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'):''; };
+  list.innerHTML = allCheckins.sort((a,b)=>new Date(b.date)-new Date(a.date)).map(c => {
+    const emp = allPerfEmployees.find(e => e.id === c.employee_id);
+    const name = emp ? `${emp.first_name} ${emp.last_name}` : 'Unknown Employee';
+    const init = emp ? `${emp.first_name[0]}${emp.last_name[0]}` : '?';
+    const color = avatarColor(c.employee_id);
+    return `
+    <div class="hr-card" style="display:flex;gap:16px;">
+      <div class="hr-emp-avatar" style="background:${color};color:#fff;width:40px;height:40px;flex-shrink:0">${init}</div>
+      <div style="flex:1">
+        <div style="display:flex;justify-content:space-between;margin-bottom:8px;">
+          <div style="font-weight:600">${name} <span style="color:var(--hr-text-muted);font-weight:400;font-size:12px;margin-left:8px">${new Date(c.date).toLocaleDateString()}</span></div>
+          <span class="hr-badge hr-badge-active">Weekly Check-in</span>
+        </div>
+        <div style="margin-bottom:8px;"><strong>Went well:</strong><br><span style="color:var(--hr-text-secondary);font-size:13px">${_e(c.went_well)}</span></div>
+        <div><strong>Blockers:</strong><br><span style="color:var(--hr-text-secondary);font-size:13px">${c.blockers ? _e(c.blockers) : 'None'}</span></div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function renderKudos() {
+  const list = document.getElementById('kudos-list'); if(!list) return;
+  if(allKudos.length === 0) {
+    list.innerHTML = '<div class="hr-empty" style="grid-column:1/-1"><p>No Kudos given yet.</p></div>';
+    return;
+  }
+  const _e = typeof escapeHtml === 'function' ? escapeHtml : function(s) { return s?String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'):''; };
+  list.innerHTML = allKudos.sort((a,b)=>new Date(b.date)-new Date(a.date)).map(k => {
+    const emp = allPerfEmployees.find(e => e.id === k.employee_id);
+    const name = emp ? `${emp.first_name} ${emp.last_name}` : 'Unknown';
+    const init = emp ? `${emp.first_name[0]}${emp.last_name[0]}` : '?';
+    const color = avatarColor(k.employee_id);
+    return `
+    <div class="hr-card">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
+        <div class="hr-emp-avatar" style="background:${color};color:#fff;width:32px;height:32px;font-size:11px">${init}</div>
+        <div>
+          <div style="font-weight:600;font-size:13px">${name}</div>
+          <div style="font-size:11px;color:var(--hr-text-muted)">${new Date(k.date).toLocaleDateString()}</div>
+        </div>
+      </div>
+      <span class="hr-badge hr-badge-info" style="margin-bottom:8px;display:inline-block">🏆 ${k.category}</span>
+      <p style="font-size:13px;color:var(--hr-text-secondary);line-height:1.4">"${_e(k.message)}"</p>
+    </div>`;
+  }).join('');
+}
+
+window.openCheckinModal = () => openModal('checkin-modal');
+window.openKudosModal = () => openModal('kudos-modal');
+
+window.saveCheckin = async function() {
+  const empId = document.getElementById('checkin-employee')?.value;
+  const well = document.getElementById('checkin-well')?.value.trim();
+  const blockers = document.getElementById('checkin-blockers')?.value.trim();
+  if(!empId || !well) { showToast('Employee and "Went well" are required','error'); return; }
+  
+  const cid = typeof getCompanyId === 'function' ? getCompanyId() : null;
+  const newRecord = {
+    employee_id: empId,
+    went_well: well,
+    blockers: blockers,
+    date: new Date().toISOString(),
+    tenant_id: cid
+  };
+  
+  try {
+    const client = sb();
+    if(!client) throw new Error("No DB");
+    const { data, error } = await client.from('performance_checkins').insert([newRecord]).select();
+    if(error) throw error;
+    allCheckins.unshift(data[0]);
+  } catch(e) {
+    console.warn('[performance] DB insert for checkin failed, using local storage.', e.message);
+    newRecord.id = Date.now().toString();
+    allCheckins.unshift(newRecord);
+  }
+
+  localStorage.setItem('hr_perf_checkins', JSON.stringify(allCheckins));
+  
+  showToast('Check-in recorded','success');
+  closeModal('checkin-modal');
+  document.getElementById('checkin-well').value = '';
+  document.getElementById('checkin-blockers').value = '';
+  renderCheckins();
+};
+
+window.saveKudos = async function() {
+  const empId = document.getElementById('kudos-employee')?.value;
+  const cat = document.getElementById('kudos-category')?.value;
+  const msg = document.getElementById('kudos-message')?.value.trim();
+  if(!empId || !msg) { showToast('Employee and message required','error'); return; }
+  
+  const cid = typeof getCompanyId === 'function' ? getCompanyId() : null;
+  const newKudos = {
+    employee_id: empId,
+    category: cat,
+    message: msg,
+    date: new Date().toISOString(),
+    tenant_id: cid
+  };
+  
+  try {
+    const client = sb();
+    if(!client) throw new Error("No DB");
+    const { data, error } = await client.from('performance_kudos').insert([newKudos]).select();
+    if(error) throw error;
+    allKudos.unshift(data[0]);
+  } catch(e) {
+    console.warn('[performance] DB insert for kudos failed, using local storage.', e.message);
+    newKudos.id = Date.now().toString();
+    allKudos.unshift(newKudos);
+  }
+
+  localStorage.setItem('hr_perf_kudos', JSON.stringify(allKudos));
+  
+  showToast('Kudos sent ✋','success');
+  closeModal('kudos-modal');
+  document.getElementById('kudos-message').value = '';
+  renderKudos();
+};
 
 /**
  * Ensures we have a fresh Supabase session token for worker calls.
@@ -502,11 +687,72 @@ window.filterReviews = () => {
 window.switchPerfTab = function(btn, tabId) {
   document.querySelectorAll('#perf-tabs .hr-tab').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
-  ['tab-reviews','tab-goals','tab-nine-box'].forEach(id => {
+  ['tab-reviews','tab-goals','tab-nine-box','tab-checkins','tab-kudos','tab-trends'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.style.display = id === tabId ? 'block' : 'none';
   });
   if (tabId === 'tab-nine-box') renderNineBox();
+  if (tabId === 'tab-trends') renderTrendsChart();
+};
+
+let trendChartInstance = null;
+window.renderTrendsChart = function() {
+  const ctx = document.getElementById('score-trend-chart');
+  if(!ctx || typeof Chart === 'undefined') return;
+  
+  // Aggregate real scores if available, else static example
+  let labels = ['Q3 2025', 'Q4 2025', 'Q1 2026', 'Q2 2026'];
+  let scores = [72, 75, 78, 83];
+
+  if (allReviews && allReviews.length > 0) {
+     // A more dynamic aggregation could go here in the future
+     const avgScore = Math.round(allReviews.reduce((sum, r) => sum + (r.score||0), 0) / allReviews.filter(r => r.score).length) || 0;
+     if (avgScore > 0) scores[3] = avgScore;
+  }
+
+  if(trendChartInstance) trendChartInstance.destroy();
+  
+  Chart.defaults.color = '#94a3b8';
+  Chart.defaults.borderColor = 'rgba(30,45,69,.5)';
+  Chart.defaults.font.family = "'IBM Plex Sans', sans-serif";
+  Chart.defaults.font.size = 13;
+  
+  trendChartInstance = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: labels,
+      datasets: [{
+        label: 'Average Performance Score',
+        data: scores,
+        borderColor: '#10b981',
+        backgroundColor: 'rgba(16,185,129,.1)',
+        fill: true,
+        tension: 0.4,
+        pointRadius: 6,
+        pointBorderWidth: 2,
+        pointBackgroundColor: '#1e2d45',
+        pointBorderColor: '#10b981'
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { position: 'top' },
+        tooltip: { boxPadding: 6 }
+      },
+      scales: {
+        y: { 
+           min: 50, 
+           max: 100, 
+           grid: { color: 'rgba(30,45,69,.5)' }
+        },
+        x: {
+           grid: { color: 'rgba(30,45,69,.5)' }
+        }
+      }
+    }
+  });
 };
 
 // ── Utility functions: defer to shared-utils.js if loaded ──

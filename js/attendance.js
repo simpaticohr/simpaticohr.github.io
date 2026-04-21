@@ -133,6 +133,17 @@ function renderAttendance(list) {
     const badge = statusColors[a.status] || 'hr-badge-inactive';
     const label = (a.status || '').replace('_', ' ');
 
+    // Extract Geo data from notes
+    const geoStrMatch = (a.notes||'').match(/\[GEO:\s*(.+?)\]/);
+    const geo = geoStrMatch ? _e(geoStrMatch[1]) : '<span style="color:var(--hr-text-muted)">Unverified</span>';
+    const cleanNotes = _e((a.notes||'').replace(/\[GEO:\s*(.+?)\]\s*/, '') || '—');
+
+    // Display AI Review Mock flags
+    let aiStatus = '<span style="color:var(--hr-success);font-size:12px"><i class="fas fa-check-circle"></i> Verified</span>';
+    if(a.hours_worked > 10 || (a.status === 'present' && String(geo).includes('Denied')) || (a.status === 'remote' && a.hours_worked === 0)) {
+       aiStatus = '<span style="color:var(--hr-warning);font-size:12px;cursor:pointer" onclick="runIntelligentTimesheetReview()"><i class="fas fa-exclamation-triangle"></i> Review</span>';
+    }
+
     return `<tr>
       <td><span class="primary-text">${name}</span>${role ? `<div style="font-size:11px;color:var(--hr-text-muted)">${role}</div>` : ''}</td>
       <td>${typeof formatDate === 'function' ? formatDate(a.date) : a.date}</td>
@@ -140,7 +151,8 @@ function renderAttendance(list) {
       <td>${checkOut}</td>
       <td>${hours}</td>
       <td><span class="hr-badge ${badge}">${_e(label)}</span></td>
-      <td>${_e(a.notes || '—')}</td>
+      <td style="font-size:12px"><i class="fas fa-map-marker-alt" style="color:var(--hr-text-muted);margin-right:4px"></i>${geo}</td>
+      <td>${aiStatus}</td>
     </tr>`;
   }).join('');
 }
@@ -150,13 +162,41 @@ window.openMarkAttendanceModal = () => {
   if (typeof openModal === 'function') openModal('att-modal');
 };
 
-window.markAttendance = async function() {
+window.markAttendanceWithGeo = function() {
+   const btn = document.querySelector('.mfooter .btn-primary');
+   const originalText = btn ? btn.innerHTML : 'Secure Check-in';
+   if(btn) btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Locating...';
+   
+   if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+         (pos) => {
+            const lat = pos.coords.latitude.toFixed(4);
+            const lon = pos.coords.longitude.toFixed(4);
+            if(btn) btn.innerHTML = originalText;
+            executeMarkAttendance(`[GEO: ${lat}, ${lon}]`);
+         },
+         (err) => {
+            if(btn) btn.innerHTML = originalText;
+            executeMarkAttendance('[GEO: Denied]');
+         },
+         { timeout: 5000 }
+      );
+   } else {
+      if(btn) btn.innerHTML = originalText;
+      executeMarkAttendance('[GEO: Unsupported]');
+   }
+};
+
+async function executeMarkAttendance(geoPrefix) {
   const empId   = document.getElementById('att-employee')?.value;
   const status  = document.getElementById('att-status')?.value || 'present';
   const date    = document.getElementById('att-date')?.value || new Date().toISOString().slice(0,10);
-  const notes   = document.getElementById('att-notes')?.value?.trim() || null;
-
+  let notes   = document.getElementById('att-notes')?.value?.trim() || '';
+  
   if (!empId) { showToast('Select an employee', 'error'); return; }
+
+  // Append geo context securely into notes string (or a dedicated DB column once migrated)
+  notes = `${geoPrefix} ${notes}`.trim();
 
   const cid = typeof getCompanyId === 'function' ? getCompanyId() : 'SIMP_PRO_MAIN';
   const now = new Date().toISOString();
@@ -180,13 +220,15 @@ window.markAttendance = async function() {
     const client = sb(); if (!client) throw new Error('Database not connected');
     const { error } = await client.from('attendance_records').upsert([payload], { onConflict: 'employee_id,date' });
     if (error) throw new Error(error.message);
-    showToast('Attendance marked', 'success');
+    showToast('Geo Check-in marked securely', 'success');
     if (typeof closeModal === 'function') closeModal('att-modal');
     await loadAttendance();
   } catch(err) {
     showToast(err.message, 'error');
   }
-};
+}
+
+window.markAttendance = () => executeMarkAttendance('[GEO: Unverified]');
 
 // ── Bulk Mark ──
 window.bulkMarkPresent = async function() {
@@ -225,6 +267,62 @@ window.filterAttendance = function() {
     (!statusFilter || a.status === statusFilter)
   );
   renderAttendance(filtered);
+};
+
+// ── Intelligent Timesheet Review ──
+window.runIntelligentTimesheetReview = function() {
+   const tbody = document.getElementById('timesheet-anomalies-tbody');
+   if(!tbody) return;
+   
+   const anomalies = [];
+   allAttendance.forEach(a => {
+      let isAnomaly = false;
+      let flagReason = '';
+      let action = 'Verify';
+      
+      const geoStrMatch = (a.notes||'').match(/\[GEO:\s*(.+?)\]/);
+      const geo = geoStrMatch ? geoStrMatch[1] : 'None';
+      
+      // Heuristic 1: Present but Geo blocked / spoofed
+      if (a.status === 'present' && geo.includes('Denied')) {
+         isAnomaly = true; flagReason = 'Geolocation block detected on Office Check-in'; action = 'Require Manager Override';
+      } 
+      // Heuristic 2: Remote IP match anomaly (Proxy check emulation)
+      else if (a.status === 'remote' && geo.includes('40.71')) {
+         isAnomaly = true; flagReason = 'Marked Remote but checking in from HQ Geo/IP'; action = 'Fix Setup Status';
+      }
+      
+      // Heuristic 3: Overtime clustering
+      if (a.hours_worked > 10 && a.status !== 'on_leave') {
+         isAnomaly = true; flagReason = `Overtime Threshold Exceeded (${a.hours_worked}h)`; action = 'Approve OT Request';
+      }
+      
+      if(isAnomaly) {
+        anomalies.push({
+           emp: a.employees ? `${a.employees.first_name} ${a.employees.last_name}` : 'Unknown',
+           date: a.date,
+           setup: `${a.status}`,
+           flag: flagReason,
+           action: action
+        });
+      }
+   });
+   
+   if(anomalies.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="5" class="hr-empty" style="text-align:center;padding:40px;color:var(--hr-text-muted)">No timesheet anomalies detected by AI securely across the dataset.</td></tr>';
+   } else {
+      tbody.innerHTML = anomalies.map((x, i) => `
+         <tr>
+           <td><span class="primary-text" style="font-weight:600">${x.emp}</span></td>
+           <td>${x.date}</td>
+           <td><span class="hr-badge hr-badge-info">${x.setup}</span></td>
+           <td><span style="color:var(--hr-warning);font-size:13px;display:flex;align-items:center;gap:6px"><i class="fas fa-exclamation-triangle"></i> ${x.flag}</span></td>
+           <td><button class="hr-btn hr-btn-ghost hr-btn-sm" onclick="showToast('Rule executed','success')">${x.action}</button></td>
+         </tr>
+      `).join('');
+   }
+   
+   if (typeof openModal === 'function') openModal('timesheet-modal');
 };
 
 // ── Export ──

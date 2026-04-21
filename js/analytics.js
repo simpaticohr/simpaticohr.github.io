@@ -57,14 +57,16 @@ async function loadAnalytics() {
     { data: payslips },
     { data: departments },
     { data: terminated },
+    { data: salaries },
   ] = await Promise.all([
-    client.from('employees').select('id, status, start_date, departments(id,name)').eq('tenant_id', cid),
+    client.from('employees').select('id, first_name, last_name, status, start_date, departments(id,name)').eq('tenant_id', cid),
     client.from('leave_requests').select('type, days, status').eq('tenant_id', cid).gte('created_at', since),
-    client.from('performance_reviews').select('score, employees(department_id)').eq('tenant_id', cid).not('score','is',null),
+    client.from('performance_reviews').select('employee_id, score, employees(department_id)').eq('tenant_id', cid).not('score','is',null),
     client.from('training_enrollments').select('status').eq('tenant_id', cid).gte('enrolled_at', since),
     client.from('payslips').select('gross_pay, net_pay, period').eq('tenant_id', cid).order('period'),
     client.from('departments').select('id, name').eq('tenant_id', cid),
     client.from('employees').select('id').eq('tenant_id', cid).eq('status','terminated').gte('updated_at', since),
+    client.from('employee_salaries').select('employee_id, base_salary, effective_date').eq('tenant_id', cid),
   ]);
 
   const active    = (employees||[]).filter(e => e.status === 'active');
@@ -108,6 +110,7 @@ async function loadAnalytics() {
   renderPerfDistChart(scores);
   await renderHiringChart(since);
   renderDeptBreakdown(active, reviews || [], departments || []);
+  renderFlightRisk(active, salaries || [], reviews || []);
 }
 
 function renderHeadcountChart(employees) {
@@ -262,6 +265,106 @@ async function renderHiringChart(since) {
     },
     options: { responsive:true, maintainAspectRatio:false, indexAxis:'y', plugins:{legend:{display:false}}, scales:{ x:{grid:{color:'rgba(30,45,69,.5)'},beginAtZero:true}, y:{grid:{display:false}} } }
   });
+}
+
+function renderFlightRisk(active, salaries, reviews) {
+  const tbody = document.getElementById('ai-flight-risk-tbody'); if(!tbody) return;
+  
+  // Aggregate data per employee
+  const riskList = [];
+  const now = Date.now();
+  
+  // Map salaries and reviews
+  const salaryMap = {};
+  salaries.forEach(s => {
+    if(!salaryMap[s.employee_id] || new Date(s.effective_date) > new Date(salaryMap[s.employee_id].date)) {
+      salaryMap[s.employee_id] = { date: s.effective_date, amount: s.base_salary };
+    }
+  });
+
+  const reviewMap = {};
+  reviews.forEach(r => {
+    if(!reviewMap[r.employee_id]) reviewMap[r.employee_id] = [];
+    reviewMap[r.employee_id].push(r.score);
+  });
+
+  active.forEach(emp => {
+    if (!emp.start_date) return;
+    let riskScore = 0;
+    const factors = [];
+    
+    // Check 1: Tenure vs Salary Stagnation
+    const tenureYears = (now - new Date(emp.start_date).getTime()) / (1000*60*60*24*365);
+    const lastSalaryDate = salaryMap[emp.id]?.date ? new Date(salaryMap[emp.id].date).getTime() : now;
+    const salaryAgeYears = (now - lastSalaryDate) / (1000*60*60*24*365);
+    
+    if (tenureYears > 2 && salaryAgeYears > 1.5) {
+      riskScore += 45;
+      factors.push('Compensation Stagnation (>18mo no raise)');
+    } else if (tenureYears > 1.5 && salaryAgeYears > 1.2) {
+      riskScore += 25;
+      factors.push('Delayed compensation review');
+    }
+
+    // Check 2: Performance Drop
+    const empReviews = reviewMap[emp.id] || [];
+    if (empReviews.length >= 2) {
+      // Very basic mock check: if recent score dropped
+      // (Assumes last added is most recent in this naive mapping)
+      const lastScore = empReviews[empReviews.length-1];
+      const prevScore = empReviews[empReviews.length-2];
+      if (lastScore < prevScore && prevScore - lastScore >= 10) {
+        riskScore += 40;
+        factors.push(`Significant Performance Drop (-${prevScore - lastScore} pts)`);
+      }
+    } else if (empReviews.length > 0 && empReviews[0] < 60) {
+       riskScore += 30;
+       factors.push('Consistently low performance rating');
+    }
+    
+    // Calculate Risk Level Matrix
+    let riskLabel = 'Low';
+    let labelColor = 'var(--hr-success)';
+    let action = 'Regular check-in';
+    
+    if (riskScore >= 70) {
+      riskLabel = 'High'; labelColor = 'var(--hr-danger)'; action = 'Schedule immediate 1-on-1 & review comp';
+    } else if (riskScore >= 40) {
+      riskLabel = 'Medium'; labelColor = 'var(--hr-warning)'; action = 'Proactive career growth discussion';
+    }
+
+    if (riskScore >= 40) {
+      riskList.push({
+        id: emp.id,
+        name: `${emp.first_name || ''} ${emp.last_name || ''}`,
+        dept: emp.departments?.name || 'Unassigned',
+        score: riskScore,
+        label: riskLabel,
+        color: labelColor,
+        factors: factors.join(', '),
+        action: action
+      });
+    }
+  });
+
+  riskList.sort((a,b) => b.score - a.score);
+
+  if (riskList.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:30px;color:var(--hr-text-muted)">No high-risk employees identified by AI presently.</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = riskList.slice(0, 5).map(r => {
+    return `<tr style="transition: background 0.2s">
+      <td><span class="primary-text" style="font-weight:600">${r.name}</span></td>
+      <td>${r.dept}</td>
+      <td><span class="hr-badge" style="background:transparent;border:1px solid ${r.color};color:${r.color}">${r.label}</span></td>
+      <td style="font-size:12px;color:var(--hr-text-secondary);max-width:300px">${r.factors}</td>
+      <td style="font-size:12px;">
+        <button class="hr-btn hr-btn-ghost hr-btn-sm" style="font-size:11px" onclick="location.href='/employees/employee-profile.html?id=${r.id}'">${r.action}</button>
+      </td>
+    </tr>`;
+  }).join('');
 }
 
 function renderDeptBreakdown(active, reviews, departments) {

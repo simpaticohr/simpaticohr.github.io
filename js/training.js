@@ -37,6 +37,7 @@ const THUMB_ICONS = { compliance: 'ðŸ›¡ï¸', technical: 'ðŸ’»', lea
       loadCourses(),
       loadEnrollments(),
       loadComplianceReport(),
+      loadAIRecommendations()
     ]);
     loadEnrollSelects();
   }
@@ -360,9 +361,15 @@ function loadEnrollSelects() {
 }
 
 window.openEnrollModal = () => openModal('enroll-modal');
-window.enrollCourseModal = (courseId) => {
+window.enrollCourseModal = (courseId, empId) => {
   const sel = document.getElementById('enroll-course');
   if (sel) sel.value = courseId;
+  const eSel = document.getElementById('enroll-employees');
+  if (eSel && empId) {
+    Array.from(eSel.options).forEach(opt => {
+      opt.selected = (opt.value === empId);
+    });
+  }
   openModal('enroll-modal');
 };
 
@@ -425,12 +432,84 @@ window.editCourse = function (id) {
 window.switchTab = function (btn, tabId) {
   document.querySelectorAll('.hr-tab').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
-  ['tab-courses', 'tab-paths', 'tab-compliance', 'tab-enrollments'].forEach(id => {
+  ['tab-courses', 'tab-paths', 'tab-compliance', 'tab-enrollments', 'tab-ai-recommend'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.style.display = id === tabId ? 'block' : 'none';
   });
   currentTabId = tabId;
 };
+
+// â”€â”€ AI Recommendations â”€â”€
+async function loadAIRecommendations() {
+  const client = sb(); if (!client) return;
+  const cid = typeof getCompanyId === 'function' ? getCompanyId() : null;
+  if (!cid) return;
+  const tbody = document.getElementById('ai-recommend-tbody'); if(!tbody) return;
+
+  const [
+    { data: activeEmps },
+    { data: perfReviews },
+    { data: courses }
+  ] = await Promise.all([
+    client.from('employees').select('id, first_name, last_name, job_title, departments(name)').eq('tenant_id', cid).eq('status','active'),
+    client.from('performance_reviews').select('employee_id, score, status').eq('tenant_id', cid).eq('status','completed'),
+    client.from('training_courses').select('id, title, category')
+  ]);
+
+  if (!activeEmps || !courses || activeEmps.length === 0) {
+     tbody.innerHTML = '<tr><td colspan="5" class="hr-empty">No active employees to evaluate.</td></tr>';
+     return;
+  }
+
+  const perfMap = {};
+  (perfReviews || []).forEach(r => {
+    if(!perfMap[r.employee_id] && r.score) perfMap[r.employee_id] = r.score;
+  });
+
+  const catMap = {
+     leadership: courses.find(c => c.category === 'leadership'),
+     soft_skills: courses.find(c => c.category === 'soft_skills'),
+     technical: courses.find(c => c.category === 'technical')
+  };
+
+  const recommendations = [];
+
+  activeEmps.forEach(emp => {
+    const score = perfMap[emp.id] || 0;
+    
+    // High performers -> Leadership
+    if (score >= 90 && catMap.leadership) {
+       recommendations.push({
+         emp, course: catMap.leadership,
+         reason: 'High performance rating identifies potential management track progression.',
+         priority: 'Medium', color: 'var(--hr-info)'
+       });
+    }
+    // Low performers -> Soft Skills/Technical refresh
+    else if (score > 0 && score < 75 && catMap.soft_skills) {
+       recommendations.push({
+         emp, course: catMap.soft_skills,
+         reason: 'Recent performance gap identified. Core skills refresher advised.',
+         priority: 'High', color: 'var(--hr-danger)'
+       });
+    }
+  });
+
+  if (recommendations.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="5" class="hr-empty" style="text-align:center;padding:40px;color:var(--hr-text-muted)">AI engine has no immediate recommendations.</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = recommendations.slice(0,10).map(r => {
+     return `<tr>
+       <td><span class="primary-text">${r.emp.first_name} ${r.emp.last_name}</span><br><small style="color:var(--hr-text-muted)">${r.emp.job_title || 'Employee'}</small></td>
+       <td><span style="font-weight:600">${r.course.title}</span></td>
+       <td><span style="font-size:12px;color:var(--hr-text-secondary);max-width:300px;display:inline-block">${r.reason}</span></td>
+       <td><span class="hr-badge" style="background:transparent;border:1px solid ${r.color};color:${r.color}">${r.priority}</span></td>
+       <td><button class="hr-btn hr-btn-ghost hr-btn-sm" onclick="enrollCourseModal('${r.course.id}', '${r.emp.id}')">Auto-Enroll</button></td>
+     </tr>`;
+  }).join('');
+}
 
 // â”€â”€ Utility functions: use shared-utils.js if loaded, else define locally â”€â”€
 if (typeof window.authHeaders === 'undefined') {
