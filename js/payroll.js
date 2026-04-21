@@ -65,7 +65,7 @@ async function loadPayslips() {
   const client = sb(); if (!client) return;
   const cid = typeof getCompanyId === 'function' ? getCompanyId() : null;
   if (!cid) { allPayslips = []; renderPayslips([]); return; }
-  const { data, error } = await client
+  let { data, error } = await client
     .from('payslips')
     .select(`
       id, period, gross_pay, deductions_total, net_pay, status, payslip_key, paid_at,
@@ -151,7 +151,7 @@ async function loadSalaryRegister() {
   const client = sb(); if (!client) return;
   const cid = typeof getCompanyId === 'function' ? getCompanyId() : null;
   if (!cid) { allSalaries = []; renderSalaryRegister([]); return; }
-  const { data, error } = await client
+  let { data, error } = await client
     .from('employee_salaries')
     .select(`
       id, base_salary, currency, employment_type, effective_date,
@@ -196,7 +196,7 @@ async function loadPayrollRuns() {
   const client = sb(); if (!client) return;
   const cid = typeof getCompanyId === 'function' ? getCompanyId() : null;
   if (!cid) { allRuns = []; renderPayrollRuns([]); return; }
-  const { data, error } = await client
+  let { data, error } = await client
     .from('payroll_runs')
     .select(`
       id, period, type, total_gross, total_net, employee_count, status, pay_date, notes, created_at,
@@ -243,7 +243,7 @@ async function loadDeductions() {
   const client = sb(); if (!client) return;
   const cid = typeof getCompanyId === 'function' ? getCompanyId() : null;
   if (!cid) { allDeductions = []; renderDeductions([]); return; }
-  const { data, error } = await client
+  let { data, error } = await client
     .from('payroll_deductions')
     .select(`
       id, type, amount, frequency, start_date, end_date, status,
