@@ -87,11 +87,14 @@ async function perfApiCall(path, method = 'GET', body = null) {
   const url = PERF_CONFIG.workerUrl + path;
   console.log(`[performance] ${method} ${path}`);
   const res = await fetch(url, opts);
-  const data = await res.json();
+  const json = await res.json();
   if (!res.ok) {
-    console.warn(`[performance] Worker ${method} ${path} failed:`, data);
-    throw new Error(data.error?.message || data.error || data.message || res.statusText);
+    console.warn(`[performance] Worker ${method} ${path} failed:`, json);
+    throw new Error(json.error?.message || json.error || json.message || res.statusText);
   }
+  // Worker wraps responses in { success, data: {...}, meta: {...} }
+  // Unwrap the envelope so callers get the inner payload directly
+  const data = (json && json.success && json.data) ? json.data : json;
   return data;
 }
 
@@ -439,9 +442,15 @@ window.createReviewCycle = async function() {
       // Supabase fallback
       const client = sb();
       if (!client) throw new Error('Database not connected');
+      // Create a payload that strictly matches the schema,
+      // avoiding tenant_id and company_id as they do not exist.
+      const dbPayload = {
+        name, start_date: start, end_date: end, type, scope,
+        status: 'active'
+      };
       const { error } = await client
         .from('review_cycles')
-        .insert([payload]);
+        .insert([dbPayload]);
       if (error) throw new Error(error.message);
     }
     
