@@ -74,8 +74,12 @@ async function loadPayslips() {
     .eq('tenant_id', cid)
     .order('created_at', { ascending: false });
 
-  if (error) { console.error(error); return; }
-  allPayslips = data || [];
+  if (error) { 
+     console.warn('[payroll] Payslips error:', error.message); 
+     const fallback = await client.from('payslips').select('*').eq('tenant_id', cid).order('created_at', { ascending: false });
+     data = fallback.data || [];
+  }
+  allPayslips = data;
 
   // Stats
   const currentMonth = new Date().toISOString().slice(0,7);
@@ -156,8 +160,12 @@ async function loadSalaryRegister() {
     .eq('tenant_id', cid)
     .order('effective_date', { ascending: false });
 
-  if (error) { console.error(error); return; }
-  allSalaries = data || [];
+  if (error) { 
+     console.warn('[payroll] Salary config error:', error.message); 
+     const fallback = await client.from('employee_salaries').select('*').eq('tenant_id', cid).order('effective_date', { ascending: false });
+     data = fallback.data || [];
+  }
+  allSalaries = data;
   renderSalaryRegister(allSalaries);
 }
 
@@ -197,8 +205,12 @@ async function loadPayrollRuns() {
     .eq('tenant_id', cid)
     .order('created_at', { ascending: false });
 
-  if (error) { console.error(error); return; }
-  allRuns = data || [];
+  if (error) { 
+     console.warn('[payroll] Payroll Runs error:', error.message); 
+     const fallback = await client.from('payroll_runs').select('*').eq('tenant_id', cid).order('created_at', { ascending: false });
+     data = fallback.data || [];
+  }
+  allRuns = data;
   renderPayrollRuns(allRuns);
 }
 
@@ -240,8 +252,12 @@ async function loadDeductions() {
     .eq('tenant_id', cid)
     .order('created_at', { ascending: false });
 
-  if (error) { console.error(error); return; }
-  allDeductions = data || [];
+  if (error) { 
+     console.warn('[payroll] Deductions error:', error.message); 
+     const fallback = await client.from('payroll_deductions').select('*').eq('tenant_id', cid).order('created_at', { ascending: false });
+     data = fallback.data || [];
+  }
+  allDeductions = data;
   renderDeductions(allDeductions);
 }
 
