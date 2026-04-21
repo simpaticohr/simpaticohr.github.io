@@ -376,15 +376,15 @@ window.calculatePayroll = async function() {
     });
     const totalNet = totalGross - totalDed;
 
-    let bonusHtml = totalBonus > 0 ? `Bonus: <strong style="color:var(--hr-info)">+${formatCurrency(totalBonus)}</strong> &nbsp;|&nbsp; ` : '';
+    let bonusHtml = totalBonus > 0 ? `Bonus: <strong style="color:var(--hr-info)">+${formatCurrency(totalBonus, currency)}</strong> &nbsp;|&nbsp; ` : '';
 
     document.getElementById('run-preview').innerHTML = `
-      <div style="margin-bottom:6px"><strong>${empCount}</strong> employees &nbsp;|&nbsp; Base + ${bonusHtml} Gross: <strong>${formatCurrency(totalGross)}</strong></div>
+      <div style="margin-bottom:6px"><strong>${empCount}</strong> employees &nbsp;|&nbsp; Base + ${bonusHtml} Gross: <strong>${formatCurrency(totalGross, currency)}</strong></div>
       <div style="font-size:12px;color:var(--hr-text-muted)">
-         Automated Tax (TDS/PF): <span style="color:var(--hr-danger)">-${formatCurrency(totalTaxes)}</span> &nbsp;|&nbsp;
-         Leave Proration: <span style="color:var(--hr-danger)">-${formatCurrency(totalProration)}</span>
+         Automated Tax (TDS/PF): <span style="color:var(--hr-danger)">-${formatCurrency(totalTaxes, currency)}</span> &nbsp;|&nbsp;
+         Leave Proration: <span style="color:var(--hr-danger)">-${formatCurrency(totalProration, currency)}</span>
       </div>
-      <div style="margin-top:8px">Net Payout: <strong style="color:var(--hr-success);font-size:16px">${formatCurrency(totalNet)}</strong></div>`;
+      <div style="margin-top:8px">Net Payout: <strong style="color:var(--hr-success);font-size:16px">${formatCurrency(totalNet, currency)}</strong></div>`;
   } catch (e) {
     setText('run-preview', 'Calculation failed: ' + e.message);
   }
