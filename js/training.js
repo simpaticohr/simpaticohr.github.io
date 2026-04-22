@@ -201,10 +201,9 @@ function renderCourses(list) {
 
 async function loadEnrollments() {
   const cid = typeof getCompanyId === 'function' ? getCompanyId() : null;
-  if (!cid) { allEnrollments = []; renderEnrollmentsTable([]); return; }
   const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
 
-  // Worker-first: fetch enrollments with tenant isolation
+  // Worker-first: The Worker uses auth-based tenant isolation, so cid is NOT required here.
   try {
     const headers = await getFreshAuthHeaders();
     const res = await fetch(`${TR_CONFIG.workerUrl}/training/enrollments`, {
@@ -219,7 +218,13 @@ async function loadEnrollments() {
     console.log('[training] Loaded', allEnrollments.length, 'enrollments from worker');
   } catch (workerErr) {
     console.warn('[training] Worker loadEnrollments failed, falling back to Supabase:', workerErr.message);
-    // Supabase fallback — use tenant_id (not company_id) for join filter
+    // Supabase fallback requires tenant_id
+    if (!cid) {
+      console.warn('[training] No tenant_id for Supabase fallback — enrollment list will be empty');
+      allEnrollments = [];
+      renderEnrollmentsTable([]);
+      return;
+    }
     const client = sb(); if (!client) { allEnrollments = []; renderEnrollmentsTable([]); return; }
     let { data, error } = await client
       .from('training_enrollments')
