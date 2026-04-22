@@ -767,6 +767,7 @@ route("POST", "/policies", handleUploadPolicy);
 route("POST", "/payroll/calculate", handleCalculatePayroll);
 route("POST", "/payroll/run", handleRunPayroll);
 route("GET", "/payroll/runs", handleListPayrollRuns);
+route("GET", "/payroll/payslips/all", handleListAllPayslips);
 route("POST", "/payroll/payslips/:id/send", handleSendPayslip);
 route("POST", "/payroll/payslips/send-all", handleSendAllPayslips);
 route("GET", "/payroll/payslips/:employeeId", handleGetPayslips);
@@ -2126,6 +2127,27 @@ async function handleGetPayslips(request, env, ctx, [employeeId]) {
     env,
     "GET",
     `/rest/v1/payslips?employee_id=eq.${employeeId}&select=*&order=pay_date.desc`,
+    null,
+    false,
+    ctx.tenantId,
+  );
+  return apiResponse({ payslips: await res.json() });
+}
+
+async function handleListAllPayslips(request, env, ctx) {
+  requireRole(
+    ctx,
+    "hr",
+    "hr_manager",
+    "company_admin",
+    "payroll",
+    "admin",
+    "superadmin",
+  );
+  const res = await sbFetch(
+    env,
+    "GET",
+    `/rest/v1/payslips?select=*,employees(id,first_name,last_name,departments(name))&order=created_at.desc&limit=200`,
     null,
     false,
     ctx.tenantId,

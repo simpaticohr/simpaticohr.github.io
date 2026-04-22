@@ -129,26 +129,155 @@ async function loadUser() {
   }
 }
 
-// ── Payslips ──
-async function loadPayslips() {
-  const client = sb(); if (!client) return;
-  const cid = typeof getCompanyId === 'function' ? getCompanyId() : null;
-  if (!cid) { allPayslips = []; renderPayslips([]); return; }
-  let { data, error } = await client
-    .from('payslips')
-    .select(`
-      id, period, gross_pay, deductions_total, net_pay, status, payslip_key, paid_at,
-      employees(id, first_name, last_name, departments(name))
-    `)
-    .eq('tenant_id', cid)
-    .order('created_at', { ascending: false });
-
-  if (error) { 
-     console.warn('[payroll] Payslips error:', error.message); 
-     const fallback = await client.from('payslips').select('*').eq('tenant_id', cid).order('created_at', { ascending: false });
-     data = fallback.data || [];
+// ── Country-Aware Tax Engine ──
+const TAX_PROFILES = {
+  IN: {
+    name: 'India',
+    slabs: [
+      { min: 0, max: 300000, rate: 0 },
+      { min: 300000, max: 700000, rate: 0.05 },
+      { min: 700000, max: 1000000, rate: 0.10 },
+      { min: 1000000, max: 1200000, rate: 0.15 },
+      { min: 1200000, max: 1500000, rate: 0.20 },
+      { min: 1500000, max: Infinity, rate: 0.30 }
+    ],
+    pf: { rate: 0.12, cap: 15000 },        // EPF: 12% of basic, capped at ₹15K
+    esi: { rate: 0.0075, ceiling: 21000 },  // ESI: 0.75% if salary ≤ ₹21K
+    professionalTax: 200,                   // Monthly PT (varies by state)
+    cess: 0.04                              // 4% Health & Education Cess on tax
+  },
+  US: {
+    name: 'United States',
+    slabs: [
+      { min: 0, max: 11600, rate: 0.10 },
+      { min: 11600, max: 47150, rate: 0.12 },
+      { min: 47150, max: 100525, rate: 0.22 },
+      { min: 100525, max: 191950, rate: 0.24 },
+      { min: 191950, max: 243725, rate: 0.32 },
+      { min: 243725, max: 609350, rate: 0.35 },
+      { min: 609350, max: Infinity, rate: 0.37 }
+    ],
+    fica: { ss: 0.062, ssWageCap: 168600, medicare: 0.0145 },
+    state: 0.05  // Approximate state tax
+  },
+  UK: {
+    name: 'United Kingdom',
+    slabs: [
+      { min: 0, max: 12570, rate: 0 },
+      { min: 12570, max: 50270, rate: 0.20 },
+      { min: 50270, max: 125140, rate: 0.40 },
+      { min: 125140, max: Infinity, rate: 0.45 }
+    ],
+    ni: { rate: 0.08, threshold: 12570 }  // National Insurance
+  },
+  AE: {
+    name: 'UAE',
+    slabs: [{ min: 0, max: Infinity, rate: 0 }],  // No income tax
+    gratuity: { rate: 0.0575 }  // EOSB provision ~21 days/year
   }
-  allPayslips = data;
+};
+
+/**
+ * Calculate slab-based annual tax, then return monthly equivalent.
+ * @param {number} monthlyIncome - Monthly taxable income
+ * @param {string} countryCode - 'IN', 'US', 'UK', 'AE'
+ * @returns {{ incomeTax, socialTax, totalTax, breakdown }}
+ */
+function calculateTax(monthlyIncome, countryCode = 'IN') {
+  const profile = TAX_PROFILES[countryCode] || TAX_PROFILES['IN'];
+  const annual = monthlyIncome * 12;
+  let remainingIncome = annual;
+  let annualTax = 0;
+  const breakdown = [];
+
+  // Slab-based income tax
+  for (const slab of profile.slabs) {
+    if (remainingIncome <= 0) break;
+    const taxableInSlab = Math.min(remainingIncome, slab.max - slab.min);
+    const slabTax = taxableInSlab * slab.rate;
+    if (slabTax > 0) breakdown.push({ slab: `${slab.rate * 100}%`, amount: slabTax / 12 });
+    annualTax += slabTax;
+    remainingIncome -= taxableInSlab;
+  }
+
+  let monthlyIncomeTax = annualTax / 12;
+  let socialTax = 0;
+
+  // Country-specific social contributions
+  if (countryCode === 'IN') {
+    // EPF (capped)
+    socialTax += Math.min(monthlyIncome * profile.pf.rate, profile.pf.cap);
+    // ESI (if below ceiling)
+    if (monthlyIncome <= profile.esi.ceiling) socialTax += monthlyIncome * profile.esi.rate;
+    // Professional Tax
+    socialTax += profile.professionalTax;
+    // Cess on income tax
+    monthlyIncomeTax *= (1 + profile.cess);
+  } else if (countryCode === 'US') {
+    // FICA: Social Security (capped) + Medicare
+    const annualSoFar = monthlyIncome * 12;
+    if (annualSoFar <= profile.fica.ssWageCap) socialTax += monthlyIncome * profile.fica.ss;
+    socialTax += monthlyIncome * profile.fica.medicare;
+    // State tax (simplified)
+    socialTax += monthlyIncome * profile.state;
+  } else if (countryCode === 'UK') {
+    // National Insurance
+    const niable = Math.max(0, monthlyIncome - profile.ni.threshold / 12);
+    socialTax += niable * profile.ni.rate;
+  } else if (countryCode === 'AE') {
+    // End-of-service gratuity provision
+    socialTax += monthlyIncome * (profile.gratuity?.rate || 0);
+  }
+
+  return {
+    incomeTax: Math.max(0, Math.round(monthlyIncomeTax * 100) / 100),
+    socialTax: Math.max(0, Math.round(socialTax * 100) / 100),
+    totalTax: Math.max(0, Math.round((monthlyIncomeTax + socialTax) * 100) / 100),
+    breakdown,
+    country: profile.name
+  };
+}
+
+/** Map currency to likely country code for tax calculation */
+function currencyToCountry(currency) {
+  return { INR: 'IN', USD: 'US', GBP: 'UK', AED: 'AE', EUR: 'US' }[currency] || 'IN';
+}
+
+// ── Payslips ── (Worker-first: auth-based tenant isolation)
+async function loadPayslips() {
+  const cid = typeof getCompanyId === 'function' ? getCompanyId() : null;
+
+  // Worker-first: Worker uses auth token for tenant isolation
+  try {
+    const res = await fetch(`${PAY_CONFIG.workerUrl}/payroll/payslips/all`, {
+      method: 'GET',
+      headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+      cache: 'no-store',
+    });
+    if (!res.ok) throw new Error(`Worker ${res.status}`);
+    const json = await res.json();
+    const payload = (json && json.success && json.data) ? json.data : json;
+    allPayslips = payload.payslips || payload.data || (Array.isArray(payload) ? payload : []);
+    console.log('[payroll] Loaded', allPayslips.length, 'payslips from worker');
+  } catch (workerErr) {
+    console.warn('[payroll] Worker payslips failed, falling back to Supabase:', workerErr.message);
+    if (!cid) { allPayslips = []; renderPayslips([]); return; }
+    const client = sb(); if (!client) { allPayslips = []; renderPayslips([]); return; }
+    let { data, error } = await client
+      .from('payslips')
+      .select(`
+        id, period, gross_pay, deductions_total, net_pay, status, payslip_key, paid_at,
+        employees(id, first_name, last_name, departments(name))
+      `)
+      .eq('tenant_id', cid)
+      .order('created_at', { ascending: false });
+    if (error) {
+      console.warn('[payroll] Payslips error:', error.message);
+      const fallback = await client.from('payslips').select('*').eq('tenant_id', cid).order('created_at', { ascending: false });
+      data = fallback.data || [];
+    }
+    allPayslips = data || [];
+  }
 
   // Stats
   const currentMonth = new Date().toISOString().slice(0,7);
@@ -157,13 +286,14 @@ async function loadPayslips() {
   const pending    = allPayslips.filter(p => p.status === 'generated').length;
 
   setText('stat-total-payroll', formatCurrency(totalGross));
-  setText('stat-on-payroll', allPayslips.length > 0 ? new Set(allPayslips.map(p=>p.employees?.id)).size : '—');
+  setText('stat-on-payroll', allPayslips.length > 0 ? new Set(allPayslips.map(p=>p.employees?.id || p.employee_id)).size : '—');
   setText('stat-pending-payslips', pending);
 
   // Populate period filter
   const periods = [...new Set(allPayslips.map(p => p.period).filter(Boolean))];
   const sel = document.getElementById('payslip-period');
   if (sel) {
+    sel.innerHTML = '<option value="">All Periods</option>';
     periods.forEach(p => {
       const opt = document.createElement('option');
       opt.value = p; opt.textContent = p;
@@ -260,26 +390,40 @@ function renderSalaryRegister(list) {
   }).join('');
 }
 
-// ── Payroll Runs ──
+// ── Payroll Runs ── (Worker-first)
 async function loadPayrollRuns() {
-  const client = sb(); if (!client) return;
   const cid = typeof getCompanyId === 'function' ? getCompanyId() : null;
-  if (!cid) { allRuns = []; renderPayrollRuns([]); return; }
-  let { data, error } = await client
-    .from('payroll_runs')
-    .select(`
-      id, period, type, total_gross, total_net, employee_count, status, pay_date, notes, created_at,
-      run_by:employees!run_by_id(first_name, last_name)
-    `)
-    .eq('tenant_id', cid)
-    .order('created_at', { ascending: false });
 
-  if (error) { 
-     console.warn('[payroll] Payroll Runs error:', error.message); 
-     const fallback = await client.from('payroll_runs').select('*').eq('tenant_id', cid).order('created_at', { ascending: false });
-     data = fallback.data || [];
+  try {
+    const res = await fetch(`${PAY_CONFIG.workerUrl}/payroll/runs`, {
+      method: 'GET',
+      headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+      cache: 'no-store',
+    });
+    if (!res.ok) throw new Error(`Worker ${res.status}`);
+    const json = await res.json();
+    const payload = (json && json.success && json.data) ? json.data : json;
+    allRuns = payload.runs || payload.data || (Array.isArray(payload) ? payload : []);
+    console.log('[payroll] Loaded', allRuns.length, 'payroll runs from worker');
+  } catch (workerErr) {
+    console.warn('[payroll] Worker runs failed, falling back to Supabase:', workerErr.message);
+    if (!cid) { allRuns = []; renderPayrollRuns([]); return; }
+    const client = sb(); if (!client) { allRuns = []; renderPayrollRuns([]); return; }
+    let { data, error } = await client
+      .from('payroll_runs')
+      .select(`
+        id, period, type, total_gross, total_net, employee_count, status, pay_date, notes, created_at,
+        run_by:employees!run_by_id(first_name, last_name)
+      `)
+      .eq('tenant_id', cid)
+      .order('created_at', { ascending: false });
+    if (error) {
+      console.warn('[payroll] Payroll Runs error:', error.message);
+      const fallback = await client.from('payroll_runs').select('*').eq('tenant_id', cid).order('created_at', { ascending: false });
+      data = fallback.data || [];
+    }
+    allRuns = data || [];
   }
-  allRuns = data;
   renderPayrollRuns(allRuns);
 }
 
@@ -307,11 +451,11 @@ function renderPayrollRuns(list) {
   }).join('');
 }
 
-// ── Deductions ──
+// ── Deductions ── (Supabase with tenant guard)
 async function loadDeductions() {
-  const client = sb(); if (!client) return;
   const cid = typeof getCompanyId === 'function' ? getCompanyId() : null;
   if (!cid) { allDeductions = []; renderDeductions([]); return; }
+  const client = sb(); if (!client) { allDeductions = []; renderDeductions([]); return; }
   let { data, error } = await client
     .from('payroll_deductions')
     .select(`
@@ -321,12 +465,12 @@ async function loadDeductions() {
     .eq('tenant_id', cid)
     .order('created_at', { ascending: false });
 
-  if (error) { 
-     console.warn('[payroll] Deductions error:', error.message); 
-     const fallback = await client.from('payroll_deductions').select('*').eq('tenant_id', cid).order('created_at', { ascending: false });
-     data = fallback.data || [];
+  if (error) {
+    console.warn('[payroll] Deductions error:', error.message);
+    const fallback = await client.from('payroll_deductions').select('*').eq('tenant_id', cid).order('created_at', { ascending: false });
+    data = fallback.data || [];
   }
-  allDeductions = data;
+  allDeductions = data || [];
   renderDeductions(allDeductions);
 }
 
@@ -416,42 +560,57 @@ window.calculatePayroll = async function() {
     const dedMap = {};
     (deductions || []).forEach(d => { dedMap[d.employee_id] = (dedMap[d.employee_id] || 0) + (d.amount || 0); });
 
+    const countryCode = currencyToCountry(currency);
+    const taxProfile = TAX_PROFILES[countryCode];
     const empCount = (salaries || []).length;
-    let totalGross = 0, totalDed = 0, totalBonus = 0, totalTaxes = 0, totalProration = 0;
-    
+    let totalGross = 0, totalDed = 0, totalBonus = 0, totalIncomeTax = 0, totalSocialTax = 0, totalProration = 0;
+
     (salaries || []).forEach(s => {
       let base = s.base_salary || 0;
       let score = perfMap[s.employee_id] || 0;
       let bonus = 0;
-      if (score >= 90) bonus = base * 0.10; // 10% bonus
-      else if (score >= 80) bonus = base * 0.05; // 5% bonus
-      
-      // Enterprise Taxation & Proration engine
+      if (score >= 90) bonus = base * 0.10;
+      else if (score >= 80) bonus = base * 0.05;
+
+      // Leave proration
       let unpaidDays = unpaidLeaveMap[s.employee_id] || 0;
-      let dailyRate = base / 22; // approx 22 working days
+      let dailyRate = base / 22;
       let prorationAdj = dailyRate * unpaidDays;
-      
-      // Calculate B2B Taxes (Mocking US/Global TDS/PF mapping)
+
+      // ★ Country-aware slab-based tax calculation
       let taxableIncome = base + bonus - prorationAdj;
-      let tdsTax = taxableIncome * 0.12; // 12% standard base tax
-      let pfTax = taxableIncome * 0.05;  // 5% standard PF/401k
-      let currentTaxes = Math.max(0, tdsTax + pfTax);
+      const taxResult = calculateTax(taxableIncome, countryCode);
 
       totalBonus += bonus;
       totalGross += base + bonus;
       totalProration += prorationAdj;
-      totalTaxes += currentTaxes;
-      totalDed += (dedMap[s.employee_id] || 0) + currentTaxes + prorationAdj;
+      totalIncomeTax += taxResult.incomeTax;
+      totalSocialTax += taxResult.socialTax;
+      totalDed += (dedMap[s.employee_id] || 0) + taxResult.totalTax + prorationAdj;
     });
+    const totalTaxes = totalIncomeTax + totalSocialTax;
     const totalNet = totalGross - totalDed;
 
-    let bonusHtml = totalBonus > 0 ? `Bonus: <strong style="color:var(--hr-info)">+${formatCurrency(totalBonus, currency)}</strong> &nbsp;|&nbsp; ` : '';
+    let bonusHtml = totalBonus > 0 ? `Perf Bonus: <strong style="color:var(--hr-info)">+${formatCurrency(totalBonus, currency)}</strong> &nbsp;|&nbsp; ` : '';
+
+    // Tax label based on country
+    const taxLabels = {
+      IN: 'Income Tax (Slab) + EPF/ESI/PT',
+      US: 'Federal Tax (Bracket) + FICA + State',
+      UK: 'PAYE (Band) + NI',
+      AE: 'Gratuity Provision'
+    };
 
     document.getElementById('run-preview').innerHTML = `
-      <div style="margin-bottom:6px"><strong>${empCount}</strong> employees &nbsp;|&nbsp; Base + ${bonusHtml} Gross: <strong>${formatCurrency(totalGross, currency)}</strong></div>
-      <div style="font-size:12px;color:var(--hr-text-muted)">
-         Automated Tax (TDS/PF): <span style="color:var(--hr-danger)">-${formatCurrency(totalTaxes, currency)}</span> &nbsp;|&nbsp;
-         Leave Proration: <span style="color:var(--hr-danger)">-${formatCurrency(totalProration, currency)}</span>
+      <div style="margin-bottom:6px"><strong>${empCount}</strong> employees &nbsp;|&nbsp; ${bonusHtml}Gross: <strong>${formatCurrency(totalGross, currency)}</strong></div>
+      <div style="font-size:12px;color:var(--hr-text-muted);margin-bottom:4px">
+        <strong>${taxProfile?.name || countryCode}</strong> Tax Engine &nbsp;·&nbsp;
+        ${taxLabels[countryCode] || 'Standard Tax'}: <span style="color:var(--hr-danger)">-${formatCurrency(totalTaxes, currency)}</span>
+      </div>
+      <div style="font-size:11px;color:var(--hr-text-muted)">
+        Income Tax: <span style="color:var(--hr-danger)">-${formatCurrency(totalIncomeTax, currency)}</span> &nbsp;|&nbsp;
+        Social: <span style="color:var(--hr-danger)">-${formatCurrency(totalSocialTax, currency)}</span> &nbsp;|&nbsp;
+        Leave Proration: <span style="color:var(--hr-danger)">-${formatCurrency(totalProration, currency)}</span>
       </div>
       <div style="margin-top:8px">Net Payout: <strong style="color:var(--hr-success);font-size:16px">${formatCurrency(totalNet, currency)}</strong></div>`;
   } catch (e) {
@@ -631,6 +790,7 @@ window.executePayroll = async function() {
         if (runErr) throw new Error('Could not create payroll run: ' + runErr.message);
 
         let totalGross = 0, totalNet = 0, totalBonus = 0;
+        const countryCode = currencyToCountry(currency);
         const payslips = salaries.map(s => {
           let base = s.base_salary || 0;
           let score = perfMap[s.employee_id] || 0;
@@ -645,10 +805,9 @@ window.executePayroll = async function() {
           const dailyRate = base / 22;
           const unpaidAdj = dailyRate * unpaidDays;
           let taxableIncome = gross - unpaidAdj;
-          let tdsTax = taxableIncome * 0.12; 
-          let pfTax = taxableIncome * 0.05;  
-          let standardTaxes = Math.max(0, tdsTax + pfTax);
-          const totalDeductionsAgg = ded + unpaidAdj + standardTaxes;
+          // ★ Country-aware slab-based tax
+          const taxResult = calculateTax(taxableIncome, countryCode);
+          const totalDeductionsAgg = ded + unpaidAdj + taxResult.totalTax;
           const net = Math.max(0, gross - totalDeductionsAgg);
           
           if (net > gross) {
