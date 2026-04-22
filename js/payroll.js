@@ -23,7 +23,76 @@ let allRuns       = [];
 let allDeductions = [];
 
 (function() {
+  /**
+   * Ensure company_id / tenant_id is available before loading payroll data.
+   * Mirrors the fix applied to training.js — independently resolves tenant from
+   * users → employees → companies tables when the dashboard hasn't set it yet.
+   */
+  async function ensureTenantId() {
+    if (typeof getCompanyId === 'function' && getCompanyId()) return;
+
+    const client = sb(); if (!client) return;
+    try {
+      let authUser = null;
+      try {
+        const { data: sesData } = await client.auth.getSession();
+        authUser = sesData?.session?.user || null;
+      } catch(e) {}
+      if (!authUser) {
+        const { data: { user: u } } = await client.auth.getUser();
+        authUser = u;
+      }
+      if (!authUser) return;
+
+      // Strategy 1: users table
+      const { data: profiles } = await client.from('users')
+        .select('company_id').eq('auth_id', authUser.id).limit(1);
+      if (profiles?.[0]?.company_id) {
+        patchLocalUser(profiles[0].company_id);
+        console.log('[payroll] ✅ Resolved tenant from users table:', profiles[0].company_id);
+        return;
+      }
+
+      // Strategy 2: employees table (user is an employee)
+      const { data: emps } = await client.from('employees')
+        .select('tenant_id').eq('email', authUser.email).limit(1);
+      if (emps?.[0]?.tenant_id) {
+        patchLocalUser(emps[0].tenant_id);
+        console.log('[payroll] ✅ Resolved tenant from employees table:', emps[0].tenant_id);
+        return;
+      }
+
+      // Strategy 3: companies table (user is owner)
+      const { data: companies } = await client.from('companies')
+        .select('id').eq('owner_id', authUser.id).limit(1);
+      if (companies?.[0]?.id) {
+        patchLocalUser(companies[0].id);
+        console.log('[payroll] ✅ Resolved tenant from companies table:', companies[0].id);
+        return;
+      }
+
+      console.warn('[payroll] ⚠ Could not resolve tenant_id — payroll data will be empty');
+    } catch(e) {
+      console.warn('[payroll] tenant resolution error:', e.message);
+    }
+  }
+
+  function patchLocalUser(tenantId) {
+    try {
+      const u = JSON.parse(localStorage.getItem('simpatico_user') || '{}');
+      u.company_id = tenantId;
+      u.tenant_id = tenantId;
+      localStorage.setItem('simpatico_user', JSON.stringify(u));
+      sessionStorage.setItem('company_id', tenantId);
+      sessionStorage.setItem('tenant_id', tenantId);
+    } catch(e) {}
+  }
+
   async function boot() {
+    // Step 1: Ensure tenant ID is resolved before ANY data load
+    await ensureTenantId();
+
+    // Step 2: Load all payroll data in parallel
     await Promise.all([loadUser(), loadPayslips(), loadSalaryRegister(), loadPayrollRuns(), loadDeductions()]);
     setNextPayrollDate();
   }
@@ -397,6 +466,24 @@ window.executePayroll = async function() {
   const notes   = document.getElementById('run-notes')?.value.trim();
   if (!period) { showToast('Pay period required', 'error'); return; }
 
+  // ★ Duplicate run guard — prevent double payslip generation
+  try {
+    const client = sb();
+    const cid = typeof getCompanyId === 'function' ? getCompanyId() : null;
+    if (client && cid) {
+      const { data: existing } = await client.from('payroll_runs')
+        .select('id, status')
+        .eq('tenant_id', cid)
+        .eq('period', period)
+        .eq('status', 'completed')
+        .limit(1);
+      if (existing?.length > 0) {
+        const proceed = confirm(`⚠️ Payroll for "${period}" was already processed.\n\nRunning again will create duplicate payslips.\n\nContinue anyway?`);
+        if (!proceed) return;
+      }
+    }
+  } catch(e) { console.warn('[payroll] Duplicate check failed:', e.message); }
+
   // ★ Validate & auto-resolve company_id — check sessionStorage FIRST (from auth)
   let companyId = sessionStorage.getItem('company_id') || 
                    sessionStorage.getItem('tenant_id') ||
@@ -405,7 +492,6 @@ window.executePayroll = async function() {
     try {
       const client = sb();
       if (client) {
-        // Use cached auth from parent dashboard (no lock), or session (no lock)
         let authUser = window._simpaticoAuthUser || null;
         if (!authUser) {
           try {
@@ -431,10 +517,8 @@ window.executePayroll = async function() {
             .limit(1);
           if (profiles?.[0]?.company_id) {
             companyId = profiles[0].company_id;
-            const stored = JSON.parse(localStorage.getItem('simpatico_user') || '{}');
-            stored.company_id = companyId;
-            stored.tenant_id = companyId;
-            localStorage.setItem('simpatico_user', JSON.stringify(stored));
+            sessionStorage.setItem('company_id', companyId);
+            sessionStorage.setItem('tenant_id', companyId);
           } else {
             console.warn('[payroll] User found but no company_id in profile');
           }
@@ -451,146 +535,154 @@ window.executePayroll = async function() {
 
   showToast('Processing payroll…', 'info');
   
-  // Direct Supabase payroll processing
+  // Worker-first: The /payroll/run endpoint handles calculation, payslip generation,
+  // audit trails, and webhook dispatch with proper tenant isolation.
   try {
-    const client = sb();
-    if (!client) throw new Error('Database not connected');
+    const payload = {
+      period,
+      pay_date: payDate,
+      type: type || 'monthly',
+      notes: notes || null,
+    };
 
-    const currency = document.getElementById('run-currency')?.value || 'USD';
-    // 1. Get all active employees with salaries
-    const { data: salaries, error: salErr } = await client
-        .from('employee_salaries')
-        .select('employee_id, base_salary, currency')
-        .eq('tenant_id', companyId)
-        .eq('currency', currency);
-      
-      if (salErr) throw new Error('Could not fetch salary data: ' + salErr.message);
-      if (!salaries || salaries.length === 0) {
-        showToast('No salary records found. Add employee salaries first.', 'error');
-        return;
-      }
+    const res = await fetch(`${PAY_CONFIG.workerUrl}/payroll/run`, {
+      method: 'POST',
+      headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
 
-      // 2. Get active deductions
-      const { data: deductions } = await client
-        .from('payroll_deductions')
-        .select('employee_id, amount, type')
-        .eq('tenant_id', companyId)
-        .eq('status', 'active');
+    if (!res.ok) {
+      const errBody = await res.json().catch(() => ({}));
+      throw new Error(errBody.error?.message || errBody.message || `Worker payroll run failed (${res.status})`);
+    }
 
-      const dedMap = {};
-      (deductions || []).forEach(d => {
-        dedMap[d.employee_id] = (dedMap[d.employee_id] || 0) + (d.amount || 0);
-      });
+    const result = await res.json();
+    const data = (result && result.success && result.data) ? result.data : result;
+    const count = data.totals?.count || '—';
+    showToast(`Payroll complete — ${count} payslips generated`, 'success');
+    console.log('[payroll] Worker run complete:', data);
+  } catch (workerErr) {
+    console.warn('[payroll] Worker payroll/run failed, falling back to Supabase:', workerErr.message);
+    
+    // Supabase fallback — direct payroll processing
+    try {
+      const client = sb();
+      if (!client) throw new Error('Database not connected');
 
-      // 2b. Get unpaid leave days (approved unpaid leave requests for this period)
-      const { data: unpaidLeaves } = await client
-        .from('leave_requests')
-        .select('employee_id, days')
-        .eq('tenant_id', companyId)
-        .eq('status', 'approved')
-        .eq('leave_type', 'unpaid')
-        .gte('start_date', period + '-01')
-        .lt('start_date', period.split('-')[0] + '-' + (parseInt(period.split('-')[1]) + 1).toString().padStart(2, '0') + '-01');
-
-      const unpaidLeaveMap = {};
-      (unpaidLeaves || []).forEach(ul => {
-        unpaidLeaveMap[ul.employee_id] = (unpaidLeaveMap[ul.employee_id] || 0) + (ul.days || 0);
-      });
-
-      // 2c. Get latest performance reviews for bonuses
-      const { data: perfReviews } = await client
-        .from('performance_reviews')
-        .select('employee_id, score, status')
-        .eq('tenant_id', companyId)
-        .eq('status', 'completed');
-      
-      const perfMap = {};
-      (perfReviews || []).sort((a,b)=>b.id-a.id).forEach(r => {
-        if(!perfMap[r.employee_id] && r.score) perfMap[r.employee_id] = r.score;
-      });
-
-      // 3. Create payroll run record
-      const { data: runData, error: runErr } = await client
-        .from('payroll_runs')
-        .insert([{
-          period, type: type || 'monthly', pay_date: payDate,
-          status: 'processing', notes: notes || null,
-          tenant_id: companyId, company_id: companyId, employee_count: salaries.length
-        }])
-        .select()
-        .single();
-      
-      if (runErr) throw new Error('Could not create payroll run: ' + runErr.message);
-
-      // 4. Generate payslips with unpaid leave adjustment & performance bonuses
-      let totalGross = 0, totalNet = 0, totalBonus = 0;
-      const payslips = salaries.map(s => {
-        let base = s.base_salary || 0;
-        let score = perfMap[s.employee_id] || 0;
-        let perfBonus = 0;
+      const currency = document.getElementById('run-currency')?.value || 'USD';
+      const { data: salaries, error: salErr } = await client
+          .from('employee_salaries')
+          .select('employee_id, base_salary, currency')
+          .eq('tenant_id', companyId)
+          .eq('currency', currency);
         
-        // Performance-based Pay-for-Performance logic
-        if (score >= 90) perfBonus = base * 0.10;
-        else if (score >= 80) perfBonus = base * 0.05;
-        
-        totalBonus += perfBonus;
-        const gross = base + perfBonus;
-        const ded = dedMap[s.employee_id] || 0;
-        const unpaidDays = unpaidLeaveMap[s.employee_id] || 0;
-        const dailyRate = base / 22; // Standard 22 working days per month
-        const unpaidAdj = dailyRate * unpaidDays;
-
-        // Enterprise Taxation
-        let taxableIncome = gross - unpaidAdj;
-        let tdsTax = taxableIncome * 0.12; 
-        let pfTax = taxableIncome * 0.05;  
-        let standardTaxes = Math.max(0, tdsTax + pfTax);
-        
-        // Final Net Calculation
-        const totalDeductionsAgg = ded + unpaidAdj + standardTaxes;
-        const net = Math.max(0, gross - totalDeductionsAgg);
-        
-        // Validate payslip data
-        if (net > gross) {
-          console.error('[payroll] Invalid payslip: net exceeds gross', { employee_id: s.employee_id, gross, net, ded, unpaidAdj });
-          throw new Error(`Net pay (${net}) exceeds gross (${gross}) for employee ${s.employee_id}. Check deductions and unpaid leave data.`);
+        if (salErr) throw new Error('Could not fetch salary data: ' + salErr.message);
+        if (!salaries || salaries.length === 0) {
+          showToast('No salary records found. Add employee salaries first.', 'error');
+          return;
         }
+
+        const { data: deductions } = await client
+          .from('payroll_deductions')
+          .select('employee_id, amount, type')
+          .eq('tenant_id', companyId)
+          .eq('status', 'active');
+
+        const dedMap = {};
+        (deductions || []).forEach(d => {
+          dedMap[d.employee_id] = (dedMap[d.employee_id] || 0) + (d.amount || 0);
+        });
+
+        const { data: unpaidLeaves } = await client
+          .from('leave_requests')
+          .select('employee_id, days')
+          .eq('tenant_id', companyId)
+          .eq('status', 'approved')
+          .eq('leave_type', 'unpaid')
+          .gte('start_date', period + '-01')
+          .lt('start_date', period.split('-')[0] + '-' + (parseInt(period.split('-')[1]) + 1).toString().padStart(2, '0') + '-01');
+
+        const unpaidLeaveMap = {};
+        (unpaidLeaves || []).forEach(ul => {
+          unpaidLeaveMap[ul.employee_id] = (unpaidLeaveMap[ul.employee_id] || 0) + (ul.days || 0);
+        });
+
+        const { data: perfReviews } = await client
+          .from('performance_reviews')
+          .select('employee_id, score, status')
+          .eq('tenant_id', companyId)
+          .eq('status', 'completed');
         
-        totalGross += gross;
-        totalNet += net;
-        return {
-          employee_id: s.employee_id,
-          period, gross_pay: gross,
-          deductions_total: totalDeductionsAgg, net_pay: net,
-          status: 'generated',
-          payroll_run_id: runData.id,
-          tenant_id: companyId, company_id: companyId
-        };
-      });
+        const perfMap = {};
+        (perfReviews || []).sort((a,b)=>b.id-a.id).forEach(r => {
+          if(!perfMap[r.employee_id] && r.score) perfMap[r.employee_id] = r.score;
+        });
 
-      const { error: slipErr } = await client
-        .from('payslips')
-        .insert(payslips);
-      
-      if (slipErr) {
-        console.error('[payroll] Payslip insert error:', slipErr.message);
-        throw new Error('Failed to save payslips: ' + slipErr.message);
-      }
+        const { data: runData, error: runErr } = await client
+          .from('payroll_runs')
+          .insert([{
+            period, type: type || 'monthly', pay_date: payDate,
+            status: 'processing', notes: notes || null,
+            tenant_id: companyId, company_id: companyId, employee_count: salaries.length
+          }])
+          .select()
+          .single();
+        
+        if (runErr) throw new Error('Could not create payroll run: ' + runErr.message);
 
-      // 5. Update run status
-      await client
-        .from('payroll_runs')
-        .update({ status: 'completed', total_gross: totalGross, total_net: totalNet })
-        .eq('id', runData.id);
+        let totalGross = 0, totalNet = 0, totalBonus = 0;
+        const payslips = salaries.map(s => {
+          let base = s.base_salary || 0;
+          let score = perfMap[s.employee_id] || 0;
+          let perfBonus = 0;
+          if (score >= 90) perfBonus = base * 0.10;
+          else if (score >= 80) perfBonus = base * 0.05;
+          
+          totalBonus += perfBonus;
+          const gross = base + perfBonus;
+          const ded = dedMap[s.employee_id] || 0;
+          const unpaidDays = unpaidLeaveMap[s.employee_id] || 0;
+          const dailyRate = base / 22;
+          const unpaidAdj = dailyRate * unpaidDays;
+          let taxableIncome = gross - unpaidAdj;
+          let tdsTax = taxableIncome * 0.12; 
+          let pfTax = taxableIncome * 0.05;  
+          let standardTaxes = Math.max(0, tdsTax + pfTax);
+          const totalDeductionsAgg = ded + unpaidAdj + standardTaxes;
+          const net = Math.max(0, gross - totalDeductionsAgg);
+          
+          if (net > gross) {
+            console.error('[payroll] Invalid payslip: net exceeds gross', { employee_id: s.employee_id, gross, net, ded, unpaidAdj });
+            throw new Error(`Net pay (${net}) exceeds gross (${gross}) for employee ${s.employee_id}.`);
+          }
+          
+          totalGross += gross;
+          totalNet += net;
+          return {
+            employee_id: s.employee_id,
+            period, gross_pay: gross,
+            deductions_total: totalDeductionsAgg, net_pay: net,
+            status: 'generated',
+            payroll_run_id: runData.id,
+            tenant_id: companyId, company_id: companyId
+          };
+        });
 
-      showToast(`Payroll complete — ${salaries.length} payslips generated`, 'success');
+        const { error: slipErr } = await client.from('payslips').insert(payslips);
+        if (slipErr) throw new Error('Failed to save payslips: ' + slipErr.message);
+
+        await client.from('payroll_runs')
+          .update({ status: 'completed', total_gross: totalGross, total_net: totalNet })
+          .eq('id', runData.id);
+
+        showToast(`Payroll complete — ${salaries.length} payslips generated`, 'success');
     } catch (err) {
       showToast(err.message, 'error');
       closeModal('run-payroll-modal');
       return;
     }
+  }
 
-  
   closeModal('run-payroll-modal');
   await Promise.all([loadPayslips(), loadPayrollRuns()]);
 };
@@ -618,10 +710,14 @@ window.sendPayslip = async function(payslipId) {
 window.sendAllPayslips = async function() {
   const unsent = allPayslips.filter(p => p.status === 'generated');
   if (unsent.length === 0) { showToast('No unsent payslips', 'info'); return; }
+  // Determine period from the first unsent payslip
+  const period = unsent[0]?.period || '';
   showToast(`Sending ${unsent.length} payslips…`, 'info');
   try {
     const res = await fetch(`${PAY_CONFIG.workerUrl}/payroll/payslips/send-all`, {
-      method: 'POST', headers: authHeaders(),
+      method: 'POST',
+      headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ period }),
     });
     if (!res.ok) throw new Error('Bulk send failed');
     showToast(`${unsent.length} payslips sent`, 'success');
@@ -831,7 +927,14 @@ if (typeof window.authHeaders === 'undefined') {
         }
       }
     }
-    return token ? { 'Authorization': 'Bearer ' + token } : {};
+    const headers = { 'Content-Type': 'application/json' };
+    if (token) headers['Authorization'] = 'Bearer ' + token;
+    // Multi-tenant isolation: always include tenant ID
+    const tenantId = (typeof getCompanyId === 'function' && getCompanyId()) ||
+                     sessionStorage.getItem('company_id') ||
+                     sessionStorage.getItem('tenant_id') || '';
+    if (tenantId) headers['X-Tenant-ID'] = tenantId;
+    return headers;
   };
 }
 if (typeof window.setText === 'undefined') {
