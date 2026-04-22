@@ -1,21 +1,23 @@
 /**
  * â•”â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•—
  * â•‘          SIMPATICO HR  â€”  ENTERPRISE PLATFORM ENGINE  v5.0                 â•‘
- * â•‘          Cloudflare Workers Â· Edge-Native Â· Zero Cold-Start                 â•‘
- * â• â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•£
- * â•‘  Architecture  : Edge-Native Multi-Tenant API                               â•‘
- * â•‘  Auth          : JWT RS256 / HMAC-SHA256 Webhook Signatures                 â•‘
- * â•‘  Intelligence  : Workers AI (Llama 3.1) + Vectorize RAG                     â•‘
- * â•‘  Storage       : Supabase (RLS-enforced) Â· R2 Â· KV Cache                    â•‘
- * â•‘  Patterns      : Middleware Pipeline Â· Circuit Breaker Â· Idempotency        â•‘
- * â•‘                  Cursor Pagination Â· Audit Trail Â· Rate Limiting            â•‘
- * â•‘                  Outbound Webhooks Â· SSE Streaming Â· Background Jobs        â•‘
- * â•šâ•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+ * ╔═════════════════════════════════════════════════════════════════════════════════════╗
+ * ║          SIMPATICO HR  —  ENTERPRISE PLATFORM ENGINE  v5.0                 ║
+ * ║          Cloudflare Workers · Edge-Native · Zero Cold-Start                 ║
+ * ╠═════════════════════════════════════════════════════════════════════════════════════╣
+ * ║  Architecture  : Edge-Native Multi-Tenant API                               ║
+ * ║  Auth          : JWT RS256 / HMAC-SHA256 Webhook Signatures                 ║
+ * ║  Intelligence  : Workers AI (Llama 3.1) + Vectorize RAG                     ║
+ * ║  Storage       : Supabase (RLS-enforced) · R2 · KV Cache                    ║
+ * ║  Patterns      : Middleware Pipeline · Circuit Breaker · Idempotency        ║
+ * ║                  Cursor Pagination · Audit Trail · Rate Limiting            ║
+ * ║                  Outbound Webhooks · SSE Streaming · Background Jobs        ║
+ * ╚═════════════════════════════════════════════════════════════════════════════════════╝ 
  */
 
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-// Â§ 0.  CONSTANTS & CONFIGURATION
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ═════════════════════════════════════════════════════════════════════════════════════
+// § 0.  CONSTANTS & CONFIGURATION
+// ═════════════════════════════════════════════════════════════════════════════════════
 
 const VERSION = "5.0.0";
 const REQUEST_TIMEOUT_MS = 28_000; // stay under CF 30 s wall
@@ -91,9 +93,9 @@ const CORS_HEADERS = Object.freeze({
   "X-API-Version": VERSION,
 });
 
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-// Â§ 1.  CUSTOM ERROR HIERARCHY
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ═════════════════════════════════════════════════════════════════════════════════════
+// § 1.  CUSTOM ERROR HIERARCHY
+// ═════════════════════════════════════════════════════════════════════════════════════
 
 class AppError extends Error {
   constructor(
@@ -150,9 +152,9 @@ class ServiceUnavailableError extends AppError {
   }
 }
 
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-// Â§ 2.  VALIDATION SCHEMAS
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ═════════════════════════════════════════════════════════════════════════════════════
+// § 2.  VALIDATION SCHEMAS
+// ═════════════════════════════════════════════════════════════════════════════════════
 
 const SCHEMAS = {
   employee: {
@@ -285,9 +287,9 @@ function validate(data, schemaName) {
   return true;
 }
 
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-// Â§ 3.  JWT AUTHENTICATION
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ═════════════════════════════════════════════════════════════════════════════════════
+// § 3.  JWT AUTHENTICATION
+// ═════════════════════════════════════════════════════════════════════════════════════
 
 async function verifyJWT(token, secret) {
   try {
@@ -329,9 +331,9 @@ function base64UrlDecode(str) {
   return Uint8Array.from(binary, (c) => c.charCodeAt(0));
 }
 
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-// Â§ 4.  RATE LIMITER  (KV-backed sliding window)
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ═════════════════════════════════════════════════════════════════════════════════════
+// § 4.  RATE LIMITER  (KV-backed sliding window)
+// ═════════════════════════════════════════════════════════════════════════════════════
 
 async function checkRateLimit(env, key) {
   if (!env.HR_KV) return { remaining: 999 };
@@ -354,9 +356,9 @@ async function checkRateLimit(env, key) {
   return { remaining: RATE_LIMIT_MAX - count - 1 };
 }
 
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-// Â§ 5.  CIRCUIT BREAKER  (KV-backed)
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ═════════════════════════════════════════════════════════════════════════════════════
+// § 5.  CIRCUIT BREAKER  (KV-backed)
+// ═════════════════════════════════════════════════════════════════════════════════════
 
 async function withCircuitBreaker(env, service, fn) {
   if (!env.HR_KV) return fn();
@@ -393,9 +395,9 @@ async function withCircuitBreaker(env, service, fn) {
   }
 }
 
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-// Â§ 6.  IDEMPOTENCY  (KV-backed)
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ═════════════════════════════════════════════════════════════════════════════════════
+// § 6.  IDEMPOTENCY  (KV-backed)
+// ═════════════════════════════════════════════════════════════════════════════════════
 
 async function withIdempotency(env, key, tenantId, fn) {
   if (!key || !env.HR_KV) return fn();
@@ -415,9 +417,9 @@ async function withIdempotency(env, key, tenantId, fn) {
   return result;
 }
 
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-// Â§ 7.  KV CACHE LAYER
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ═════════════════════════════════════════════════════════════════════════════════════
+// § 7.  KV CACHE LAYER
+// ═════════════════════════════════════════════════════════════════════════════════════
 
 async function withCache(env, key, ttl, fn) {
   if (!env.HR_KV) return fn();
@@ -433,9 +435,9 @@ async function invalidateCache(env, ...keys) {
   await Promise.allSettled(keys.map((k) => env.HR_KV.delete(k)));
 }
 
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-// Â§ 8.  STRUCTURED AUDIT LOGGER
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ═════════════════════════════════════════════════════════════════════════════════════
+// § 8.  STRUCTURED AUDIT LOGGER
+// ═════════════════════════════════════════════════════════════════════════════════════
 
 const auditBuffer = [];
 
@@ -471,9 +473,9 @@ async function audit(env, ctx, action, resource, resourceId, meta = {}) {
   console.log(JSON.stringify({ type: "AUDIT", ...event }));
 }
 
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-// Â§ 9.  OUTBOUND WEBHOOK DISPATCHER
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ═════════════════════════════════════════════════════════════════════════════════════
+// § 9.  OUTBOUND WEBHOOK DISPATCHER
+// ═════════════════════════════════════════════════════════════════════════════════════
 
 async function dispatchWebhook(env, tenantId, event, payload) {
   if (!env.HR_KV) return;
@@ -521,9 +523,9 @@ async function hmacSign(secret, data) {
     .join("");
 }
 
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-// Â§ 10.  MIDDLEWARE PIPELINE
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ═════════════════════════════════════════════════════════════════════════════════════
+// § 10.  MIDDLEWARE PIPELINE
+// ═════════════════════════════════════════════════════════════════════════════════════
 
 async function buildContext(request, env) {
   const url = new URL(request.url);
@@ -551,7 +553,7 @@ async function buildContext(request, env) {
         actor = await verifyViaSupabase(token, env);
       }
     } catch (authErr) {
-      // Don't crash the pipeline â€” let route handlers decide via requireAuth/requireRole
+      // Don't crash the pipeline — let route handlers decide via requireAuth/requireRole
       console.warn(
         "[Auth] Token verification failed (will be unauthenticated):",
         authErr.message,
@@ -629,9 +631,9 @@ function requireRole(ctx, ...roles) {
     throw new ForbiddenError(`Required roles: ${roles.join(", ")}`);
 }
 
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-// Â§ 11.  RESPONSE HELPERS
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ═════════════════════════════════════════════════════════════════════════════════════
+// § 11.  RESPONSE HELPERS
+// ═════════════════════════════════════════════════════════════════════════════════════
 
 function apiResponse(data, status = HTTP.OK, extra = {}) {
   return Response.json(
@@ -675,9 +677,9 @@ function paginatedResponse(items, cursor, total, extra = {}) {
   );
 }
 
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-// Â§ 12.  ROUTER
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ═════════════════════════════════════════════════════════════════════════════════════
+// § 12.  ROUTER
+// ═════════════════════════════════════════════════════════════════════════════════════
 
 const ROUTES = [];
 
@@ -702,7 +704,7 @@ function matchRoute(method, path) {
   return null;
 }
 
-// â”€â”€â”€ Route Declarations â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ——— Route Declarations —————————————————————————————————————————————————————————————
 
 // Health & Meta
 route("GET", "/health", handleHealth);
@@ -770,6 +772,7 @@ route("GET", "/payroll/runs", handleListPayrollRuns);
 route("GET", "/payroll/payslips/all", handleListAllPayslips);
 route("POST", "/payroll/payslips/:id/send", handleSendPayslip);
 route("POST", "/payroll/payslips/send-all", handleSendAllPayslips);
+route("GET", "/payroll/payslips/:id/pdf", handleGeneratePayslipPdf);
 route("GET", "/payroll/payslips/:employeeId", handleGetPayslips);
 
 // Recruitment / ATS
@@ -2016,6 +2019,126 @@ async function handleCalculatePayroll(request, env, ctx) {
   );
 
   return apiResponse({ period, payslips, totals });
+}
+
+async function handleGeneratePayslipPdf(request, env, ctx, [payslipId]) {
+  requireAuth(ctx);
+  
+  // Fetch payslip data with employee details and company details
+  const res = await sbFetch(
+    env,
+    "GET",
+    `/rest/v1/payslips?id=eq.${payslipId}&select=*,employees(first_name,last_name,job_title,departments(name)),companies(name,address,registration_number)&limit=1`,
+    null,
+    false,
+    ctx.tenantId,
+  );
+  const data = await res.json();
+  const payslip = data?.[0];
+  if (!payslip) throw new NotFoundError("Payslip");
+  
+  // Generate PDF
+  const pdfDoc = await PDFDocument.create();
+  const page = pdfDoc.addPage([600, 800]);
+  const helveticaFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
+  const helveticaBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+  
+  const { width, height } = page.getSize();
+  const colorDark = rgb(0.1, 0.1, 0.1);
+  const colorGray = rgb(0.4, 0.4, 0.4);
+  const colorBrand = rgb(0.15, 0.25, 0.45);
+  
+  const companyName = payslip.companies?.name || "Simpatico HR Enterprise";
+  const empName = `${payslip.employees?.first_name || ""} ${payslip.employees?.last_name || ""}`.trim();
+  const period = payslip.period || "Unknown Period";
+  const currency = payslip.currency || "INR";
+  
+  // Header
+  page.drawText(companyName, { x: 50, y: height - 60, size: 24, font: helveticaBold, color: colorBrand });
+  page.drawText("PAYSLIP", { x: width - 150, y: height - 60, size: 20, font: helveticaBold, color: colorGray });
+  
+  page.drawLine({
+    start: { x: 50, y: height - 80 },
+    end: { x: width - 50, y: height - 80 },
+    thickness: 1,
+    color: rgb(0.8, 0.8, 0.8),
+  });
+  
+  // Employee Details
+  page.drawText(`Employee Name: ${empName}`, { x: 50, y: height - 120, size: 12, font: helveticaBold, color: colorDark });
+  page.drawText(`Job Title: ${payslip.employees?.job_title || "N/A"}`, { x: 50, y: height - 140, size: 10, font: helveticaFont, color: colorDark });
+  page.drawText(`Department: ${payslip.employees?.departments?.name || "N/A"}`, { x: 50, y: height - 155, size: 10, font: helveticaFont, color: colorDark });
+  
+  page.drawText(`Pay Period: ${period}`, { x: width - 200, y: height - 120, size: 10, font: helveticaBold, color: colorDark });
+  page.drawText(`Pay Date: ${payslip.pay_date || "N/A"}`, { x: width - 200, y: height - 135, size: 10, font: helveticaFont, color: colorDark });
+  page.drawText(`Status: ${payslip.status?.toUpperCase() || "GENERATED"}`, { x: width - 200, y: height - 150, size: 10, font: helveticaFont, color: colorDark });
+  
+  // Earnings & Deductions Table Header
+  const tableY = height - 220;
+  page.drawRectangle({
+    x: 50, y: tableY - 5, width: width - 100, height: 25,
+    color: rgb(0.95, 0.95, 0.95),
+  });
+  page.drawText("EARNINGS", { x: 60, y: tableY, size: 10, font: helveticaBold, color: colorDark });
+  page.drawText("AMOUNT", { x: 200, y: tableY, size: 10, font: helveticaBold, color: colorDark });
+  page.drawText("DEDUCTIONS", { x: width / 2 + 10, y: tableY, size: 10, font: helveticaBold, color: colorDark });
+  page.drawText("AMOUNT", { x: width - 100, y: tableY, size: 10, font: helveticaBold, color: colorDark });
+  
+  // Content
+  const formatAmt = (amt) => `${currency} ${Number(amt).toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2})}`;
+  
+  page.drawText("Basic Salary", { x: 60, y: tableY - 30, size: 10, font: helveticaFont, color: colorDark });
+  page.drawText(formatAmt(payslip.gross_pay), { x: 200, y: tableY - 30, size: 10, font: helveticaFont, color: colorDark });
+  
+  let dY = tableY - 30;
+  if (payslip.deductions && Array.isArray(payslip.deductions)) {
+    payslip.deductions.forEach(d => {
+      page.drawText(d.name || "Deduction", { x: width / 2 + 10, y: dY, size: 10, font: helveticaFont, color: colorDark });
+      page.drawText(formatAmt(d.amount), { x: width - 100, y: dY, size: 10, font: helveticaFont, color: colorDark });
+      dY -= 20;
+    });
+  } else {
+    page.drawText("Total Deductions", { x: width / 2 + 10, y: dY, size: 10, font: helveticaFont, color: colorDark });
+    page.drawText(formatAmt(payslip.deductions_total), { x: width - 100, y: dY, size: 10, font: helveticaFont, color: colorDark });
+  }
+  
+  // Totals
+  const totalY = dY - 40;
+  page.drawLine({
+    start: { x: 50, y: totalY + 15 },
+    end: { x: width - 50, y: totalY + 15 },
+    thickness: 1,
+    color: rgb(0.8, 0.8, 0.8),
+  });
+  
+  page.drawText("Gross Earnings:", { x: 60, y: totalY, size: 10, font: helveticaBold, color: colorDark });
+  page.drawText(formatAmt(payslip.gross_pay), { x: 200, y: totalY, size: 10, font: helveticaBold, color: colorDark });
+  
+  page.drawText("Total Deductions:", { x: width / 2 + 10, y: totalY, size: 10, font: helveticaBold, color: colorDark });
+  page.drawText(formatAmt(payslip.deductions_total), { x: width - 100, y: totalY, size: 10, font: helveticaBold, color: colorDark });
+  
+  page.drawRectangle({
+    x: 50, y: totalY - 45, width: width - 100, height: 30,
+    color: rgb(0.9, 0.95, 0.9),
+  });
+  page.drawText("NET PAY:", { x: 60, y: totalY - 35, size: 12, font: helveticaBold, color: colorDark });
+  page.drawText(formatAmt(payslip.net_pay), { x: width - 150, y: totalY - 35, size: 14, font: helveticaBold, color: rgb(0.1, 0.5, 0.2) });
+  
+  // Footer
+  page.drawText("This is a computer-generated document. No signature is required.", {
+    x: 50, y: 50, size: 8, font: helveticaFont, color: colorGray,
+  });
+  
+  const pdfBytes = await pdfDoc.save();
+  
+  return new Response(pdfBytes, {
+    status: 200,
+    headers: {
+      ...getCorsHeaders(request),
+      "Content-Type": "application/pdf",
+      "Content-Disposition": `inline; filename="Payslip_${empName.replace(/\\s+/g, '_')}_${period}.pdf"`,
+    }
+  });
 }
 
 async function handleRunPayroll(request, env, ctx) {

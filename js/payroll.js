@@ -335,7 +335,7 @@ function renderPayslips(list) {
       <td><span class="hr-badge ${badgeClass}">${p.status}</span></td>
       <td>
         <div style="display:flex;gap:6px">
-          ${p.payslip_key ? `<button class="hr-btn hr-btn-ghost hr-btn-sm" onclick="downloadPayslip('${p.payslip_key}')">Download</button>` : ''}
+          <button class="hr-btn hr-btn-ghost hr-btn-sm" onclick="downloadPayslip('${p.id}')">Download</button>
           ${p.status === 'generated' ? `<button class="hr-btn hr-btn-primary hr-btn-sm" onclick="sendPayslip('${p.id}')">Send</button>` : ''}
         </div>
       </td>
@@ -855,12 +855,36 @@ window.executePayroll = async function() {
 };
 
 // ── Payslip actions ──
-window.downloadPayslip = async function(key) {
+window.downloadPayslip = async function(id) {
   try {
-    const res = await fetch(`${PAY_CONFIG.workerUrl}/r2/signed-url?key=${encodeURIComponent(key)}`, { headers: authHeaders() });
-    const { url } = await res.json();
-    window.open(url, '_blank');
-  } catch { showToast('Failed to download payslip', 'error'); }
+    showToast('Generating PDF...', 'info');
+    const res = await fetch(`${PAY_CONFIG.workerUrl}/payroll/payslips/${id}/pdf`, { headers: authHeaders() });
+    if (!res.ok) {
+      const err = await res.json().catch(()=>({}));
+      throw new Error(err.error || 'Failed to generate PDF');
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    
+    // Extract filename from Content-Disposition if present
+    let filename = `Payslip_${id}.pdf`;
+    const disposition = res.headers.get('Content-Disposition');
+    if (disposition && disposition.indexOf('filename=') !== -1) {
+      const matches = /filename="([^"]+)"/.exec(disposition);
+      if (matches != null && matches[1]) filename = matches[1];
+    }
+    
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
 };
 
 window.sendPayslip = async function(payslipId) {
