@@ -1,21 +1,21 @@
 /**
- * ╔══════════════════════════════════════════════════════════════════════════════╗
- * ║          SIMPATICO HR  —  ENTERPRISE PLATFORM ENGINE  v5.0                 ║
- * ║          Cloudflare Workers · Edge-Native · Zero Cold-Start                 ║
- * ╠══════════════════════════════════════════════════════════════════════════════╣
- * ║  Architecture  : Edge-Native Multi-Tenant API                               ║
- * ║  Auth          : JWT RS256 / HMAC-SHA256 Webhook Signatures                 ║
- * ║  Intelligence  : Workers AI (Llama 3.1) + Vectorize RAG                     ║
- * ║  Storage       : Supabase (RLS-enforced) · R2 · KV Cache                    ║
- * ║  Patterns      : Middleware Pipeline · Circuit Breaker · Idempotency        ║
- * ║                  Cursor Pagination · Audit Trail · Rate Limiting            ║
- * ║                  Outbound Webhooks · SSE Streaming · Background Jobs        ║
- * ╚══════════════════════════════════════════════════════════════════════════════╝
+ * â•”â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•—
+ * â•‘          SIMPATICO HR  â€”  ENTERPRISE PLATFORM ENGINE  v5.0                 â•‘
+ * â•‘          Cloudflare Workers Â· Edge-Native Â· Zero Cold-Start                 â•‘
+ * â• â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•£
+ * â•‘  Architecture  : Edge-Native Multi-Tenant API                               â•‘
+ * â•‘  Auth          : JWT RS256 / HMAC-SHA256 Webhook Signatures                 â•‘
+ * â•‘  Intelligence  : Workers AI (Llama 3.1) + Vectorize RAG                     â•‘
+ * â•‘  Storage       : Supabase (RLS-enforced) Â· R2 Â· KV Cache                    â•‘
+ * â•‘  Patterns      : Middleware Pipeline Â· Circuit Breaker Â· Idempotency        â•‘
+ * â•‘                  Cursor Pagination Â· Audit Trail Â· Rate Limiting            â•‘
+ * â•‘                  Outbound Webhooks Â· SSE Streaming Â· Background Jobs        â•‘
+ * â•šâ•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
  */
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// § 0.  CONSTANTS & CONFIGURATION
-// ═══════════════════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// Â§ 0.  CONSTANTS & CONFIGURATION
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 const VERSION = "5.0.0";
 const REQUEST_TIMEOUT_MS = 28_000; // stay under CF 30 s wall
@@ -91,9 +91,9 @@ const CORS_HEADERS = Object.freeze({
   "X-API-Version": VERSION,
 });
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// § 1.  CUSTOM ERROR HIERARCHY
-// ═══════════════════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// Â§ 1.  CUSTOM ERROR HIERARCHY
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 class AppError extends Error {
   constructor(
@@ -150,9 +150,9 @@ class ServiceUnavailableError extends AppError {
   }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// § 2.  VALIDATION SCHEMAS
-// ═══════════════════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// Â§ 2.  VALIDATION SCHEMAS
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 const SCHEMAS = {
   employee: {
@@ -285,9 +285,9 @@ function validate(data, schemaName) {
   return true;
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// § 3.  JWT AUTHENTICATION
-// ═══════════════════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// Â§ 3.  JWT AUTHENTICATION
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 async function verifyJWT(token, secret) {
   try {
@@ -329,9 +329,9 @@ function base64UrlDecode(str) {
   return Uint8Array.from(binary, (c) => c.charCodeAt(0));
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// § 4.  RATE LIMITER  (KV-backed sliding window)
-// ═══════════════════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// Â§ 4.  RATE LIMITER  (KV-backed sliding window)
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 async function checkRateLimit(env, key) {
   if (!env.HR_KV) return { remaining: 999 };
@@ -354,9 +354,9 @@ async function checkRateLimit(env, key) {
   return { remaining: RATE_LIMIT_MAX - count - 1 };
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// § 5.  CIRCUIT BREAKER  (KV-backed)
-// ═══════════════════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// Â§ 5.  CIRCUIT BREAKER  (KV-backed)
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 async function withCircuitBreaker(env, service, fn) {
   if (!env.HR_KV) return fn();
@@ -393,9 +393,9 @@ async function withCircuitBreaker(env, service, fn) {
   }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// § 6.  IDEMPOTENCY  (KV-backed)
-// ═══════════════════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// Â§ 6.  IDEMPOTENCY  (KV-backed)
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 async function withIdempotency(env, key, tenantId, fn) {
   if (!key || !env.HR_KV) return fn();
@@ -415,9 +415,9 @@ async function withIdempotency(env, key, tenantId, fn) {
   return result;
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// § 7.  KV CACHE LAYER
-// ═══════════════════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// Â§ 7.  KV CACHE LAYER
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 async function withCache(env, key, ttl, fn) {
   if (!env.HR_KV) return fn();
@@ -433,9 +433,9 @@ async function invalidateCache(env, ...keys) {
   await Promise.allSettled(keys.map((k) => env.HR_KV.delete(k)));
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// § 8.  STRUCTURED AUDIT LOGGER
-// ═══════════════════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// Â§ 8.  STRUCTURED AUDIT LOGGER
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 const auditBuffer = [];
 
@@ -471,9 +471,9 @@ async function audit(env, ctx, action, resource, resourceId, meta = {}) {
   console.log(JSON.stringify({ type: "AUDIT", ...event }));
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// § 9.  OUTBOUND WEBHOOK DISPATCHER
-// ═══════════════════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// Â§ 9.  OUTBOUND WEBHOOK DISPATCHER
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 async function dispatchWebhook(env, tenantId, event, payload) {
   if (!env.HR_KV) return;
@@ -521,9 +521,9 @@ async function hmacSign(secret, data) {
     .join("");
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// § 10.  MIDDLEWARE PIPELINE
-// ═══════════════════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// Â§ 10.  MIDDLEWARE PIPELINE
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 async function buildContext(request, env) {
   const url = new URL(request.url);
@@ -551,7 +551,7 @@ async function buildContext(request, env) {
         actor = await verifyViaSupabase(token, env);
       }
     } catch (authErr) {
-      // Don't crash the pipeline — let route handlers decide via requireAuth/requireRole
+      // Don't crash the pipeline â€” let route handlers decide via requireAuth/requireRole
       console.warn(
         "[Auth] Token verification failed (will be unauthenticated):",
         authErr.message,
@@ -629,9 +629,9 @@ function requireRole(ctx, ...roles) {
     throw new ForbiddenError(`Required roles: ${roles.join(", ")}`);
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// § 11.  RESPONSE HELPERS
-// ═══════════════════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// Â§ 11.  RESPONSE HELPERS
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 function apiResponse(data, status = HTTP.OK, extra = {}) {
   return Response.json(
@@ -675,9 +675,9 @@ function paginatedResponse(items, cursor, total, extra = {}) {
   );
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// § 12.  ROUTER
-// ═══════════════════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// Â§ 12.  ROUTER
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 const ROUTES = [];
 
@@ -702,7 +702,7 @@ function matchRoute(method, path) {
   return null;
 }
 
-// ─── Route Declarations ────────────────────────────────────────────────────────
+// â”€â”€â”€ Route Declarations â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 // Health & Meta
 route("GET", "/health", handleHealth);
@@ -818,9 +818,9 @@ route("GET", "/analytics/attrition", handleAttritionReport);
 route("POST", "/companies/register", handleCompanyRegister);
 route("POST", "/email/welcome", handleWelcomeEmail);
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// § 13.  MAIN ENTRY POINT
-// ═══════════════════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// Â§ 13.  MAIN ENTRY POINT
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 export default {
   async fetch(request, env, execCtx) {
@@ -858,17 +858,17 @@ export default {
     const { requestId, tenantId } = ctx;
 
     try {
-      // ── Global Rate Limiting ──
+      // â”€â”€ Global Rate Limiting â”€â”€
       const { remaining } = await checkRateLimit(env, `${tenantId}:${ctx.ip}`);
 
-      // ── Route Matching ──
+      // â”€â”€ Route Matching â”€â”€
       const match = matchRoute(method, path);
       if (!match) return errorResponse(new NotFoundError("Route"), requestId);
 
       const { route: r, params } = match;
       const idempotencyKey = request.headers.get("X-Idempotency-Key");
 
-      // ── Handler Execution with timeout ──
+      // â”€â”€ Handler Execution with timeout â”€â”€
       const handlerFn = async () => {
         const result = await Promise.race([
           r.fns[0](request, env, ctx, params, url),
@@ -890,7 +890,7 @@ export default {
         handlerFn,
       );
 
-      // ── Flush Audit Buffer ──
+      // â”€â”€ Flush Audit Buffer â”€â”€
       if (auditBuffer.length) {
         execCtx?.waitUntil?.(
           sbFetch(
@@ -935,11 +935,11 @@ export default {
   },
 };
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// § 14.  HANDLER IMPLEMENTATIONS
-// ═══════════════════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// Â§ 14.  HANDLER IMPLEMENTATIONS
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
-// ── Health & Meta ──────────────────────────────────────────────────────────────
+// â”€â”€ Health & Meta â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 async function handleHealth(request, env, ctx) {
   const checks = await Promise.allSettled([
@@ -970,7 +970,7 @@ async function handleVersion() {
   });
 }
 
-// ── Webhook Registration ───────────────────────────────────────────────────────
+// â”€â”€ Webhook Registration â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 async function handleRegisterWebhook(request, env, ctx) {
   requireAuth(ctx);
@@ -989,7 +989,7 @@ async function handleRegisterWebhook(request, env, ctx) {
   return apiResponse({ registered: true, url, events }, HTTP.CREATED);
 }
 
-// ── Employees ─────────────────────────────────────────────────────────────────
+// â”€â”€ Employees â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 async function handleCreateEmployee(request, env, ctx) {
   requireAuth(ctx);
@@ -1038,7 +1038,7 @@ async function handleCreateEmployee(request, env, ctx) {
   // Welcome email (fire-and-forget)
   sendEmail(env, {
     to: body.email,
-    subject: `Welcome to the Team, ${body.first_name}! 🎉`,
+    subject: `Welcome to the Team, ${body.first_name}! ðŸŽ‰`,
     html: welcomeEmailHtml(body.first_name, empNum),
   }).catch(console.error);
 
@@ -1168,7 +1168,7 @@ async function handleBulkCreateEmployees(request, env, ctx) {
   requireRole(ctx, "hr", "admin", "superadmin");
   const { employees } = await safeJson(request);
   if (!Array.isArray(employees) || employees.length > 200)
-    throw new ValidationError("employees must be an array of ≤ 200");
+    throw new ValidationError("employees must be an array of â‰¤ 200");
 
   const results = await Promise.allSettled(
     employees.map(async (emp) => {
@@ -1227,7 +1227,7 @@ async function handleUploadAvatar(request, env, ctx, [id]) {
   const file = formData.get("file");
   if (!file) throw new ValidationError("file is required");
   if (file.size > 5 * 1024 * 1024)
-    throw new ValidationError("Avatar must be ≤ 5 MB");
+    throw new ValidationError("Avatar must be â‰¤ 5 MB");
 
   const key = `avatars/${ctx.tenantId}/${id}/${Date.now()}-${sanitizeFilename(file.name)}`;
   await env.HR_BUCKET.put(key, file.stream(), {
@@ -1299,7 +1299,7 @@ async function handleSignedUrl(request, env, ctx, _, url) {
   return apiResponse({ url: publicUrl, expires_in: 3600 });
 }
 
-// ── Onboarding ────────────────────────────────────────────────────────────────
+// â”€â”€ Onboarding â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 async function handleStartOnboarding(request, env, ctx) {
   requireRole(ctx, "hr", "admin", "superadmin");
@@ -1464,7 +1464,7 @@ async function handleUploadPolicy(request, env, ctx) {
   return apiResponse({ policy }, HTTP.CREATED);
 }
 
-// ── Training ──────────────────────────────────────────────────────────────────
+// â”€â”€ Training â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 async function handleCreateCourse(request, env, ctx) {
   requireRole(ctx, "hr", "admin", "superadmin");
@@ -1631,7 +1631,7 @@ async function handleSendReminder(request, env, ctx, [id]) {
   return apiResponse({ sent: true });
 }
 
-// ── Performance ───────────────────────────────────────────────────────────────
+// â”€â”€ Performance â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 async function handleCreateCycle(request, env, ctx) {
   requireRole(ctx, "hr", "admin", "superadmin");
@@ -1745,7 +1745,7 @@ async function handlePerformanceFeedback(request, env, ctx) {
 Generate a balanced, constructive, STAR-method performance review paragraph for:
 Employee: ${emp?.first_name} ${emp?.last_name} | Role: ${emp?.job_title}
 Manager Rating: ${rating}/5 | Strengths noted: ${strengths} | Areas for improvement: ${improvements}
-Be specific, professional, growth-oriented, and 150-200 words. Avoid clichés.`;
+Be specific, professional, growth-oriented, and 150-200 words. Avoid clichÃ©s.`;
 
   const result = await env.AI.run("@cf/meta/llama-3.1-8b-instruct", {
     messages: [{ role: "user", content: prompt }],
@@ -1757,7 +1757,7 @@ Be specific, professional, growth-oriented, and 150-200 words. Avoid clichés.`;
   });
 }
 
-// ── OKRs / Goals ─────────────────────────────────────────────────────────────
+// â”€â”€ OKRs / Goals â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 async function handleCreateGoal(request, env, ctx) {
   requireAuth(ctx);
@@ -1817,7 +1817,7 @@ async function handleUpdateGoal(request, env, ctx, [id]) {
   return apiResponse({ goal });
 }
 
-// ── Leave ─────────────────────────────────────────────────────────────────────
+// â”€â”€ Leave â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 async function handleSubmitLeave(request, env, ctx) {
   requireAuth(ctx);
@@ -1937,7 +1937,7 @@ async function handleLeaveDecision(request, env, ctx, [id]) {
   return apiResponse({ status: decision, leave_id: leaveId });
 }
 
-// ── Payroll ───────────────────────────────────────────────────────────────────
+// â”€â”€ Payroll â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 async function handleCalculatePayroll(request, env, ctx) {
   requireRole(
@@ -2215,14 +2215,14 @@ async function handleSendAllPayslips(request, env, ctx) {
   });
 }
 
-// ── Recruitment / ATS ─────────────────────────────────────────────────────────
+// â”€â”€ Recruitment / ATS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 async function handleCreateJob(request, env, ctx) {
   requireRole(ctx, "hr", "admin", "superadmin");
   const body = await safeJson(request);
   validate(body, "job_posting");
 
-  // Accept status from frontend (open, draft, closed) — default to "open"
+  // Accept status from frontend (open, draft, closed) â€” default to "open"
   const jobStatus = ["open", "draft", "closed"].includes(body.status) ? body.status : "open";
 
   // Validate syndication_targets values
@@ -2312,7 +2312,7 @@ async function handleCreateJob(request, env, ctx) {
 }
 
 async function handleListJobs(request, env, ctx, _, url) {
-  // No strict role check — tenant isolation enforced by sbFetch
+  // No strict role check â€” tenant isolation enforced by sbFetch
   const status = url.searchParams.get("status") || "open";
   const res = await sbFetch(
     env,
@@ -2437,12 +2437,12 @@ Return ONLY valid JSON in format: {"match_score": 85, "reason": "Brief 1-sentenc
   // Check if job has auto_shortlist enabled (database flag on jobs table)
   // Falls back to true by default for AI-first automation pipeline
   const autoEnabled = job?.auto_shortlist !== false;
-  // Configurable rejection threshold — jobs can set auto_reject_threshold (default: 40)
+  // Configurable rejection threshold â€” jobs can set auto_reject_threshold (default: 40)
   const rejectThreshold = job?.auto_reject_threshold ?? 40;
 
   if (autoEnabled && match_score !== null) {
     if (match_score >= 70) {
-      // HIGH SCORE → Auto-shortlist to interview stage
+      // HIGH SCORE â†’ Auto-shortlist to interview stage
       status = "interview";
       autoInterview = true;
       const chars =
@@ -2451,11 +2451,11 @@ Return ONLY valid JSON in format: {"match_score": 85, "reason": "Brief 1-sentenc
         interviewToken += chars.charAt(Math.floor(Math.random() * chars.length));
       }
     } else if (match_score < rejectThreshold) {
-      // LOW SCORE → Auto-reject with notification
+      // LOW SCORE â†’ Auto-reject with notification
       status = "rejected";
       autoRejected = true;
     }
-    // MIDDLE SCORE (rejectThreshold..69) → stays as "applied" for manual review
+    // MIDDLE SCORE (rejectThreshold..69) â†’ stays as "applied" for manual review
   }
 
   // Preserve resume_text for the candidate profile drawer
@@ -2537,11 +2537,11 @@ Return ONLY valid JSON in format: {"match_score": 85, "reason": "Brief 1-sentenc
     try {
       await sendEmail(env, {
         to: app.candidate_email,
-        subject: `Interview Invitation — ${job.title} at SimpaticoHR`,
+        subject: `Interview Invitation â€” ${job.title} at SimpaticoHR`,
         html: `<div style="max-width:600px;margin:0 auto;font-family:'Inter',Arial,sans-serif;background:#f8fafc;padding:32px 0;">
   <div style="background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,0.06);margin:0 16px;">
     <div style="background:linear-gradient(135deg,#4f46e5,#7c3aed);padding:32px 24px;text-align:center;">
-      <h1 style="color:#fff;font-size:22px;margin:0;font-weight:800;">Interview Invitation 🎉</h1>
+      <h1 style="color:#fff;font-size:22px;margin:0;font-weight:800;">Interview Invitation ðŸŽ‰</h1>
       <p style="color:rgba(255,255,255,0.85);font-size:14px;margin:8px 0 0;">You've been shortlisted by our AI screening</p>
     </div>
     <div style="padding:32px 24px;">
@@ -2557,70 +2557,70 @@ Return ONLY valid JSON in format: {"match_score": 85, "reason": "Brief 1-sentenc
         </table>
       </div>
       <div style="text-align:center;margin:24px 0;">
-        <a href="${meetingLink}" style="display:inline-block;background:linear-gradient(135deg,#4f46e5,#7c3aed);color:#fff;text-decoration:none;padding:14px 32px;border-radius:10px;font-weight:700;font-size:15px;">Start Your Interview →</a>
+        <a href="${meetingLink}" style="display:inline-block;background:linear-gradient(135deg,#4f46e5,#7c3aed);color:#fff;text-decoration:none;padding:14px 32px;border-radius:10px;font-weight:700;font-size:15px;">Start Your Interview â†’</a>
       </div>
       <div style="background:#fef3c7;border-left:4px solid #f59e0b;padding:12px 16px;border-radius:0 8px 8px 0;font-size:13px;color:#92400e;line-height:1.6;">
-        <strong>Tips:</strong> Use Chrome or Edge · Ensure good lighting · Use a quiet room · Have your camera and microphone ready
+        <strong>Tips:</strong> Use Chrome or Edge Â· Ensure good lighting Â· Use a quiet room Â· Have your camera and microphone ready
       </div>
     </div>
     <div style="background:#f1f5f9;padding:16px 24px;text-align:center;border-top:1px solid #e2e8f0;">
-      <p style="font-size:12px;color:#94a3b8;margin:0;">© ${new Date().getFullYear()} SimpaticoHR Consultancy Pvt Ltd · <a href="https://simpaticohr.in" style="color:#4f46e5;text-decoration:none;">simpaticohr.in</a></p>
+      <p style="font-size:12px;color:#94a3b8;margin:0;">Â© ${new Date().getFullYear()} SimpaticoHR Consultancy Pvt Ltd Â· <a href="https://simpaticohr.in" style="color:#4f46e5;text-decoration:none;">simpaticohr.in</a></p>
     </div>
   </div>
 </div>`,
-      });\r
-    } catch (e) {\r
-      console.warn("[ATS] Auto-shortlist email failed:", e.message);\r
-    }\r
-  }\r
-\r
-  // 5. Auto-Reject Notification Email\r
-  if (autoRejected && app) {\r
-    try {\r
-      await sendEmail(env, {\r
-        to: app.candidate_email,\r
-        subject: `Application Update — ${job.title}`,\r
-        html: `<div style="max-width:600px;margin:0 auto;font-family:'Inter',Arial,sans-serif;background:#f8fafc;padding:32px 0;">\r
-  <div style="background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,0.06);margin:0 16px;">\r
-    <div style="background:linear-gradient(135deg,#1e293b,#334155);padding:32px 24px;text-align:center;">\r
-      <h1 style="color:#fff;font-size:22px;margin:0;font-weight:800;">Application Update</h1>\r
-    </div>\r
-    <div style="padding:32px 24px;">\r
-      <p style="font-size:16px;color:#1f2937;margin:0 0 16px;">Hi <strong>${app.candidate_name || 'there'}</strong>,</p>\r
-      <p style="font-size:14px;color:#4b5563;line-height:1.7;margin:0 0 20px;">Thank you for your interest in the <strong>${job.title}</strong> position. After careful review, we've decided to move forward with other candidates whose qualifications more closely match our current requirements.</p>\r
-      <p style="font-size:14px;color:#4b5563;line-height:1.7;margin:0 0 20px;">We encourage you to apply for future openings that match your skills and experience. Your profile has been added to our talent pool for consideration.</p>\r
-      <p style="font-size:14px;color:#6b7280;margin:0;">Best regards,<br/><strong>SimpaticoHR Recruitment Team</strong></p>\r
-    </div>\r
-    <div style="background:#f1f5f9;padding:16px 24px;text-align:center;border-top:1px solid #e2e8f0;">\r
-      <p style="font-size:12px;color:#94a3b8;margin:0;">© ${new Date().getFullYear()} SimpaticoHR Consultancy Pvt Ltd</p>\r
-    </div>\r
-  </div>\r
-</div>`,\r
-      });\r
-    } catch (e) {\r
-      console.warn("[ATS] Auto-reject email failed:", e.message);\r
-    }\r
-    await audit(env, ctx, "application.auto_rejected", "job_applications", app.id, {\r
-      match_score,\r
-      reject_threshold: rejectThreshold,\r
-    }).catch(() => {});\r
-  }\r
-\r
-  await dispatchWebhook(env, ctx.tenantId, "application.received", {\r
-    application_id: app.id,\r
-    job_id: body.job_id,\r
-    auto_shortlisted: autoInterview,\r
-    auto_rejected: autoRejected,\r
-    match_score,\r
-  });\r
-  return apiResponse(\r
-    { application: app, auto_scheduled: autoInterview, auto_rejected: autoRejected, match_score },\r
-    HTTP.CREATED,\r
-  );\r
+      });
+    } catch (e) {
+      console.warn("[ATS] Auto-shortlist email failed:", e.message);
+    }
+  }
+
+  // 5. Auto-Reject Notification Email
+  if (autoRejected && app) {
+    try {
+      await sendEmail(env, {
+        to: app.candidate_email,
+        subject: `Application Update â€” ${job.title}`,
+        html: `<div style="max-width:600px;margin:0 auto;font-family:'Inter',Arial,sans-serif;background:#f8fafc;padding:32px 0;">
+  <div style="background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,0.06);margin:0 16px;">
+    <div style="background:linear-gradient(135deg,#1e293b,#334155);padding:32px 24px;text-align:center;">
+      <h1 style="color:#fff;font-size:22px;margin:0;font-weight:800;">Application Update</h1>
+    </div>
+    <div style="padding:32px 24px;">
+      <p style="font-size:16px;color:#1f2937;margin:0 0 16px;">Hi <strong>${app.candidate_name || 'there'}</strong>,</p>
+      <p style="font-size:14px;color:#4b5563;line-height:1.7;margin:0 0 20px;">Thank you for your interest in the <strong>${job.title}</strong> position. After careful review, we've decided to move forward with other candidates whose qualifications more closely match our current requirements.</p>
+      <p style="font-size:14px;color:#4b5563;line-height:1.7;margin:0 0 20px;">We encourage you to apply for future openings that match your skills and experience. Your profile has been added to our talent pool for consideration.</p>
+      <p style="font-size:14px;color:#6b7280;margin:0;">Best regards,<br/><strong>SimpaticoHR Recruitment Team</strong></p>
+    </div>
+    <div style="background:#f1f5f9;padding:16px 24px;text-align:center;border-top:1px solid #e2e8f0;">
+      <p style="font-size:12px;color:#94a3b8;margin:0;">Â© ${new Date().getFullYear()} SimpaticoHR Consultancy Pvt Ltd</p>
+    </div>
+  </div>
+</div>`,
+      });
+    } catch (e) {
+      console.warn("[ATS] Auto-reject email failed:", e.message);
+    }
+    await audit(env, ctx, "application.auto_rejected", "job_applications", app.id, {
+      match_score,
+      reject_threshold: rejectThreshold,
+    }).catch(() => {});
+  }
+
+  await dispatchWebhook(env, ctx.tenantId, "application.received", {
+    application_id: app.id,
+    job_id: body.job_id,
+    auto_shortlisted: autoInterview,
+    auto_rejected: autoRejected,
+    match_score,
+  });
+  return apiResponse(
+    { application: app, auto_scheduled: autoInterview, auto_rejected: autoRejected, match_score },
+    HTTP.CREATED,
+  );
 }
 
 async function handleListApplications(request, env, ctx, _, url) {
-  // No strict role check — tenant isolation enforced by sbFetch tenant_id filter
+  // No strict role check â€” tenant isolation enforced by sbFetch tenant_id filter
   const jobId = url.searchParams.get("job_id");
   const status = url.searchParams.get("status");
   let qp = `select=*,jobs(title,department)&order=created_at.desc`;
@@ -2688,7 +2688,7 @@ async function handleUpdateApplication(request, env, ctx, [id]) {
   return apiResponse({ application: app || { id, ...patch } });
 }
 
-// ── Notifications ─────────────────────────────────────────────────────────────
+// â”€â”€ Notifications â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 async function handleListNotifications(request, env, ctx, _, url) {
   requireAuth(ctx);
@@ -2719,7 +2719,7 @@ async function handleMarkNotificationRead(request, env, ctx, [id]) {
   return new Response(null, { status: HTTP.NO_CONTENT, headers: CORS_HEADERS });
 }
 
-// ── AI Intelligence ───────────────────────────────────────────────────────────
+// â”€â”€ AI Intelligence â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 async function handleInterviewQuestion(request, env, ctx) {
   // requireAuth(ctx);
@@ -3210,7 +3210,7 @@ async function handleGenerateJD(request, env, ctx) {
 
   const prompt = `You are a world-class talent acquisition specialist. Write a compelling, inclusive, bias-free job description.
 Role: ${title} | Department: ${department} | Experience: ${experience || "unspecified"} | Key Skills: ${skills || "unspecified"} | Tone: ${tone}
-Structure: Overview → Responsibilities (5-7 bullets) → Requirements (must-have vs nice-to-have) → Benefits → Diversity statement.
+Structure: Overview â†’ Responsibilities (5-7 bullets) â†’ Requirements (must-have vs nice-to-have) â†’ Benefits â†’ Diversity statement.
 Use engaging, modern language. Avoid jargon. Max 500 words.`;
 
   const result = await env.AI.run("@cf/meta/llama-3.1-8b-instruct", {
@@ -3243,9 +3243,9 @@ async function handleInterviewEmail(request, env) {
                         <p>You have been invited to an interview for the <strong>${data.position}</strong> role.</p>
                         <div style="background-color: #f3f4f6; padding: 15px; border-radius: 8px; margin: 20px 0;">
                             <ul style="list-style: none; padding: 0; margin: 0;">
-                                <li style="margin-bottom: 8px;"><strong>📅 Date:</strong> ${data.date}</li>
-                                <li style="margin-bottom: 8px;"><strong>⏰ Time:</strong> ${data.startTime}</li>
-                                <li><strong>📍 Mode:</strong> ${data.mode.toUpperCase()}</li>
+                                <li style="margin-bottom: 8px;"><strong>ðŸ“… Date:</strong> ${data.date}</li>
+                                <li style="margin-bottom: 8px;"><strong>â° Time:</strong> ${data.startTime}</li>
+                                <li><strong>ðŸ“ Mode:</strong> ${data.mode.toUpperCase()}</li>
                             </ul>
                         </div>
                         ${data.meetingLink ? `<p><strong>Link/Location:</strong> <a href="${data.meetingLink}" style="color: #4f46e5;">${data.meetingLink}</a></p>` : ""}
@@ -3304,7 +3304,7 @@ Return ONLY valid JSON array, no markdown.`;
   return apiResponse({ tasks, role, department });
 }
 
-// ── Analytics ─────────────────────────────────────────────────────────────────
+// â”€â”€ Analytics â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 async function handleAnalyticsSummary(request, env, ctx) {
   requireAuth(ctx);
@@ -3560,9 +3560,9 @@ async function handleAttritionReport(request, env, ctx) {
   });
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// § 15.  SUPABASE HELPER  (tenant-scoped)
-// ═══════════════════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// Â§ 15.  SUPABASE HELPER  (tenant-scoped)
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 async function sbFetch(
   env,
@@ -3575,7 +3575,7 @@ async function sbFetch(
   if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_KEY)
     throw new ServiceUnavailableError("Database");
 
-  // ── TENANT ISOLATION: Only inject tenant filter for tables that have tenant_id ──
+  // â”€â”€ TENANT ISOLATION: Only inject tenant filter for tables that have tenant_id â”€â”€
   // Tables without tenant_id: job_applications, jobs, interviews, employees (core schema)
   // We use service_role key which bypasses RLS, so tenant isolation is opt-in per table
   let finalPath = path;
@@ -3640,13 +3640,13 @@ async function sbFetch(
   return response;
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// § 16.  EMAIL HELPER
-// ═══════════════════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// Â§ 16.  EMAIL HELPER
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 async function sendEmail(env, { to, subject, html, replyTo }) {
   if (!env.RESEND_API_KEY) {
-    console.warn("RESEND_API_KEY not set — email suppressed");
+    console.warn("RESEND_API_KEY not set â€” email suppressed");
     return;
   }
 
@@ -3673,9 +3673,9 @@ async function sendEmail(env, { to, subject, html, replyTo }) {
   return res;
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
-// § 16.5 WHATSAPP AUTOMATION
-// ──────────────────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Â§ 16.5 WHATSAPP AUTOMATION
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 async function handleWhatsAppNotification(request, env, ctx) {
   const body = await safeJson(request);
   const { phone, message } = body;
@@ -3709,9 +3709,9 @@ async function handleWhatsAppNotification(request, env, ctx) {
   return apiResponse({ success: true, method: "api" });
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// § 17.  UTILITY FUNCTIONS
-// ═══════════════════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// Â§ 17.  UTILITY FUNCTIONS
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 async function safeJson(request) {
   try {
@@ -3740,9 +3740,9 @@ function addDays(dateStr, days) {
   return d.toISOString().split("T")[0];
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// § 18.  EMAIL TEMPLATES
-// ═══════════════════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// Â§ 18.  EMAIL TEMPLATES
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 function welcomeEmailHtml(firstName, empNum) {
   return `
@@ -3754,7 +3754,7 @@ function welcomeEmailHtml(firstName, empNum) {
     <tr><td align="center">
       <table width="600" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08)">
         <tr><td style="background:linear-gradient(135deg,#6366f1,#8b5cf6);padding:40px;text-align:center">
-          <h1 style="color:white;margin:0;font-size:28px;font-weight:700">Welcome to the Team! 🎉</h1>
+          <h1 style="color:white;margin:0;font-size:28px;font-weight:700">Welcome to the Team! ðŸŽ‰</h1>
         </td></tr>
         <tr><td style="padding:40px">
           <p style="font-size:16px;color:#374151">Hi <strong>${firstName}</strong>,</p>
@@ -3765,11 +3765,11 @@ function welcomeEmailHtml(firstName, empNum) {
           </div>
           <p style="font-size:15px;color:#6b7280">Log in to your dashboard to complete your onboarding checklist.</p>
           <div style="text-align:center;margin-top:32px">
-            <a href="${"https://app.simpaticohr.in"}" style="display:inline-block;background:linear-gradient(135deg,#6366f1,#8b5cf6);color:white;text-decoration:none;padding:14px 32px;border-radius:8px;font-weight:600;font-size:15px">Go to Dashboard →</a>
+            <a href="${"https://app.simpaticohr.in"}" style="display:inline-block;background:linear-gradient(135deg,#6366f1,#8b5cf6);color:white;text-decoration:none;padding:14px 32px;border-radius:8px;font-weight:600;font-size:15px">Go to Dashboard â†’</a>
           </div>
         </td></tr>
         <tr><td style="background:#f9fafb;padding:20px;text-align:center;border-top:1px solid #e5e7eb">
-          <p style="margin:0;font-size:12px;color:#9ca3af">© ${new Date().getFullYear()} Simpatico HR. All rights reserved.</p>
+          <p style="margin:0;font-size:12px;color:#9ca3af">Â© ${new Date().getFullYear()} Simpatico HR. All rights reserved.</p>
         </td></tr>
       </table>
     </td></tr>
@@ -3787,7 +3787,7 @@ function payslipEmailHtml(ps) {
     <tr><td align="center">
       <table width="600" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08)">
         <tr><td style="background:linear-gradient(135deg,#0ea5e9,#6366f1);padding:32px;text-align:center">
-          <h2 style="color:white;margin:0">Payslip — ${ps.period}</h2>
+          <h2 style="color:white;margin:0">Payslip â€” ${ps.period}</h2>
         </td></tr>
         <tr><td style="padding:32px">
           <p>Hi <strong>${ps.employees?.first_name || "there"}</strong>, your payslip for <strong>${ps.period}</strong> is ready.</p>
@@ -3806,27 +3806,27 @@ function payslipEmailHtml(ps) {
 }
 
 /**
- * ╔══════════════════════════════════════════════════════════════════════════════╗
- * ║  REQUIRED CLOUDFLARE BINDINGS (wrangler.toml)                              ║
- * ╠══════════════════════════════════════════════════════════════════════════════╣
- * ║  Secrets (wrangler secret put):                                             ║
- * ║    SUPABASE_URL          — Supabase project URL                             ║
- * ║    SUPABASE_SERVICE_KEY  — Supabase service role key                        ║
- * ║    JWT_SECRET            — HMAC-SHA256 secret for JWT verification           ║
- * ║    RESEND_API_KEY        — Resend email API key                              ║
- * ║    WEBHOOK_SECRET        — HMAC secret for outbound webhook signatures       ║
- * ║    R2_PUBLIC_URL         — Public base URL for R2 bucket                    ║
- * ║    EMAIL_FROM            — Sender address (optional, has default)            ║
- * ║                                                                             ║
- * ║  KV Namespace:  HR_KV   (rate limiting, idempotency, circuit breaker)       ║
- * ║  R2 Bucket:     HR_BUCKET (avatars, documents)                              ║
- * ║  AI Binding:    AI       (Workers AI)                                       ║
- * ║  Vectorize:     VECTORIZE (semantic search index)                           ║
- * ╚══════════════════════════════════════════════════════════════════════════════╝
- */ // ── ADD THIS ROUTE to your ROUTES declarations (§12) ──────────────────────────
+ * â•”â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•—
+ * â•‘  REQUIRED CLOUDFLARE BINDINGS (wrangler.toml)                              â•‘
+ * â• â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•£
+ * â•‘  Secrets (wrangler secret put):                                             â•‘
+ * â•‘    SUPABASE_URL          â€” Supabase project URL                             â•‘
+ * â•‘    SUPABASE_SERVICE_KEY  â€” Supabase service role key                        â•‘
+ * â•‘    JWT_SECRET            â€” HMAC-SHA256 secret for JWT verification           â•‘
+ * â•‘    RESEND_API_KEY        â€” Resend email API key                              â•‘
+ * â•‘    WEBHOOK_SECRET        â€” HMAC secret for outbound webhook signatures       â•‘
+ * â•‘    R2_PUBLIC_URL         â€” Public base URL for R2 bucket                    â•‘
+ * â•‘    EMAIL_FROM            â€” Sender address (optional, has default)            â•‘
+ * â•‘                                                                             â•‘
+ * â•‘  KV Namespace:  HR_KV   (rate limiting, idempotency, circuit breaker)       â•‘
+ * â•‘  R2 Bucket:     HR_BUCKET (avatars, documents)                              â•‘
+ * â•‘  AI Binding:    AI       (Workers AI)                                       â•‘
+ * â•‘  Vectorize:     VECTORIZE (semantic search index)                           â•‘
+ * â•šâ•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+ */ // â”€â”€ ADD THIS ROUTE to your ROUTES declarations (Â§12) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // route('POST', '/interviews/schedule', handleScheduleInterviewEmail);
 
-// ── ADD THIS HANDLER (paste into § 14) ────────────────────────────────────────
+// â”€â”€ ADD THIS HANDLER (paste into Â§ 14) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 async function handleScheduleInterviewEmail(request, env, ctx) {
   const body = await safeJson(request);
@@ -3845,7 +3845,7 @@ async function handleScheduleInterviewEmail(request, env, ctx) {
     notes,
     interviewLink,
     token, // From frontend: unique string for the candidate
-    interviewerEmail, // optional — cc the interviewer if provided
+    interviewerEmail, // optional â€” cc the interviewer if provided
   } = body;
 
   if (!candidateName || !candidateEmail || !position || !date || !startTime) {
@@ -3864,10 +3864,10 @@ async function handleScheduleInterviewEmail(request, env, ctx) {
 
   const modeLabel =
     {
-      video: "📹 Video Call",
-      inperson: "🏢 In-Person",
-      phone: "📞 Phone Call",
-      proctored: "🔒 Proctored (AI-Monitored)",
+      video: "ðŸ“¹ Video Call",
+      inperson: "ðŸ¢ In-Person",
+      phone: "ðŸ“ž Phone Call",
+      proctored: "ðŸ”’ Proctored (AI-Monitored)",
     }[mode] || mode;
 
   let meetingSection = "";
@@ -3883,7 +3883,7 @@ async function handleScheduleInterviewEmail(request, env, ctx) {
 
   const notesSection = notes
     ? `<div style="margin-top:20px;background:#fef3c7;border-left:4px solid #f59e0b;padding:12px 16px;border-radius:6px;font-size:14px;color:#92400e;">
-        <strong>📝 Notes:</strong> ${notes}
+        <strong>ðŸ“ Notes:</strong> ${notes}
        </div>`
     : "";
 
@@ -3896,7 +3896,7 @@ async function handleScheduleInterviewEmail(request, env, ctx) {
     <tr><td align="center">
       <table width="600" cellpadding="0" cellspacing="0" style="background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08);">
         <tr><td style="background:linear-gradient(135deg,#4f46e5,#7c3aed);padding:36px;text-align:center;">
-          <h1 style="color:white;margin:0;font-size:24px;font-weight:700;">Interview Scheduled 🎉</h1>
+          <h1 style="color:white;margin:0;font-size:24px;font-weight:700;">Interview Scheduled ðŸŽ‰</h1>
           <p style="color:rgba(255,255,255,0.85);margin:8px 0 0;font-size:15px;">You have been invited for an interview</p>
         </td></tr>
         <tr><td style="padding:36px;">
@@ -3914,7 +3914,7 @@ async function handleScheduleInterviewEmail(request, env, ctx) {
               <tr><td style="padding:8px 0;color:#6b7280;font-size:14px;">Date</td>
                   <td style="padding:8px 0;font-weight:600;font-size:14px;">${formattedDate}</td></tr>
               <tr><td style="padding:8px 0;color:#6b7280;font-size:14px;">Time</td>
-                  <td style="padding:8px 0;font-weight:600;font-size:14px;">${formattedStart} – ${formattedEnd}</td></tr>
+                  <td style="padding:8px 0;font-weight:600;font-size:14px;">${formattedStart} â€“ ${formattedEnd}</td></tr>
               <tr><td style="padding:8px 0;color:#6b7280;font-size:14px;">Mode</td>
                   <td style="padding:8px 0;font-weight:600;font-size:14px;">${modeLabel}</td></tr>
               <tr><td style="padding:8px 0;color:#6b7280;font-size:14px;">Interviewer</td>
@@ -3927,7 +3927,7 @@ async function handleScheduleInterviewEmail(request, env, ctx) {
             mode === "proctored"
               ? `
           <div style="background:#ede9fe;border-left:4px solid #7c3aed;padding:14px 16px;border-radius:6px;margin-bottom:20px;font-size:14px;color:#5b21b6;">
-            <strong>🔒 This is a Proctored Interview.</strong><br>
+            <strong>ðŸ”’ This is a Proctored Interview.</strong><br>
             Your session will be AI-monitored. Please ensure your camera and microphone are working, and take the interview from a quiet, well-lit location.
           </div>`
               : ""
@@ -3939,10 +3939,10 @@ async function handleScheduleInterviewEmail(request, env, ctx) {
             If you need to reschedule or have any questions, please reply to this email or contact our HR team.
           </p>
 
-          <p style="font-size:15px;color:#374151;margin-top:20px;">Best of luck! 🙌<br><strong>Simpatico HR Team</strong></p>
+          <p style="font-size:15px;color:#374151;margin-top:20px;">Best of luck! ðŸ™Œ<br><strong>Simpatico HR Team</strong></p>
         </td></tr>
         <tr><td style="background:#f9fafb;padding:20px;text-align:center;border-top:1px solid #e5e7eb;">
-          <p style="margin:0;font-size:12px;color:#9ca3af;">© ${new Date().getFullYear()} Simpatico HR · interviews@simpaticohr.in</p>
+          <p style="margin:0;font-size:12px;color:#9ca3af;">Â© ${new Date().getFullYear()} Simpatico HR Â· interviews@simpaticohr.in</p>
         </td></tr>
       </table>
     </td></tr>
@@ -3953,7 +3953,7 @@ async function handleScheduleInterviewEmail(request, env, ctx) {
   // Send to candidate
   await sendEmail(env, {
     to: candidateEmail,
-    subject: `Interview Scheduled: ${position} — ${formattedDate}`,
+    subject: `Interview Scheduled: ${position} â€” ${formattedDate}`,
     html: candidateHtml,
   });
 
@@ -3961,7 +3961,7 @@ async function handleScheduleInterviewEmail(request, env, ctx) {
   if (interviewerEmail) {
     await sendEmail(env, {
       to: interviewerEmail,
-      subject: `[Action Required] You are interviewing ${candidateName} — ${formattedDate}`,
+      subject: `[Action Required] You are interviewing ${candidateName} â€” ${formattedDate}`,
       html: candidateHtml.replace(
         `Hi <strong>${candidateName}</strong>`,
         `Hi <strong>${interviewer}</strong>, you have an upcoming interview with <strong>${candidateName}</strong>`,
@@ -3986,9 +3986,9 @@ function formatTimeStr(timeStr) {
   return `${hour}:${String(m).padStart(2, "0")} ${ampm}`;
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// § REGISTRATION & WELCOME EMAIL HANDLERS
-// ═══════════════════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// Â§ REGISTRATION & WELCOME EMAIL HANDLERS
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 async function handleCompanyRegister(request, env, ctx) {
   const body = await safeJson(request);
@@ -4075,7 +4075,7 @@ async function handleCompanyRegister(request, env, ctx) {
   try {
     await sendEmail(env, {
       to: email,
-      subject: `Welcome to SimpaticoHR, ${admin_name || "Team"}! 🎉`,
+      subject: `Welcome to SimpaticoHR, ${admin_name || "Team"}! ðŸŽ‰`,
       html: registrationWelcomeHtml(admin_name || "there", name, "company"),
     });
   } catch (e) {
@@ -4095,8 +4095,8 @@ async function handleWelcomeEmail(request, env, ctx) {
 
   const subject =
     type === "company"
-      ? `Welcome to SimpaticoHR, ${name}! Your company is ready 🚀`
-      : `Welcome to SimpaticoHR, ${name}! 🎉`;
+      ? `Welcome to SimpaticoHR, ${name}! Your company is ready ðŸš€`
+      : `Welcome to SimpaticoHR, ${name}! ðŸŽ‰`;
 
   await sendEmail(env, {
     to: email,
@@ -4139,11 +4139,11 @@ function registrationWelcomeHtml(name, companyName, type) {
           <p style="font-size:14px;color:#4b5563;font-weight:600;margin:0 0 12px;">Here's what to do next:</p>
           <ul style="font-size:14px;color:#4b5563;line-height:2;padding-left:20px;margin:0 0 24px;">${nextSteps}</ul>
           <div style="text-align:center;margin:24px 0;">
-            <a href="https://simpaticohr.in/platform/login.html" style="display:inline-block;background:linear-gradient(135deg,#1E40AF,#3B82F6);color:#fff;text-decoration:none;padding:14px 32px;border-radius:10px;font-weight:700;font-size:15px;">Go to Dashboard →</a>
+            <a href="https://simpaticohr.in/platform/login.html" style="display:inline-block;background:linear-gradient(135deg,#1E40AF,#3B82F6);color:#fff;text-decoration:none;padding:14px 32px;border-radius:10px;font-weight:700;font-size:15px;">Go to Dashboard â†’</a>
           </div>
         </div>
         <div style="background:#f1f5f9;padding:16px 24px;text-align:center;border-top:1px solid #e2e8f0;">
-          <p style="font-size:12px;color:#94a3b8;margin:0;">© ${new Date().getFullYear()} SimpaticoHR Consultancy Pvt Ltd · <a href="https://simpaticohr.in" style="color:#3B82F6;text-decoration:none;">simpaticohr.in</a></p>
+          <p style="font-size:12px;color:#94a3b8;margin:0;">Â© ${new Date().getFullYear()} SimpaticoHR Consultancy Pvt Ltd Â· <a href="https://simpaticohr.in" style="color:#3B82F6;text-decoration:none;">simpaticohr.in</a></p>
         </div>
       </div>
     </div>`;
@@ -4159,9 +4159,9 @@ function registrationWelcomeHtml(name, companyName, type) {
 // route('GET',    '/candidates/:id/assessments',                       handleGetCandidateAssessments);
 // route('POST',   '/assessments/:assessmentId/score',                  handleScoreAssessment);
 
-// ───────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Assign assessment to candidate
-// ───────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 async function handleAssignAssessment(request, env, ctx) {
   requireRole(ctx, 'hr', 'hr_manager', 'company_admin', 'admin', 'superadmin');
   
@@ -4191,9 +4191,9 @@ async function handleAssignAssessment(request, env, ctx) {
   }
 }
 
-// ───────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Submit candidate responses to assessment
-// ───────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 async function handleSubmitAssessment(request, env, ctx) {
   // Candidates can submit their own assessments
   const { id: candidateId, assessmentId } = ctx.params;
@@ -4247,9 +4247,9 @@ async function handleSubmitAssessment(request, env, ctx) {
   }
 }
 
-// ───────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Get candidate's assessments
-// ───────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 async function handleGetCandidateAssessments(request, env, ctx) {
   const { id: candidateId } = ctx.params;
   
@@ -4277,9 +4277,9 @@ async function handleGetCandidateAssessments(request, env, ctx) {
   }
 }
 
-// ───────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Score candidate's assessment using AI
-// ───────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 async function handleScoreAssessment(request, env, ctx) {
   requireRole(ctx, 'hr', 'hr_manager', 'company_admin', 'admin', 'superadmin');
   
@@ -4388,9 +4388,9 @@ Return as JSON:
   }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// § CLIENT INTERVIEW MANAGEMENT HANDLERS
-// ═══════════════════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// Â§ CLIENT INTERVIEW MANAGEMENT HANDLERS
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 async function handleListClientInterviews(request, env, ctx, _, url) {
   requireAuth(ctx);
