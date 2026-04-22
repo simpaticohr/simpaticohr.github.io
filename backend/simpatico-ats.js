@@ -1953,13 +1953,13 @@ async function handleCalculatePayroll(request, env, ctx) {
     "admin",
     "superadmin",
   );
-  const { period } = await safeJson(request);
+  const { period, currency } = await safeJson(request);
 
   const [salRes, dedRes, leaveRes] = await Promise.all([
     sbFetch(
       env,
       "GET",
-      "/rest/v1/employee_salaries?select=*,employees(status,id)",
+      currency ? `/rest/v1/employee_salaries?currency=eq.${currency}&select=*,employees(status,id)` : "/rest/v1/employee_salaries?select=*,employees(status,id)",
       null,
       false,
       ctx.tenantId,
@@ -2005,6 +2005,7 @@ async function handleCalculatePayroll(request, env, ctx) {
       deductions: empDeds,
       unpaid_adjustment: unpaidAdj,
       net: Math.max(0, net),
+      currency: s.currency || currency || 'USD',
     };
   });
 
@@ -2172,7 +2173,7 @@ async function handleRunPayroll(request, env, ctx) {
   const calcRes = await handleCalculatePayroll(
     new Request("http://internal", {
       method: "POST",
-      body: JSON.stringify({ period: body.period }),
+      body: JSON.stringify({ period: body.period, currency: body.currency }),
     }),
     env,
     ctx,

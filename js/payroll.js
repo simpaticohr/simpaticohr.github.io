@@ -292,7 +292,7 @@ async function loadPayslips() {
   const totalGross = thisMonth.reduce((s, p) => s + (p.gross_pay || 0), 0);
   const pending    = allPayslips.filter(p => p.status === 'generated').length;
 
-  setText('stat-total-payroll', formatCurrency(totalGross));
+  setText('stat-total-payroll', formatCurrency(totalGross, window._lastPayslipsCurrency || 'USD'));
   setText('stat-on-payroll', allPayslips.length > 0 ? new Set(allPayslips.map(p=>p.employees?.id || p.employee_id)).size : '—');
   setText('stat-pending-payslips', pending);
 
@@ -329,9 +329,9 @@ function renderPayslips(list) {
         </div>
       </td>
       <td>${p.period || '—'}</td>
-      <td class="hr-font-mono">${formatCurrency(p.gross_pay)}</td>
-      <td class="hr-font-mono" style="color:var(--hr-danger)">-${formatCurrency(p.deductions_total)}</td>
-      <td class="hr-font-mono" style="color:var(--hr-success);font-weight:600">${formatCurrency(p.net_pay)}</td>
+      <td class="hr-font-mono">${formatCurrency(p.gross_pay, p.currency)}</td>
+      <td class="hr-font-mono" style="color:var(--hr-danger)">-${formatCurrency(p.deductions_total, p.currency)}</td>
+      <td class="hr-font-mono" style="color:var(--hr-success);font-weight:600">${formatCurrency(p.net_pay, p.currency)}</td>
       <td><span class="hr-badge ${badgeClass}">${p.status}</span></td>
       <td>
         <div style="display:flex;gap:6px">
@@ -446,8 +446,8 @@ function renderPayrollRuns(list) {
     return `<tr>
       <td><span class="primary-text">${r.period}</span></td>
       <td>${formatEnum(r.type)}</td>
-      <td class="hr-font-mono">${formatCurrency(r.total_gross)}</td>
-      <td class="hr-font-mono" style="color:var(--hr-success);font-weight:600">${formatCurrency(r.total_net)}</td>
+      <td class="hr-font-mono">${formatCurrency(r.total_gross, r.currency)}</td>
+      <td class="hr-font-mono" style="color:var(--hr-success);font-weight:600">${formatCurrency(r.total_net, r.currency)}</td>
       <td>${r.employee_count || '—'}</td>
       <td><span class="hr-badge ${badgeClass}">${r.status}</span></td>
       <td>${runBy}</td>
@@ -710,6 +710,7 @@ window.executePayroll = async function() {
       pay_date: payDate,
       type: type || 'monthly',
       notes: notes || null,
+      currency: document.getElementById('run-currency')?.value || 'USD',
     };
 
     const res = await fetch(`${PAY_CONFIG.workerUrl}/payroll/run`, {
@@ -790,7 +791,8 @@ window.executePayroll = async function() {
           .insert([{
             period, type: type || 'monthly', pay_date: payDate,
             status: 'processing', notes: notes || null,
-            tenant_id: companyId, company_id: companyId, employee_count: salaries.length
+            tenant_id: companyId, company_id: companyId, employee_count: salaries.length,
+            currency: currency
           }])
           .select()
           .single();
@@ -831,7 +833,8 @@ window.executePayroll = async function() {
             deductions_total: totalDeductionsAgg, net_pay: net,
             status: 'generated',
             payroll_run_id: runData.id,
-            tenant_id: companyId, company_id: companyId
+            tenant_id: companyId, company_id: companyId,
+            currency: s.currency || currency || 'USD'
           };
         });
 
