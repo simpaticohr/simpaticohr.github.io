@@ -71,6 +71,13 @@ let allDeductions = [];
         return;
       }
 
+      // Strategy 4: SIMPATICO_CONFIG global fallback
+      if (typeof SIMPATICO_CONFIG !== 'undefined' && SIMPATICO_CONFIG.tenantId) {
+        patchLocalUser(SIMPATICO_CONFIG.tenantId);
+        console.log('[payroll] ✅ Resolved tenant from SIMPATICO_CONFIG fallback:', SIMPATICO_CONFIG.tenantId);
+        return;
+      }
+
       console.warn('[payroll] ⚠ Could not resolve tenant_id — payroll data will be empty');
     } catch(e) {
       console.warn('[payroll] tenant resolution error:', e.message);
@@ -510,7 +517,8 @@ window.calculatePayroll = async function() {
 
   const companyId = sessionStorage.getItem('company_id') || 
                      sessionStorage.getItem('tenant_id') ||
-                     (typeof getCompanyId === 'function' ? getCompanyId() : null);
+                     (typeof getCompanyId === 'function' ? getCompanyId() : null) ||
+                     (typeof SIMPATICO_CONFIG !== 'undefined' ? SIMPATICO_CONFIG.tenantId : null);
 
   // Direct Supabase calculation
   try {
