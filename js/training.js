@@ -31,7 +31,80 @@ const THUMB_PALETTES = {
 const THUMB_ICONS = { compliance: '🛡️', technical: '💻', leadership: '🎯', soft_skills: '🤝', onboarding: '🚀' };
 
 (function () {
+  /**
+   * Ensure company_id / tenant_id is available before loading any data.
+   * The dashboard's auto-resolution may not have completed yet (iframe race)
+   * or may have failed (companies table RLS error). This independently resolves
+   * the tenant from users → employees → companies tables.
+   */
+  async function ensureTenantId() {
+    // Already resolved?
+    if (typeof getCompanyId === 'function' && getCompanyId()) return;
+
+    const client = sb(); if (!client) return;
+    try {
+      // Get the current auth user
+      let authUser = null;
+      try {
+        const { data: sesData } = await client.auth.getSession();
+        authUser = sesData?.session?.user || null;
+      } catch(e) {}
+      if (!authUser) {
+        const { data: { user: u } } = await client.auth.getUser();
+        authUser = u;
+      }
+      if (!authUser) return;
+
+      // Strategy 1: Check users table for company_id
+      const { data: profiles } = await client.from('users')
+        .select('company_id').eq('auth_id', authUser.id).limit(1);
+      if (profiles?.[0]?.company_id) {
+        patchLocalUser(profiles[0].company_id);
+        console.log('[training] ✅ Resolved tenant from users table:', profiles[0].company_id);
+        return;
+      }
+
+      // Strategy 2: Check employees table for tenant_id (user might be an employee)
+      const { data: emps } = await client.from('employees')
+        .select('tenant_id').eq('email', authUser.email).limit(1);
+      if (emps?.[0]?.tenant_id) {
+        patchLocalUser(emps[0].tenant_id);
+        console.log('[training] ✅ Resolved tenant from employees table:', emps[0].tenant_id);
+        return;
+      }
+
+      // Strategy 3: Check companies table (user might be owner)
+      const { data: companies } = await client.from('companies')
+        .select('id').eq('owner_id', authUser.id).limit(1);
+      if (companies?.[0]?.id) {
+        patchLocalUser(companies[0].id);
+        console.log('[training] ✅ Resolved tenant from companies table:', companies[0].id);
+        return;
+      }
+
+      console.warn('[training] ⚠ Could not resolve tenant_id — enrollment list will be empty');
+    } catch(e) {
+      console.warn('[training] tenant resolution error:', e.message);
+    }
+  }
+
+  function patchLocalUser(tenantId) {
+    try {
+      const u = JSON.parse(localStorage.getItem('simpatico_user') || '{}');
+      u.company_id = tenantId;
+      u.tenant_id = tenantId;
+      localStorage.setItem('simpatico_user', JSON.stringify(u));
+      // Also set in sessionStorage for fallback reads
+      sessionStorage.setItem('company_id', tenantId);
+      sessionStorage.setItem('tenant_id', tenantId);
+    } catch(e) {}
+  }
+
   async function boot() {
+    // Step 1: Ensure tenant ID is resolved before ANY data load
+    await ensureTenantId();
+
+    // Step 2: Load all data in parallel
     await Promise.all([
       loadUser(),
       loadCourses(),
@@ -58,17 +131,33 @@ async function loadUser() {
 }
 
 async function loadCourses() {
-  const client = sb(); if (!client) return;
   const cid = typeof getCompanyId === 'function' ? getCompanyId() : null;
-  let query = client.from('training_courses')
-    .select('*')
-    .order('created_at', { ascending: false });
-  // Removed tenant_id filter because training_courses is a global catalog in the schema.
-  let { data, error } = await query;
 
-
-  if (error) { console.error(error); return; }
-  allCourses = data || [];
+  // Worker-first: /training/courses endpoint with KV caching and tenant isolation
+  try {
+    const headers = await getFreshAuthHeaders();
+    const res = await fetch(`${TR_CONFIG.workerUrl}/training/courses`, {
+      method: 'GET',
+      headers: { ...headers, 'Content-Type': 'application/json' },
+      cache: 'no-store',
+    });
+    if (!res.ok) throw new Error(`Worker responded ${res.status}`);
+    const json = await res.json();
+    // Worker wraps in { success, data: { courses: [...] } } or similar
+    const payload = (json && json.success && json.data) ? json.data : json;
+    allCourses = payload.courses || payload.data || (Array.isArray(payload) ? payload : []);
+    console.log('[training] Loaded', allCourses.length, 'courses from worker');
+  } catch (workerErr) {
+    console.warn('[training] Worker loadCourses failed, falling back to Supabase:', workerErr.message);
+    // Supabase fallback
+    const client = sb(); if (!client) return;
+    let query = client.from('training_courses')
+      .select('*')
+      .order('created_at', { ascending: false });
+    let { data, error } = await query;
+    if (error) { console.error(error); return; }
+    allCourses = data || [];
+  }
 
   setText('stat-courses', allCourses.length);
   setText('stat-courses-sub', `${allCourses.filter(c => c.is_required).length} compliance required`);
@@ -111,26 +200,58 @@ function renderCourses(list) {
 }
 
 async function loadEnrollments() {
-  const client = sb(); if (!client) return;
   const cid = typeof getCompanyId === 'function' ? getCompanyId() : null;
   if (!cid) { allEnrollments = []; renderEnrollmentsTable([]); return; }
   const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
 
-  let { data, error } = await client
-    .from('training_enrollments')
-    .select(`
-      *,
-      employees!inner(first_name, last_name, company_id),
-      training_courses(*)
-    `)
-    .eq('employees.company_id', cid)
-    .order('enrolled_at', { ascending: false });
+  // Worker-first: fetch enrollments with tenant isolation
+  try {
+    const headers = await getFreshAuthHeaders();
+    const res = await fetch(`${TR_CONFIG.workerUrl}/training/enrollments`, {
+      method: 'GET',
+      headers: { ...headers, 'Content-Type': 'application/json' },
+      cache: 'no-store',
+    });
+    if (!res.ok) throw new Error(`Worker responded ${res.status}`);
+    const json = await res.json();
+    const payload = (json && json.success && json.data) ? json.data : json;
+    allEnrollments = payload.enrollments || payload.data || (Array.isArray(payload) ? payload : []);
+    console.log('[training] Loaded', allEnrollments.length, 'enrollments from worker');
+  } catch (workerErr) {
+    console.warn('[training] Worker loadEnrollments failed, falling back to Supabase:', workerErr.message);
+    // Supabase fallback — use tenant_id (not company_id) for join filter
+    const client = sb(); if (!client) { allEnrollments = []; renderEnrollmentsTable([]); return; }
+    let { data, error } = await client
+      .from('training_enrollments')
+      .select(`
+        *,
+        employees!inner(first_name, last_name, tenant_id),
+        training_courses(*)
+      `)
+      .eq('employees.tenant_id', cid)
+      .order('enrolled_at', { ascending: false });
 
-  if (error) { console.error(error); return; }
-  allEnrollments = data || [];
+    if (error) {
+      console.error('[training] Supabase enrollment query error:', error.message);
+      // Try simpler query without join filter as last resort
+      const fallback = await client
+        .from('training_enrollments')
+        .select('*, training_courses(*)')
+        .eq('tenant_id', cid)
+        .order('enrolled_at', { ascending: false });
+      if (fallback.error) { console.error(fallback.error); allEnrollments = []; }
+      else { allEnrollments = fallback.data || []; }
+    } else {
+      allEnrollments = data || [];
+    }
+  }
 
   const completions = allEnrollments.filter(e => e.status === 'completed' && new Date(e.completed_at) >= new Date(thirtyDaysAgo)).length;
-  const learners = new Set(allEnrollments.map(e => e.employees ? `${e.employees.first_name}_${e.employees.last_name}` : null).filter(Boolean)).size;
+  const learners = new Set(allEnrollments.map(e => {
+    if (e.employees) return `${e.employees.first_name}_${e.employees.last_name}`;
+    if (e.employee_name) return e.employee_name;
+    return null;
+  }).filter(Boolean)).size;
   setText('stat-completions', completions);
   setText('stat-learners', learners);
 
@@ -139,10 +260,16 @@ async function loadEnrollments() {
 
 function renderEnrollmentsTable(list) {
   const tbody = document.getElementById('enrollments-tbody'); if (!tbody) return;
+  if (list.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--hr-text-muted);padding:40px">No enrollments yet. Enroll employees in courses above.</td></tr>';
+    return;
+  }
   tbody.innerHTML = list.slice(0, 50).map(e => {
+    // Handle both nested (Supabase join) and flat (Worker) response shapes
     const emp = e.employees;
     const course = e.training_courses;
-    const name = emp ? `${emp.first_name} ${emp.last_name}` : '—';
+    const name = emp ? `${emp.first_name} ${emp.last_name}` : (e.employee_name || '—');
+    const courseTitle = course?.title || e.course_title || '—';
     const pct = e.progress || (e.status === 'completed' ? 100 : 0);
     const badge = e.status === 'completed'
       ? '<span class="hr-badge hr-badge-active">Completed</span>'
@@ -151,7 +278,7 @@ function renderEnrollmentsTable(list) {
         : '<span class="hr-badge hr-badge-pending">Enrolled</span>';
     return `<tr>
       <td><span class="primary-text">${name}</span></td>
-      <td>${course?.title || '—'}</td>
+      <td>${courseTitle}</td>
       <td>${e.enrolled_at ? new Date(e.enrolled_at).toLocaleDateString() : '—'}</td>
       <td>
         <div style="display:flex;align-items:center;gap:10px">
@@ -175,10 +302,10 @@ async function loadComplianceReport() {
     .from('training_enrollments')
     .select(`
       *,
-      employees!inner(first_name, last_name, company_id),
+      employees!inner(first_name, last_name, tenant_id),
       training_courses(*)
     `)
-    .eq('employees.company_id', cid)
+    .eq('employees.tenant_id', cid)
     .eq('training_courses.is_required', true)
     .or(`due_date.lte.${soon},status.eq.overdue`)
     .order('due_date');
@@ -260,27 +387,25 @@ window.saveCourse = async function () {
   };
 
   try {
-    const client = sb();
-    if (!client) throw new Error('Database not connected');
-    const { error } = await client.from('training_courses').insert([payload]);
-    
-    if (error) {
-      console.warn('[training] Direct insert failed, falling back to worker:', error.message);
-      
-      try {
-          const { data: sessionData } = await client.auth.getSession();
-          if (sessionData?.session?.access_token) {
-              window._simpatico_liveToken = sessionData.session.access_token;
-          }
-      } catch (e) { console.warn('[training] Session refresh failed:', e.message); }
-      
-      const headers = typeof window.authHeaders === 'function' ? window.authHeaders() : {};
+    // Worker-first: enforces tenant isolation, audit trails, and schema compliance
+    try {
+      const headers = await getFreshAuthHeaders();
       const res = await fetch(`${TR_CONFIG.workerUrl}/training/courses`, {
-          method: 'POST',
-          headers: { ...headers, 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
+        method: 'POST',
+        headers: { ...headers, 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
       });
-      if (!res.ok) throw new Error('Failed to create training course via worker');
+      if (!res.ok) {
+        const errBody = await res.json().catch(() => ({}));
+        throw new Error(errBody.error?.message || errBody.message || 'Worker creation failed');
+      }
+      console.log('[training] Course created via worker');
+    } catch (workerErr) {
+      console.warn('[training] Worker insert failed, falling back to Supabase:', workerErr.message);
+      const client = sb();
+      if (!client) throw new Error('Database not connected');
+      const { error } = await client.from('training_courses').insert([payload]);
+      if (error) throw new Error(error.message);
     }
 
     showToast('Course created!', 'success');
@@ -288,6 +413,7 @@ window.saveCourse = async function () {
     await loadCourses();
   } catch (err) { showToast(err.message, 'error'); }
 };
+
 
 // â”€â”€ AI Course Generation via Cloudflare AI â”€â”€
 window.generateCourseWithAI = async function () {
@@ -382,50 +508,78 @@ window.enrollEmployees = async function () {
   if (!courseId) { showToast('Select a course', 'error'); return; }
   if (empIds.length === 0) { showToast('Select at least one employee', 'error'); return; }
 
+  // Worker-first: The backend expects { employee_id, course_id } per enrollment (singular).
+  // Loop through selected employees and create one enrollment each.
+  let successCount = 0;
+  let lastError = null;
+
   try {
     const headers = await getFreshAuthHeaders();
-    const res = await fetch(`${TR_CONFIG.workerUrl}/training/enroll`, {
-      method: 'POST',
-      headers: { ...headers, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ course_id: courseId, employee_ids: empIds, due_date: due }),
-    });
-    if (!res.ok) {
-        const js = await res.json().catch(()=>({}));
-        throw new Error(js.error || 'Worker enrollment failed');
+    for (const empId of empIds) {
+      try {
+        const res = await fetch(`${TR_CONFIG.workerUrl}/training/enroll`, {
+          method: 'POST',
+          headers: { ...headers, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ course_id: courseId, employee_id: empId, due_date: due }),
+        });
+        if (!res.ok) {
+          const js = await res.json().catch(() => ({}));
+          throw new Error(js.error?.message || js.message || 'Worker enrollment failed');
+        }
+        successCount++;
+      } catch (singleErr) {
+        console.warn(`[training] Worker enroll failed for employee ${empId}:`, singleErr.message);
+        lastError = singleErr;
+      }
     }
-    showToast(`${empIds.length} employee(s) enrolled`, 'success');
+
+    if (successCount === empIds.length) {
+      showToast(`${successCount} employee(s) enrolled`, 'success');
+    } else if (successCount > 0) {
+      showToast(`${successCount}/${empIds.length} enrolled (some failed)`, 'info');
+    } else {
+      throw lastError || new Error('All enrollments failed');
+    }
     closeModal('enroll-modal');
     await loadEnrollments();
-  } catch (err) { 
-     console.warn('[training] Worker enrollment failed, utilizing fallback bypass:', err.message);
-     try {
-       let cid = sessionStorage.getItem('company_id') || sessionStorage.getItem('tenant_id') || (typeof getCompanyId === 'function' ? getCompanyId() : null);
-       if (!cid) {
-          const { data: { user } } = await sb().auth.getUser();
+  } catch (err) {
+    console.warn('[training] Worker enrollment failed, falling back to Supabase:', err.message);
+    try {
+      let cid = sessionStorage.getItem('company_id') || sessionStorage.getItem('tenant_id') || (typeof getCompanyId === 'function' ? getCompanyId() : null);
+      if (!cid) {
+        const client = sb();
+        if (client) {
+          const { data: { user } } = await client.auth.getUser();
           if (user) {
-             const { data: profiles } = await sb().from('users').select('company_id').eq('auth_id', user.id).limit(1);
-             if (profiles?.[0]?.company_id) cid = profiles[0].company_id;
+            const { data: profiles } = await client.from('users').select('company_id').eq('auth_id', user.id).limit(1);
+            if (profiles?.[0]?.company_id) {
+              cid = profiles[0].company_id;
+              sessionStorage.setItem('company_id', cid);
+              sessionStorage.setItem('tenant_id', cid);
+            }
           }
-       }
-       if (!cid) throw new Error('Tenant mapping missing. Please log in again.');
-       
-       const records = empIds.map(eid => ({
-           course_id: courseId,
-           employee_id: eid,
-           tenant_id: cid,
-           due_date: due || null,
-           status: 'enrolled'
-       }));
-       
-       const { error } = await sb().from('training_enrollments').insert(records);
-       if (error) throw new Error(error.message);
-       
-       showToast(`${empIds.length} employee(s) enrolled via fallback bypass`, 'success');
-       closeModal('enroll-modal');
-       await loadEnrollments();
-     } catch (fallbackErr) {
-       showToast(fallbackErr.message, 'error');
-     }
+        }
+      }
+      if (!cid) throw new Error('Tenant mapping missing. Please log in again.');
+
+      const records = empIds.map(eid => ({
+        course_id: courseId,
+        employee_id: eid,
+        tenant_id: cid,
+        due_date: due || null,
+        status: 'enrolled',
+        enrolled_at: new Date().toISOString(),
+      }));
+
+      const { error } = await sb().from('training_enrollments').insert(records);
+      if (error) throw new Error(error.message);
+
+      showToast(`${empIds.length} employee(s) enrolled`, 'success');
+      closeModal('enroll-modal');
+      await loadEnrollments();
+    } catch (fallbackErr) {
+      showToast(fallbackErr.message, 'error');
+    }
   }
 };
 

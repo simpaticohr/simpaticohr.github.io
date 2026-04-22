@@ -738,6 +738,7 @@ route("GET", "/api/training_courses", handleListCourses);
 route("POST", "/api/training-courses", handleCreateCourse);
 route("GET", "/api/training-courses", handleListCourses);
 route("POST", "/training/enroll", handleEnrollTraining);
+route("GET",  "/training/enrollments", handleListEnrollments);
 route("POST", "/training/semantic-search", handleSemanticCourseSearch);
 route("POST", "/training/remind/:id", handleSendReminder);
 
@@ -1520,34 +1521,64 @@ async function handleListCourses(request, env, ctx, _, url) {
 
 async function handleEnrollTraining(request, env, ctx) {
   requireAuth(ctx);
-  const { employee_id, course_id } = await safeJson(request);
+  const { employee_id, course_id, due_date } = await safeJson(request);
   if (!employee_id || !course_id)
     throw new ValidationError("employee_id and course_id required");
+
+  const insertPayload = {
+    employee_id,
+    course_id,
+    status: "enrolled",
+    enrolled_at: new Date().toISOString(),
+    tenant_id: ctx.tenantId,
+  };
+  // Include due_date if provided by frontend
+  if (due_date) insertPayload.due_date = due_date;
 
   const res = await sbFetch(
     env,
     "POST",
     "/rest/v1/training_enrollments",
-    {
-      employee_id,
-      course_id,
-      status: "enrolled",
-      enrolled_at: new Date().toISOString(),
-      tenant_id: ctx.tenantId,
-    },
+    insertPayload,
     false,
     ctx.tenantId,
   );
-  const [enrollment] = await res.json();
-  await audit(
-    env,
-    ctx,
-    "training.enroll",
-    "training_enrollments",
-    enrollment.id,
-    { employee_id, course_id },
-  );
+  const parsed = await res.json();
+  const enrollment = Array.isArray(parsed) ? parsed[0] : parsed;
+  if (enrollment?.id) {
+    await audit(
+      env,
+      ctx,
+      "training.enroll",
+      "training_enrollments",
+      enrollment.id,
+      { employee_id, course_id },
+    );
+  }
   return apiResponse({ enrollment }, HTTP.CREATED);
+}
+
+async function handleListEnrollments(request, env, ctx) {
+  requireAuth(ctx);
+  const res = await sbFetch(
+    env,
+    "GET",
+    `/rest/v1/training_enrollments?select=*,employees(first_name,last_name,email),training_courses(title,category,is_required,duration_hours)&order=enrolled_at.desc&limit=200`,
+    null,
+    false,
+    ctx.tenantId,
+  );
+  if (!res.ok) {
+    const errText = await res.text().catch(() => "unknown");
+    console.error(`[handleListEnrollments] Supabase GET failed (${res.status}):`, errText);
+    throw new AppError(
+      `Failed to fetch enrollments: ${errText}`,
+      res.status >= 500 ? HTTP.SERVER_ERROR : HTTP.BAD_REQUEST,
+      "DB_ERROR",
+    );
+  }
+  const enrollments = await res.json();
+  return apiResponse({ enrollments });
 }
 
 async function handleSemanticCourseSearch(request, env, ctx) {
@@ -1864,11 +1895,12 @@ async function handleGetLeaveBalance(request, env, ctx, _, url) {
 
 async function handleLeaveDecision(request, env, ctx, [id]) {
   requireRole(ctx, "manager", "hr", "admin", "superadmin");
-  const status = id.split("/")[0]; // extracted from path segment
-  // Re-extract from original path
-  const pathParts = new URL(request.url).pathname.split("/");
-  const leaveId = pathParts[2];
-  const decision = pathParts[3];
+  // Route pattern: PATCH /leave/:id/approved  or  PATCH /leave/:id/rejected
+  // `id` is the leave UUID from the route param
+  const leaveId = id;
+  // Extract the decision (last segment) from the URL path
+  const pathSegments = new URL(request.url).pathname.split("/").filter(Boolean);
+  const decision = pathSegments[pathSegments.length - 1]; // "approved" or "rejected"
 
   const res = await sbFetch(
     env,
@@ -2398,21 +2430,32 @@ Return ONLY valid JSON in format: {"match_score": 85, "reason": "Brief 1-sentenc
     }
   }
 
-  // 3. Auto-Shortlist Logic
+  // 3. Auto-Shortlist / Auto-Reject Logic
   let autoInterview = false;
+  let autoRejected = false;
   let interviewToken = "";
   // Check if job has auto_shortlist enabled (database flag on jobs table)
   // Falls back to true by default for AI-first automation pipeline
   const autoEnabled = job?.auto_shortlist !== false;
+  // Configurable rejection threshold — jobs can set auto_reject_threshold (default: 40)
+  const rejectThreshold = job?.auto_reject_threshold ?? 40;
 
-  if (autoEnabled && match_score !== null && match_score >= 70) {
-    status = "interview";
-    autoInterview = true;
-    const chars =
-      "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-    for (let i = 0; i < 32; i++) {
-      interviewToken += chars.charAt(Math.floor(Math.random() * chars.length));
+  if (autoEnabled && match_score !== null) {
+    if (match_score >= 70) {
+      // HIGH SCORE → Auto-shortlist to interview stage
+      status = "interview";
+      autoInterview = true;
+      const chars =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+      for (let i = 0; i < 32; i++) {
+        interviewToken += chars.charAt(Math.floor(Math.random() * chars.length));
+      }
+    } else if (match_score < rejectThreshold) {
+      // LOW SCORE → Auto-reject with notification
+      status = "rejected";
+      autoRejected = true;
     }
+    // MIDDLE SCORE (rejectThreshold..69) → stays as "applied" for manual review
   }
 
   // Preserve resume_text for the candidate profile drawer
@@ -2525,21 +2568,55 @@ Return ONLY valid JSON in format: {"match_score": 85, "reason": "Brief 1-sentenc
     </div>
   </div>
 </div>`,
-      });
-    } catch (e) {
-      console.warn("[ATS] Auto-shortlist email failed:", e.message);
-    }
-  }
-
-  await dispatchWebhook(env, ctx.tenantId, "application.received", {
-    application_id: app.id,
-    job_id: body.job_id,
-    auto_shortlisted: autoInterview,
-  });
-  return apiResponse(
-    { application: app, auto_scheduled: autoInterview, match_score },
-    HTTP.CREATED,
-  );
+      });\r
+    } catch (e) {\r
+      console.warn("[ATS] Auto-shortlist email failed:", e.message);\r
+    }\r
+  }\r
+\r
+  // 5. Auto-Reject Notification Email\r
+  if (autoRejected && app) {\r
+    try {\r
+      await sendEmail(env, {\r
+        to: app.candidate_email,\r
+        subject: `Application Update — ${job.title}`,\r
+        html: `<div style="max-width:600px;margin:0 auto;font-family:'Inter',Arial,sans-serif;background:#f8fafc;padding:32px 0;">\r
+  <div style="background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,0.06);margin:0 16px;">\r
+    <div style="background:linear-gradient(135deg,#1e293b,#334155);padding:32px 24px;text-align:center;">\r
+      <h1 style="color:#fff;font-size:22px;margin:0;font-weight:800;">Application Update</h1>\r
+    </div>\r
+    <div style="padding:32px 24px;">\r
+      <p style="font-size:16px;color:#1f2937;margin:0 0 16px;">Hi <strong>${app.candidate_name || 'there'}</strong>,</p>\r
+      <p style="font-size:14px;color:#4b5563;line-height:1.7;margin:0 0 20px;">Thank you for your interest in the <strong>${job.title}</strong> position. After careful review, we've decided to move forward with other candidates whose qualifications more closely match our current requirements.</p>\r
+      <p style="font-size:14px;color:#4b5563;line-height:1.7;margin:0 0 20px;">We encourage you to apply for future openings that match your skills and experience. Your profile has been added to our talent pool for consideration.</p>\r
+      <p style="font-size:14px;color:#6b7280;margin:0;">Best regards,<br/><strong>SimpaticoHR Recruitment Team</strong></p>\r
+    </div>\r
+    <div style="background:#f1f5f9;padding:16px 24px;text-align:center;border-top:1px solid #e2e8f0;">\r
+      <p style="font-size:12px;color:#94a3b8;margin:0;">© ${new Date().getFullYear()} SimpaticoHR Consultancy Pvt Ltd</p>\r
+    </div>\r
+  </div>\r
+</div>`,\r
+      });\r
+    } catch (e) {\r
+      console.warn("[ATS] Auto-reject email failed:", e.message);\r
+    }\r
+    await audit(env, ctx, "application.auto_rejected", "job_applications", app.id, {\r
+      match_score,\r
+      reject_threshold: rejectThreshold,\r
+    }).catch(() => {});\r
+  }\r
+\r
+  await dispatchWebhook(env, ctx.tenantId, "application.received", {\r
+    application_id: app.id,\r
+    job_id: body.job_id,\r
+    auto_shortlisted: autoInterview,\r
+    auto_rejected: autoRejected,\r
+    match_score,\r
+  });\r
+  return apiResponse(\r
+    { application: app, auto_scheduled: autoInterview, auto_rejected: autoRejected, match_score },\r
+    HTTP.CREATED,\r
+  );\r
 }
 
 async function handleListApplications(request, env, ctx, _, url) {
@@ -3016,7 +3093,11 @@ async function handleSaveAssessment(request, env, ctx) {
   );
   if (!res.ok) {
     const errText = await res.text();
-    throw new ExternalServiceError("Supabase/Assessments", errText, res.status);
+    throw new AppError(
+      `Assessment save failed (Supabase): ${errText}`,
+      res.status >= 500 ? HTTP.SERVER_ERROR : HTTP.BAD_REQUEST,
+      "DB_ERROR",
+    );
   }
 
   const saved = await res.json();
@@ -3495,18 +3576,21 @@ async function sbFetch(
     throw new ServiceUnavailableError("Database");
 
   // ── TENANT ISOLATION: Only inject tenant filter for tables that have tenant_id ──
-  // Tables without company_id: job_applications, jobs, interviews, employees (core schema)
+  // Tables without tenant_id: job_applications, jobs, interviews, employees (core schema)
   // We use service_role key which bypasses RLS, so tenant isolation is opt-in per table
   let finalPath = path;
   const TENANT_AWARE_TABLES = [
     "leave_requests",
     "payroll_runs",
     "payslips",
+    "employee_salaries",
+    "payroll_deductions",
     "training_courses",
     "training_enrollments",
     "onboarding_records",
     "onboarding_tasks",
     "performance_reviews",
+    "performance_goals",
     "goals",
     "notifications",
     "audit_logs",
@@ -3517,7 +3601,8 @@ async function sbFetch(
     const tableName = (path.match(/\/rest\/v1\/([a-z_]+)/) || [])[1];
     if (tableName && TENANT_AWARE_TABLES.includes(tableName)) {
       const separator = finalPath.includes("?") ? "&" : "?";
-      finalPath += `${separator}company_id=eq.${tenantId}`;
+      // Most tables use `tenant_id` as their multi-tenant column
+      finalPath += `${separator}tenant_id=eq.${tenantId}`;
     }
   }
 
