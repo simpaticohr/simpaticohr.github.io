@@ -1,0 +1,1 @@
+This folder contains the built output assets for the worker "simpatico-hr-ats" generated at 2026-04-23T12:02:54.369Z.

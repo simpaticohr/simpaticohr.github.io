@@ -550,11 +550,12 @@ function renderPayrollRuns(list) {
   tbody.innerHTML = list.map(r => {
     const badgeClass = { processing:'hr-badge-info', completed:'hr-badge-active', failed:'hr-badge-danger' }[r.status] || 'hr-badge-pending';
     const runBy = r.run_by ? `${r.run_by.first_name} ${r.run_by.last_name}` : '—';
+    const runCurrency = r.currency || window._lastPayslipsCurrency || 'USD';
     return `<tr>
       <td><span class="primary-text">${r.period}</span></td>
       <td>${formatEnum(r.type)}</td>
-      <td class="hr-font-mono">${formatCurrency(r.total_gross, r.currency)}</td>
-      <td class="hr-font-mono" style="color:var(--hr-success);font-weight:600">${formatCurrency(r.total_net, r.currency)}</td>
+      <td class="hr-font-mono">${formatCurrency(r.total_gross, runCurrency)}</td>
+      <td class="hr-font-mono" style="color:var(--hr-success);font-weight:600">${formatCurrency(r.total_net, runCurrency)}</td>
       <td>${r.employee_count || '—'}</td>
       <td><span class="hr-badge ${badgeClass}">${r.status}</span></td>
       <td>${runBy}</td>
