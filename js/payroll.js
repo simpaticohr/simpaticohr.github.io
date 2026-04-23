@@ -233,6 +233,36 @@ const TAX_PROFILES = {
       unemployment: 0.013,
       care: 0.01525
     }
+  },
+  NZ: {
+    name: 'New Zealand',
+    slabs: [
+      { min: 0, max: 14000, rate: 0.105 },
+      { min: 14000, max: 48000, rate: 0.175 },
+      { min: 48000, max: 70000, rate: 0.30 },
+      { min: 70000, max: 180000, rate: 0.33 },
+      { min: 180000, max: Infinity, rate: 0.39 }
+    ],
+    acc: 0.0139 // ACC levy
+  },
+  SG: {
+    name: 'Singapore',
+    slabs: [
+      { min: 0, max: 20000, rate: 0 },
+      { min: 20000, max: 30000, rate: 0.02 },
+      { min: 30000, max: 40000, rate: 0.035 },
+      { min: 40000, max: 80000, rate: 0.07 },
+      { min: 80000, max: 120000, rate: 0.115 },
+      { min: 120000, max: 160000, rate: 0.15 },
+      { min: 160000, max: 200000, rate: 0.18 },
+      { min: 200000, max: 240000, rate: 0.19 },
+      { min: 240000, max: 280000, rate: 0.195 },
+      { min: 280000, max: 320000, rate: 0.20 },
+      { min: 320000, max: 500000, rate: 0.22 },
+      { min: 500000, max: 1000000, rate: 0.23 },
+      { min: 1000000, max: Infinity, rate: 0.24 }
+    ],
+    cpf: { rate: 0.20, maxWage: 6800 } // employee portion of CPF
   }
 };
 
@@ -298,6 +328,12 @@ function calculateTax(monthlyIncome, countryCode = 'IN', taxRegime = 'old') {
   } else if (countryCode === 'DE') {
     // German Social Security contributions
     socialTax += monthlyIncome * (profile.social.health + profile.social.pension + profile.social.unemployment + profile.social.care);
+  } else if (countryCode === 'NZ') {
+    // ACC Levy
+    socialTax += monthlyIncome * profile.acc;
+  } else if (countryCode === 'SG') {
+    // CPF
+    socialTax += Math.min(monthlyIncome, profile.cpf.maxWage) * profile.cpf.rate;
   }
 
   return {
@@ -311,7 +347,7 @@ function calculateTax(monthlyIncome, countryCode = 'IN', taxRegime = 'old') {
 
 /** Map currency to likely country code for tax calculation */
 function currencyToCountry(currency) {
-  return { INR: 'IN', USD: 'US', GBP: 'UK', AED: 'AE', EUR: 'DE', CAD: 'CA', AUD: 'AU' }[currency] || 'IN';
+  return { INR: 'IN', USD: 'US', GBP: 'UK', AED: 'AE', EUR: 'DE', CAD: 'CA', AUD: 'AU', NZD: 'NZ', SGD: 'SG' }[currency] || 'IN';
 }
 
 // ── Payslips ── (Worker-first: auth-based tenant isolation)
@@ -699,7 +735,9 @@ window.calculatePayroll = async function() {
       AE: 'Gratuity Provision',
       CA: 'Federal Tax + CPP + EI',
       AU: 'Income Tax + Medicare Levy',
-      DE: 'Lohnsteuer + Social Security'
+      DE: 'Lohnsteuer + Social Security',
+      NZ: 'Income Tax + ACC Levy',
+      SG: 'Income Tax + CPF'
     };
 
     document.getElementById('run-preview').innerHTML = `
