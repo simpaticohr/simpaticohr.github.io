@@ -385,9 +385,11 @@ function renderPayslips(list) {
     return;
   }
   tbody.innerHTML = list.map(p => {
-    const emp  = p.employees;
+    const emp = p.employees;
     const name = emp ? `${emp.first_name} ${emp.last_name}` : '—';
     const badgeClass = { generated:'hr-badge-info', sent:'hr-badge-active', paid:'hr-badge-active' }[p.status] || 'hr-badge-inactive';
+    const empSalary = typeof allSalaries !== 'undefined' ? allSalaries.find(s => s.employee_id === (emp?.id || p.employee_id)) : null;
+    const currency = p.currency || empSalary?.currency || window._lastPayslipsCurrency || 'USD';
     return `<tr>
       <td>
         <div style="display:flex;align-items:center;gap:10px">
@@ -396,9 +398,9 @@ function renderPayslips(list) {
         </div>
       </td>
       <td>${p.period || '—'}</td>
-      <td class="hr-font-mono">${formatCurrency(p.gross_pay, p.currency)}</td>
-      <td class="hr-font-mono" style="color:var(--hr-danger)">-${formatCurrency(p.deductions_total, p.currency)}</td>
-      <td class="hr-font-mono" style="color:var(--hr-success);font-weight:600">${formatCurrency(p.net_pay, p.currency)}</td>
+      <td class="hr-font-mono">${formatCurrency(p.gross_pay, currency)}</td>
+      <td class="hr-font-mono" style="color:var(--hr-danger)">-${formatCurrency(p.deductions_total, currency)}</td>
+      <td class="hr-font-mono" style="color:var(--hr-success);font-weight:600">${formatCurrency(p.net_pay, currency)}</td>
       <td><span class="hr-badge ${badgeClass}">${p.status}</span></td>
       <td>
         <div style="display:flex;gap:6px">
