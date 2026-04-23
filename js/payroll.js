@@ -909,7 +909,10 @@ window.sendPayslip = async function(payslipId) {
     const res = await fetch(`${PAY_CONFIG.workerUrl}/payroll/payslips/${payslipId}/send`, {
       method: 'POST', headers: authHeaders(),
     });
-    if (!res.ok) throw new Error('Send failed');
+    if (!res.ok) {
+      const errBody = await res.json().catch(() => ({}));
+      throw new Error(errBody.error?.message || errBody.message || 'Send failed');
+    }
     showToast('Payslip sent to employee', 'success');
     await loadPayslips();
   } catch (err) { showToast(err.message, 'error'); }
@@ -927,7 +930,10 @@ window.sendAllPayslips = async function() {
       headers: { ...authHeaders(), 'Content-Type': 'application/json' },
       body: JSON.stringify({ period }),
     });
-    if (!res.ok) throw new Error('Bulk send failed');
+    if (!res.ok) {
+      const errBody = await res.json().catch(() => ({}));
+      throw new Error(errBody.error?.message || errBody.message || 'Bulk send failed');
+    }
     showToast(`${unsent.length} payslips sent`, 'success');
     await loadPayslips();
   } catch (err) { showToast(err.message, 'error'); }
