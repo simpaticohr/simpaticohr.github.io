@@ -99,8 +99,10 @@ let allDeductions = [];
     // Step 1: Ensure tenant ID is resolved before ANY data load
     await ensureTenantId();
 
-    // Step 2: Load all payroll data in parallel
-    await Promise.all([loadUser(), loadPayslips(), loadSalaryRegister(), loadPayrollRuns(), loadDeductions()]);
+    // Step 2: Load dependencies first
+    await Promise.all([loadUser(), loadSalaryRegister(), loadPayrollRuns(), loadDeductions()]);
+    // Step 3: Load payslips (requires allSalaries for currency logic)
+    await loadPayslips();
     setNextPayrollDate();
   }
   if (document.readyState === 'loading') {

@@ -80,6 +80,19 @@ table tbody tr:hover{background:#f8fafc}
     <div class="eb" id="run-err"></div>
     <div class="fg"><label class="fl">Period (YYYY-MM) *</label><input class="fi" id="run-period" placeholder="2025-03"></div>
     <div class="fg"><label class="fl">Pay Date *</label><input class="fi" id="run-date" type="date"></div>
+    <div class="fg"><label class="fl">Currency *</label>
+      <select class="fi" id="run-currency">
+        <option value="INR">INR (₹) - India</option>
+        <option value="USD" selected>USD ($) - USA</option>
+        <option value="GBP">GBP (£) - UK</option>
+        <option value="CAD">CAD ($) - Canada</option>
+        <option value="AUD">AUD ($) - Australia</option>
+        <option value="NZD">NZD ($) - New Zealand</option>
+        <option value="EUR">EUR (€) - Europe</option>
+        <option value="AED">AED (د.إ) - UAE</option>
+        <option value="SGD">SGD ($) - Singapore</option>
+      </select>
+    </div>
     <div class="fg"><label class="fl">Notes</label><input class="fi" id="run-notes" placeholder="Optional notes"></div>
     <div class="mf">
       <button class="btn bg2" onclick="cm('mo-run')">Cancel</button>
@@ -209,14 +222,19 @@ async function sendAll(period) {
 async function openCalc() {
   var p = prompt('Enter period to calculate (YYYY-MM):', new Date().toISOString().slice(0, 7));
   if (!p) return;
+  var c = prompt('Enter currency to calculate for (e.g. INR, USD, GBP):', 'INR');
+  if (!c) return;
+  c = c.toUpperCase();
+
+  const sym = { INR: '₹', USD: '$', GBP: '£', EUR: '€' }[c] || c + ' ';
 
   // Try worker first
   try {
-    var r = await fetch(WORKER + '/payroll/calculate', { method: 'POST', headers: hdr(), body: JSON.stringify({ period: p }) });
+    var r = await fetch(WORKER + '/payroll/calculate', { method: 'POST', headers: hdr(), body: JSON.stringify({ period: p, currency: c }) });
     var d = await r.json();
     if (r.ok && d.success) {
       var t = d.data.totals;
-      alert('Payroll calculation for ' + p + ':\nEmployees: ' + (t.count || 0) + '\nGross: ₹' + (t.gross || 0).toLocaleString('en-IN') + '\nNet: ₹' + (t.net || 0).toLocaleString('en-IN'));
+      alert('Payroll calculation for ' + p + ' (' + c + '):\nEmployees: ' + (t.count || 0) + '\nGross: ' + sym + (t.gross || 0).toLocaleString('en-US') + '\nNet: ' + sym + (t.net || 0).toLocaleString('en-US'));
       return;
     }
     console.warn('[payroll] Worker calculate failed (' + r.status + '), using fallback');
@@ -232,8 +250,9 @@ async function openCalc() {
 
     var { data: salaries, error: salErr } = await client
       .from('employee_salaries')
-      .select('employee_id, base_salary')
-      .eq('tenant_id', cid);
+      .select('employee_id, base_salary, currency')
+      .eq('tenant_id', cid)
+      .eq('currency', c);
     if (salErr) throw new Error(salErr.message);
 
     // ✅ Only select amount — no leave_type column reference
@@ -253,7 +272,7 @@ async function openCalc() {
       net   += (s.base_salary || 0) - (dedMap[s.employee_id] || 0);
     });
 
-    alert('Payroll calculation for ' + p + ' (direct):\nEmployees: ' + count + '\nGross: ₹' + gross.toLocaleString('en-IN') + '\nNet: ₹' + net.toLocaleString('en-IN'));
+    alert('Payroll calculation for ' + p + ' (' + c + ' - direct):\nEmployees: ' + count + '\nGross: ' + sym + gross.toLocaleString('en-US') + '\nNet: ' + sym + net.toLocaleString('en-US'));
   } catch(e) {
     toast('Calc error: ' + e.message, 'er');
   }
@@ -279,10 +298,11 @@ async function doRun() {
   // Try worker first
   var workerOk = false;
   try {
+    var runCurrency = el('run-currency') ? el('run-currency').value : 'USD';
     var r = await fetch(WORKER + '/payroll/run', {
       method: 'POST',
       headers: hdr(),
-      body: JSON.stringify({ period: period, pay_date: payDate, notes: el('run-notes').value || null })
+      body: JSON.stringify({ period: period, pay_date: payDate, currency: runCurrency, notes: el('run-notes').value || null })
     });
     var d = await r.json();
     if (r.ok && d.success) {
@@ -321,15 +341,22 @@ async function doRun() {
       (deductions || []).forEach(function(d) { dedMap[d.employee_id] = (dedMap[d.employee_id] || 0) + (d.amount || 0); });
 
       // ✅ NO initiated_by / run_by_id — those columns don't exist in payroll_runs
+      var runCurrency = el('run-currency') ? el('run-currency').value : 'USD';
+      
+      // Filter salaries by selected currency for fallback
+      var filteredSalaries = salaries.filter(function(s) { return (s.currency || 'USD') === runCurrency; });
+      if (!filteredSalaries.length) throw new Error('No salary records found for currency: ' + runCurrency);
+      
       var runPayload = {
         period:         period,
         type:           'monthly',
         pay_date:       payDate,
+        currency:       runCurrency,
         status:         'processing',
         notes:          el('run-notes').value || null,
         company_id:     cid,
         tenant_id:      cid,
-        employee_count: salaries.length
+        employee_count: filteredSalaries.length
       };
 
       var { data: runData, error: runErr } = await client
@@ -340,12 +367,12 @@ async function doRun() {
       if (runErr) throw new Error(runErr.message);
 
       var totalGross = 0, totalNet = 0;
-      var payslips = salaries.map(function(s) {
+      var payslips = filteredSalaries.map(function(s) {
         var gross = s.base_salary || 0;
         var ded   = dedMap[s.employee_id] || 0;
         var net   = gross - ded;
         totalGross += gross; totalNet += net;
-        return { employee_id: s.employee_id, period: period, gross_pay: gross, deductions_total: ded, net_pay: net, status: 'generated', payroll_run_id: runData.id, company_id: cid, tenant_id: cid, pay_date: payDate };
+        return { employee_id: s.employee_id, period: period, currency: runCurrency, gross_pay: gross, deductions_total: ded, net_pay: net, status: 'generated', payroll_run_id: runData.id, company_id: cid, tenant_id: cid, pay_date: payDate };
       });
 
       var { error: slipErr } = await client.from('payslips').insert(payslips);
