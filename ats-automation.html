@@ -597,19 +597,31 @@ var ICON_MAP={
   schedule_daily:{ico:'⏰',bg:'#f1f5f9'},schedule_weekly:{ico:'📅',bg:'#f1f5f9'}
 };
 var INTEGRATIONS=[
-  {name:'Greenhouse',icon:'🌿',desc:'Sync candidates & update pipeline',connected:true,color:'#059669'},
-  {name:'Lever',icon:'🎯',desc:'Bi-directional ATS sync',connected:false,color:'#4f46e5'},
-  {name:'Workday',icon:'☁️',desc:'HRIS & recruiting integration',connected:true,color:'#0ea5e9'},
-  {name:'LinkedIn',icon:'🔗',desc:'Job posting & sourcing',connected:true,color:'#0077b5'},
-  {name:'Indeed',icon:'🔍',desc:'Job board & applications',connected:false,color:'#003a9b'},
+  {name:'LinkedIn',icon:'🔗',desc:'Job posting, sourcing & profile sync',connected:true,color:'#0077b5'},
+  {name:'Indeed',icon:'🔍',desc:'Job board posting & applications',connected:false,color:'#003a9b'},
   {name:'Slack',icon:'💬',desc:'Team notifications & alerts',connected:true,color:'#4a154b'},
-  {name:'Calendly',icon:'📅',desc:'Interview scheduling',connected:true,color:'#006bff'},
+  {name:'Zoom',icon:'📹',desc:'Auto-generate video interview links',connected:false,color:'#2D8CFF'},
+  {name:'Calendly',icon:'📅',desc:'Interview self-scheduling',connected:true,color:'#006bff'},
+  {name:'Checkr',icon:'✅',desc:'Automated background checks',connected:false,color:'#1FCE73'},
   {name:'HireVue',icon:'🎥',desc:'Video interviews & AI scoring',connected:false,color:'#7c3aed'},
   {name:'Docusign',icon:'✍️',desc:'Offer letter e-signatures',connected:true,color:'#ffb600'},
-  {name:'Zapier',icon:'⚡',desc:'1000+ app integrations',connected:false,color:'#ff4a00'},
-  {name:'Workable',icon:'📋',desc:'Job ads & pipeline sync',connected:false,color:'#2a9d8f'},
+  {name:'Workday',icon:'☁️',desc:'HRIS employee sync (Post-hire)',connected:true,color:'#0ea5e9'},
+  {name:'BambooHR',icon:'🐼',desc:'HRIS onboarding sync',connected:false,color:'#7AB800'},
   {name:'SAP SuccessFactors',icon:'🏢',desc:'Enterprise HRIS sync',connected:false,color:'#0070f3'},
+  {name:'Zapier',icon:'⚡',desc:'1000+ app automations',connected:false,color:'#ff4a00'},
 ];
+// Restore integration state from local storage
+var savedInts = localStorage.getItem('simpatico_ats_integrations');
+if (savedInts) {
+  try {
+    var parsedInts = JSON.parse(savedInts);
+    INTEGRATIONS.forEach(function(intg) {
+      var match = parsedInts.find(function(p) { return p.name === intg.name; });
+      if (match) intg.connected = match.connected;
+    });
+  } catch(e) { console.error('Error parsing integrations', e); }
+}
+
 var SLA_CONFIG=[
   {stage:'applied',label:'Applied → Screening',target:2,warn:1,unit:'days'},
   {stage:'screening',label:'Screening → Interview',target:5,warn:3,unit:'days'},
@@ -1390,11 +1402,19 @@ function openIntegrations(){
   el('intModal').classList.add('open');
 }
 function toggleInt(btn,name,connected){
-  toast((connected?'Disconnected from ':'Connected to ')+name,'ok');
-  btn.textContent=connected?'Connect':'Disconnect';
-  btn.className='btn btn-sm '+(connected?'btn-primary':'btn-ghost');
-  btn.closest('.int-card').classList.toggle('connected',!connected);
-  btn.setAttribute('onclick','toggleInt(this,\''+name+'\','+(connected?'false':'true')+')');
+  var isConnecting = !connected;
+  btn.disabled = true;
+  btn.textContent = isConnecting ? 'Connecting...' : 'Disconnecting...';
+  
+  setTimeout(function() {
+    btn.disabled = false;
+    var intObj = INTEGRATIONS.find(function(i){ return i.name === name; });
+    if(intObj) intObj.connected = isConnecting;
+    localStorage.setItem('simpatico_ats_integrations', JSON.stringify(INTEGRATIONS));
+    
+    toast((isConnecting ? 'Connected to ' : 'Disconnected from ') + name, 'ok');
+    openIntegrations(); // Refresh the grid to reflect state
+  }, 1000);
 }
 
 /* ══════════════════════════
