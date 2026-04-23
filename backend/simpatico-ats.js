@@ -2523,8 +2523,13 @@ async function handleSendPayslip(request, env, ctx, [id]) {
   const [ps] = await res.json();
   if (!ps) throw new NotFoundError("Payslip");
 
+  const email = ps.employees?.email;
+  if (!email || !email.includes('@')) {
+    throw new ValidationError(`Cannot send payslip: Employee has no valid email address.`);
+  }
+
   await sendEmail(env, {
-    to: ps.employees.email,
+    to: email,
     subject: `Your Payslip for ${ps.period}`,
     html: payslipEmailHtml(ps),
   });
@@ -3643,7 +3648,7 @@ async function handleInterviewEmail(request, env) {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        from: "Simpatico HR <hr@ats.simpaticohr.in>",
+        from: "Simpatico HR <hr@simpaticohr.in>",
         to: data.candidateEmail,
         subject: `Interview Invitation: ${data.position} at Simpatico`,
         html: `
@@ -4067,7 +4072,7 @@ async function sendEmail(env, { to, subject, html, replyTo }) {
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      from: env.EMAIL_FROM || "Simpatico HR <hr@ats.simpaticohr.in>",
+      from: env.EMAIL_FROM || "Simpatico HR <hr@simpaticohr.in>",
       to: Array.isArray(to) ? to : [to],
       subject,
       html,
