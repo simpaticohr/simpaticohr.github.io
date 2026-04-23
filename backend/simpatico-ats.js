@@ -2537,7 +2537,7 @@ async function handleSendPayslip(request, env, ctx, [id]) {
     env,
     "PATCH",
     `/rest/v1/payslips?id=eq.${id}`,
-    { sent_at: new Date().toISOString() },
+    { status: "sent" },
     false,
     ctx.tenantId,
   );
@@ -2560,7 +2560,7 @@ async function handleSendAllPayslips(request, env, ctx) {
   const res = await sbFetch(
     env,
     "GET",
-    `/rest/v1/payslips?period=eq.${period}&sent_at=is.null&select=*,employees(email,first_name)`,
+    `/rest/v1/payslips?period=eq.${period}&status=neq.sent&select=*,employees(email,first_name)`,
     null,
     false,
     ctx.tenantId,
@@ -2579,7 +2579,7 @@ async function handleSendAllPayslips(request, env, ctx) {
     env,
     "PATCH",
     `/rest/v1/payslips?period=eq.${period}`,
-    { sent_at: new Date().toISOString() },
+    { status: "sent" },
     false,
     ctx.tenantId,
   );

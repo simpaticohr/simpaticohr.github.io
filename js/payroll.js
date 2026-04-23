@@ -465,7 +465,7 @@ async function loadSalaryRegister() {
   let { data, error } = await client
     .from('employee_salaries')
     .select(`
-      id, base_salary, currency, employment_type, effective_date, allowances, tax_regime,
+      id, base_salary, currency, employment_type, effective_date,
       employees(id, first_name, last_name, job_title, departments(name))
     `)
     .eq('tenant_id', cid)
@@ -639,7 +639,7 @@ window.calculatePayroll = async function() {
     const currency = document.getElementById('run-currency')?.value || 'USD';
     const { data: salaries, error: salErr } = await client
       .from('employee_salaries')
-      .select('employee_id, base_salary, allowances, tax_regime')
+      .select('employee_id, base_salary')
       .eq('tenant_id', companyId)
       .eq('currency', currency);
 
@@ -997,10 +997,13 @@ window.editSalary = async function(id) {
   document.getElementById('edit-salary-amount').value = salary.base_salary || '';
   
   const allowances = salary.allowances || {};
-  document.getElementById('salary-hra-amount').value = allowances.hra || '';
-  document.getElementById('salary-special-amount').value = allowances.special || '';
+  const hraEl = document.getElementById('salary-hra-amount');
+  if (hraEl) hraEl.value = allowances.hra || '';
+  const specialEl = document.getElementById('salary-special-amount');
+  if (specialEl) specialEl.value = allowances.special || '';
   
-  document.getElementById('salary-tax-regime').value = salary.tax_regime || 'old';
+  const taxEl = document.getElementById('salary-tax-regime');
+  if (taxEl) taxEl.value = salary.tax_regime || 'old';
   document.getElementById('salary-currency').value = salary.currency || 'INR';
   document.getElementById('salary-emp-type').value = salary.employment_type || 'full_time';
   if (salary.effective_date) document.getElementById('salary-effective-date').value = salary.effective_date;
@@ -1027,8 +1030,6 @@ window.saveSalary = async function() {
   const payload = {
     employee_id: empId,
     base_salary: amount,
-    allowances: { hra: hraAmount, special: specialAmount },
-    tax_regime: taxRegime,
     currency: currency,
     employment_type: empType,
     effective_date: effDate || new Date().toISOString().slice(0,10),
