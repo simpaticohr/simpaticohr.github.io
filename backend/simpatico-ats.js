@@ -2231,11 +2231,11 @@ async function handleCalculatePayroll(request, env, ctx) {
 async function handleGeneratePayslipPdf(request, env, ctx, [payslipId]) {
   requireAuth(ctx);
   
-  // Fetch payslip data with employee details and company details
+  // Fetch payslip data with employee details
   const res = await sbFetch(
     env,
     "GET",
-    `/rest/v1/payslips?id=eq.${payslipId}&select=*,employees(first_name,last_name,job_title,departments(name)),companies(name,address,registration_number)&limit=1`,
+    `/rest/v1/payslips?id=eq.${payslipId}&select=*,employees(first_name,last_name,job_title,departments(name))&limit=1`,
     null,
     false,
     ctx.tenantId,
@@ -2243,6 +2243,25 @@ async function handleGeneratePayslipPdf(request, env, ctx, [payslipId]) {
   const data = await res.json();
   const payslip = data?.[0];
   if (!payslip) throw new NotFoundError("Payslip");
+
+  // Fetch company details
+  let companyName = "Simpatico HR Enterprise";
+  try {
+    const compRes = await sbFetch(
+      env,
+      "GET",
+      `/rest/v1/companies?id=eq.${ctx.tenantId}&select=name&limit=1`,
+      null,
+      false,
+      ctx.tenantId,
+    );
+    if (compRes.ok) {
+      const compData = await compRes.json();
+      if (compData?.[0]?.name) companyName = compData[0].name;
+    }
+  } catch (e) {
+    console.warn("Could not fetch company name for payslip");
+  }
   
   // Generate PDF
   const pdfDoc = await PDFDocument.create();
@@ -2254,8 +2273,6 @@ async function handleGeneratePayslipPdf(request, env, ctx, [payslipId]) {
   const colorDark = rgb(0.1, 0.1, 0.1);
   const colorGray = rgb(0.4, 0.4, 0.4);
   const colorBrand = rgb(0.15, 0.25, 0.45);
-  
-  const companyName = payslip.companies?.name || "Simpatico HR Enterprise";
   const empName = `${payslip.employees?.first_name || ""} ${payslip.employees?.last_name || ""}`.trim();
   const period = payslip.period || "Unknown Period";
   const currency = payslip.currency || "INR";
