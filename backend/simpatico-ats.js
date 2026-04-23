@@ -4172,6 +4172,7 @@ function welcomeEmailHtml(firstName, empNum) {
 }
 
 function payslipEmailHtml(ps) {
+  const currency = ps.currency || 'USD';
   return `
 <!DOCTYPE html>
 <html>
@@ -4185,9 +4186,9 @@ function payslipEmailHtml(ps) {
         <tr><td style="padding:32px">
           <p>Hi <strong>${ps.employees?.first_name || "there"}</strong>, your payslip for <strong>${ps.period}</strong> is ready.</p>
           <table width="100%" cellpadding="8" cellspacing="0" style="border-collapse:collapse">
-            <tr style="background:#f9fafb"><td style="border-bottom:1px solid #e5e7eb;color:#6b7280">Gross Pay</td><td style="border-bottom:1px solid #e5e7eb;text-align:right;font-weight:600">$${Number(ps.gross || 0).toLocaleString()}</td></tr>
-            <tr><td style="border-bottom:1px solid #e5e7eb;color:#6b7280">Deductions</td><td style="border-bottom:1px solid #e5e7eb;text-align:right;color:#ef4444">-$${Number(ps.deductions || 0).toLocaleString()}</td></tr>
-            <tr style="background:#f0fdf4"><td style="font-weight:700;font-size:16px">Net Pay</td><td style="text-align:right;font-weight:700;font-size:18px;color:#16a34a">$${Number(ps.net || 0).toLocaleString()}</td></tr>
+            <tr style="background:#f9fafb"><td style="border-bottom:1px solid #e5e7eb;color:#6b7280">Gross Pay</td><td style="border-bottom:1px solid #e5e7eb;text-align:right;font-weight:600">${currency} ${Number(ps.gross_pay || 0).toLocaleString()}</td></tr>
+            <tr><td style="border-bottom:1px solid #e5e7eb;color:#6b7280">Deductions</td><td style="border-bottom:1px solid #e5e7eb;text-align:right;color:#ef4444">-${currency} ${Number(ps.deductions_total || 0).toLocaleString()}</td></tr>
+            <tr style="background:#f0fdf4"><td style="font-weight:700;font-size:16px">Net Pay</td><td style="text-align:right;font-weight:700;font-size:18px;color:#16a34a">${currency} ${Number(ps.net_pay || 0).toLocaleString()}</td></tr>
           </table>
           <p style="font-size:13px;color:#9ca3af;margin-top:24px">Pay Date: <strong>${ps.pay_date || "N/A"}</strong></p>
         </td></tr>
