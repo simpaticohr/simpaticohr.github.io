@@ -139,7 +139,20 @@ async function loadUser() {
 // ── Country-Aware Tax Engine ──
 const TAX_PROFILES = {
   IN: {
-    name: 'India',
+    name: 'India (Old Regime)',
+    slabs: [
+      { min: 0, max: 300000, rate: 0 },
+      { min: 300000, max: 500000, rate: 0.05 },
+      { min: 500000, max: 1000000, rate: 0.20 },
+      { min: 1000000, max: Infinity, rate: 0.30 }
+    ],
+    pf: { rate: 0.12, cap: 15000 },        // EPF: 12% of basic, capped at ₹15K
+    esi: { rate: 0.0075, ceiling: 21000 },  // ESI: 0.75% if salary ≤ ₹21K
+    professionalTax: 200,                   // Monthly PT (varies by state)
+    cess: 0.04                              // 4% Health & Education Cess on tax
+  },
+  IN_NEW: {
+    name: 'India (New Regime)',
     slabs: [
       { min: 0, max: 300000, rate: 0 },
       { min: 300000, max: 700000, rate: 0.05 },
@@ -181,6 +194,45 @@ const TAX_PROFILES = {
     name: 'UAE',
     slabs: [{ min: 0, max: Infinity, rate: 0 }],  // No income tax
     gratuity: { rate: 0.0575 }  // EOSB provision ~21 days/year
+  },
+  CA: {
+    name: 'Canada',
+    slabs: [
+      { min: 0, max: 53359, rate: 0.15 },
+      { min: 53359, max: 106717, rate: 0.205 },
+      { min: 106717, max: 165430, rate: 0.26 },
+      { min: 165430, max: 235675, rate: 0.29 },
+      { min: 235675, max: Infinity, rate: 0.33 }
+    ],
+    cpp: { rate: 0.0595, max: 3867.50 }, // Canada Pension Plan
+    ei: { rate: 0.0166, max: 1049.12 }   // Employment Insurance
+  },
+  AU: {
+    name: 'Australia',
+    slabs: [
+      { min: 0, max: 18200, rate: 0 },
+      { min: 18200, max: 45000, rate: 0.19 },
+      { min: 45000, max: 120000, rate: 0.325 },
+      { min: 120000, max: 180000, rate: 0.37 },
+      { min: 180000, max: Infinity, rate: 0.45 }
+    ],
+    medicare: 0.02, // Medicare levy
+    super: 0.11     // Superannuation guarantee (employer paid, but tracked)
+  },
+  DE: {
+    name: 'Germany (EU)',
+    slabs: [
+      { min: 0, max: 10908, rate: 0 },
+      { min: 10908, max: 62809, rate: 0.24 }, // simplified progressive band
+      { min: 62809, max: 277825, rate: 0.42 },
+      { min: 277825, max: Infinity, rate: 0.45 }
+    ],
+    social: {
+      health: 0.073,
+      pension: 0.093,
+      unemployment: 0.013,
+      care: 0.01525
+    }
   }
 };
 
@@ -190,8 +242,10 @@ const TAX_PROFILES = {
  * @param {string} countryCode - 'IN', 'US', 'UK', 'AE'
  * @returns {{ incomeTax, socialTax, totalTax, breakdown }}
  */
-function calculateTax(monthlyIncome, countryCode = 'IN') {
-  const profile = TAX_PROFILES[countryCode] || TAX_PROFILES['IN'];
+function calculateTax(monthlyIncome, countryCode = 'IN', taxRegime = 'old') {
+  let profileKey = countryCode;
+  if (countryCode === 'IN' && taxRegime === 'new') profileKey = 'IN_NEW';
+  const profile = TAX_PROFILES[profileKey] || TAX_PROFILES['IN'];
   const annual = monthlyIncome * 12;
   let remainingIncome = annual;
   let annualTax = 0;
@@ -234,6 +288,16 @@ function calculateTax(monthlyIncome, countryCode = 'IN') {
   } else if (countryCode === 'AE') {
     // End-of-service gratuity provision
     socialTax += monthlyIncome * (profile.gratuity?.rate || 0);
+  } else if (countryCode === 'CA') {
+    // CPP & EI (capped annually, approximated monthly)
+    socialTax += Math.min(monthlyIncome * profile.cpp.rate, profile.cpp.max / 12);
+    socialTax += Math.min(monthlyIncome * profile.ei.rate, profile.ei.max / 12);
+  } else if (countryCode === 'AU') {
+    // Medicare levy
+    socialTax += monthlyIncome * profile.medicare;
+  } else if (countryCode === 'DE') {
+    // German Social Security contributions
+    socialTax += monthlyIncome * (profile.social.health + profile.social.pension + profile.social.unemployment + profile.social.care);
   }
 
   return {
@@ -247,7 +311,7 @@ function calculateTax(monthlyIncome, countryCode = 'IN') {
 
 /** Map currency to likely country code for tax calculation */
 function currencyToCountry(currency) {
-  return { INR: 'IN', USD: 'US', GBP: 'UK', AED: 'AE', EUR: 'US' }[currency] || 'IN';
+  return { INR: 'IN', USD: 'US', GBP: 'UK', AED: 'AE', EUR: 'DE', CAD: 'CA', AUD: 'AU' }[currency] || 'IN';
 }
 
 // ── Payslips ── (Worker-first: auth-based tenant isolation)
@@ -255,10 +319,13 @@ async function loadPayslips() {
   const cid = typeof getCompanyId === 'function' ? getCompanyId() : null;
 
   // Worker-first: Worker uses auth token for tenant isolation
+  const _authHdrs = authHeaders();
+  const _hasPayToken = !!_authHdrs['Authorization'];
   try {
+    if (!_hasPayToken) throw new Error('No auth token — skipping Worker');
     const res = await fetch(`${PAY_CONFIG.workerUrl}/payroll/payslips/all`, {
       method: 'GET',
-      headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+      headers: { ..._authHdrs, 'Content-Type': 'application/json' },
       cache: 'no-store',
     });
     if (!res.ok) throw new Error(`Worker ${res.status}`);
@@ -267,7 +334,7 @@ async function loadPayslips() {
     allPayslips = payload.payslips || payload.data || (Array.isArray(payload) ? payload : []);
     console.log('[payroll] Loaded', allPayslips.length, 'payslips from worker');
   } catch (workerErr) {
-    console.warn('[payroll] Worker payslips failed, falling back to Supabase:', workerErr.message);
+    if (_hasPayToken) console.warn('[payroll] Worker payslips failed, falling back to Supabase:', workerErr.message);
     if (!cid) { allPayslips = []; renderPayslips([]); return; }
     const client = sb(); if (!client) { allPayslips = []; renderPayslips([]); return; }
     let { data, error } = await client
@@ -360,7 +427,7 @@ async function loadSalaryRegister() {
   let { data, error } = await client
     .from('employee_salaries')
     .select(`
-      id, base_salary, currency, employment_type, effective_date,
+      id, base_salary, currency, employment_type, effective_date, allowances, tax_regime,
       employees(id, first_name, last_name, job_title, departments(name))
     `)
     .eq('tenant_id', cid)
@@ -466,7 +533,7 @@ async function loadDeductions() {
   let { data, error } = await client
     .from('payroll_deductions')
     .select(`
-      id, type, amount, frequency, start_date, end_date, status,
+      id, employee_id, type, amount, frequency, start_date, end_date, status,
       employees(first_name, last_name)
     `)
     .eq('tenant_id', cid)
@@ -491,10 +558,15 @@ function renderDeductions(list) {
     const emp = d.employees;
     const name = emp ? `${emp.first_name} ${emp.last_name}` : '—';
     const badgeClass = d.status === 'active' ? 'hr-badge-active' : 'hr-badge-inactive';
+    
+    // Find the employee's assigned currency to correctly format deductions
+    const empSalary = typeof allSalaries !== 'undefined' ? allSalaries.find(s => s.employee_id === d.employee_id) : null;
+    const currency = empSalary?.currency || window._lastPayslipsCurrency || 'USD';
+
     return `<tr>
       <td><span class="primary-text">${name}</span></td>
       <td>${formatEnum(d.type)}</td>
-      <td class="hr-font-mono">${formatCurrency(d.amount)}</td>
+      <td class="hr-font-mono">${formatCurrency(d.amount, currency)}</td>
       <td>${formatEnum(d.frequency)}</td>
       <td>${d.start_date || '—'}</td>
       <td>${d.end_date || 'Ongoing'}</td>
@@ -529,7 +601,7 @@ window.calculatePayroll = async function() {
     const currency = document.getElementById('run-currency')?.value || 'USD';
     const { data: salaries, error: salErr } = await client
       .from('employee_salaries')
-      .select('employee_id, base_salary')
+      .select('employee_id, base_salary, allowances, tax_regime')
       .eq('tenant_id', companyId)
       .eq('currency', currency);
 
@@ -551,6 +623,17 @@ window.calculatePayroll = async function() {
 
     const unpaidLeaveMap = {};
     (unpaidLeaves || []).forEach(ul => { unpaidLeaveMap[ul.employee_id] = (unpaidLeaveMap[ul.employee_id] || 0) + (ul.days || 0); });
+
+    // Fetch approved expenses for reimbursements
+    const { data: expenses } = await client
+      .from('employee_expenses')
+      .select('employee_id, amount')
+      .eq('tenant_id', companyId)
+      .eq('status', 'approved')
+      .is('paid_in_payslip', null);
+
+    const expenseMap = {};
+    (expenses || []).forEach(ex => { expenseMap[ex.employee_id] = (expenseMap[ex.employee_id] || 0) + (ex.amount || 0); });
 
     // Link Performance Data for Bonuses
     const { data: reviews } = await client
@@ -575,6 +658,9 @@ window.calculatePayroll = async function() {
 
     (salaries || []).forEach(s => {
       let base = s.base_salary || 0;
+      let allowances = s.allowances || {};
+      let totalAllowances = (allowances.hra || 0) + (allowances.special || 0);
+      
       let score = perfMap[s.employee_id] || 0;
       let bonus = 0;
       if (score >= 90) bonus = base * 0.10;
@@ -582,15 +668,17 @@ window.calculatePayroll = async function() {
 
       // Leave proration
       let unpaidDays = unpaidLeaveMap[s.employee_id] || 0;
-      let dailyRate = base / 22;
+      let dailyRate = (base + totalAllowances) / 22;
       let prorationAdj = dailyRate * unpaidDays;
 
       // ★ Country-aware slab-based tax calculation
-      let taxableIncome = base + bonus - prorationAdj;
-      const taxResult = calculateTax(taxableIncome, countryCode);
+      let taxableIncome = base + totalAllowances + bonus - prorationAdj;
+      const taxResult = calculateTax(taxableIncome, countryCode, s.tax_regime || 'old');
+
+      let reimbursements = expenseMap[s.employee_id] || 0;
 
       totalBonus += bonus;
-      totalGross += base + bonus;
+      totalGross += base + totalAllowances + bonus + reimbursements;
       totalProration += prorationAdj;
       totalIncomeTax += taxResult.incomeTax;
       totalSocialTax += taxResult.socialTax;
@@ -606,7 +694,10 @@ window.calculatePayroll = async function() {
       IN: 'Income Tax (Slab) + EPF/ESI/PT',
       US: 'Federal Tax (Bracket) + FICA + State',
       UK: 'PAYE (Band) + NI',
-      AE: 'Gratuity Provision'
+      AE: 'Gratuity Provision',
+      CA: 'Federal Tax + CPP + EI',
+      AU: 'Income Tax + Medicare Levy',
+      DE: 'Lohnsteuer + Social Security'
     };
 
     document.getElementById('run-preview').innerHTML = `
@@ -730,127 +821,10 @@ window.executePayroll = async function() {
     showToast(`Payroll complete — ${count} payslips generated`, 'success');
     console.log('[payroll] Worker run complete:', data);
   } catch (workerErr) {
-    console.warn('[payroll] Worker payroll/run failed, falling back to Supabase:', workerErr.message);
-    
-    // Supabase fallback — direct payroll processing
-    try {
-      const client = sb();
-      if (!client) throw new Error('Database not connected');
-
-      const currency = document.getElementById('run-currency')?.value || 'USD';
-      const { data: salaries, error: salErr } = await client
-          .from('employee_salaries')
-          .select('employee_id, base_salary, currency')
-          .eq('tenant_id', companyId)
-          .eq('currency', currency);
-        
-        if (salErr) throw new Error('Could not fetch salary data: ' + salErr.message);
-        if (!salaries || salaries.length === 0) {
-          showToast('No salary records found. Add employee salaries first.', 'error');
-          return;
-        }
-
-        const { data: deductions } = await client
-          .from('payroll_deductions')
-          .select('employee_id, amount, type')
-          .eq('tenant_id', companyId)
-          .eq('status', 'active');
-
-        const dedMap = {};
-        (deductions || []).forEach(d => {
-          dedMap[d.employee_id] = (dedMap[d.employee_id] || 0) + (d.amount || 0);
-        });
-
-        const { data: unpaidLeaves } = await client
-          .from('leave_requests')
-          .select('employee_id, days')
-          .eq('tenant_id', companyId)
-          .eq('status', 'approved')
-          .eq('leave_type', 'unpaid')
-          .gte('start_date', period + '-01')
-          .lt('start_date', period.split('-')[0] + '-' + (parseInt(period.split('-')[1]) + 1).toString().padStart(2, '0') + '-01');
-
-        const unpaidLeaveMap = {};
-        (unpaidLeaves || []).forEach(ul => {
-          unpaidLeaveMap[ul.employee_id] = (unpaidLeaveMap[ul.employee_id] || 0) + (ul.days || 0);
-        });
-
-        const { data: perfReviews } = await client
-          .from('performance_reviews')
-          .select('employee_id, score, status')
-          .eq('tenant_id', companyId)
-          .eq('status', 'completed');
-        
-        const perfMap = {};
-        (perfReviews || []).sort((a,b)=>b.id-a.id).forEach(r => {
-          if(!perfMap[r.employee_id] && r.score) perfMap[r.employee_id] = r.score;
-        });
-
-        const { data: runData, error: runErr } = await client
-          .from('payroll_runs')
-          .insert([{
-            period, type: type || 'monthly', pay_date: payDate,
-            status: 'processing', notes: notes || null,
-            tenant_id: companyId, company_id: companyId, employee_count: salaries.length,
-            currency: currency
-          }])
-          .select()
-          .single();
-        
-        if (runErr) throw new Error('Could not create payroll run: ' + runErr.message);
-
-        let totalGross = 0, totalNet = 0, totalBonus = 0;
-        const countryCode = currencyToCountry(currency);
-        const payslips = salaries.map(s => {
-          let base = s.base_salary || 0;
-          let score = perfMap[s.employee_id] || 0;
-          let perfBonus = 0;
-          if (score >= 90) perfBonus = base * 0.10;
-          else if (score >= 80) perfBonus = base * 0.05;
-          
-          totalBonus += perfBonus;
-          const gross = base + perfBonus;
-          const ded = dedMap[s.employee_id] || 0;
-          const unpaidDays = unpaidLeaveMap[s.employee_id] || 0;
-          const dailyRate = base / 22;
-          const unpaidAdj = dailyRate * unpaidDays;
-          let taxableIncome = gross - unpaidAdj;
-          // ★ Country-aware slab-based tax
-          const taxResult = calculateTax(taxableIncome, countryCode);
-          const totalDeductionsAgg = ded + unpaidAdj + taxResult.totalTax;
-          const net = Math.max(0, gross - totalDeductionsAgg);
-          
-          if (net > gross) {
-            console.error('[payroll] Invalid payslip: net exceeds gross', { employee_id: s.employee_id, gross, net, ded, unpaidAdj });
-            throw new Error(`Net pay (${net}) exceeds gross (${gross}) for employee ${s.employee_id}.`);
-          }
-          
-          totalGross += gross;
-          totalNet += net;
-          return {
-            employee_id: s.employee_id,
-            period, gross_pay: gross,
-            deductions_total: totalDeductionsAgg, net_pay: net,
-            status: 'generated',
-            payroll_run_id: runData.id,
-            tenant_id: companyId, company_id: companyId,
-            currency: s.currency || currency || 'USD'
-          };
-        });
-
-        const { error: slipErr } = await client.from('payslips').insert(payslips);
-        if (slipErr) throw new Error('Failed to save payslips: ' + slipErr.message);
-
-        await client.from('payroll_runs')
-          .update({ status: 'completed', total_gross: totalGross, total_net: totalNet })
-          .eq('id', runData.id);
-
-        showToast(`Payroll complete — ${salaries.length} payslips generated`, 'success');
-    } catch (err) {
-      showToast(err.message, 'error');
-      closeModal('run-payroll-modal');
-      return;
-    }
+    console.error('[payroll] Worker payroll/run failed:', workerErr.message);
+    showToast(workerErr.message, 'error');
+    closeModal('run-payroll-modal');
+    return;
   }
 
   closeModal('run-payroll-modal');
@@ -943,6 +917,9 @@ window.openAddSalaryModal = async function() {
   document.getElementById('salary-modal-title').textContent = 'Add Salary';
   document.getElementById('edit-salary-id').value = '';
   document.getElementById('edit-salary-amount').value = '';
+  document.getElementById('salary-hra-amount').value = '';
+  document.getElementById('salary-special-amount').value = '';
+  document.getElementById('salary-tax-regime').value = 'old';
   document.getElementById('salary-effective-date').valueAsDate = new Date();
 
   // Populate employee select
@@ -972,6 +949,12 @@ window.editSalary = async function(id) {
   document.getElementById('edit-salary-id').value = id;
   document.getElementById('salary-employee').value = salary.employee_id || '';
   document.getElementById('edit-salary-amount').value = salary.base_salary || '';
+  
+  const allowances = salary.allowances || {};
+  document.getElementById('salary-hra-amount').value = allowances.hra || '';
+  document.getElementById('salary-special-amount').value = allowances.special || '';
+  
+  document.getElementById('salary-tax-regime').value = salary.tax_regime || 'old';
   document.getElementById('salary-currency').value = salary.currency || 'INR';
   document.getElementById('salary-emp-type').value = salary.employment_type || 'full_time';
   if (salary.effective_date) document.getElementById('salary-effective-date').value = salary.effective_date;
@@ -980,6 +963,11 @@ window.editSalary = async function(id) {
 window.saveSalary = async function() {
   const empId   = document.getElementById('salary-employee')?.value;
   const amount  = parseFloat(document.getElementById('edit-salary-amount')?.value);
+  
+  const hraAmount = parseFloat(document.getElementById('salary-hra-amount')?.value) || 0;
+  const specialAmount = parseFloat(document.getElementById('salary-special-amount')?.value) || 0;
+  const taxRegime = document.getElementById('salary-tax-regime')?.value || 'old';
+  
   const currency = document.getElementById('salary-currency')?.value || 'INR';
   const empType = document.getElementById('salary-emp-type')?.value || 'full_time';
   const effDate = document.getElementById('salary-effective-date')?.value;
@@ -993,6 +981,8 @@ window.saveSalary = async function() {
   const payload = {
     employee_id: empId,
     base_salary: amount,
+    allowances: { hra: hraAmount, special: specialAmount },
+    tax_regime: taxRegime,
     currency: currency,
     employment_type: empType,
     effective_date: effDate || new Date().toISOString().slice(0,10),
@@ -1076,11 +1066,17 @@ window.saveDeduction = async function() {
 };
 
 function setNextPayrollDate() {
-  const today = new Date();
-  const next = new Date(today.getFullYear(), today.getMonth() + 1, 1);
-  setText('stat-next-date', next.toLocaleDateString('en-US',{month:'short',day:'numeric'}));
-  const days = Math.round((next - today) / (1000*60*60*24));
-  setText('stat-next-sub', `In ${days} days`);
+  var today = new Date();
+  var m = today.getMonth() + 1; // next month
+  var y = today.getFullYear();
+  if (m > 11) { m = 0; y++; }
+  var next = new Date(y, m, 1);
+  var months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  setText('stat-next-date', months[next.getMonth()] + ' 1');
+  var msPerDay = 1000 * 60 * 60 * 24;
+  var diff = next.getTime() - today.getTime();
+  var days = Math.ceil(diff / msPerDay);
+  setText('stat-next-sub', 'In ' + days + ' days');
 }
 
 window.switchPayrollTab = function(btn, tabId) {

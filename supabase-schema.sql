@@ -414,3 +414,51 @@ $$ LANGUAGE plpgsql;
 CREATE TRIGGER t_onboarding_pct
   AFTER INSERT OR UPDATE OR DELETE ON onboarding_tasks
   FOR EACH ROW EXECUTE FUNCTION update_onboarding_pct();
+
+-- ════════════════════════════════════════════════════════
+-- AUTOMATION RULES (ATS & HR)
+-- ════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS automation_rules (
+  id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  module       TEXT NOT NULL DEFAULT 'hr' CHECK (module IN ('ats','hr')),
+  name         TEXT NOT NULL,
+  description  TEXT,
+  trigger      TEXT NOT NULL,
+  conditions   JSONB DEFAULT '{}',
+  actions      JSONB DEFAULT '[]',
+  enabled      BOOLEAN DEFAULT true,
+  run_count    INT DEFAULT 0,
+  created_by   UUID REFERENCES employees(id),
+  created_at   TIMESTAMPTZ DEFAULT NOW(),
+  updated_at   TIMESTAMPTZ DEFAULT NOW(),
+  is_template  BOOLEAN DEFAULT false,
+  is_ai        BOOLEAN DEFAULT false
+);
+
+CREATE TABLE IF NOT EXISTS automation_logs (
+  id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  rule_id      UUID REFERENCES automation_rules(id) ON DELETE CASCADE,
+  module       TEXT NOT NULL DEFAULT 'hr' CHECK (module IN ('ats','hr')),
+  rule_name    TEXT,
+  target_id    TEXT,
+  action_taken TEXT,
+  status       TEXT DEFAULT 'success' CHECK (status IN ('success','failed','skipped')),
+  details      TEXT,
+  created_at   TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_auto_rules_module ON automation_rules(module);
+CREATE INDEX IF NOT EXISTS idx_auto_logs_module ON automation_logs(module);
+
+ALTER TABLE automation_rules ENABLE ROW LEVEL SECURITY;
+ALTER TABLE automation_logs  ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Service public rules" ON automation_rules FOR ALL TO service_role USING (true);
+CREATE POLICY "Auth users read rules" ON automation_rules FOR SELECT TO authenticated USING (true);
+CREATE POLICY "Auth users insert rules" ON automation_rules FOR INSERT TO authenticated WITH CHECK (true);
+CREATE POLICY "Auth users update rules" ON automation_rules FOR UPDATE TO authenticated USING (true);
+CREATE POLICY "Auth users delete rules" ON automation_rules FOR DELETE TO authenticated USING (true);
+
+CREATE POLICY "Service public logs" ON automation_logs FOR ALL TO service_role USING (true);
+CREATE POLICY "Auth users read logs" ON automation_logs FOR SELECT TO authenticated USING (true);
+CREATE POLICY "Auth users insert logs" ON automation_logs FOR INSERT TO authenticated WITH CHECK (true);

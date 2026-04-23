@@ -198,7 +198,7 @@ const SCHEMAS = {
   },
   payroll_run: {
     required: ["period", "pay_date"],
-    optional: ["notes", "type"],
+    optional: ["notes", "type", "currency"],
     rules: {
       period: (v) =>
         /^\d{4}-(0[1-9]|1[0-2])(-\d{1,2})?$/.test(v) ||
@@ -796,6 +796,7 @@ route("PATCH", "/notifications/:id/read", handleMarkNotificationRead);
 route("POST", "/notifications/whatsapp", handleWhatsAppNotification);
 
 // AI Intelligence
+route("POST", "/ai/expense-ocr", handleExpenseOCR);
 route("POST", "/ai/chat", handleAIChat);
 route("POST", "/ai/chat/stream", handleAIChatStream);
 route("POST", "/ai/employee-insight", handleEmployeeInsight);
@@ -1943,6 +1944,161 @@ async function handleLeaveDecision(request, env, ctx, [id]) {
 
 // â”€â”€ Payroll â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
+const TAX_PROFILES = {
+  IN: {
+    name: 'India (Old Regime)',
+    slabs: [
+      { min: 0, max: 300000, rate: 0 },
+      { min: 300000, max: 500000, rate: 0.05 },
+      { min: 500000, max: 1000000, rate: 0.20 },
+      { min: 1000000, max: Infinity, rate: 0.30 }
+    ],
+    pf: { rate: 0.12, cap: 15000 },
+    esi: { rate: 0.0075, ceiling: 21000 },
+    professionalTax: 200,
+    cess: 0.04
+  },
+  IN_NEW: {
+    name: 'India (New Regime)',
+    slabs: [
+      { min: 0, max: 300000, rate: 0 },
+      { min: 300000, max: 700000, rate: 0.05 },
+      { min: 700000, max: 1000000, rate: 0.10 },
+      { min: 1000000, max: 1200000, rate: 0.15 },
+      { min: 1200000, max: 1500000, rate: 0.20 },
+      { min: 1500000, max: Infinity, rate: 0.30 }
+    ],
+    pf: { rate: 0.12, cap: 15000 },
+    esi: { rate: 0.0075, ceiling: 21000 },
+    professionalTax: 200,
+    cess: 0.04
+  },
+  US: {
+    name: 'United States',
+    slabs: [
+      { min: 0, max: 11600, rate: 0.10 },
+      { min: 11600, max: 47150, rate: 0.12 },
+      { min: 47150, max: 100525, rate: 0.22 },
+      { min: 100525, max: 191950, rate: 0.24 },
+      { min: 191950, max: 243725, rate: 0.32 },
+      { min: 243725, max: 609350, rate: 0.35 },
+      { min: 609350, max: Infinity, rate: 0.37 }
+    ],
+    fica: { ss: 0.062, ssWageCap: 168600, medicare: 0.0145 },
+    state: 0.05
+  },
+  UK: {
+    name: 'United Kingdom',
+    slabs: [
+      { min: 0, max: 12570, rate: 0 },
+      { min: 12570, max: 50270, rate: 0.20 },
+      { min: 50270, max: 125140, rate: 0.40 },
+      { min: 125140, max: Infinity, rate: 0.45 }
+    ],
+    ni: { rate: 0.08, threshold: 12570 }
+  },
+  AE: {
+    name: 'UAE',
+    slabs: [{ min: 0, max: Infinity, rate: 0 }],
+    gratuity: { rate: 0.0575 }
+  },
+  CA: {
+    name: 'Canada',
+    slabs: [
+      { min: 0, max: 53359, rate: 0.15 },
+      { min: 53359, max: 106717, rate: 0.205 },
+      { min: 106717, max: 165430, rate: 0.26 },
+      { min: 165430, max: 235675, rate: 0.29 },
+      { min: 235675, max: Infinity, rate: 0.33 }
+    ],
+    cpp: { rate: 0.0595, max: 3867.50 },
+    ei: { rate: 0.0166, max: 1049.12 }
+  },
+  AU: {
+    name: 'Australia',
+    slabs: [
+      { min: 0, max: 18200, rate: 0 },
+      { min: 18200, max: 45000, rate: 0.19 },
+      { min: 45000, max: 120000, rate: 0.325 },
+      { min: 120000, max: 180000, rate: 0.37 },
+      { min: 180000, max: Infinity, rate: 0.45 }
+    ],
+    medicare: 0.02,
+    super: 0.11
+  },
+  DE: {
+    name: 'Germany (EU)',
+    slabs: [
+      { min: 0, max: 10908, rate: 0 },
+      { min: 10908, max: 62809, rate: 0.24 },
+      { min: 62809, max: 277825, rate: 0.42 },
+      { min: 277825, max: Infinity, rate: 0.45 }
+    ],
+    social: {
+      health: 0.073,
+      pension: 0.093,
+      unemployment: 0.013,
+      care: 0.01525
+    }
+  }
+};
+
+function calculateTax(monthlyIncome, countryCode = 'IN', taxRegime = 'old') {
+  let profileKey = countryCode;
+  if (countryCode === 'IN' && taxRegime === 'new') profileKey = 'IN_NEW';
+  const profile = TAX_PROFILES[profileKey] || TAX_PROFILES['IN'];
+  const annual = monthlyIncome * 12;
+  let remainingIncome = annual;
+  let annualTax = 0;
+  const breakdown = [];
+
+  for (const slab of profile.slabs) {
+    if (remainingIncome <= 0) break;
+    const taxableInSlab = Math.min(remainingIncome, slab.max - slab.min);
+    const slabTax = taxableInSlab * slab.rate;
+    if (slabTax > 0) breakdown.push({ slab: `${slab.rate * 100}%`, amount: slabTax / 12 });
+    annualTax += slabTax;
+    remainingIncome -= taxableInSlab;
+  }
+
+  let monthlyIncomeTax = annualTax / 12;
+  let socialTax = 0;
+
+  if (countryCode === 'IN') {
+    socialTax += Math.min(monthlyIncome * profile.pf.rate, profile.pf.cap);
+    if (monthlyIncome <= profile.esi.ceiling) socialTax += monthlyIncome * profile.esi.rate;
+    socialTax += profile.professionalTax;
+    monthlyIncomeTax *= (1 + profile.cess);
+  } else if (countryCode === 'US') {
+    const annualSoFar = monthlyIncome * 12;
+    if (annualSoFar <= profile.fica.ssWageCap) socialTax += monthlyIncome * profile.fica.ss;
+    socialTax += monthlyIncome * profile.fica.medicare;
+    socialTax += monthlyIncome * profile.state;
+  } else if (countryCode === 'UK') {
+    const niable = Math.max(0, monthlyIncome - profile.ni.threshold / 12);
+    socialTax += niable * profile.ni.rate;
+  } else if (countryCode === 'AE') {
+    socialTax += monthlyIncome * (profile.gratuity?.rate || 0);
+  } else if (countryCode === 'CA') {
+    socialTax += Math.min(monthlyIncome * profile.cpp.rate, profile.cpp.max / 12);
+    socialTax += Math.min(monthlyIncome * profile.ei.rate, profile.ei.max / 12);
+  } else if (countryCode === 'AU') {
+    socialTax += monthlyIncome * profile.medicare;
+  } else if (countryCode === 'DE') {
+    socialTax += monthlyIncome * (profile.social.health + profile.social.pension + profile.social.unemployment + profile.social.care);
+  }
+
+  return {
+    incomeTax: Math.max(0, Math.round(monthlyIncomeTax * 100) / 100),
+    socialTax: Math.max(0, Math.round(socialTax * 100) / 100),
+    totalTax: Math.max(0, Math.round((monthlyIncomeTax + socialTax) * 100) / 100)
+  };
+}
+
+function currencyToCountry(currency) {
+  return { INR: 'IN', USD: 'US', GBP: 'UK', AED: 'AE', EUR: 'DE', CAD: 'CA', AUD: 'AU' }[currency] || 'IN';
+}
+
 async function handleCalculatePayroll(request, env, ctx) {
   requireRole(
     ctx,
@@ -1955,7 +2111,7 @@ async function handleCalculatePayroll(request, env, ctx) {
   );
   const { period, currency } = await safeJson(request);
 
-  const [salRes, dedRes, leaveRes] = await Promise.all([
+  const [salRes, dedRes, leaveRes, perfRes, expRes] = await Promise.all([
     sbFetch(
       env,
       "GET",
@@ -1980,6 +2136,22 @@ async function handleCalculatePayroll(request, env, ctx) {
       false,
       ctx.tenantId,
     ),
+    sbFetch(
+      env,
+      "GET",
+      `/rest/v1/performance_reviews?status=eq.completed&select=employee_id,score`,
+      null,
+      false,
+      ctx.tenantId,
+    ),
+    sbFetch(
+      env,
+      "GET",
+      `/rest/v1/expenses?status=eq.approved&select=employee_id,amount`,
+      null,
+      false,
+      ctx.tenantId,
+    ),
   ]);
 
   const salaries = (await salRes.json()).filter(
@@ -1987,33 +2159,65 @@ async function handleCalculatePayroll(request, env, ctx) {
   );
   const deductions = await dedRes.json();
   const unpaidLeave = await leaveRes.json();
+  const reviews = await perfRes.json() || [];
+  const expenses = await expRes.json() || [];
+
+  const perfMap = {};
+  reviews.sort((a,b)=>b.id-a.id).forEach(r => {
+    if(!perfMap[r.employee_id] && r.score) perfMap[r.employee_id] = r.score;
+  });
+
+  const expenseMap = {};
+  expenses.forEach(ex => {
+    expenseMap[ex.employee_id] = (expenseMap[ex.employee_id] || 0) + (ex.amount || 0);
+  });
+
+  const countryCode = currencyToCountry(currency || 'USD');
 
   const payslips = salaries.map((s) => {
+    let base = s.base_salary || 0;
+    let allowances = s.allowances || {};
+    let totalAllowances = (allowances.hra || 0) + (allowances.special || 0);
+
+    let score = perfMap[s.employee_id] || 0;
+    let bonus = 0;
+    if (score >= 90) bonus = base * 0.10;
+    else if (score >= 80) bonus = base * 0.05;
+
     const empDeds = deductions
       .filter((d) => d.employee_id === s.employee_id)
       .reduce((sum, d) => sum + Number(d.amount), 0);
+      
     const unpaidDays = unpaidLeave
       .filter((l) => l.employee_id === s.employee_id)
       .reduce((sum, l) => sum + l.days, 0);
-    const dailyRate = s.base_salary / 22;
+      
+    const dailyRate = (base + totalAllowances) / 22;
     const unpaidAdj = dailyRate * unpaidDays;
-    const gross = Number(s.base_salary);
-    const net = gross - empDeds - unpaidAdj;
+
+    let taxableIncome = base + totalAllowances + bonus - unpaidAdj;
+    const taxResult = calculateTax(taxableIncome, countryCode, s.tax_regime || 'old');
+
+    let reimbursements = expenseMap[s.employee_id] || 0;
+
+    const gross = base + totalAllowances + bonus + reimbursements;
+    const totalDeductionsAgg = empDeds + unpaidAdj + taxResult.totalTax;
+    const net = Math.max(0, gross - totalDeductionsAgg);
+
     return {
       employee_id: s.employee_id,
-      gross,
-      deductions: empDeds,
-      unpaid_adjustment: unpaidAdj,
-      net: Math.max(0, net),
+      gross_pay: gross,
+      deductions_total: totalDeductionsAgg,
+      net_pay: net,
       currency: s.currency || currency || 'USD',
     };
   });
 
   const totals = payslips.reduce(
     (acc, p) => ({
-      gross: acc.gross + p.gross,
-      net: acc.net + p.net,
-      deductions: acc.deductions + p.deductions,
+      gross: acc.gross + p.gross_pay,
+      net: acc.net + p.net_pay,
+      deductions: acc.deductions + p.deductions_total,
       count: acc.count + 1,
     }),
     { gross: 0, net: 0, deductions: 0, count: 0 },
@@ -2500,6 +2704,9 @@ async function handleCreateApplication(request, env, ctx) {
     throw new ValidationError("job_id and candidate_email required");
 
   // 0. Base64 Upload Handling (Bypass Frontend RLS limit)
+  // â˜… ENTERPRISE B2B MULTI-TENANT FIX:
+  // Store CVs in a tenant-isolated path. Do not use public URLs for PII data.
+  let secureFileKey = null;
   if (body.resume_base64 && body.resume_filename) {
     try {
       const base64Data = body.resume_base64.split(",")[1] || body.resume_base64;
@@ -2509,7 +2716,11 @@ async function handleCreateApplication(request, env, ctx) {
         fileBytes[i] = binaryStr.charCodeAt(i);
       }
       
-      const uploadRes = await fetch(`${env.SUPABASE_URL}/storage/v1/object/hr-documents/${body.resume_filename}`, {
+      const fileExt = body.resume_filename.split('.').pop() || 'pdf';
+      // Isolate by tenant_id and job_id to prevent naming collisions and enforce strict RLS
+      secureFileKey = `${ctx.tenantId}/${body.job_id}/${Date.now()}-${crypto.randomUUID()}.${fileExt}`;
+      
+      const uploadRes = await fetch(`${env.SUPABASE_URL}/storage/v1/object/hr-documents/${secureFileKey}`, {
         method: "POST",
         headers: {
           "Authorization": `Bearer ${env.SUPABASE_SERVICE_KEY}`,
@@ -2521,7 +2732,8 @@ async function handleCreateApplication(request, env, ctx) {
       });
       
       if (uploadRes.ok) {
-        body.resume_url = `${env.SUPABASE_URL}/storage/v1/object/public/hr-documents/${body.resume_filename}`;
+        // Store as a private storage path reference, NOT a public URL
+        body.resume_url = `private://hr-documents/${secureFileKey}`;
       } else {
         console.error("Worker upload error:", await uploadRes.text());
       }
@@ -2887,6 +3099,39 @@ async function handleInterviewQuestion(request, env, ctx) {
     token_hint: token?.slice(0, 8),
   });
   return apiResponse({ response: result.response });
+}
+
+async function handleExpenseOCR(request, env, ctx) {
+  requireAuth(ctx);
+  const { receipt_text } = await safeJson(request);
+  if (!receipt_text) throw new ValidationError("receipt_text required");
+
+  const prompt = `You are an AI expense parser. Given the following raw text extracted from a receipt, identify the vendor name, the total amount, the currency (e.g. USD, EUR, INR), the date (YYYY-MM-DD), and categorize the expense (one of: travel, meals, office_supplies, software, general).
+If you cannot find a value, return null for that field.
+Receipt Text:
+"""
+${receipt_text}
+"""
+Return ONLY valid JSON (no markdown, no backticks) in this exact format:
+{"vendor": "Vendor Name", "amount": 120.50, "currency": "USD", "date": "2024-05-10", "category": "meals"}`;
+
+  const result = await env.AI.run("@cf/meta/llama-3.1-8b-instruct", {
+    messages: [{ role: "user", content: prompt }],
+    max_tokens: 300,
+  });
+
+  try {
+    const text = result.response.replace(/```json|```/g, "").trim();
+    const parsed = JSON.parse(text);
+    return apiResponse({ parsed });
+  } catch (e) {
+    throw new AppError(
+      "Failed to parse receipt with AI",
+      HTTP.SERVER_ERROR,
+      "PARSE_ERROR",
+      result.response,
+    );
+  }
 }
 
 async function handleAIChat(request, env, ctx) {
@@ -3556,7 +3801,7 @@ async function handleAnalyticsReport(request, env, ctx, _, url) {
     sbFetch(
       env,
       "GET",
-      `/rest/v1/payslips?select=period,gross,net,employees(first_name,last_name)`,
+      `/rest/v1/payslips?select=period,gross_pay,net_pay,employees(first_name,last_name)`,
       null,
       false,
       ctx.tenantId,
@@ -3607,7 +3852,7 @@ async function handleAnalyticsReport(request, env, ctx, _, url) {
         `${p.employees?.first_name} ${p.employees?.last_name}`,
         p.period,
         "NET",
-        p.net,
+        p.net_pay,
         "PAID",
       ]),
       ...reviews.map((r) => [

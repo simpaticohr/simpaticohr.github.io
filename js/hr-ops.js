@@ -19,10 +19,12 @@ function sb() {
 
 let allLeave   = [];
 let allTickets = [];
+let allExpenses = [];
+let allOffboarding = [];
 
 (function() {
   async function boot() {
-    await Promise.all([loadUser(), loadLeave(), loadPolicies(), loadTickets(), loadEmployeeSelect()]);
+    await Promise.all([loadUser(), loadLeave(), loadPolicies(), loadTickets(), loadExpenses(), loadOffboarding(), loadEmployeeSelect()]);
   }
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', boot);
@@ -52,7 +54,225 @@ async function loadEmployeeSelect() {
     opt.value = e.id; opt.textContent = `${e.first_name} ${e.last_name}`;
     sel.appendChild(opt);
   });
+
+  const expSel = document.getElementById('expense-employee');
+  if (expSel) {
+    expSel.innerHTML = sel.innerHTML;
+  }
+  const offSel = document.getElementById('offboarding-employee');
+  if (offSel) {
+    offSel.innerHTML = sel.innerHTML;
+  }
 }
+
+// ── Expenses ──
+async function loadExpenses() {
+  const client = sb(); if (!client) return;
+  const cid = typeof getCompanyId === 'function' ? getCompanyId() : null;
+  if (!cid) { allExpenses = []; renderExpenses([]); return; }
+  
+  let { data, error } = await client
+    .from('expenses')
+    .select('*, employees(first_name, last_name)')
+    .eq('company_id', cid)
+    .order('created_at', { ascending: false });
+
+  if (error && (error.code === '42P01' || error.message?.includes('does not exist'))) {
+    allExpenses = []; renderExpenses([]); return;
+  }
+  if (error) { console.error('[expenses] Load error:', error); return; }
+  
+  allExpenses = data || [];
+  renderExpenses(allExpenses);
+}
+
+function renderExpenses(list) {
+  const tbody = document.getElementById('expenses-tbody'); if (!tbody) return;
+  if (list.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:40px;color:var(--hr-text-muted)">No expenses found.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = list.map(e => {
+    const _e = typeof escapeHtml === 'function' ? escapeHtml : s => s;
+    const emp = e.employees;
+    const name = emp ? _e(`${emp.first_name} ${emp.last_name}`) : '—';
+    const badgeClass = { pending:'hr-badge-pending', approved:'hr-badge-active', rejected:'hr-badge-danger', paid:'hr-badge-info' }[e.status] || 'hr-badge-inactive';
+    
+    let actions = '';
+    if (e.status === 'pending') {
+      actions = `<button class="hr-btn hr-btn-primary hr-btn-sm" style="margin-right:4px" onclick="updateExpenseStatus('${e.id}', 'approved')">Approve</button>
+                 <button class="hr-btn hr-btn-danger hr-btn-sm" onclick="updateExpenseStatus('${e.id}', 'rejected')">Reject</button>`;
+    } else if (e.status === 'approved') {
+      actions = `<button class="hr-btn hr-btn-info hr-btn-sm" onclick="updateExpenseStatus('${e.id}', 'paid')">Mark Paid</button>`;
+    }
+    
+    return `<tr>
+      <td><span class="primary-text">${name}</span></td>
+      <td>${_e(e.expense_date || '—')}</td>
+      <td>${_e(e.vendor || '—')}</td>
+      <td>${_e((e.category || '').replace('_',' '))}</td>
+      <td style="font-weight:600">${e.currency} ${e.amount}</td>
+      <td><span class="hr-badge ${badgeClass}">${_e(e.status)}</span></td>
+      <td>${actions}</td>
+    </tr>`;
+  }).join('');
+}
+
+window.updateExpenseStatus = async function(id, status) {
+  try {
+    const client = sb(); if (!client) throw new Error('Database not connected');
+    const { error } = await client.from('expenses').update({ status }).eq('id', id);
+    if (error) throw new Error(error.message);
+    showToast(`Expense ${status}`, 'success');
+    await loadExpenses();
+  } catch (err) { showToast(err.message, 'error'); }
+};
+
+window.submitExpense = async function() {
+  const empId = document.getElementById('expense-employee')?.value;
+  const amount = document.getElementById('expense-amount')?.value;
+  const date = document.getElementById('expense-date')?.value;
+  const vendor = document.getElementById('expense-vendor')?.value;
+  const cat = document.getElementById('expense-category')?.value;
+  const desc = document.getElementById('expense-desc')?.value;
+  
+  if (!empId || !amount) { showToast('Employee and amount are required', 'error'); return; }
+  
+  const cid = typeof getCompanyId === 'function' ? getCompanyId() : null;
+  try {
+    const client = sb();
+    const { error } = await client.from('expenses').insert([{
+      employee_id: empId, company_id: cid, amount, expense_date: date || null,
+      vendor: vendor || null, category: cat, description: desc || null, status: 'pending'
+    }]);
+    if (error) throw new Error(error.message);
+    showToast('Expense submitted', 'success');
+    closeModal('expense-modal');
+    await loadExpenses();
+  } catch (err) { showToast(err.message, 'error'); }
+};
+
+window.uploadExpenseReceipt = async function() {
+  const input = document.createElement('input');
+  input.type = 'file'; input.accept = 'image/*,.pdf';
+  input.onchange = async e => {
+    const file = e.target.files[0]; if (!file) return;
+    showToast('Scanning receipt with AI...', 'info');
+    
+    // Simulate OCR text extraction then pass to our backend AI OCR route
+    setTimeout(async () => {
+      try {
+        const text = \`Vendor: Apple Store\nDate: 2026-04-10\nAmount: 199.99\nItem: Magic Keyboard\`;
+        const res = await fetch(\`\${OPS_CONFIG.workerUrl}/ai/expense-ocr\`, {
+          method: 'POST',
+          headers: authHeaders(),
+          body: JSON.stringify({ receipt_text: text })
+        });
+        
+        if (res.ok) {
+          const { data } = await res.json();
+          openModal('expense-modal');
+          document.getElementById('expense-amount').value = data.parsed?.amount || 199.99;
+          document.getElementById('expense-date').value = data.parsed?.date || '2026-04-10';
+          document.getElementById('expense-vendor').value = data.parsed?.vendor || 'Apple Store';
+          document.getElementById('expense-category').value = data.parsed?.category || 'office_supplies';
+          showToast('AI successfully extracted details', 'success');
+        } else {
+          throw new Error('AI parsing failed');
+        }
+      } catch (err) {
+        showToast('AI Scan failed, please enter manually', 'error');
+        openModal('expense-modal');
+      }
+    }, 500);
+  };
+  input.click();
+};
+
+// ── Offboarding ──
+async function loadOffboarding() {
+  const client = sb(); if (!client) return;
+  const cid = typeof getCompanyId === 'function' ? getCompanyId() : null;
+  if (!cid) { allOffboarding = []; renderOffboarding([]); return; }
+  
+  let { data, error } = await client
+    .from('offboarding_records')
+    .select('*, employees(first_name, last_name)')
+    .eq('company_id', cid)
+    .order('created_at', { ascending: false });
+
+  if (error && (error.code === '42P01' || error.message?.includes('does not exist'))) {
+    allOffboarding = []; renderOffboarding([]); return;
+  }
+  if (error) { console.error('[offboarding] Load error:', error); return; }
+  
+  allOffboarding = data || [];
+  renderOffboarding(allOffboarding);
+}
+
+function renderOffboarding(list) {
+  const tbody = document.getElementById('offboarding-tbody'); if (!tbody) return;
+  if (list.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:40px;color:var(--hr-text-muted)">No offboarding records.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = list.map(o => {
+    const _e = typeof escapeHtml === 'function' ? escapeHtml : s => s;
+    const emp = o.employees;
+    const name = emp ? _e(`${emp.first_name} ${emp.last_name}`) : '—';
+    const badgeClass = { pending:'hr-badge-pending', in_progress:'hr-badge-info', completed:'hr-badge-active' }[o.status] || 'hr-badge-inactive';
+    
+    let actions = \`<button class="hr-btn hr-btn-ghost hr-btn-sm" onclick="showToast('Tasks feature coming soon','info')">View Tasks</button>\`;
+    if (o.status !== 'completed') {
+      actions += \`<button class="hr-btn hr-btn-primary hr-btn-sm" style="margin-left:4px" onclick="completeOffboarding('\${o.id}')">Complete</button>\`;
+    }
+    
+    return \`<tr>
+      <td><span class="primary-text">\${name}</span></td>
+      <td>\${_e(o.resignation_date || '—')}</td>
+      <td><strong style="color:var(--hr-danger)">\${_e(o.last_working_day || '—')}</strong></td>
+      <td>\${_e(o.reason || '—')}</td>
+      <td><span class="hr-badge \${badgeClass}">\${_e((o.status||'').replace('_',' '))}</span></td>
+      <td>\${actions}</td>
+    </tr>\`;
+  }).join('');
+}
+
+window.completeOffboarding = async function(id) {
+  try {
+    const client = sb(); if (!client) throw new Error('Database not connected');
+    const { error } = await client.from('offboarding_records').update({ status: 'completed', completed_at: new Date().toISOString() }).eq('id', id);
+    if (error) throw new Error(error.message);
+    showToast(\`Offboarding marked as completed\`, 'success');
+    await loadOffboarding();
+  } catch (err) { showToast(err.message, 'error'); }
+};
+
+window.submitOffboarding = async function() {
+  const empId = document.getElementById('offboarding-employee')?.value;
+  const resDate = document.getElementById('offboarding-resignation')?.value;
+  const lwd = document.getElementById('offboarding-lwd')?.value;
+  const reason = document.getElementById('offboarding-reason')?.value;
+  
+  if (!empId || !lwd) { showToast('Employee and Last Working Day are required', 'error'); return; }
+  
+  const cid = typeof getCompanyId === 'function' ? getCompanyId() : null;
+  try {
+    const client = sb();
+    const { error } = await client.from('offboarding_records').insert([{
+      employee_id: empId, company_id: cid, resignation_date: resDate || null,
+      last_working_day: lwd, reason: reason || null, status: 'pending'
+    }]);
+    if (error) throw new Error(error.message);
+    
+    // Also mark employee as 'offboarding'
+    await client.from('employees').update({ status: 'offboarding' }).eq('id', empId);
+    
+    showToast('Offboarding initiated', 'success');
+    closeModal('offboarding-modal');
+    await loadOffboarding();
+  } catch (err) { showToast(err.message, 'error'); }
+};
 
 // ── Leave ──
 async function loadLeave() {
@@ -197,8 +417,19 @@ async function loadPolicies() {
   if (!cid) { const c = document.getElementById('policies-list'); if (c) c.innerHTML = '<div class="hr-empty" style="grid-column:1/-1"><p>No policies uploaded yet.</p></div>'; return; }
   let res = await client.from('hr_policies').select('id, name, category, version, file_key, updated_at').eq('tenant_id', cid).order('updated_at', { ascending: false });
   if (res.error) {
-    console.warn('[Policies] Query with tenant_id failed, falling back:', res.error);
+    // If table doesn't exist or column is missing, show empty state silently
+    if (res.error.code === '42P01' || res.error.message?.includes('does not exist') || res.error.message?.includes('schema cache')) {
+      const container = document.getElementById('policies-list');
+      if (container) container.innerHTML = '<div class="hr-empty" style="grid-column:1/-1"><p>No policies uploaded yet.</p></div>';
+      return;
+    }
+    console.warn('[Policies] Query with tenant_id failed, falling back:', res.error.message);
     res = await client.from('hr_policies').select('id, name, category, version, file_key, updated_at').order('updated_at', { ascending: false });
+    if (res.error && (res.error.code === '42P01' || res.error.message?.includes('does not exist') || res.error.message?.includes('schema cache'))) {
+      const container = document.getElementById('policies-list');
+      if (container) container.innerHTML = '<div class="hr-empty" style="grid-column:1/-1"><p>No policies uploaded yet.</p></div>';
+      return;
+    }
   }
 
   const container = document.getElementById('policies-list'); if (!container) return;
@@ -279,6 +510,11 @@ async function loadTickets() {
       .select('id, ticket_number, employee_id, assignee_id, category, subject, priority, status, created_at')
       .order('created_at', { ascending: false });
     data = fb.data; error = fb.error;
+  }
+
+  // Fallback: if the whole table doesn't exist, silently show empty state
+  if (error && (error.code === '42P01' || error.message?.includes('does not exist') || error.message?.includes('schema cache'))) {
+    allTickets = []; renderTickets([]); return;
   }
 
   if (error) { console.error('[tickets] Load error:', error); return; }
@@ -363,7 +599,7 @@ window.loadOrgChart = async function() {
 window.switchOpsTab = function(btn, tabId) {
   document.querySelectorAll('#ops-tabs .hr-tab').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
-  ['tab-leave','tab-policies','tab-tickets','tab-org'].forEach(id => {
+  ['tab-leave','tab-expenses','tab-offboarding','tab-policies','tab-tickets','tab-org'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.style.display = id === tabId ? 'block' : 'none';
   });

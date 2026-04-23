@@ -160,7 +160,7 @@ window.load = async function load() {
       var result = await client
         .from('payroll_runs')
         .select('*')
-        .eq('company_id', cid)
+        .eq('tenant_id', cid)
         .order('created_at', { ascending: false })
         .limit(24);
       if (result.error) throw new Error(result.error.message);
@@ -233,14 +233,14 @@ async function openCalc() {
     var { data: salaries, error: salErr } = await client
       .from('employee_salaries')
       .select('employee_id, base_salary')
-      .eq('company_id', cid);
+      .eq('tenant_id', cid);
     if (salErr) throw new Error(salErr.message);
 
     // ✅ Only select amount — no leave_type column reference
     var { data: deductions } = await client
       .from('payroll_deductions')
       .select('employee_id, amount')
-      .eq('company_id', cid)
+      .eq('tenant_id', cid)
       .eq('status', 'active');
 
     var dedMap = {};
@@ -307,14 +307,14 @@ async function doRun() {
       var { data: salaries, error: salErr } = await client
         .from('employee_salaries')
         .select('employee_id, base_salary, currency')
-        .eq('company_id', cid);
+        .eq('tenant_id', cid);
       if (salErr) throw new Error(salErr.message);
       if (!salaries || !salaries.length) throw new Error('No salary records found. Add employee salaries first.');
 
       var { data: deductions } = await client
         .from('payroll_deductions')
         .select('employee_id, amount')
-        .eq('company_id', cid)
+        .eq('tenant_id', cid)
         .eq('status', 'active');
 
       var dedMap = {};
@@ -328,6 +328,7 @@ async function doRun() {
         status:         'processing',
         notes:          el('run-notes').value || null,
         company_id:     cid,
+        tenant_id:      cid,
         employee_count: salaries.length
       };
 
@@ -344,7 +345,7 @@ async function doRun() {
         var ded   = dedMap[s.employee_id] || 0;
         var net   = gross - ded;
         totalGross += gross; totalNet += net;
-        return { employee_id: s.employee_id, period: period, gross_pay: gross, deductions_total: ded, net_pay: net, status: 'generated', payroll_run_id: runData.id, company_id: cid, pay_date: payDate };
+        return { employee_id: s.employee_id, period: period, gross_pay: gross, deductions_total: ded, net_pay: net, status: 'generated', payroll_run_id: runData.id, company_id: cid, tenant_id: cid, pay_date: payDate };
       });
 
       var { error: slipErr } = await client.from('payslips').insert(payslips);

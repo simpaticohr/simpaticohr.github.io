@@ -662,20 +662,84 @@ var RULE_ICONS = {
   schedule:            { icon: '🕐', bg: '#f1f5f9' }
 };
 
-function loadRules() {
-  try { return JSON.parse(localStorage.getItem(KEY_RULES) || '[]'); } catch(e) { return []; }
+function loadRules() { return HR_RULES; }
+function saveRules(rules) { HR_RULES = rules; localStorage.setItem(KEY_RULES, JSON.stringify(rules)); }
+function loadLog() { return HR_LOG; }
+function saveLog(log) { HR_LOG = log; localStorage.setItem(KEY_LOG, JSON.stringify(log)); }
+function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
+
+var HR_RULES = [], HR_LOG = [];
+
+async function fetchRulesFromDB() {
+  try {
+    if (window.sbFetch) HR_RULES = await sbFetch('automation_rules', 'module=eq.hr&order=created_at.desc');
+    else HR_RULES = JSON.parse(localStorage.getItem(KEY_RULES)||'[]');
+  } catch(e) { HR_RULES = JSON.parse(localStorage.getItem(KEY_RULES)||'[]'); console.error(e); }
 }
-function saveRules(rules) {
-  localStorage.setItem(KEY_RULES, JSON.stringify(rules));
+async function fetchLogFromDB() {
+  try {
+    if (window.sbFetch) HR_LOG = await sbFetch('automation_logs', 'module=eq.hr&order=created_at.desc&limit=200');
+    else HR_LOG = JSON.parse(localStorage.getItem(KEY_LOG)||'[]');
+  } catch(e) { HR_LOG = JSON.parse(localStorage.getItem(KEY_LOG)||'[]'); console.error(e); }
 }
-function loadLog() {
-  try { return JSON.parse(localStorage.getItem(KEY_LOG) || '[]'); } catch(e) { return []; }
+async function saveRuleToDB(payload, id) {
+  try {
+    if (window.sbInsert) {
+      payload.module = 'hr';
+      if(id) await sbUpdate('automation_rules', payload, 'id=eq.'+id);
+      else await sbInsert('automation_rules', payload);
+      await fetchRulesFromDB();
+    } else {
+      var arr = JSON.parse(localStorage.getItem(KEY_RULES)||'[]');
+      if(id) arr = arr.map(a => a.id===id ? Object.assign(a, payload) : a);
+      else { payload.id = id || uid(); arr.push(payload); }
+      saveRules(arr);
+    }
+  } catch(e) { console.error('Save failed', e); }
 }
-function saveLog(log) {
-  localStorage.setItem(KEY_LOG, JSON.stringify(log.slice(0, 200)));
+async function deleteRuleFromDB(id) {
+  try {
+    if (window.sbFetch && window.AN_CONFIG && window.AN_CONFIG.supabaseUrl) {
+      await fetch(window.AN_CONFIG.supabaseUrl + '/rest/v1/automation_rules?id=eq.'+id, { method: 'DELETE', headers: window.sbHeaders ? window.sbHeaders() : {} });
+      await fetchRulesFromDB();
+    } else {
+      saveRules(JSON.parse(localStorage.getItem(KEY_RULES)||'[]').filter(a => a.id!==id));
+    }
+  } catch(e) { console.error('Delete failed', e); }
 }
-function uid() {
-  return Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+async function toggleRuleInDB(id, enabled) {
+  try {
+    if (window.sbUpdate) {
+      await sbUpdate('automation_rules', {enabled: enabled}, 'id=eq.'+id);
+      await fetchRulesFromDB();
+    } else {
+      saveRules(JSON.parse(localStorage.getItem(KEY_RULES)||'[]').map(a => a.id===id ? Object.assign(a, {enabled:enabled}) : a));
+    }
+  } catch(e) { console.error('Toggle failed', e); }
+}
+async function logToDB(payload) {
+  try {
+    if (window.sbInsert) {
+      payload.module = 'hr';
+      await sbInsert('automation_logs', payload);
+      await fetchLogFromDB();
+    } else {
+      var arr = JSON.parse(localStorage.getItem(KEY_LOG)||'[]');
+      arr.push(payload);
+      saveLog(arr.slice(-300));
+    }
+  } catch(e) { console.error('Log save failed', e); }
+}
+async function clearLogDB() {
+  try {
+    if (window.sbFetch && window.AN_CONFIG && window.AN_CONFIG.supabaseUrl) {
+      await fetch(window.AN_CONFIG.supabaseUrl + '/rest/v1/automation_logs?module=eq.hr', { method: 'DELETE', headers: window.sbHeaders ? window.sbHeaders() : {} });
+      HR_LOG = [];
+    } else {
+      localStorage.setItem(KEY_LOG, '[]');
+      HR_LOG = [];
+    }
+  } catch(e) { console.error('Clear log failed', e); }
 }
 
 /* ════════════════════════════════
@@ -768,19 +832,19 @@ function renderLog() {
   area.innerHTML = '<div style="overflow-x:auto"><table><thead><tr><th>Time</th><th>Rule</th><th>Trigger</th><th>Status</th><th>Details</th></tr></thead><tbody>' +
     log.slice().reverse().map(function(l) {
       var sc = l.status === 'success' ? 'success' : l.status === 'skipped' ? 'skipped' : 'failed';
-      return '<tr><td class="mono">'+esc(new Date(l.ts).toLocaleString('en-IN'))+'</td>' +
-        '<td><strong>'+esc(l.ruleName||'—')+'</strong></td>' +
+      return '<tr><td class="mono">'+esc(new Date(l.created_at||l.ts).toLocaleString('en-IN'))+'</td>' +
+        '<td><strong>'+esc(l.rule_name||l.ruleName||'—')+'</strong></td>' +
         '<td><span class="rule-chip trigger" style="font-size:.73rem">'+esc(TRIGGER_LABELS[l.trigger]||l.trigger||'—')+'</span></td>' +
         '<td><span class="log-status '+sc+'">'+esc(l.status)+'</span></td>' +
-        '<td style="color:var(--muted);font-size:.82rem">'+esc(l.detail||'')+'</td>' +
+        '<td style="color:var(--muted);font-size:.82rem">'+esc(l.detail||l.action_taken||l.details||'')+'</td>' +
         '</tr>';
     }).join('') +
     '</tbody></table></div>';
 }
 
-function clearLog() {
+async function clearLog() {
   if (!confirm('Clear all execution history?')) return;
-  saveLog([]);
+  await clearLogDB();
   renderLog(); updateStats();
   toast('Log cleared', 'ok');
 }
@@ -915,58 +979,50 @@ function saveRule() {
   btn.textContent = '⏳ Saving...';
   btn.disabled = true;
 
-  setTimeout(function() {
-    var rules = loadRules();
+  setTimeout(async function() {
     var now   = new Date().toISOString();
     var id    = el('editRuleId').value;
+    
+    var payload = {
+      name: name, desc: el('rDesc').value.trim(),
+      trigger: trigger, actions: actions,
+      cond_dept: el('rCondDept').value,
+      cond_type: el('rCondType').value
+    };
 
-    if (id) {
-      rules = rules.map(function(r) {
-        if (r.id !== id) return r;
-        return Object.assign({}, r, {
-          name: name, desc: el('rDesc').value.trim(),
-          trigger: trigger, actions: actions,
-          cond_dept: el('rCondDept').value,
-          cond_type: el('rCondType').value,
-          updated_at: now
-        });
-      });
-      toast('Automation updated ✓', 'ok');
-    } else {
-      rules.push({
-        id: uid(), name: name, desc: el('rDesc').value.trim(),
-        trigger: trigger, actions: actions,
-        cond_dept: el('rCondDept').value,
-        cond_type: el('rCondType').value,
-        enabled: true, run_count: 0,
-        created_at: now
-      });
-      toast('Automation created ✓', 'ok');
+    try {
+        if (id) {
+          payload.updated_at = now;
+          await saveRuleToDB(payload, id);
+          toast('Automation updated ✓', 'ok');
+        } else {
+          payload.created_at = now;
+          payload.enabled = true;
+          payload.run_count = 0;
+          await saveRuleToDB(payload, null);
+          toast('Automation created ✓', 'ok');
+        }
+
+        closeRuleModal();
+        renderRules(); updateStats();
+    } catch(e) {
+        toast('Error saving automation: ' + e.message, 'err');
     }
-
-    saveRules(rules);
-    closeRuleModal();
-    renderRules(); updateStats();
     
     btn.textContent = origText;
     btn.disabled = false;
-  }, 600);
+  }, 100);
 }
 
-function deleteRule(id) {
+async function deleteRule(id) {
   if (!confirm('Delete this automation rule? This cannot be undone.')) return;
-  var rules = loadRules().filter(function(r){ return r.id !== id; });
-  saveRules(rules);
+  await deleteRuleFromDB(id);
   renderRules(); updateStats();
   toast('Automation deleted', 'ok');
 }
 
-function toggleRule(id, enabled) {
-  var rules = loadRules().map(function(r) {
-    if (r.id !== id) return r;
-    return Object.assign({}, r, { enabled: enabled });
-  });
-  saveRules(rules);
+async function toggleRule(id, enabled) {
+  await toggleRuleInDB(id, enabled);
   renderRules(); updateStats();
   toast(enabled ? '▶ Automation enabled' : '⏸ Automation disabled', 'info');
 }
@@ -982,7 +1038,7 @@ function simulateRule(id) {
   el('simBar').classList.add('running');
   toast('▶ Running "' + r.name + '"…', 'info');
 
-  setTimeout(function() {
+  setTimeout(async function() {
     el('simBar').classList.remove('running');
 
     var success = Math.random() > 0.1;
@@ -991,21 +1047,13 @@ function simulateRule(id) {
       ? actions.map(function(a){ return (ACTION_LABELS[a.type]||a.type) + (a.target?' → '+a.target:''); }).join(', ')
       : 'Simulated failure: target unreachable';
 
-    // Update run count
-    var updatedRules = rules.map(function(x) {
-      if (x.id !== id) return x;
-      return Object.assign({}, x, { run_count: (x.run_count||0) + 1 });
-    });
-    saveRules(updatedRules);
+    if (r.id) await saveRuleToDB({ run_count: (r.run_count||0) + 1 }, r.id);
 
-    // Log it
-    var log = loadLog();
-    log.push({
-      id: uid(), ruleName: r.name, trigger: r.trigger,
+    await logToDB({
+      rule_name: r.name, trigger: r.trigger,
       status: success ? 'success' : 'failed',
-      detail: detail, ts: new Date().toISOString()
+      detail: detail, created_at: new Date().toISOString(), ts: new Date().toISOString()
     });
-    saveLog(log);
 
     renderRules(); renderLog(); updateStats();
     toast(success ? '✅ Executed successfully' : '❌ Execution failed — see log', success ? 'ok' : 'err');
@@ -1259,74 +1307,75 @@ document.addEventListener('keydown', function(e) {
 /* ════════════════════════════════
    SEED DEFAULT RULES (first load)
 ════════════════════════════════ */
-function seedDefaults() {
+async function initDatabase() {
+  await fetchRulesFromDB();
+  await fetchLogFromDB();
+  await seedDefaults();
+  renderRules();
+  updateStats();
+}
+
+async function seedDefaults() {
   if (loadRules().length) return;
   var defaults = [
     {
-      id: uid(), name: 'Welcome New Employee', enabled: true, run_count: 24, is_ai: false,
+      name: 'Welcome New Employee', enabled: true, run_count: 24, is_ai: false,
       desc: 'Sends welcome email and creates onboarding tasks automatically',
       trigger: 'employee_joined', cond_dept: '', cond_type: '',
       actions: [
         { type: 'send_email',  target: '{employee.email}', msg: 'Welcome to the team!' },
         { type: 'create_task', target: 'hr@company.com',   msg: 'Complete onboarding checklist' },
         { type: 'send_slack',  target: '#general',          msg: '🎉 Welcome {employee.name}!' }
-      ],
-      created_at: new Date().toISOString()
+      ]
     },
     {
-      id: uid(), name: 'Probation Ending Alert', enabled: true, run_count: 9, is_ai: false,
+      name: 'Probation Ending Alert', enabled: true, run_count: 9, is_ai: false,
       desc: 'Notifies managers 14 days before probation ends',
       trigger: 'probation_ending', cond_dept: '', cond_type: '',
       actions: [
         { type: 'assign_manager',  target: '{employee.manager}', msg: 'Probation review needed' },
         { type: 'add_to_calendar', target: '{employee.manager}', msg: 'Schedule review' }
-      ],
-      created_at: new Date().toISOString()
+      ]
     },
     {
-      id: uid(), name: 'Work Anniversary Shoutout', enabled: true, run_count: 37, is_ai: false,
+      name: 'Work Anniversary Shoutout', enabled: true, run_count: 37, is_ai: false,
       desc: 'Celebrates work anniversaries in Slack and via email',
       trigger: 'work_anniversary', cond_dept: '', cond_type: '',
       actions: [
         { type: 'send_email', target: '{employee.email}', msg: 'Happy anniversary! 🎊' },
         { type: 'send_slack', target: '#general', msg: '🎉 Happy anniversary {employee.name}!' }
-      ],
-      created_at: new Date().toISOString()
+      ]
     },
     {
-      id: uid(), name: 'Weekly Leave Digest', enabled: false, run_count: 12, is_ai: false,
+      name: 'Weekly Leave Digest', enabled: false, run_count: 12, is_ai: false,
       desc: 'Sends HR a weekly summary of pending leave requests every Monday',
       trigger: 'schedule', cond_dept: '', cond_type: '',
       actions: [
         { type: 'send_email', target: 'hr@company.com', msg: 'Pending leave requests need review' }
-      ],
-      created_at: new Date().toISOString()
+      ]
     }
   ];
-  saveRules(defaults);
+  for(var r of defaults) { await saveRuleToDB(r, null); }
 
-  // Seed some log entries
   var log = [];
   defaults.forEach(function(r) {
     for (var i = 0; i < (r.run_count > 5 ? 5 : r.run_count); i++) {
-      log.push({
-        id: uid(), ruleName: r.name, trigger: r.trigger,
-        status: Math.random() > 0.08 ? 'success' : 'failed',
-        detail: r.actions.map(function(a){ return ACTION_LABELS[a.type]; }).join(', '),
-        ts: new Date(Date.now() - Math.random() * 7 * 24 * 60 * 60 * 1000).toISOString()
-      });
+        log.push({
+            rule_name: r.name, trigger: r.trigger,
+            status: Math.random() > 0.08 ? 'success' : 'failed',
+            detail: r.actions.map(function(a){ return ACTION_LABELS[a.type]; }).join(', '),
+            created_at: new Date(Date.now() - Math.random() * 7 * 24 * 60 * 60 * 1000).toISOString()
+        });
     }
   });
-  saveLog(log);
+  for(var l of log) { await logToDB(l); }
 }
 
 /* ════════════════════════════════
    INIT
 ════════════════════════════════ */
 document.addEventListener('DOMContentLoaded', function() {
-  seedDefaults();
-  renderRules();
-  updateStats();
+  initDatabase();
 });
 </script>
 </body>

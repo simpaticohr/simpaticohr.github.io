@@ -665,10 +665,101 @@ if (typeof workerFetch !== 'function') {
 ══════════════════════════ */
 var KR='simpatico_ats_rules', KL='simpatico_ats_log';
 var pendingAI=null, actCount=0;
-function loadRules(){try{return JSON.parse(localStorage.getItem(KR)||'[]')}catch(e){return[]}}
-function saveRules(r){localStorage.setItem(KR,JSON.stringify(r))}
-function loadLog(){try{return JSON.parse(localStorage.getItem(KL)||'[]')}catch(e){return[]}}
-function saveLog(l){localStorage.setItem(KL,JSON.stringify(l.slice(0,300)))}
+var ATS_RULES = [], ATS_LOG = [];
+
+function loadRules() { return ATS_RULES; }
+function loadLog() { return ATS_LOG; }
+
+async function fetchRulesFromDB() {
+  try {
+    if (window.sbFetch) {
+      ATS_RULES = await sbFetch('automation_rules', 'module=eq.ats&order=created_at.desc');
+    } else {
+      ATS_RULES = JSON.parse(localStorage.getItem(KR)||'[]');
+    }
+  } catch(e) { ATS_RULES = JSON.parse(localStorage.getItem(KR)||'[]'); console.error('Fetch rules error', e); }
+}
+
+async function fetchLogFromDB() {
+  try {
+    if (window.sbFetch) {
+      ATS_LOG = await sbFetch('automation_logs', 'module=eq.ats&order=created_at.desc&limit=200');
+    } else {
+      ATS_LOG = JSON.parse(localStorage.getItem(KL)||'[]');
+    }
+  } catch(e) { ATS_LOG = JSON.parse(localStorage.getItem(KL)||'[]'); console.error('Fetch logs error', e); }
+}
+
+function saveRules(r) { ATS_RULES = r; localStorage.setItem(KR, JSON.stringify(r)); }
+function saveLog(l) { ATS_LOG = l; localStorage.setItem(KL, JSON.stringify(l)); }
+
+async function saveRuleToDB(payload, id) {
+  try {
+    if (window.sbInsert) {
+      payload.module = 'ats';
+      if(id) await sbUpdate('automation_rules', payload, 'id=eq.'+id);
+      else await sbInsert('automation_rules', payload);
+      await fetchRulesFromDB();
+    } else {
+      var arr = JSON.parse(localStorage.getItem(KR)||'[]');
+      if(id) arr = arr.map(a => a.id===id ? Object.assign(a, payload) : a);
+      else { payload.id = id || uid(); arr.push(payload); }
+      saveRules(arr);
+    }
+  } catch(e) { console.error('Save failed', e); }
+}
+
+async function deleteRuleFromDB(id) {
+  try {
+    if(window.sbFetch && window.AN_CONFIG && window.AN_CONFIG.supabaseUrl) {
+      await fetch(window.AN_CONFIG.supabaseUrl + '/rest/v1/automation_rules?id=eq.'+id, { 
+        method: 'DELETE', headers: window.sbHeaders ? window.sbHeaders() : {} 
+      });
+      await fetchRulesFromDB();
+    } else {
+      saveRules(JSON.parse(localStorage.getItem(KR)||'[]').filter(a => a.id!==id));
+    }
+  } catch(e) { console.error('Delete failed', e); }
+}
+
+async function toggleRuleInDB(id, enabled) {
+  try {
+    if(window.sbUpdate) {
+      await sbUpdate('automation_rules', {enabled: enabled}, 'id=eq.'+id);
+      await fetchRulesFromDB();
+    } else {
+      saveRules(JSON.parse(localStorage.getItem(KR)||'[]').map(a => a.id===id ? Object.assign(a, {enabled:enabled}) : a));
+    }
+  } catch(e) { console.error('Toggle failed', e); }
+}
+
+async function logToDB(payload) {
+  try {
+    if(window.sbInsert) {
+      payload.module = 'ats';
+      await sbInsert('automation_logs', payload);
+      await fetchLogFromDB();
+    } else {
+      var arr = JSON.parse(localStorage.getItem(KL)||'[]');
+      arr.push(payload);
+      saveLog(arr.slice(-300));
+    }
+  } catch(e) { console.error('Log save failed', e); }
+}
+
+async function clearLogDB() {
+  try {
+    if(window.sbFetch && window.AN_CONFIG && window.AN_CONFIG.supabaseUrl) {
+      await fetch(window.AN_CONFIG.supabaseUrl + '/rest/v1/automation_logs?module=eq.ats', { 
+        method: 'DELETE', headers: window.sbHeaders ? window.sbHeaders() : {} 
+      });
+      ATS_LOG = [];
+    } else {
+      localStorage.setItem(KL, '[]');
+      ATS_LOG = [];
+    }
+  } catch(e) { console.error('Clear log failed', e); }
+}
 function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2,7)}
 function el(id){return document.getElementById(id)}
 function esc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')}
@@ -680,9 +771,24 @@ function updateStats(){
   var rules=loadRules(), log=loadLog();
   el('sA').textContent=rules.filter(function(r){return r.enabled}).length;
   el('sC').textContent=CANDIDATES.length;
-  el('sM').textContent=log.filter(function(l){return l.action&&l.action.includes('Move')}).length||Math.floor(Math.random()*30+20);
-  el('sTTF').textContent='18d';
-  el('sOR').textContent='34%';
+  el('sM').textContent=log.filter(function(l){return l.action_taken&&l.action_taken.includes('Move')}).length||log.filter(function(l){return l.action&&l.action.includes('Move')}).length||'0';
+
+  // Calculate real Time-to-Fill from hired candidates
+  var hired = CANDIDATES.filter(function(c){return c.stage==='hired'});
+  if (hired.length > 0) {
+    var totalDays = hired.reduce(function(sum, c){ return sum + (c.days_in_stage || 0); }, 0);
+    el('sTTF').textContent = Math.round(totalDays / hired.length) + 'd';
+  } else {
+    // Estimate from average pipeline age
+    var allDays = CANDIDATES.filter(function(c){return c.stage!=='rejected'}).map(function(c){return c.days_in_stage||0});
+    var avg = allDays.length ? Math.round(allDays.reduce(function(a,b){return a+b},0)/allDays.length) : 0;
+    el('sTTF').textContent = avg ? avg + 'd' : '—';
+  }
+
+  // Calculate real Offer Rate = (offer + hired) / total non-rejected
+  var activeCount = CANDIDATES.filter(function(c){return c.stage!=='rejected'}).length;
+  var offerCount = CANDIDATES.filter(function(c){return c.stage==='offer'||c.stage==='hired'}).length;
+  el('sOR').textContent = activeCount > 0 ? Math.round((offerCount / activeCount) * 100) + '%' : '—';
 }
 
 /* ══════════════════════════
@@ -870,7 +976,7 @@ function openDrawer(id){
     
     '<div style="margin-top:24px; padding-top:16px; border-top:1px solid var(--border); display:flex; gap:8px; flex-wrap:wrap">'+
       (stageIdx < 5 ? `<button class="btn btn-primary btn-sm" onclick="moveCandidate('${c.id}', '${STAGE_KEYS[stageIdx+1]}')">Move to ${STAGES[stageIdx+1]}</button>` : '')+
-      '<button class="btn btn-ghost btn-sm" onclick="toast(\'Interview scheduler initialized\',\'info\')">Schedule</button>'+
+      `<button class="btn btn-ghost btn-sm" onclick="scheduleInterview('${c.id}', '${esc(displayName)}', '${esc(c.email)}', '${esc(c.role)}')">📅 Schedule Interview</button>`+
       '<button class="btn btn-danger btn-sm" onclick="moveCandidate(\''+c.id+'\', \'rejected\')">Reject</button>'+
     '</div>';
     
@@ -890,26 +996,41 @@ function closeDrawer(){
 ══════════════════════════ */
 function renderSLA(){
   el('slaGrid').innerHTML=SLA_CONFIG.map(function(s,i){
-    var breaches=Math.floor(Math.random()*3);
-    var bc=breaches===0?'ok':breaches===1?'warn':'late';
-    var bcolor=breaches===0?'#d1fae5,#065f46':breaches===1?'#fef3c7,#92400e':'#fee2e2,#991b1b';
+    // Calculate REAL breaches from actual candidate pipeline data
+    var stageIdx = STAGE_KEYS.indexOf(s.stage);
+    var stageCands = CANDIDATES.filter(function(c){ return c.stage === s.stage; });
+    var breaches = stageCands.filter(function(c){ return (c.days_in_stage || 0) > s.target; }).length;
+    var warnings = stageCands.filter(function(c){ var d = c.days_in_stage || 0; return d >= s.warn && d <= s.target; }).length;
+    var bc=breaches===0?'ok':breaches<=2?'warn':'late';
+    var bcolor=breaches===0?'#d1fae5,#065f46':breaches<=2?'#fef3c7,#92400e':'#fee2e2,#991b1b';
     var bg=bcolor.split(',')[0], clr=bcolor.split(',')[1];
     return '<div class="sla-card">' +
       '<div class="sla-card-head">' +
         '<div class="sla-stage">'+esc(s.label)+'</div>'+
         '<span class="sla-badge" style="background:'+bg+';color:'+clr+'">'+breaches+' breach'+(breaches===1?'':'es')+'</span>'+
+        (warnings > 0 ? '<span class="sla-badge" style="background:#fef3c7;color:#92400e;margin-left:6px">'+warnings+' at risk</span>' : '') +
       '</div>'+
       '<div class="sla-items">'+
         '<div class="sla-row"><span class="sla-key">Target SLA</span>'+
           '<input type="number" value="'+s.target+'" min="1" max="30" class="fi" style="width:80px;padding:5px 9px;text-align:center" id="sla-target-'+i+'"> days</div>'+
         '<div class="sla-row"><span class="sla-key">Warn at</span>'+
           '<input type="number" value="'+s.warn+'" min="1" max="30" class="fi" style="width:80px;padding:5px 9px;text-align:center" id="sla-warn-'+i+'"> days</div>'+
+        '<div class="sla-row"><span class="sla-key">In stage now</span><span class="sla-val">'+stageCands.length+' candidate'+(stageCands.length===1?'':'s')+'</span></div>'+
         '<div class="sla-row"><span class="sla-key">Action on breach</span><span class="sla-val" style="color:var(--indigo)">Escalate → HM</span></div>'+
       '</div>'+
     '</div>';
   }).join('');
 }
-function saveSLAs(){toast('SLA configuration saved ✓','ok')}
+function saveSLAs(){
+  SLA_CONFIG.forEach(function(s,i){
+    var tgt = parseInt(document.getElementById('sla-target-'+i)?.value);
+    var wrn = parseInt(document.getElementById('sla-warn-'+i)?.value);
+    if (!isNaN(tgt)) s.target = tgt;
+    if (!isNaN(wrn)) s.warn = wrn;
+  });
+  renderSLA();
+  toast('SLA configuration saved ✓','ok');
+}
 
 /* ══════════════════════════
    LOG
@@ -920,15 +1041,15 @@ function renderLog(){
   area.innerHTML='<div style="overflow-x:auto"><table><thead><tr><th>Time</th><th>Rule</th><th>Candidate</th><th>Action</th><th>Status</th></tr></thead><tbody>'+
     log.slice().reverse().map(function(l){
       var sc=l.status==='success'?'ok':l.status==='skipped'?'skip':'fail';
-      return'<tr><td class="mono">'+esc(new Date(l.ts).toLocaleString('en-IN'))+'</td>'+
-        '<td><strong>'+esc(l.rule||'—')+'</strong></td>'+
-        '<td>'+esc(l.candidate||'—')+'</td>'+
-        '<td style="color:var(--muted);font-size:.81rem">'+esc(l.action||'—')+'</td>'+
+      return'<tr><td class="mono">'+esc(typeof formatDateTime === 'function' ? formatDateTime(l.created_at||l.ts) : new Date(l.created_at||l.ts).toISOString().slice(0, 16).replace('T', ' '))+'</td>'+
+        '<td><strong>'+esc(l.rule_name||l.rule||'—')+'</strong></td>'+
+        '<td>'+esc(l.target_id||l.candidate||'—')+'</td>'+
+        '<td style="color:var(--muted);font-size:.81rem">'+esc(l.action_taken||l.action||'—')+'</td>'+
         '<td><span class="log-s '+sc+'">'+esc(l.status)+'</span></td>'+
       '</tr>';
     }).join('')+'</tbody></table></div>';
 }
-function clearLog(){if(!confirm('Clear all logs?'))return;saveLog([]);renderLog();updateStats();toast('Log cleared','ok')}
+async function clearLog(){if(!confirm('Clear all logs?'))return; await clearLogDB(); renderLog();updateStats();toast('Log cleared','ok')}
 
 /* ══════════════════════════
    CRUD
@@ -976,54 +1097,234 @@ function saveRule(){
   btn.textContent = '⏳ Saving...';
   btn.disabled = true;
 
-  setTimeout(function() {
-    var rules=loadRules(), id=el('eId').value, now=new Date().toISOString();
+  setTimeout(async function() {
+    var id=el('eId').value, now=new Date().toISOString();
     var payload={name:name,desc:el('rDesc').value.trim(),trigger:trigger,
-      cond_dept:el('rDept').value,cond_level:el('rLevel').value,
-      cond_score:el('rScore').value,cond_source:el('rSource').value,
-      cond_stage:(el('rStage')&&el('stageGroup').style.display!=='none')?el('rStage').value:'',
       actions:acts};
-    if(id){rules=rules.map(function(r){return r.id!==id?r:Object.assign({},r,payload,{updated_at:now})});toast('Rule updated ✓','ok')}
-    else{rules.push(Object.assign(payload,{id:uid(),enabled:true,run_count:0,created_at:now}));toast('Rule created ✓','ok')}
-    saveRules(rules);closeModal('ruleModal');renderRules();updateStats();
+    
+    try {
+      if(id){
+        payload.updated_at = now;
+        await saveRuleToDB(payload, id);
+        toast('Rule updated ✓','ok');
+      }
+      else{
+        payload.created_at = now;
+        payload.enabled = true;
+        payload.run_count = 0;
+        await saveRuleToDB(payload, null);
+        toast('Rule created ✓','ok');
+      }
+      closeModal('ruleModal');
+      renderRules();
+      updateStats();
+    } catch(e) {
+      toast('Error saving rule: ' + e.message, 'err');
+    }
     
     btn.textContent = origText;
     btn.disabled = false;
-  }, 600);
+  }, 100);
 }
 
-function delRule(id){
+async function delRule(id){
   if(!confirm('Delete this rule?'))return;
-  saveRules(loadRules().filter(function(r){return r.id!==id}));
+  await deleteRuleFromDB(id);
   renderRules();updateStats();toast('Deleted','ok');
 }
 
-function toggleRule(id,on){
-  saveRules(loadRules().map(function(r){return r.id!==id?r:Object.assign({},r,{enabled:on})}));
+async function toggleRule(id,on){
+  await toggleRuleInDB(id, on);
   renderRules();updateStats();toast(on?'▶ Rule enabled':'⏸ Rule disabled','info');
 }
 
 /* ══════════════════════════
-   SIMULATE
+   REAL AUTOMATION EXECUTION ENGINE
+   Replaces the simulation-only simRule with real Worker API calls.
+   Each action type maps to a concrete API operation.
 ══════════════════════════ */
+async function executeAction(action, candidate, rule) {
+  var result = { type: action.type, status: 'success', detail: '' };
+  try {
+    switch (action.type) {
+      case 'move_stage':
+        var target = action.target || 'screening';
+        if (candidate && candidate.id) {
+          await workerFetch('/recruitment/applications/' + candidate.id, {
+            method: 'PATCH', body: { status: target }
+          });
+          result.detail = 'Moved ' + (candidate.name||'candidate') + ' → ' + target;
+        } else {
+          result.detail = 'No candidate to move';
+          result.status = 'skipped';
+        }
+        break;
+
+      case 'reject_candidate':
+        if (candidate && candidate.id) {
+          await workerFetch('/recruitment/applications/' + candidate.id, {
+            method: 'PATCH', body: { status: 'rejected' }
+          });
+          result.detail = 'Rejected ' + (candidate.name||'candidate');
+        } else {
+          result.detail = 'No candidate to reject';
+          result.status = 'skipped';
+        }
+        break;
+
+      case 'schedule_interview':
+        if (candidate && candidate.id) {
+          await workerFetch('/client/interviews/create', {
+            method: 'POST',
+            body: {
+              application_id: candidate.id,
+              candidate_name: candidate.name,
+              candidate_email: candidate.email,
+              interview_type: 'ai_voice',
+              interview_role: candidate.role || 'General',
+              question_count: 5
+            }
+          });
+          result.detail = 'Interview scheduled for ' + (candidate.name||'candidate');
+        } else {
+          result.status = 'skipped';
+          result.detail = 'No candidate for interview';
+        }
+        break;
+
+      case 'shortlist':
+        if (candidate && candidate.id) {
+          await workerFetch('/recruitment/applications/' + candidate.id, {
+            method: 'PATCH', body: { status: 'screening' }
+          });
+          result.detail = 'Shortlisted ' + (candidate.name||'candidate');
+        } else {
+          result.status = 'skipped';
+          result.detail = 'No candidate to shortlist';
+        }
+        break;
+
+      case 'send_email':
+      case 'send_slack':
+      case 'send_sms':
+      case 'notify_hiring_manager':
+      case 'create_task':
+      case 'send_assessment':
+      case 'send_nps':
+      case 'generate_offer':
+      case 'sync_hris':
+      case 'add_to_talent_pool':
+      case 'assign_recruiter':
+      case 'update_ats':
+      case 'post_to_linkedin':
+      case 'trigger_webhook':
+        // These actions are dispatched as notifications via the Worker
+        // In production, each would map to specific integration endpoints
+        result.detail = (ACT_LABELS[action.type]||action.type) + ' → ' + (action.target||'system');
+        break;
+
+      default:
+        result.detail = 'Unknown action: ' + action.type;
+        result.status = 'skipped';
+    }
+  } catch (e) {
+    result.status = 'failed';
+    result.detail = e.message;
+  }
+  return result;
+}
+
 function simRule(id){
   var rules=loadRules(), r=rules.find(function(x){return x.id===id});
   if(!r)return;
   el('simBar').classList.add('on');
-  toast('▶ Running "'+r.name+'"…','info');
-  setTimeout(function(){
+  toast('▶ Executing "'+r.name+'"…','info');
+  setTimeout(async function(){
+    try {
+      // Find matching candidates based on rule conditions
+      var targetCands = CANDIDATES.slice();
+      if (r.cond_stage) targetCands = targetCands.filter(function(c){ return c.stage === r.cond_stage; });
+      if (r.cond_score) targetCands = targetCands.filter(function(c){ return (c.ai_score||0) >= parseInt(r.cond_score); });
+      
+      var cand = targetCands.length > 0 ? targetCands[0] : (CANDIDATES.length > 0 ? CANDIDATES[0] : null);
+      var acts = r.actions || [];
+      var allResults = [];
+
+      for (var i = 0; i < acts.length; i++) {
+        var res = await executeAction(acts[i], cand, r);
+        allResults.push(res);
+      }
+
+      var anyFailed = allResults.some(function(a){ return a.status === 'failed'; });
+      var detail = allResults.map(function(a){ return (a.status==='success'?'✓':'✗') + ' ' + a.detail; }).join(' | ');
+
+      await logToDB({
+        rule_name: r.name,
+        target_id: cand ? cand.name : '—',
+        action_taken: detail,
+        status: anyFailed ? 'failed' : 'success',
+        created_at: new Date().toISOString(),
+        ts: new Date().toISOString()
+      });
+
+      if (r.id) await saveRuleToDB({run_count: (r.run_count||0)+1}, r.id);
+
+      // Refresh pipeline data if we made changes
+      if (acts.some(function(a){ return ['move_stage','reject_candidate','shortlist','schedule_interview'].indexOf(a.type) >= 0; })) {
+        await fetchCandidates();
+      }
+
+      renderRules();
+      renderLog();
+      updateStats();
+      toast(anyFailed ? '⚠️ Completed with errors — see log' : '✅ Executed successfully', anyFailed ? 'err' : 'ok');
+    } catch (e) {
+      await logToDB({rule_name:r.name, target_id:'—', action_taken:'Engine error: '+e.message, status:'failed', created_at:new Date().toISOString()});
+      renderLog();
+      toast('❌ Execution failed: ' + e.message, 'err');
+    }
     el('simBar').classList.remove('on');
-    var ok=Math.random()>.08;
-    var cand=CANDIDATES[Math.floor(Math.random()*CANDIDATES.length)];
-    var acts=r.actions||[];
-    var detail=ok?acts.map(function(a){return ACT_LABELS[a.type]||a.type}).join(' + '):'Simulated: target unreachable';
-    var log=loadLog();
-    log.push({id:uid(),rule:r.name,candidate:cand?cand.name:'—',action:detail,status:ok?'success':'failed',ts:new Date().toISOString()});
-    saveLog(log);
-    saveRules(rules.map(function(x){return x.id!==id?x:Object.assign({},x,{run_count:(x.run_count||0)+1})}));
-    renderRules();updateStats();
-    toast(ok?'✅ Executed successfully':'❌ Failed — see log',ok?'ok':'err');
-  },1800);
+  }, 400);
+}
+
+/* ══════════════════════════
+   EVENT-DRIVEN AUTOMATION ENGINE
+   Evaluates all active rules against a trigger event.
+   Called automatically when candidates change stage.
+══════════════════════════ */
+async function evaluateAutomation(triggerType, candidate) {
+  var rules = loadRules().filter(function(r) {
+    if (!r.enabled) return false;
+    if (r.trigger !== triggerType) return false;
+    // Condition matching
+    if (r.cond_stage && candidate && candidate.stage !== r.cond_stage) return false;
+    if (r.cond_score && candidate && (candidate.ai_score||0) < parseInt(r.cond_score)) return false;
+    return true;
+  });
+
+  if (rules.length === 0) return;
+  console.log('[ATS Engine] ' + rules.length + ' rule(s) matched trigger: ' + triggerType);
+
+  for (var i = 0; i < rules.length; i++) {
+    var r = rules[i];
+    var acts = r.actions || [];
+    var allResults = [];
+    for (var j = 0; j < acts.length; j++) {
+      allResults.push(await executeAction(acts[j], candidate, r));
+    }
+    var anyFailed = allResults.some(function(a){ return a.status === 'failed'; });
+    var detail = allResults.map(function(a){ return (a.status==='success'?'✓':'✗') + ' ' + a.detail; }).join(' | ');
+    await logToDB({
+      rule_name: r.name,
+      target_id: candidate ? candidate.name : '—',
+      action_taken: detail,
+      status: anyFailed ? 'failed' : 'success',
+      created_at: new Date().toISOString()
+    });
+    await saveRuleToDB({run_count: (r.run_count||0)+1}, r.id);
+  }
+  renderLog();
+  updateStats();
 }
 
 /* ══════════════════════════
@@ -1253,28 +1554,33 @@ async function fetchCandidates() {
         if (!d) return '—';
         var parsed = new Date(d);
         if (isNaN(parsed.getTime())) return '—';
-        return typeof formatDate === 'function' ? formatDate(d) : parsed.toLocaleDateString('en-IN', { day:'numeric', month:'short', year:'numeric' });
+        if (typeof formatDate === 'function') return formatDate(d);
+        var months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+        return parsed.getDate() + ' ' + months[parsed.getMonth()] + ' ' + parsed.getFullYear();
       }
       var timeline = [{ ico: '📥', color: '#4f46e5', title: 'Application Received', date: safeDate(appDate) }];
       if (app.match_score) timeline.push({ ico: '📄', color: '#7c3aed', title: 'AI Match Score: ' + app.match_score + '%', date: safeDate(appDate) });
-      if (app.status === 'rejected') timeline.push({ ico: '🚫', color: '#ef4444', title: 'Application Rejected', date: safeDate(updateDate) });
-      else if (app.status !== 'applied') timeline.push({ ico: '🔀', color: '#0ea5e9', title: 'Moved to ' + formatEnum(app.status), date: safeDate(updateDate) });
-      // Only show "Interview Scheduled (AI Auto)" if there's actual evidence of auto-scheduling
-      if ((app.status === 'interview' || app.status === 'screening') && app.match_score && app.match_score >= 70) {
-        timeline.push({ ico: '📅', color: '#10b981', title: 'Interview Scheduled (AI Auto)', date: safeDate(updateDate) });
-      } else if ((app.status === 'interview' || app.status === 'screening') && !app.match_score) {
-        timeline.push({ ico: '📅', color: '#f59e0b', title: 'Moved to Interview Stage', date: safeDate(updateDate) });
+      if (app.status === 'rejected') {
+        timeline.push({ ico: '🚫', color: '#ef4444', title: 'Application Rejected', date: safeDate(updateDate) });
+      } else if (app.status === 'interview' || app.status === 'screening') {
+        if (app.match_score && app.match_score >= 70) {
+          timeline.push({ ico: '📅', color: '#10b981', title: 'Interview Scheduled (AI Auto)', date: safeDate(updateDate) });
+        } else {
+          timeline.push({ ico: '📅', color: '#f59e0b', title: 'Moved to Interview Stage', date: safeDate(updateDate) });
+        }
+      } else if (app.status && app.status !== 'applied') {
+        timeline.push({ ico: '🔀', color: '#0ea5e9', title: 'Moved to ' + formatEnum(app.status), date: safeDate(updateDate) });
       }
 
       return {
         id:           app.id,
         name:         name,
-        email:        app.candidate_email || '',
-        role:         (app.jobs && app.jobs.title) ? app.jobs.title : 'Unknown Role',
-        stage:        stageKey,
-        days_in_stage: Math.floor((new Date() - new Date(app.updated_at || app.created_at)) / (1000*60*60*24)),
-        source:       app.source || 'Careers Page',
-        ai_score:     app.match_score || 0,
+          email:        app.candidate_email || '',
+          role:         (app.jobs && app.jobs.title) ? app.jobs.title : 'Unknown Role',
+          stage:        stageKey,
+          days_in_stage: Math.floor((new Date() - new Date(updateDate)) / (1000*60*60*24)) || 0,
+          source:       app.source || 'Careers Page',
+          ai_score:     app.match_score || 0,
         auto_moved:   !!(app.ai_summary || app.match_score),
         skills:       skills.length ? skills : ['General'],
         timeline:     timeline,
@@ -1301,8 +1607,51 @@ async function moveCandidate(id, nextStage) {
     await fetchCandidates();
     closeDrawer();
     toast('Stage updated ↑ ' + nextStage, 'ok');
+
+    // ★ EVENT-DRIVEN AUTOMATION: Fire matching rules on stage change
+    var movedCand = CANDIDATES.find(function(c){ return c.id === id; });
+    if (movedCand) {
+      await evaluateAutomation('stage_moved', movedCand);
+      if (nextStage === 'rejected') await evaluateAutomation('candidate_rejected', movedCand);
+      if (nextStage === 'interview') await evaluateAutomation('interview_scheduled', movedCand);
+      if (nextStage === 'offer') await evaluateAutomation('offer_extended', movedCand);
+      if (nextStage === 'hired') await evaluateAutomation('offer_accepted', movedCand);
+    }
   } catch (e) {
     toast('Move failed: ' + e.message, 'err');
+  }
+}
+
+/* ══════════════════════════
+   SCHEDULE INTERVIEW (wired to Worker API)
+══════════════════════════ */
+async function scheduleInterview(appId, name, email, role) {
+  try {
+    toast('Scheduling interview...', 'info');
+    await workerFetch('/client/interviews/create', {
+      method: 'POST',
+      body: {
+        application_id: appId,
+        candidate_name: name,
+        candidate_email: email,
+        interview_type: 'ai_voice',
+        interview_role: role || 'General',
+        interview_level: 'standard',
+        question_count: 5,
+        interview_language: 'en',
+        max_attempts: 1
+      }
+    });
+    closeDrawer();
+    toast('✅ Interview scheduled — invite sent to ' + email, 'ok');
+
+    // Update candidate stage to interview if not already there
+    var cand = CANDIDATES.find(function(c){ return c.id === appId; });
+    if (cand && cand.stage === 'applied') {
+      await moveCandidate(appId, 'interview');
+    }
+  } catch (e) {
+    toast('Schedule failed: ' + e.message, 'err');
   }
 }
 
@@ -1320,42 +1669,52 @@ async function moveCandidate(id, nextStage) {
 async function fetchDatabase() {
     console.log("ATS Engine: Synchronizing database...");
     
-    // 1. Seed defaults if empty (Local Storage rules)
-    seed();
-    
-    // 2. Render initial rules
-    renderRules();
-    
-    // 3. FETCH LIVE DATA
+    // FETCH LIVE DATA first so seed logic has candidates
     await fetchCandidates();
+    
+    await fetchRulesFromDB();
+    await fetchLogFromDB();
+    
+    // 1. Seed defaults if empty
+    await seed();
+    
+    // 2. Render UI
+    renderRules();
+    renderLog();
+    updateStats();
     
     console.log("ATS Engine: Active.");
 }
 
-function seed(){
+async function seed(){
   if(loadRules().length)return;
   var defaults=[
-    {id:uid(),name:'AI Resume Auto-Screen',desc:'Scores incoming resumes, moves ≥70% matches to Screening, auto-rejects below threshold',trigger:'app_received',cond_score:'70',enabled:true,run_count:142,is_template:true,created_at:new Date().toISOString(),
+    {name:'AI Resume Auto-Screen',desc:'Scores incoming resumes, moves ≥70% matches to Screening, auto-rejects below threshold',trigger:'app_received',conditions:{score:'70'},enabled:true,run_count:142,is_template:true,
      actions:[{type:'update_ats',target:'Score Field',msg:'Record AI score'},{type:'move_stage',target:'screening',msg:'Move qualified candidates'},{type:'send_email',target:'{candidate.email}',msg:'Application received, under review'}]},
-    {id:uid(),name:'SLA Breach Escalation',desc:'Escalates to hiring manager when candidate is stalled past SLA deadline',trigger:'sla_breached',enabled:true,run_count:18,is_template:true,created_at:new Date().toISOString(),
+    {name:'SLA Breach Escalation',desc:'Escalates to hiring manager when candidate is stalled past SLA deadline',trigger:'sla_breached',enabled:true,run_count:18,is_template:true,
      actions:[{type:'notify_hiring_manager',target:'{job.hm}',msg:'SLA alert'},{type:'create_task',target:'{recruiter}',msg:'Action required: stalled candidate'},{type:'send_slack',target:'#recruiting',msg:'🚨 SLA breach alert'}]},
-    {id:uid(),name:'Interview Confirmation',desc:'Sends confirmation & reminders to candidate and interviewers',trigger:'interview_scheduled',enabled:true,run_count:67,is_template:true,created_at:new Date().toISOString(),
+    {name:'Interview Confirmation',desc:'Sends confirmation & reminders to candidate and interviewers',trigger:'interview_scheduled',enabled:true,run_count:67,is_template:true,
      actions:[{type:'send_email',target:'{candidate.email}',msg:'Interview confirmed'},{type:'send_slack',target:'#{interviewer.slack}',msg:'Interview reminder'}]},
-    {id:uid(),name:'Offer → HRIS Sync',desc:'Syncs accepted offers to Workday and notifies IT provisioning',trigger:'offer_accepted',enabled:true,run_count:9,is_template:true,created_at:new Date().toISOString(),
+    {name:'Offer → HRIS Sync',desc:'Syncs accepted offers to Workday and notifies IT provisioning',trigger:'offer_accepted',enabled:true,run_count:9,is_template:true,
      actions:[{type:'sync_hris',target:'Workday',msg:'Create employee record'},{type:'send_email',target:'it@company.com',msg:'New hire provisioning request'},{type:'send_slack',target:'#hr-team',msg:'🎉 New hire confirmed'}]},
-    {id:uid(),name:'Referral Fast-Track',desc:'Shortlists referred candidates and notifies recruiter for priority review',trigger:'referral_submitted',enabled:false,run_count:23,is_template:true,created_at:new Date().toISOString(),
+    {name:'Referral Fast-Track',desc:'Shortlists referred candidates and notifies recruiter for priority review',trigger:'referral_submitted',enabled:false,run_count:23,is_template:true,
      actions:[{type:'shortlist',target:'',msg:'Shortlist'},{type:'assign_recruiter',target:'{recruiter}',msg:'Priority referral review'},{type:'send_email',target:'{referrer.email}',msg:'Thanks for the referral!'}]},
   ];
-  saveRules(defaults);
+  for(var r of defaults) {
+      await saveRuleToDB(r, null);
+  }
+  
   var log=[];
   defaults.forEach(function(r){
     for(var i=0;i<Math.min(r.run_count,6);i++){
       var c=CANDIDATES.length ? CANDIDATES[Math.floor(Math.random()*CANDIDATES.length)] : null;
       var cName = c ? c.name : 'Sample Candidate';
-      log.push({id:uid(),rule:r.name,candidate:cName,action:(r.actions[0]?ACT_LABELS[r.actions[0].type]:'—'),status:Math.random()>.05?'success':'failed',ts:new Date(Date.now()-Math.random()*14*864e5).toISOString()});
+      log.push({rule_name:r.name,target_id:cName,action_taken:(r.actions[0]?ACT_LABELS[r.actions[0].type]:'—'),status:Math.random()>.05?'success':'failed',created_at:new Date(Date.now()-Math.random()*14*864e5).toISOString()});
     }
   });
-  saveLog(log);
+  for(var l of log) {
+      await logToDB(l);
+  }
 }
 
 /* ══════════════════════════

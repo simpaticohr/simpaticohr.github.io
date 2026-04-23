@@ -73,21 +73,34 @@ async function loadCheckinsAndKudos() {
     let qCheck = client.from('performance_checkins').select('*').order('date', {ascending: false});
     if(cid) qCheck = qCheck.eq('tenant_id', cid);
     const { data: cData, error: cErr } = await qCheck;
-    if(cErr) throw cErr;
+    if(cErr) {
+      // Table doesn't exist — silently use localStorage (not a real error)
+      if (cErr.code === '42P01' || cErr.message?.includes('does not exist') || cErr.message?.includes('schema cache')) {
+        throw { silent: true, message: 'performance_checkins table not found' };
+      }
+      throw cErr;
+    }
     allCheckins = cData || [];
 
     // Fetch Kudos
     let qKudos = client.from('performance_kudos').select('*').order('date', {ascending: false});
     if(cid) qKudos = qKudos.eq('tenant_id', cid);
     const { data: kData, error: kErr } = await qKudos;
-    if(kErr) throw kErr;
+    if(kErr) {
+      if (kErr.code === '42P01' || kErr.message?.includes('does not exist') || kErr.message?.includes('schema cache')) {
+        throw { silent: true, message: 'performance_kudos table not found' };
+      }
+      throw kErr;
+    }
     allKudos = kData || [];
     
     // Save to local sync
     localStorage.setItem('hr_perf_checkins', JSON.stringify(allCheckins));
     localStorage.setItem('hr_perf_kudos', JSON.stringify(allKudos));
   } catch(e) {
-    console.warn('[performance] DB fetch for checkins/kudos failed, falling back to localStorage.', e.message);
+    if (!e.silent) {
+      console.warn('[performance] DB fetch for checkins/kudos failed, falling back to localStorage.', e.message);
+    }
     allCheckins = JSON.parse(localStorage.getItem('hr_perf_checkins') || '[]');
     allKudos    = JSON.parse(localStorage.getItem('hr_perf_kudos') || '[]');
   }
@@ -299,7 +312,10 @@ async function loadUser() {
 }
 
 async function loadCycles() {
+  // Pre-check: skip Worker call if no auth token available yet
+  const hasToken = typeof getAuthToken === 'function' && getAuthToken();
   try {
+    if (!hasToken) throw new Error('No auth token — skipping Worker');
     const result = await perfApiCall('/performance/cycles');
     // Worker may return { cycles: [...] }, { data: [...] }, or an array directly
     // Defensively extract an array from any shape of response
@@ -314,7 +330,7 @@ async function loadCycles() {
     allCycles = parsed || [];
     console.log('[performance] Loaded ' + allCycles.length + ' cycles from worker');
   } catch (workerErr) {
-    console.warn('[performance] Worker loadCycles failed, trying Supabase fallback:', workerErr.message);
+    if (hasToken) console.warn('[performance] Worker loadCycles failed, trying Supabase fallback:', workerErr.message);
     allCycles = await loadCyclesFromDB();
   }
 
@@ -358,8 +374,25 @@ async function loadReviews() {
   var cid = typeof getCompanyId === 'function' ? getCompanyId() : null;
   if (!cid) { allReviews = []; renderReviews([]); return; }
 
-  // Supabase is the primary source for reviews (worker route does not exist)
-  allReviews = await loadReviewsFromDB(cid);
+  // Worker-first: use the /performance/reviews endpoint with tenant isolation
+  const hasToken = typeof getAuthToken === 'function' && getAuthToken();
+  try {
+    if (!hasToken) throw new Error('No auth token — skipping Worker');
+    await refreshToken();
+    const result = await perfApiCall('/performance/reviews');
+    // Worker may return { reviews: [...] }, { data: [...] }, or array
+    if (Array.isArray(result)) {
+      allReviews = result;
+    } else if (result && typeof result === 'object') {
+      allReviews = result.reviews || result.data || [];
+    } else {
+      allReviews = [];
+    }
+    console.log('[performance] Loaded ' + allReviews.length + ' reviews from worker');
+  } catch (workerErr) {
+    if (hasToken) console.warn('[performance] Worker loadReviews failed, trying Supabase fallback:', workerErr.message);
+    allReviews = await loadReviewsFromDB(cid);
+  }
 
   // Safety: ensure allReviews is always an array
   if (!Array.isArray(allReviews)) allReviews = [];
@@ -420,8 +453,24 @@ async function loadGoals() {
   var cid = typeof getCompanyId === 'function' ? getCompanyId() : null;
   if (!cid) { allGoals = []; renderGoals([]); return; }
 
-  // Supabase is the primary source for goals (worker route does not exist)
-  allGoals = await loadGoalsFromDB(cid);
+  // Worker-first: use the /goals endpoint with tenant isolation
+  const hasToken = typeof getAuthToken === 'function' && getAuthToken();
+  try {
+    if (!hasToken) throw new Error('No auth token — skipping Worker');
+    await refreshToken();
+    const result = await perfApiCall('/goals');
+    if (Array.isArray(result)) {
+      allGoals = result;
+    } else if (result && typeof result === 'object') {
+      allGoals = result.goals || result.data || [];
+    } else {
+      allGoals = [];
+    }
+    console.log('[performance] Loaded ' + allGoals.length + ' goals from worker');
+  } catch (workerErr) {
+    if (hasToken) console.warn('[performance] Worker loadGoals failed, trying Supabase fallback:', workerErr.message);
+    allGoals = await loadGoalsFromDB(cid);
+  }
 
   // Safety: ensure allGoals is always an array
   if (!Array.isArray(allGoals)) allGoals = [];
@@ -670,9 +719,55 @@ window.openReview = function(id) {
 };
 window.openGoalsModal   = () => showToast('Manage broad goals view', 'info');
 window.openAddGoalModal = () => openModal('add-goal-modal');
-window.updateGoalProgress = (id) => openModal('update-goal-modal');
-window.saveGoal = () => { showToast('Goal saved successfully', 'success'); closeModal('add-goal-modal'); };
-window.saveGoalProgress = () => { showToast('Progress updated', 'success'); closeModal('update-goal-modal'); };
+window.updateGoalProgress = (id) => {
+  // Store the goal ID for the update modal
+  const hiddenInput = document.getElementById('update-goal-id');
+  if (hiddenInput) hiddenInput.value = id;
+  openModal('update-goal-modal');
+};
+
+window.saveGoal = async function() {
+  const title = document.getElementById('goal-title')?.value?.trim();
+  const employeeId = document.getElementById('goal-employee')?.value;
+  const description = document.getElementById('goal-description')?.value?.trim() || '';
+  const dueDate = document.getElementById('goal-due-date')?.value || null;
+  const period = document.getElementById('goal-period')?.value || '';
+
+  if (!title) { showToast('Goal title is required', 'error'); return; }
+  if (!employeeId) { showToast('Select an employee', 'error'); return; }
+
+  try {
+    await refreshToken();
+    await perfApiCall('/goals', 'POST', {
+      title, employee_id: employeeId, description, due_date: dueDate, period,
+    });
+    showToast('Goal created successfully', 'success');
+    closeModal('add-goal-modal');
+    await loadGoals();
+  } catch (err) {
+    console.error('[performance] saveGoal failed:', err.message);
+    showToast(err.message || 'Failed to save goal', 'error');
+  }
+};
+
+window.saveGoalProgress = async function() {
+  const goalId = document.getElementById('update-goal-id')?.value;
+  const progress = parseInt(document.getElementById('goal-progress-slider')?.value || '0');
+  const status = document.getElementById('goal-status-select')?.value || 'on_track';
+
+  if (!goalId) { showToast('No goal selected', 'error'); return; }
+
+  try {
+    await refreshToken();
+    await perfApiCall(`/goals/${goalId}`, 'PATCH', { progress, status });
+    showToast('Goal progress updated', 'success');
+    closeModal('update-goal-modal');
+    await loadGoals();
+  } catch (err) {
+    console.error('[performance] saveGoalProgress failed:', err.message);
+    showToast(err.message || 'Failed to update progress', 'error');
+  }
+};
 window.filterReviews = () => {
   const q  = (document.getElementById('review-search')?.value || '').toLowerCase();
   const cy = document.getElementById('cycle-filter')?.value || '';
@@ -771,7 +866,14 @@ if (typeof window.authHeaders === 'undefined') {
     if (!token) {
       token = localStorage.getItem('sh_token') || localStorage.getItem('simpatico_token') || localStorage.getItem('sb-token') || '';
     }
-    return token ? { 'Authorization': 'Bearer ' + token } : {};
+    const headers = { 'Content-Type': 'application/json' };
+    if (token) headers['Authorization'] = 'Bearer ' + token;
+    // Multi-tenant isolation: always include tenant ID
+    const tenantId = (typeof getCompanyId === 'function' && getCompanyId()) ||
+                     sessionStorage.getItem('company_id') ||
+                     sessionStorage.getItem('tenant_id') || '';
+    if (tenantId) headers['X-Tenant-ID'] = tenantId;
+    return headers;
   };
 }
 if (typeof window.avatarColor === 'undefined') {

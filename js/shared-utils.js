@@ -277,19 +277,22 @@
     if (!dateStr) return '—';
     var d = new Date(dateStr);
     if (isNaN(d.getTime())) return '—';
-    return d.toLocaleDateString('en-IN', {
-      day: 'numeric', month: 'short', year: 'numeric'
-    });
+    var months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    return d.getDate() + ' ' + months[d.getMonth()] + ' ' + d.getFullYear();
   }
 
   function formatDateTime(dateStr) {
     if (!dateStr) return 'N/A';
     var d = new Date(dateStr);
     if (isNaN(d.getTime())) return 'N/A';
-    return d.toLocaleString('en-IN', {
-      day: 'numeric', month: 'short', year: 'numeric',
-      hour: '2-digit', minute: '2-digit'
-    });
+    var months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    var h = d.getHours();
+    var m = d.getMinutes();
+    var ampm = h >= 12 ? 'pm' : 'am';
+    h = h % 12;
+    h = h ? h : 12; 
+    m = m < 10 ? '0'+m : m;
+    return d.getDate() + ' ' + months[d.getMonth()] + ' ' + d.getFullYear() + ', ' + h + ':' + m + ' ' + ampm;
   }
 
   function timeAgo(dateStr) {
