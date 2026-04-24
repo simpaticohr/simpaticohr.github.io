@@ -22334,14 +22334,14 @@ async function handleSendPayslip(request, env, ctx, [id]) {
     subject: `Your Payslip for ${ps.period}`,
     html: payslipEmailHtml(ps)
   });
-  await sbFetch(
-    env,
-    "PATCH",
-    `/rest/v1/payslips?id=eq.${id}`,
-    { sent_at: (/* @__PURE__ */ new Date()).toISOString() },
-    false,
-    ctx.tenantId
-  );
+    await sbFetch(
+      env,
+      "PATCH",
+      `/rest/v1/payslips?id=eq.${id}`,
+      { status: "sent" },
+      false,
+      ctx.tenantId
+    );
   return apiResponse({ sent: true });
 }
 __name(handleSendPayslip, "handleSendPayslip");
@@ -22357,14 +22357,14 @@ async function handleSendAllPayslips(request, env, ctx) {
   );
   const { period } = await safeJson(request);
   if (!period) throw new ValidationError("period required");
-  const res = await sbFetch(
-    env,
-    "GET",
-    `/rest/v1/payslips?period=eq.${period}&sent_at=is.null&select=*,employees(email,first_name)`,
-    null,
-    false,
-    ctx.tenantId
-  );
+    const res = await sbFetch(
+      env,
+      "GET",
+      `/rest/v1/payslips?period=eq.${period}&status=neq.sent&select=*,employees(email,first_name)`,
+      null,
+      false,
+      ctx.tenantId
+    );
   const pss = await res.json();
   const sent = await Promise.allSettled(
     pss.map(
@@ -22375,14 +22375,14 @@ async function handleSendAllPayslips(request, env, ctx) {
       })
     )
   );
-  await sbFetch(
-    env,
-    "PATCH",
-    `/rest/v1/payslips?period=eq.${period}`,
-    { sent_at: (/* @__PURE__ */ new Date()).toISOString() },
-    false,
-    ctx.tenantId
-  );
+    await sbFetch(
+      env,
+      "PATCH",
+      `/rest/v1/payslips?period=eq.${period}`,
+      { status: "sent" },
+      false,
+      ctx.tenantId
+    );
   return apiResponse({
     total: pss.length,
     succeeded: sent.filter((s) => s.status === "fulfilled").length
