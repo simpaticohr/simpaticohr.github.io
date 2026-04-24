@@ -4070,25 +4070,48 @@ async function sbFetch(
   // We use service_role key which bypasses RLS, so tenant isolation is opt-in per table
   let finalPath = path;
   const TENANT_AWARE_TABLES = [
+    // Core HR
+    "employees",
+    "departments",
+    // Recruitment
+    "jobs",
+    "job_applications",
+    "interviews",
+    // Leave & Attendance
     "leave_requests",
+    "attendance_records",
+    // Payroll
     "payroll_runs",
     "payslips",
     "employee_salaries",
     "payroll_deductions",
+    "expenses",
+    "employee_expenses",
+    // Training
     "training_courses",
     "training_enrollments",
+    // Onboarding & Offboarding
     "onboarding_records",
     "onboarding_tasks",
+    "offboarding_records",
+    "offboarding_tasks",
+    // Performance
     "performance_reviews",
     "performance_goals",
     "review_cycles",
-    "attendance_records",
-    "employee_expenses",
     "goals",
-    "notifications",
-    "audit_logs",
+    // Surveys
+    "pulse_surveys",
+    "pulse_survey_responses",
+    // Documents & Policies
     "employee_documents",
     "hr_policies",
+    // Admin & System
+    "notifications",
+    "audit_logs",
+    "hr_tickets",
+    "automation_rules",
+    "automation_logs",
   ];
   // Inject tenant_id filter for GET, PATCH, and DELETE to prevent cross-tenant access
   if (["GET", "PATCH", "DELETE"].includes(method) && tenantId && tenantId !== "default") {
