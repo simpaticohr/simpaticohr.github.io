@@ -2208,6 +2208,21 @@
     </div>
 </div>
 
+<div class="modal fade" id="proctoredLauncherModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="fas fa-shield-halved me-2" style="color:var(--primary)"></i>Proctored Session Launcher</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body" id="proctoredLauncherBody"></div>
+            <div class="modal-footer" id="proctoredLauncherFooter">
+                <button class="btn-outline-custom" data-bs-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <div class="modal fade" id="interviewDetailModal" tabindex="-1">
     <div class="modal-dialog modal-lg">
         <div class="modal-content">
@@ -2492,7 +2507,7 @@ async function syncWithSupabase() {
     // 1. Fetch Jobs — STRICTLY FILTERED by company_id
     try {
         const jobsRes = await db.from('jobs').select('*')
-            .eq('company_id', companyId)
+            .eq('tenant_id', companyId)
             .order('created_at', { ascending: false });
         if (!jobsRes.error && jobsRes.data) {
             DataStore.update(data => { data.jobs = jobsRes.data; });
@@ -2505,7 +2520,7 @@ async function syncWithSupabase() {
     // 2. Fetch Interviews — STRICTLY FILTERED by company_id
     try {
         const intRes = await db.from('interviews').select('*')
-            .eq('company_id', companyId)
+            .eq('tenant_id', companyId)
             .order('created_at', { ascending: false });
         if (!intRes.error && intRes.data) {
             DataStore.update(data => { 
@@ -2552,7 +2567,7 @@ async function syncWithSupabase() {
     // 3. Fetch Applications — STRICTLY FILTERED by company_id
     try {
         const appRes = await db.from('job_applications').select('*, jobs(title, department)')
-            .eq('company_id', companyId)
+            .eq('tenant_id', companyId)
             .order('created_at', { ascending: false });
         if (!appRes.error && appRes.data) {
             DataStore.update(data => {
@@ -2570,7 +2585,7 @@ async function syncWithSupabase() {
     // 4. Fetch Employee count — STRICTLY FILTERED by company_id
     try {
         const empRes = await db.from('employees').select('id', { count: 'exact', head: true })
-            .eq('company_id', companyId);
+            .eq('tenant_id', companyId);
         if (!empRes.error) {
             DataStore.update(data => { data.stats.totalEmployees = empRes.count || 0; });
             synced++;
@@ -3656,6 +3671,7 @@ async function handleCreateJob(e, status = 'open') {
         skills_required: skills ? skills.split(',').map(s => s.trim()).filter(Boolean) : [],
         description: notes ? (description + '\n\nNotes: ' + notes) : description,
         status, 
+        tenant_id: user.tenant_id || user.company_id,
         company_id: user.tenant_id || user.company_id,
         syndication_targets
     };
@@ -3856,6 +3872,7 @@ async function handleScheduleInterview(e) {
         token,
         status: mode === 'proctored' ? 'pending' : 'scheduled',
         job_id: selectedJobId,
+        tenant_id: user.company_id || user.tenant_id || null,
         company_id: user.company_id || user.tenant_id || null,
         created_at: new Date().toISOString(),
         expires_at: new Date(new Date().getTime() + 7 * 24 * 60 * 60 * 1000).toISOString(),
@@ -4277,11 +4294,50 @@ function viewProctorSettings(id) {
 }
 
 function startProctoredSession() {
-    showToast('🔒 Proctored session launcher — coming soon with Cloudflare AI integration', 'success');
+    const proctored = appData.interviews.filter(i => i.mode === 'proctored' && i.status !== 'cancelled');
+    
+    let html = '';
+    if (proctored.length === 0) {
+        html = '<p style="color:var(--text-secondary);text-align:center;padding:20px;">No active proctored sessions found. Schedule one first.</p>';
+    } else {
+        html = '<div class="table-responsive"><table class="simp-table"><thead><tr><th>Candidate</th><th>Position</th><th>Time</th><th>Status</th><th>Actions</th></tr></thead><tbody>';
+        
+        proctored.forEach(int => {
+            const link = int.token ? getInterviewLink(int.token) : null;
+            html += `
+                <tr>
+                    <td><strong>${escapeHtml(int.candidateName)}</strong></td>
+                    <td>${escapeHtml(int.position)}</td>
+                    <td>${formatDate(int.date)} ${formatTime(int.startTime)}</td>
+                    <td><span class="status-badge ${int.status}">${capitalize(int.status)}</span></td>
+                    <td>
+                        ${link ? `
+                            <button class="btn-sm-action link-btn" onclick="copyToClipboard('${link}','Proctored Link')" title="Copy Link"><i class="fas fa-copy"></i></button>
+                            <button class="btn-sm-action view" onclick="window.open('${link}', '_blank')" title="Candidate Room Preview"><i class="fas fa-external-link-alt"></i></button>
+                            <button class="btn-sm-action notify" onclick="startProctoredMonitor('${int.id}')" title="Admin Monitor"><i class="fas fa-desktop"></i></button>
+                        ` : '<span style="color:var(--text-secondary)">No token</span>'}
+                    </td>
+                </tr>
+            `;
+        });
+        
+        html += '</tbody></table></div>';
+    }
+    
+    document.getElementById('proctoredLauncherBody').innerHTML = html;
+    const modal = new bootstrap.Modal(document.getElementById('proctoredLauncherModal'));
+    modal.show();
 }
 
 function startProctoredMonitor(id) {
-    showToast('🖥️ Live monitoring — coming soon', 'success');
+    const int = appData.interviews.find(i => i.id === id);
+    if (!int || !int.token) {
+        showToast('Cannot monitor: invalid session or missing token', 'error');
+        return;
+    }
+    const link = getInterviewLink(int.token) + '&mode=admin';
+    window.open(link, '_blank');
+    showToast('🖥️ Opened live monitor', 'success');
 }
 
 async function generateJD() {
