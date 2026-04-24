@@ -378,7 +378,7 @@ async function loadPayslips() {
     let { data, error } = await client
       .from('payslips')
       .select(`
-        id, period, gross_pay, deductions_total, net_pay, status, payslip_key, paid_at,
+        id, period, gross_pay, deductions_total, net_pay, status, currency, pay_date,
         employees(id, first_name, last_name, departments(name))
       `)
       .eq('tenant_id', cid)

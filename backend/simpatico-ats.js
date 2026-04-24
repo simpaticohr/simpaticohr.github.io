@@ -2533,14 +2533,33 @@ async function handleSendPayslip(request, env, ctx, [id]) {
     subject: `Your Payslip for ${ps.period}`,
     html: payslipEmailHtml(ps),
   });
-  await sbFetch(
-    env,
-    "PATCH",
-    `/rest/v1/payslips?id=eq.${id}`,
-    { status: "sent" },
-    false,
-    ctx.tenantId,
-  );
+  // Update status — wrapped in try-catch so email success is not lost
+  // if DB schema is out of sync (e.g. missing sent_at column)
+  try {
+    await sbFetch(
+      env,
+      "PATCH",
+      `/rest/v1/payslips?id=eq.${id}`,
+      { status: "sent", sent_at: new Date().toISOString() },
+      false,
+      ctx.tenantId,
+    );
+  } catch (patchErr) {
+    // Retry with minimal payload if sent_at column doesn't exist yet
+    console.warn("[payroll] Payslip PATCH failed, retrying without sent_at:", patchErr.message);
+    try {
+      await sbFetch(
+        env,
+        "PATCH",
+        `/rest/v1/payslips?id=eq.${id}`,
+        { status: "sent" },
+        false,
+        ctx.tenantId,
+      );
+    } catch (retryErr) {
+      console.error("[payroll] Payslip status update failed entirely:", retryErr.message);
+    }
+  }
   return apiResponse({ sent: true });
 }
 
@@ -2575,14 +2594,31 @@ async function handleSendAllPayslips(request, env, ctx) {
       }),
     ),
   );
-  await sbFetch(
-    env,
-    "PATCH",
-    `/rest/v1/payslips?period=eq.${period}`,
-    { status: "sent" },
-    false,
-    ctx.tenantId,
-  );
+  // Update status — wrapped in try-catch for schema resilience
+  try {
+    await sbFetch(
+      env,
+      "PATCH",
+      `/rest/v1/payslips?period=eq.${period}`,
+      { status: "sent", sent_at: new Date().toISOString() },
+      false,
+      ctx.tenantId,
+    );
+  } catch (patchErr) {
+    console.warn("[payroll] Bulk payslip PATCH failed, retrying without sent_at:", patchErr.message);
+    try {
+      await sbFetch(
+        env,
+        "PATCH",
+        `/rest/v1/payslips?period=eq.${period}`,
+        { status: "sent" },
+        false,
+        ctx.tenantId,
+      );
+    } catch (retryErr) {
+      console.error("[payroll] Bulk payslip status update failed entirely:", retryErr.message);
+    }
+  }
   return apiResponse({
     total: pss.length,
     succeeded: sent.filter((s) => s.status === "fulfilled").length,
