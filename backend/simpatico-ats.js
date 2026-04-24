@@ -708,7 +708,7 @@ function matchRoute(method, path) {
 
 // ——— Route Declarations —————————————————————————————————————————————————————————————
 
-// Health & Meta
+// Health & Meta (Trigger GH Action)
 route("GET", "/health", handleHealth);
 route("GET", "/version", handleVersion);
 route("POST", "/webhooks/register", handleRegisterWebhook);
