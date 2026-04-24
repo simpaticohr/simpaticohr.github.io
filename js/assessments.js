@@ -22,36 +22,68 @@ async function generateAssessment() {
     <div style="text-align:center; padding: 40px; color: var(--hr-text-muted);">
       <div class="hr-spinner" style="width:30px;height:30px;border-width:3px;margin:0 auto 15px auto;"></div>
       <p>AI is analyzing requirements and generating a custom assessment...</p>
+      <p style="font-size:12px; margin-top:8px; opacity:0.7;">This may take 10-20 seconds</p>
     </div>
   `;
 
-  try {
-    const res = await workerFetch("/ai/generate-assessment", {
-      method: "POST",
-      body: {
-        job_title: jobTitle,
-        department: dept,
-        difficulty: diff,
-        tech_stack: tech,
-        culture: culture,
-        question_count: 5,
-      },
-    });
+  // Retry logic: AI can sometimes return malformed JSON on first attempt
+  const MAX_RETRIES = 2;
+  let lastError = null;
 
-    if (res.error) throw new Error(res.error.message || "Generation failed");
+  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+    try {
+      const res = await workerFetch("/ai/generate-assessment", {
+        method: "POST",
+        body: {
+          job_title: jobTitle,
+          department: dept,
+          difficulty: diff,
+          tech_stack: tech,
+          culture: culture,
+          question_count: 5,
+        },
+      });
 
-    currentAssessment = res.data.assessment;
-    renderAssessment(currentAssessment);
-    document.getElementById("save-assessment-btn").disabled = false;
-    showToast("Assessment generated securely for your tenant", "success");
-  } catch (e) {
-    preview.innerHTML = `<div class="empty-state"><p style="color:var(--hr-danger)">Error: ${e.message}</p></div>`;
-    showToast(e.message, "error");
-  } finally {
-    btn.disabled = false;
-    btn.innerHTML = "✨ Generate Assessment";
+      // workerFetch wraps response in {success, data, meta}
+      const assessment = res.data?.assessment || res.assessment;
+      if (!assessment) throw new Error("No assessment data in response");
+
+      currentAssessment = assessment;
+      renderAssessment(currentAssessment);
+      document.getElementById("save-assessment-btn").disabled = false;
+      showToast("Assessment generated successfully", "success");
+      lastError = null;
+      break; // Success — exit retry loop
+    } catch (e) {
+      lastError = e;
+      console.warn(`[assessments] Attempt ${attempt + 1} failed:`, e.message);
+
+      // Only retry on AI-related errors, not auth/validation
+      if (e.message.includes("401") || e.message.includes("403") || e.message.includes("required")) {
+        break; // Don't retry auth or validation errors
+      }
+
+      if (attempt < MAX_RETRIES - 1) {
+        preview.innerHTML = `
+          <div style="text-align:center; padding: 40px; color: var(--hr-text-muted);">
+            <div class="hr-spinner" style="width:30px;height:30px;border-width:3px;margin:0 auto 15px auto;"></div>
+            <p>Retrying generation (attempt ${attempt + 2}/${MAX_RETRIES})...</p>
+          </div>
+        `;
+        await new Promise((r) => setTimeout(r, 1000)); // Brief pause before retry
+      }
+    }
   }
+
+  if (lastError) {
+    preview.innerHTML = `<div class="empty-state"><p style="color:var(--hr-danger)">Error: ${escapeHtml(lastError.message)}</p><p style="margin-top:10px;font-size:13px;color:var(--hr-text-muted)">Try adjusting your parameters or click Generate again.</p></div>`;
+    showToast(lastError.message, "error");
+  }
+
+  btn.disabled = false;
+  btn.innerHTML = "✨ Generate Assessment";
 }
+
 
 function renderAssessment(data) {
   const container = document.getElementById("preview-area");

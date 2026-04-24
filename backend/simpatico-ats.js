@@ -3399,137 +3399,155 @@ async function handleGenerateAssessment(request, env, ctx) {
     );
   }
 
-  try {
-    // Build detailed prompt for AI
-    const prompt = `Design a highly specific, proctored assessment quiz for a ${difficulty || "mid-level"} ${job_title}${department ? ` in ${department}` : ""}${tech_stack ? ` specializing in ${tech_stack}` : ""}.
+  // Check AI binding availability
+  if (!env.AI) {
+    throw new ServiceUnavailableError("AI");
+  }
 
-Generate ${question_count} technical questions that:
+  const userPrompt = `Design a highly specific, proctored assessment quiz for a ${difficulty || "mid-level"} ${job_title}${department ? ` in ${department}` : ""}${tech_stack ? ` specializing in ${tech_stack}` : ""}.
+
+Generate exactly ${question_count} technical questions that:
 1. Accurately assess core competencies for this role
 2. Include both multiple-choice (MCQ) and short-answer types
 3. Have clear correct answers and grading rubrics for AI evaluation
 4. Test real-world problem-solving, not just theory
+${culture ? `\nCompany culture: ${culture}. Incorporate questions that assess alignment with our values.` : ""}
 
-${culture ? `Company culture: ${culture}. Incorporate questions that assess alignment with our values.` : ""}
-
-CRITICAL: Return ONLY valid JSON (no markdown, no code blocks) in this exact format:
+Return ONLY valid JSON in this exact format (no markdown, no code fences, no extra text):
 {
-  "assessment_title": "string",
+  "assessment_title": "Title Here",
   "questions": [
     {
       "id": "q1",
       "type": "mcq",
-      "question": "string",
-      "options": ["A", "B", "C", "D"],
-      "correct_answer": "A",
+      "question": "Your question text",
+      "options": ["Option A", "Option B", "Option C", "Option D"],
+      "correct_answer": "Option A",
+      "scoring_rubric": "How to grade this question"
+    },
+    {
+      "id": "q2",
+      "type": "short_answer",
+      "question": "Your question text",
+      "correct_answer": "Expected answer or key points",
       "scoring_rubric": "How to grade this question"
     }
   ]
 }`;
 
-    const aiResponse = await env.AI.run("@cf/meta/llama-3.1-8b-instruct", {
-      messages: [{ role: "user", content: prompt }],
-      max_tokens: 2000,
+  let aiResponse;
+  try {
+    aiResponse = await env.AI.run("@cf/meta/llama-3.1-8b-instruct", {
+      messages: [
+        {
+          role: "system",
+          content: "You are a JSON-only assessment generator. You MUST respond with valid JSON only. No markdown, no code blocks, no explanatory text. Just pure JSON.",
+        },
+        { role: "user", content: userPrompt },
+      ],
+      max_tokens: 3000,
     });
-
-    if (!aiResponse?.response) {
-      throw new Error("AI returned empty response");
-    }
-
-    // Parse AI response - remove markdown code blocks if present
-    let responseText = aiResponse.response.trim();
-    responseText = responseText
-      .replace(/^```json\n?/, "")
-      .replace(/\n?```$/, "")
-      .replace(/^```\n?/, "")
-      .trim();
-
-    // Attempt to parse JSON
-    let assessment;
-    try {
-      assessment = JSON.parse(responseText);
-    } catch (parseError) {
-      console.error("[assessment] JSON parse failed:", {
-        error: parseError.message,
-        rawResponse: responseText.substring(0, 200),
-      });
-      throw new Error(
-        `AI returned invalid JSON: ${parseError.message}. Please try again.`,
-      );
-    }
-
-    // Validate assessment structure
-    if (
-      !assessment.assessment_title ||
-      typeof assessment.assessment_title !== "string"
-    ) {
-      throw new Error("Assessment missing or invalid title field");
-    }
-
-    if (
-      !Array.isArray(assessment.questions) ||
-      assessment.questions.length === 0
-    ) {
-      throw new Error(
-        `Assessment has no questions (got ${assessment.questions?.length || 0}). AI may not have generated properly.`,
-      );
-    }
-
-    // Validate each question
-    assessment.questions.forEach((q, idx) => {
-      if (!q.question || !q.type) {
-        throw new Error(
-          `Question ${idx + 1} missing required fields (question, type)`,
-        );
-      }
-      if (
-        q.type === "mcq" &&
-        (!Array.isArray(q.options) || q.options.length === 0)
-      ) {
-        throw new Error(`MCQ question ${idx + 1} has no options`);
-      }
-      if (!q.correct_answer) {
-        throw new Error(`Question ${idx + 1} missing correct_answer`);
-      }
-    });
-
-    return apiResponse({
-      assessment,
-      generated_at: new Date().toISOString(),
-      question_count: assessment.questions.length,
-    });
-  } catch (error) {
-    console.error("[assessment] Generation error:", {
-      job_title,
-      error: error.message,
-      timestamp: new Date().toISOString(),
-    });
-
-    // Distinguish between validation, AI, and system errors
-    if (error.message.includes("JSON")) {
-      return apiResponse(
-        { error: `Assessment generation failed: ${error.message}` },
-        HTTP.SERVER_ERROR,
-        { code: "AI_PARSE_ERROR", retryable: true },
-      );
-    }
-
-    if (
-      error.message.includes("missing") ||
-      error.message.includes("invalid")
-    ) {
-      return apiResponse(
-        { error: `Invalid assessment structure: ${error.message}` },
-        HTTP.SERVER_ERROR,
-        { code: "ASSESSMENT_VALIDATION_ERROR", retryable: true },
-      );
-    }
-
-    return apiResponse(
-      { error: error.message || "Assessment generation failed" },
-      HTTP.SERVER_ERROR,
-      { code: "AI_SERVICE_ERROR" },
+  } catch (aiErr) {
+    console.error("[assessment] AI.run() failed:", aiErr.message);
+    throw new AppError(
+      "AI service temporarily unavailable. Please try again in a moment.",
+      HTTP.UNAVAILABLE,
+      "AI_SERVICE_ERROR",
     );
   }
+
+  if (!aiResponse?.response) {
+    throw new AppError(
+      "AI returned an empty response. Please try again.",
+      HTTP.SERVER_ERROR,
+      "AI_EMPTY_RESPONSE",
+    );
+  }
+
+  // Robust JSON extraction from AI response
+  let responseText = aiResponse.response.trim();
+
+  // Strip markdown code fences (```json ... ``` or ``` ... ```)
+  responseText = responseText
+    .replace(/^```(?:json)?\s*\n?/i, "")
+    .replace(/\n?\s*```\s*$/i, "")
+    .trim();
+
+  // If there's still non-JSON text, try to extract the JSON object
+  if (!responseText.startsWith("{")) {
+    const jsonStart = responseText.indexOf("{");
+    const jsonEnd = responseText.lastIndexOf("}");
+    if (jsonStart !== -1 && jsonEnd > jsonStart) {
+      responseText = responseText.substring(jsonStart, jsonEnd + 1);
+    }
+  }
+
+  let assessment;
+  try {
+    assessment = JSON.parse(responseText);
+  } catch (parseError) {
+    console.error("[assessment] JSON parse failed:", {
+      error: parseError.message,
+      rawResponse: responseText.substring(0, 500),
+    });
+    throw new AppError(
+      "AI returned invalid JSON. Please try generating again.",
+      HTTP.SERVER_ERROR,
+      "AI_PARSE_ERROR",
+    );
+  }
+
+  // Validate and normalize assessment structure
+  if (!assessment.assessment_title || typeof assessment.assessment_title !== "string") {
+    // Auto-generate a title if missing
+    assessment.assessment_title = `${difficulty || "Mid-Level"} ${job_title} Assessment`;
+  }
+
+  if (!Array.isArray(assessment.questions) || assessment.questions.length === 0) {
+    throw new AppError(
+      "AI did not generate any questions. Please try again with different parameters.",
+      HTTP.SERVER_ERROR,
+      "AI_NO_QUESTIONS",
+    );
+  }
+
+  // Lenient validation: fix up questions rather than failing hard
+  assessment.questions = assessment.questions.map((q, idx) => {
+    // Ensure required fields exist
+    if (!q.id) q.id = `q${idx + 1}`;
+    if (!q.type) q.type = Array.isArray(q.options) ? "mcq" : "short_answer";
+    if (!q.question && q.text) q.question = q.text; // common AI alias
+
+    // For MCQs, ensure options exist
+    if (q.type === "mcq" && (!Array.isArray(q.options) || q.options.length === 0)) {
+      q.type = "short_answer"; // Downgrade to short answer if no options
+      delete q.options;
+    }
+
+    // Don't require correct_answer for short-answer (rubric is enough)
+    if (!q.correct_answer && q.type === "short_answer") {
+      q.correct_answer = q.scoring_rubric || "See rubric for grading criteria";
+    }
+
+    return q;
+  });
+
+  // Filter out any questions that still lack a question text
+  assessment.questions = assessment.questions.filter((q) => q.question);
+
+  if (assessment.questions.length === 0) {
+    throw new AppError(
+      "AI generated malformed questions. Please try again.",
+      HTTP.SERVER_ERROR,
+      "AI_MALFORMED_QUESTIONS",
+    );
+  }
+
+  return apiResponse({
+    assessment,
+    generated_at: new Date().toISOString(),
+    question_count: assessment.questions.length,
+  });
 }
 
 async function handleGenerateCourse(request, env, ctx) {
