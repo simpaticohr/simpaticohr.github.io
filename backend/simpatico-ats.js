@@ -2275,7 +2275,21 @@ async function handleGeneratePayslipPdf(request, env, ctx, [payslipId]) {
   const colorBrand = rgb(0.15, 0.25, 0.45);
   const empName = `${payslip.employees?.first_name || ""} ${payslip.employees?.last_name || ""}`.trim();
   const period = payslip.period || "Unknown Period";
-  const currency = payslip.currency || "INR";
+
+  // Resolve currency: payslip → employee_salaries fallback → default
+  let currencyCode = payslip.currency;
+  if (!currencyCode && payslip.employee_id) {
+    try {
+      const salRes = await sbFetch(env, "GET", `/rest/v1/employee_salaries?employee_id=eq.${payslip.employee_id}&select=currency&order=created_at.desc&limit=1`, null, false, ctx.tenantId);
+      const [sal] = await salRes.json();
+      if (sal && sal.currency) currencyCode = sal.currency;
+    } catch (e) { /* ignore */ }
+  }
+  currencyCode = currencyCode || "INR";
+
+  // Map currency code to symbol for PDF display
+  const currencySymbols = { INR: "\u20B9", USD: "$", EUR: "\u20AC", GBP: "\u00A3", AED: "AED ", CAD: "CA$", AUD: "A$", SGD: "S$", NZD: "NZ$" };
+  const currencySym = currencySymbols[currencyCode] || (currencyCode + " ");
   
   // Header
   page.drawText(companyName, { x: 50, y: height - 60, size: 24, font: helveticaBold, color: colorBrand });
@@ -2309,7 +2323,7 @@ async function handleGeneratePayslipPdf(request, env, ctx, [payslipId]) {
   page.drawText("AMOUNT", { x: width - 100, y: tableY, size: 10, font: helveticaBold, color: colorDark });
   
   // Content
-  const formatAmt = (amt) => `${currency} ${Number(amt).toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2})}`;
+  const formatAmt = (amt) => `${currencySym}${Number(amt).toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2})}`;
   
   page.drawText("Basic Salary", { x: 60, y: tableY - 30, size: 10, font: helveticaFont, color: colorDark });
   page.drawText(formatAmt(payslip.gross_pay), { x: 200, y: tableY - 30, size: 10, font: helveticaFont, color: colorDark });
