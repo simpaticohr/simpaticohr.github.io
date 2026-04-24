@@ -4081,17 +4081,20 @@ async function sbFetch(
     "onboarding_tasks",
     "performance_reviews",
     "performance_goals",
+    "review_cycles",
+    "attendance_records",
+    "employee_expenses",
     "goals",
     "notifications",
     "audit_logs",
     "employee_documents",
     "hr_policies",
   ];
-  if (method === "GET" && tenantId && tenantId !== "default") {
+  // Inject tenant_id filter for GET, PATCH, and DELETE to prevent cross-tenant access
+  if (["GET", "PATCH", "DELETE"].includes(method) && tenantId && tenantId !== "default") {
     const tableName = (path.match(/\/rest\/v1\/([a-z_]+)/) || [])[1];
     if (tableName && TENANT_AWARE_TABLES.includes(tableName)) {
       const separator = finalPath.includes("?") ? "&" : "?";
-      // Most tables use `tenant_id` as their multi-tenant column
       finalPath += `${separator}tenant_id=eq.${tenantId}`;
     }
   }
