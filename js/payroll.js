@@ -467,7 +467,7 @@ async function loadSalaryRegister() {
   let { data, error } = await client
     .from('employee_salaries')
     .select(`
-      id, base_salary, currency, employment_type, effective_date,
+      id, employee_id, base_salary, currency, employment_type, effective_date,
       employees(id, first_name, last_name, job_title, departments(name))
     `)
     .eq('tenant_id', cid)
