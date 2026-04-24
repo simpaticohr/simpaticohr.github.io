@@ -2523,6 +2523,17 @@ async function handleSendPayslip(request, env, ctx, [id]) {
   const [ps] = await res.json();
   if (!ps) throw new NotFoundError("Payslip");
 
+  // Fallback for older payslips that were generated before the currency column was added
+  if (!ps.currency && ps.employee_id) {
+    try {
+      const salRes = await sbFetch(env, "GET", `/rest/v1/employee_salaries?employee_id=eq.${ps.employee_id}&select=currency&order=created_at.desc&limit=1`, null, false, ctx.tenantId);
+      const [sal] = await salRes.json();
+      if (sal && sal.currency) ps.currency = sal.currency;
+    } catch (e) {
+      console.warn("Could not fetch fallback currency for payslip:", e.message);
+    }
+  }
+
   const email = ps.employees?.email;
   if (!email || !email.includes('@')) {
     throw new ValidationError(`Cannot send payslip: Employee has no valid email address.`);
@@ -2585,6 +2596,20 @@ async function handleSendAllPayslips(request, env, ctx) {
     ctx.tenantId,
   );
   const pss = await res.json();
+
+  // Fallback for older payslips that were generated before the currency column was added
+  for (const ps of pss) {
+    if (!ps.currency && ps.employee_id) {
+      try {
+        const salRes = await sbFetch(env, "GET", `/rest/v1/employee_salaries?employee_id=eq.${ps.employee_id}&select=currency&order=created_at.desc&limit=1`, null, false, ctx.tenantId);
+        const [sal] = await salRes.json();
+        if (sal && sal.currency) ps.currency = sal.currency;
+      } catch (e) {
+        // Ignore fallback errors to prevent blocking the bulk send
+      }
+    }
+  }
+
   const sent = await Promise.allSettled(
     pss.map((ps) =>
       sendEmail(env, {
@@ -4011,9 +4036,9 @@ async function handleAttritionReport(request, env, ctx) {
   });
 }
 
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-// Â§ 15.  SUPABASE HELPER  (tenant-scoped)
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ——————————————————————————————————————————————————————————————————————————————————————————————————
+// § 15.  SUPABASE HELPER  (tenant-scoped)
+// ——————————————————————————————————————————————————————————————————————————————————————————————————
 
 async function sbFetch(
   env,
@@ -4230,7 +4255,14 @@ function welcomeEmailHtml(firstName, empNum) {
 }
 
 function payslipEmailHtml(ps) {
-  const currency = ps.currency || 'USD';
+  const currencyCode = ps.currency || 'USD';
+  let currencySym = currencyCode;
+  if (currencyCode === 'INR') currencySym = '₹';
+  else if (currencyCode === 'USD') currencySym = '$';
+  else if (currencyCode === 'EUR') currencySym = '€';
+  else if (currencyCode === 'GBP') currencySym = '£';
+  else currencySym = currencyCode + ' ';
+
   return `
 <!DOCTYPE html>
 <html>
@@ -4239,14 +4271,14 @@ function payslipEmailHtml(ps) {
     <tr><td align="center">
       <table width="600" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08)">
         <tr><td style="background:linear-gradient(135deg,#0ea5e9,#6366f1);padding:32px;text-align:center">
-          <h2 style="color:white;margin:0">Payslip â€” ${ps.period}</h2>
+          <h2 style="color:white;margin:0">Payslip — ${ps.period}</h2>
         </td></tr>
         <tr><td style="padding:32px">
           <p>Hi <strong>${ps.employees?.first_name || "there"}</strong>, your payslip for <strong>${ps.period}</strong> is ready.</p>
           <table width="100%" cellpadding="8" cellspacing="0" style="border-collapse:collapse">
-            <tr style="background:#f9fafb"><td style="border-bottom:1px solid #e5e7eb;color:#6b7280">Gross Pay</td><td style="border-bottom:1px solid #e5e7eb;text-align:right;font-weight:600">${currency} ${Number(ps.gross_pay || 0).toLocaleString()}</td></tr>
-            <tr><td style="border-bottom:1px solid #e5e7eb;color:#6b7280">Deductions</td><td style="border-bottom:1px solid #e5e7eb;text-align:right;color:#ef4444">-${currency} ${Number(ps.deductions_total || 0).toLocaleString()}</td></tr>
-            <tr style="background:#f0fdf4"><td style="font-weight:700;font-size:16px">Net Pay</td><td style="text-align:right;font-weight:700;font-size:18px;color:#16a34a">${currency} ${Number(ps.net_pay || 0).toLocaleString()}</td></tr>
+            <tr style="background:#f9fafb"><td style="border-bottom:1px solid #e5e7eb;color:#6b7280">Gross Pay</td><td style="border-bottom:1px solid #e5e7eb;text-align:right;font-weight:600">${currencySym}${Number(ps.gross_pay || 0).toLocaleString()}</td></tr>
+            <tr><td style="border-bottom:1px solid #e5e7eb;color:#6b7280">Deductions</td><td style="border-bottom:1px solid #e5e7eb;text-align:right;color:#ef4444">-${currencySym}${Number(ps.deductions_total || 0).toLocaleString()}</td></tr>
+            <tr style="background:#f0fdf4"><td style="font-weight:700;font-size:16px">Net Pay</td><td style="text-align:right;font-weight:700;font-size:18px;color:#16a34a">${currencySym}${Number(ps.net_pay || 0).toLocaleString()}</td></tr>
           </table>
           <p style="font-size:13px;color:#9ca3af;margin-top:24px">Pay Date: <strong>${ps.pay_date || "N/A"}</strong></p>
         </td></tr>
