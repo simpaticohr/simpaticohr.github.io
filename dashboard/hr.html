@@ -2509,26 +2509,39 @@ async function syncWithSupabase() {
             .order('created_at', { ascending: false });
         if (!intRes.error && intRes.data) {
             DataStore.update(data => { 
-                data.interviews = intRes.data.map(dbInt => ({
-                    id: dbInt.id,
-                    candidateName: dbInt.candidate_name || 'Candidate',
-                    candidateEmail: dbInt.candidate_email || '',
-                    candidatePhone: dbInt.candidate_phone || '',
-                    position: dbInt.interview_role || 'Position',
-                    round: dbInt.interview_level || 'Round',
-                    date: dbInt.created_at ? dbInt.created_at.split('T')[0] : new Date().toISOString().split('T')[0],
-                    startTime: '10:00',
-                    endTime: '10:45',
-                    interviewer: 'Recruiting Team',
-                    mode: dbInt.interview_type === 'ai_voice' ? 'proctored' : 'video',
-                    status: dbInt.status === 'pending' ? 'scheduled' : (dbInt.status || 'scheduled'),
-                    token: dbInt.token || '',
-                    job_id: dbInt.job_id,
-                    score: dbInt.overall_score || null,
-                    recommendation: dbInt.recommendation || '',
-                    notificationLog: dbInt.notification_log || [],
-                    proctorSettings: dbInt.proctor_settings || null
-                }));
+                data.interviews = intRes.data.map(dbInt => {
+                    const feedback = dbInt.feedback || null;
+                    const recommendation = feedback?.recommendation || 
+                        (dbInt.overall_score >= 70 ? 'Recommended' : 
+                         dbInt.overall_score >= 50 ? 'Maybe' : 
+                         dbInt.overall_score ? 'Not Recommended' : '');
+                    return {
+                        id: dbInt.id,
+                        candidateName: dbInt.candidate_name || 'Candidate',
+                        candidateEmail: dbInt.candidate_email || '',
+                        candidatePhone: dbInt.candidate_phone || '',
+                        position: dbInt.interview_role || 'Position',
+                        round: dbInt.interview_level || 'Round',
+                        date: dbInt.completed_at ? dbInt.completed_at.split('T')[0] :
+                              dbInt.created_at ? dbInt.created_at.split('T')[0] : new Date().toISOString().split('T')[0],
+                        startTime: dbInt.started_at ? new Date(dbInt.started_at).toTimeString().slice(0,5) : '10:00',
+                        endTime: dbInt.completed_at ? new Date(dbInt.completed_at).toTimeString().slice(0,5) : '10:45',
+                        interviewer: dbInt.interview_type === 'ai_voice' ? 'AI Interviewer' : 'Recruiting Team',
+                        mode: dbInt.interview_type === 'ai_voice' ? 'proctored' : 'video',
+                        status: dbInt.status === 'pending' ? 'scheduled' : (dbInt.status || 'scheduled'),
+                        token: dbInt.token || '',
+                        job_id: dbInt.job_id,
+                        score: dbInt.overall_score || null,
+                        recommendation: recommendation,
+                        feedback: feedback,
+                        trustScore: dbInt.trust_score || null,
+                        violationCount: dbInt.violation_count || 0,
+                        completedAt: dbInt.completed_at || null,
+                        conversationLog: dbInt.conversation_log || null,
+                        notificationLog: dbInt.notification_log || [],
+                        proctorSettings: dbInt.proctor_settings || null
+                    };
+                });
             });
             synced++;
         } else if (intRes.error) {
@@ -3386,6 +3399,7 @@ function renderCompletedInterviewTable() {
                 <td><span style="font-weight:600;color:var(--primary);">${int.score ? int.score + '/100' : 'Awaiting Review'}</span></td>
                 <td>
                     <button class="btn-sm-action view" title="Details" onclick="viewInterview('${int.id}')"><i class="fas fa-eye"></i></button>
+                    ${int.token ? `<button class="btn-sm-action view" title="View Report" onclick="window.open('/interview/results.html?token=${int.token}', '_blank')"><i class="fas fa-file-contract"></i></button>` : ''}
                 </td>
             </tr>
         `;
@@ -3509,7 +3523,10 @@ function renderResultsTable() {
             <td>${int.score || 'Pending'}</td>
             <td>${int.recommendation || 'Awaiting feedback'}</td>
             <td>${escapeHtml((int.interviewer || 'Unassigned').split('(')[0].trim())}</td>
-            <td><button class="btn-sm-action view" onclick="viewInterview('${int.id}')"><i class="fas fa-eye"></i></button></td>
+            <td>
+                <button class="btn-sm-action view" onclick="viewInterview('${int.id}')" title="Details"><i class="fas fa-eye"></i></button>
+                ${int.token ? `<button class="btn-sm-action view" onclick="window.open('/interview/results.html?token=${int.token}', '_blank')" title="View Report"><i class="fas fa-file-contract"></i></button>` : ''}
+            </td>
         </tr>
     `).join('');
 }
