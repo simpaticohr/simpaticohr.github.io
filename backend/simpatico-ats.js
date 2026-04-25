@@ -4568,10 +4568,10 @@ async function handleScheduleInterviewEmail(request, env, ctx) {
 
   const modeLabel =
     {
-      video: "📹 Video Call",
-      inperson: "🏢 In-Person",
-      phone: "📞 Phone Call",
-      proctored: "🔑 Proctored (AI-Monitored)",
+      video: "Video Call",
+      inperson: "In-Person",
+      phone: "Phone Call",
+      proctored: "Proctored (AI-Monitored)",
     }[mode] || mode;
 
   let meetingSection = "";
@@ -4587,7 +4587,7 @@ async function handleScheduleInterviewEmail(request, env, ctx) {
 
   const notesSection = notes
     ? `<div style="margin-top:20px;background:#fef3c7;border-left:4px solid #f59e0b;padding:12px 16px;border-radius:6px;font-size:14px;color:#92400e;">
-        <strong>📝 Notes:</strong> ${notes}
+        <strong>Notes:</strong> ${notes}
        </div>`
     : "";
 
@@ -4600,7 +4600,7 @@ async function handleScheduleInterviewEmail(request, env, ctx) {
     <tr><td align="center">
       <table width="600" cellpadding="0" cellspacing="0" style="background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08);">
         <tr><td style="background:linear-gradient(135deg,#4f46e5,#7c3aed);padding:36px;text-align:center;">
-          <h1 style="color:white;margin:0;font-size:24px;font-weight:700;">Interview Scheduled 🎉</h1>
+          <h1 style="color:white;margin:0;font-size:24px;font-weight:700;">Interview Scheduled</h1>
           <p style="color:rgba(255,255,255,0.85);margin:8px 0 0;font-size:15px;">You have been invited for an interview</p>
         </td></tr>
         <tr><td style="padding:36px;">
@@ -4618,7 +4618,7 @@ async function handleScheduleInterviewEmail(request, env, ctx) {
               <tr><td style="padding:8px 0;color:#6b7280;font-size:14px;">Date</td>
                   <td style="padding:8px 0;font-weight:600;font-size:14px;">${formattedDate}</td></tr>
               <tr><td style="padding:8px 0;color:#6b7280;font-size:14px;">Time</td>
-                  <td style="padding:8px 0;font-weight:600;font-size:14px;">${formattedStart} â€“ ${formattedEnd}</td></tr>
+                  <td style="padding:8px 0;font-weight:600;font-size:14px;">${formattedStart} - ${formattedEnd}</td></tr>
               <tr><td style="padding:8px 0;color:#6b7280;font-size:14px;">Mode</td>
                   <td style="padding:8px 0;font-weight:600;font-size:14px;">${modeLabel}</td></tr>
               <tr><td style="padding:8px 0;color:#6b7280;font-size:14px;">Interviewer</td>
@@ -4631,7 +4631,7 @@ async function handleScheduleInterviewEmail(request, env, ctx) {
             mode === "proctored"
               ? `
           <div style="background:#ede9fe;border-left:4px solid #7c3aed;padding:14px 16px;border-radius:6px;margin-bottom:20px;font-size:14px;color:#5b21b6;">
-            <strong>🔑 This is a Proctored Interview.</strong><br>
+            <strong>This is a Proctored Interview.</strong><br>
             Your session will be AI-monitored. Please ensure your camera and microphone are working, and take the interview from a quiet, well-lit location.
           </div>`
               : ""
@@ -4643,7 +4643,7 @@ async function handleScheduleInterviewEmail(request, env, ctx) {
             If you need to reschedule or have any questions, please reply to this email or contact our HR team.
           </p>
 
-          <p style="font-size:15px;color:#374151;margin-top:20px;">Best of luck! 🙌<br><strong>Simpatico HR Team</strong></p>
+          <p style="font-size:15px;color:#374151;margin-top:20px;">Best of luck!<br><strong>Simpatico HR Team</strong></p>
         </td></tr>
         <tr><td style="background:#f9fafb;padding:20px;text-align:center;border-top:1px solid #e5e7eb;">
           <p style="margin:0;font-size:12px;color:#9ca3af;">© ${new Date().getFullYear()} Simpatico HR · interviews@simpaticohr.in</p>
