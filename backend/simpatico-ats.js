@@ -825,6 +825,29 @@ route("GET", "/analytics/attrition", handleAttritionReport);
 route("POST", "/companies/register", handleCompanyRegister);
 route("POST", "/email/welcome", handleWelcomeEmail);
 
+// ── Super Admin (Role-Protected) ──
+route("GET", "/admin/verify", handleAdminVerify);
+route("GET", "/admin/stats", handleAdminStats);
+route("GET", "/admin/companies", handleAdminListCompanies);
+route("GET", "/admin/users", handleAdminListUsers);
+route("GET", "/admin/jobs", handleAdminListJobs);
+route("GET", "/admin/audit-logs", handleAdminAuditLogs);
+route("POST", "/admin/test-email", handleAdminTestEmail);
+
+// ── Attendance ──
+route("POST", "/attendance/clock-in", handleClockIn);
+route("POST", "/attendance/clock-out", handleClockOut);
+route("GET", "/attendance/records", handleListAttendance);
+route("GET", "/attendance/summary", handleAttendanceSummary);
+
+// ── Billing & Subscriptions ──
+route("POST", "/billing/create-order", handleCreateOrder);
+route("POST", "/billing/verify-payment", handleVerifyPayment);
+route("POST", "/billing/paddle-webhook", handlePaddleWebhook);
+route("GET", "/billing/subscription", handleGetSubscription);
+route("POST", "/billing/cancel", handleCancelSubscription);
+route("GET", "/billing/transactions", handleListTransactions);
+
 // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // Â§ 13.  MAIN ENTRY POINT
 // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
@@ -2802,6 +2825,33 @@ async function handleCreateApplication(request, env, ctx) {
   if (!body.job_id || !body.candidate_email)
     throw new ValidationError("job_id and candidate_email required");
 
+  // ★ DUPLICATE APPLICATION CHECK
+  // Prevent the same candidate from applying to the same job multiple times
+  try {
+    const dupCheck = await sbFetch(
+      env,
+      "GET",
+      `/rest/v1/job_applications?job_id=eq.${body.job_id}&candidate_email=eq.${encodeURIComponent(body.candidate_email)}&select=id,status,match_score`,
+      null,
+      false,
+      ctx.tenantId,
+    );
+    const existing = await dupCheck.json();
+    if (Array.isArray(existing) && existing.length > 0) {
+      const prev = existing[0];
+      // Allow re-application only if previously rejected (second chance)
+      if (prev.status !== 'rejected') {
+        return apiResponse(
+          { error: { message: `You have already applied to this position (Status: ${prev.status}). Application ID: ${prev.id}` }, duplicate: true, existing_application: prev },
+          409,
+        );
+      }
+      console.log(`[ATS] Re-application allowed for previously rejected candidate: ${body.candidate_email}`);
+    }
+  } catch (e) {
+    console.warn("[ATS] Duplicate check failed (proceeding):", e.message);
+  }
+
   // 0. Base64 Upload Handling (Bypass Frontend RLS limit)
   // â˜… ENTERPRISE B2B MULTI-TENANT FIX:
   // Store CVs in a tenant-isolated path. Do not use public URLs for PII data.
@@ -2865,21 +2915,25 @@ Job Title: ${job.title}
 Job Desc: ${job.description || job.department}
 Resume: ${body.resume_text}
 
-Calculate a match score out of 100 based on skills, experience, and requirements fit. 
-Return ONLY valid JSON in format: {"match_score": 85, "reason": "Brief 1-sentence reason"}`;
+Calculate a match score out of 100 based on skills, experience, and requirements fit.
+Also extract the candidate's top skills (max 8) from their resume.
+Return ONLY valid JSON in format: {"match_score": 85, "reason": "Brief 1-sentence reason", "skills": ["JavaScript", "React", "Node.js"]}`;
 
     try {
       const result = await env.AI.run("@cf/meta/llama-3.1-8b-instruct", {
         messages: [{ role: "user", content: prompt }],
-        max_tokens: 300,
+        max_tokens: 400,
       });
       const cleaned = result.response.replace(/```json|```/g, "").trim();
       const analysis = JSON.parse(cleaned);
       match_score = analysis.match_score || null;
       ai_summary = analysis.reason;
+      // Extract skills from AI response (comma-separated for DB storage)
+      if (Array.isArray(analysis.skills) && analysis.skills.length > 0) {
+        body._extracted_skills = analysis.skills.slice(0, 8).join(", ");
+      }
 
-      // We assume job_applications has a JSONB metadata or similar, but to be perfectly safe,
-      // we'll append the ai_summary to the resume_text or note field if metadata isn't strictly defined.
+      // Append the ai_summary to the resume_text for the candidate profile drawer
       body.resume_text =
         `[AI Score: ${match_score}/100 - ${ai_summary}]\n\n` + body.resume_text;
     } catch (e) {
@@ -2930,6 +2984,8 @@ Return ONLY valid JSON in format: {"match_score": 85, "reason": "Brief 1-sentenc
     ai_summary:       ai_summary || null,
     resume_text:      storedResumeText,
     resume_url:       body.resume_url || null,
+    source:           body.source || null,
+    candidate_skills: body._extracted_skills || body.candidate_skills || null,
     applied_at:       new Date().toISOString(),
     tenant_id:        ctx.tenantId,
   };
@@ -3063,6 +3119,38 @@ Return ONLY valid JSON in format: {"match_score": 85, "reason": "Brief 1-sentenc
     }).catch(() => {});
   }
 
+  // 6. Application Confirmation Email (for mid-score / manual-review candidates)
+  // Candidates who are NOT auto-shortlisted or auto-rejected get a confirmation email
+  if (!autoInterview && !autoRejected && app) {
+    try {
+      await sendEmail(env, {
+        to: app.candidate_email,
+        subject: `Application Received — ${job?.title || 'Open Position'}`,
+        html: `<div style="max-width:600px;margin:0 auto;font-family:'Inter',Arial,sans-serif;background:#f8fafc;padding:32px 0;">
+  <div style="background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,0.06);margin:0 16px;">
+    <div style="background:linear-gradient(135deg,#4f46e5,#6366f1);padding:32px 24px;text-align:center;">
+      <h1 style="color:#fff;font-size:22px;margin:0;font-weight:800;">Application Received ✓</h1>
+      <p style="color:rgba(255,255,255,0.85);font-size:14px;margin:8px 0 0;">We're reviewing your profile</p>
+    </div>
+    <div style="padding:32px 24px;">
+      <p style="font-size:16px;color:#1f2937;margin:0 0 16px;">Hi <strong>${app.candidate_name || 'there'}</strong>,</p>
+      <p style="font-size:14px;color:#4b5563;line-height:1.7;margin:0 0 20px;">Thank you for applying to the <strong>${job?.title || 'open position'}</strong> role. We've received your application and our team is currently reviewing it.</p>
+      <p style="font-size:14px;color:#4b5563;line-height:1.7;margin:0 0 20px;">You'll hear from us within <strong>5 business days</strong> with an update on your application status. If shortlisted, we'll reach out to schedule the next steps.</p>
+      <div style="background:#f0fdf4;border-left:4px solid #22c55e;padding:12px 16px;border-radius:0 8px 8px 0;font-size:13px;color:#166534;line-height:1.6;">
+        <strong>What happens next?</strong> Our AI screening system and recruiting team will evaluate your profile against the role requirements. Strong matches are fast-tracked to interviews.
+      </div>
+    </div>
+    <div style="background:#f1f5f9;padding:16px 24px;text-align:center;border-top:1px solid #e2e8f0;">
+      <p style="font-size:12px;color:#94a3b8;margin:0;">© ${new Date().getFullYear()} SimpaticoHR Consultancy Pvt Ltd · <a href="https://simpaticohr.in" style="color:#4f46e5;text-decoration:none;">simpaticohr.in</a></p>
+    </div>
+  </div>
+</div>`,
+      });
+    } catch (e) {
+      console.warn("[ATS] Confirmation email failed:", e.message);
+    }
+  }
+
   await dispatchWebhook(env, ctx.tenantId, "application.received", {
     application_id: app.id,
     job_id: body.job_id,
@@ -3102,7 +3190,7 @@ async function handleUpdateApplication(request, env, ctx, [id]) {
     "status",
     "updated_at",
     "notes",
-    "ai_score",
+    "match_score",
     "interview_token",
   ];
   const patch = {};
@@ -3138,6 +3226,43 @@ async function handleUpdateApplication(request, env, ctx, [id]) {
 
   const result = await res.json();
   const app = Array.isArray(result) ? result[0] : result;
+
+  // ★ MANUAL REJECTION EMAIL
+  // When a recruiter manually rejects a candidate, send a professional notification
+  if (body.status === 'rejected' && app) {
+    try {
+      // Fetch the job title for a personalized email
+      let jobTitle = 'the position';
+      if (app.job_id) {
+        const jobRes = await sbFetch(env, "GET", `/rest/v1/jobs?id=eq.${app.job_id}&select=title`, null, false, ctx.tenantId);
+        const [jobInfo] = await jobRes.json();
+        if (jobInfo?.title) jobTitle = jobInfo.title;
+      }
+      await sendEmail(env, {
+        to: app.candidate_email,
+        subject: `Application Update — ${jobTitle}`,
+        html: `<div style="max-width:600px;margin:0 auto;font-family:'Inter',Arial,sans-serif;background:#f8fafc;padding:32px 0;">
+  <div style="background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,0.06);margin:0 16px;">
+    <div style="background:linear-gradient(135deg,#1e293b,#334155);padding:32px 24px;text-align:center;">
+      <h1 style="color:#fff;font-size:22px;margin:0;font-weight:800;">Application Update</h1>
+    </div>
+    <div style="padding:32px 24px;">
+      <p style="font-size:16px;color:#1f2937;margin:0 0 16px;">Hi <strong>${app.candidate_name || 'there'}</strong>,</p>
+      <p style="font-size:14px;color:#4b5563;line-height:1.7;margin:0 0 20px;">Thank you for your interest in the <strong>${jobTitle}</strong> position. After careful review, we've decided to move forward with other candidates whose qualifications more closely match our current requirements.</p>
+      <p style="font-size:14px;color:#4b5563;line-height:1.7;margin:0 0 20px;">We encourage you to apply for future openings that match your skills and experience.</p>
+      <p style="font-size:14px;color:#6b7280;margin:0;">Best regards,<br/><strong>SimpaticoHR Recruitment Team</strong></p>
+    </div>
+    <div style="background:#f1f5f9;padding:16px 24px;text-align:center;border-top:1px solid #e2e8f0;">
+      <p style="font-size:12px;color:#94a3b8;margin:0;">© ${new Date().getFullYear()} SimpaticoHR Consultancy Pvt Ltd</p>
+    </div>
+  </div>
+</div>`,
+      });
+      console.log(`[ATS] Manual rejection email sent to ${app.candidate_email}`);
+    } catch (emailErr) {
+      console.warn("[ATS] Manual rejection email failed:", emailErr.message);
+    }
+  }
 
   await audit(env, ctx, "application.update", "job_applications", id, {
     status: body.status,
@@ -4130,6 +4255,9 @@ async function sbFetch(
     "hr_tickets",
     "automation_rules",
     "automation_logs",
+    // Billing
+    "subscriptions",
+    "payment_transactions",
   ];
   // Inject tenant_id filter for GET, PATCH, and DELETE to prevent cross-tenant access
   if (["GET", "PATCH", "DELETE"].includes(method) && tenantId && tenantId !== "default") {
@@ -4274,9 +4402,9 @@ function addDays(dateStr, days) {
   return d.toISOString().split("T")[0];
 }
 
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-// Â§ 18.  EMAIL TEMPLATES
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+// § 18.  EMAIL TEMPLATES
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
 
 function welcomeEmailHtml(firstName, empNum) {
   return `
@@ -4493,30 +4621,59 @@ async function handleScheduleInterviewEmail(request, env, ctx) {
 </html>`;
 
   // Send to candidate
-  await sendEmail(env, {
-    to: candidateEmail,
-    subject: `Interview Scheduled: ${position} â€” ${formattedDate}`,
-    html: candidateHtml,
-  });
+  console.log(`[interview-email] Sending interview invite to ${candidateEmail} for ${position}`);
+  let candidateSent = false;
+  let interviewerSent = false;
+  let emailError = null;
+
+  try {
+    await sendEmail(env, {
+      to: candidateEmail,
+      subject: `Interview Scheduled: ${position} â€” ${formattedDate}`,
+      html: candidateHtml,
+    });
+    candidateSent = true;
+    console.log(`[interview-email] Candidate email sent to ${candidateEmail}`);
+  } catch (emailErr) {
+    emailError = emailErr.message || 'Failed to send candidate email';
+    console.error(`[interview-email] Candidate email failed:`, emailErr.message);
+  }
 
   // Optionally CC interviewer
   if (interviewerEmail) {
-    await sendEmail(env, {
-      to: interviewerEmail,
-      subject: `[Action Required] You are interviewing ${candidateName} â€” ${formattedDate}`,
-      html: candidateHtml.replace(
-        `Hi <strong>${candidateName}</strong>`,
-        `Hi <strong>${interviewer}</strong>, you have an upcoming interview with <strong>${candidateName}</strong>`,
-      ),
-    });
+    try {
+      await sendEmail(env, {
+        to: interviewerEmail,
+        subject: `[Action Required] You are interviewing ${candidateName} â€” ${formattedDate}`,
+        html: candidateHtml.replace(
+          `Hi <strong>${candidateName}</strong>`,
+          `Hi <strong>${interviewer}</strong>, you have an upcoming interview with <strong>${candidateName}</strong>`,
+        ),
+      });
+      interviewerSent = true;
+      console.log(`[interview-email] Interviewer email sent to ${interviewerEmail}`);
+    } catch (intEmailErr) {
+      console.error(`[interview-email] Interviewer email failed:`, intEmailErr.message);
+    }
+  }
+
+  // If the candidate email failed entirely, return an error so the frontend knows
+  if (!candidateSent) {
+    throw new AppError(
+      emailError || 'Interview email delivery failed',
+      500,
+      'EMAIL_ERROR'
+    );
   }
 
   await audit(env, ctx, "interview.email_sent", "interviews", null, {
     candidateEmail,
     position,
+    candidateSent,
+    interviewerSent,
   });
 
-  return apiResponse({ sent: true, to: candidateEmail });
+  return apiResponse({ sent: true, to: candidateEmail, candidateSent, interviewerSent });
 }
 
 // Helper used inside this handler only
@@ -5101,4 +5258,838 @@ async function handleSubmitInterview(request, env, ctx) {
   });
 
   return apiResponse({ submitted: true, interview_id: interview.id });
+}
+
+// ═════════════════════════════════════════════════════════════════════════════════════
+// § ADMIN — Server-Side Protected Super Admin Handlers
+// ═════════════════════════════════════════════════════════════════════════════════════
+
+/**
+ * GET /admin/verify — Verify the caller is a super_admin/company_admin.
+ * The frontend should call this on load instead of trusting localStorage.
+ */
+async function handleAdminVerify(request, env, ctx) {
+  requireRole(ctx, "super_admin", "superadmin", "company_admin");
+  await audit(env, ctx, "admin.verify", "admin", null, { ip: ctx.ip });
+  return apiResponse({
+    verified: true,
+    role: ctx.actorRole,
+    email: ctx.actorEmail,
+    actor_id: ctx.actorId,
+  });
+}
+
+/**
+ * GET /admin/stats — Platform-wide statistics (cross-tenant).
+ */
+async function handleAdminStats(request, env, ctx) {
+  requireRole(ctx, "super_admin", "superadmin");
+
+  async function countTable(env, table) {
+    try {
+      const res = await fetch(
+        `${env.SUPABASE_URL}/rest/v1/${table}?select=id`,
+        {
+          headers: {
+            apikey: env.SUPABASE_SERVICE_KEY,
+            Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
+            Prefer: "count=exact",
+            "Range-Unit": "items",
+            Range: "0-0",
+          },
+        },
+      );
+      const range = res.headers.get("Content-Range") || "";
+      const match = range.match(/\/(\d+)$/);
+      return match ? parseInt(match[1]) : 0;
+    } catch {
+      return 0;
+    }
+  }
+
+  const [companies, users, jobs, applications, interviews, employees] =
+    await Promise.all([
+      countTable(env, "companies"),
+      countTable(env, "users"),
+      countTable(env, "jobs"),
+      countTable(env, "job_applications"),
+      countTable(env, "interviews"),
+      countTable(env, "employees"),
+    ]);
+
+  return apiResponse({
+    companies,
+    users,
+    jobs,
+    applications,
+    interviews,
+    employees,
+  });
+}
+
+/**
+ * GET /admin/companies — List all companies (cross-tenant, super_admin only).
+ */
+async function handleAdminListCompanies(request, env, ctx) {
+  requireRole(ctx, "super_admin", "superadmin");
+
+  const res = await fetch(
+    `${env.SUPABASE_URL}/rest/v1/companies?select=*&order=created_at.desc`,
+    {
+      headers: {
+        apikey: env.SUPABASE_SERVICE_KEY,
+        Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
+      },
+    },
+  );
+  if (!res.ok) throw new AppError("Failed to fetch companies", res.status);
+  const data = await res.json();
+  return apiResponse(data);
+}
+
+/**
+ * GET /admin/users — List all users (cross-tenant, super_admin only).
+ */
+async function handleAdminListUsers(request, env, ctx) {
+  requireRole(ctx, "super_admin", "superadmin");
+
+  const res = await fetch(
+    `${env.SUPABASE_URL}/rest/v1/users?select=*&order=created_at.desc`,
+    {
+      headers: {
+        apikey: env.SUPABASE_SERVICE_KEY,
+        Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
+      },
+    },
+  );
+  if (!res.ok) throw new AppError("Failed to fetch users", res.status);
+  const data = await res.json();
+  return apiResponse(data);
+}
+
+/**
+ * GET /admin/jobs — List all jobs across tenants (super_admin only).
+ */
+async function handleAdminListJobs(request, env, ctx) {
+  requireRole(ctx, "super_admin", "superadmin");
+
+  const res = await fetch(
+    `${env.SUPABASE_URL}/rest/v1/jobs?select=*,companies(name)&order=created_at.desc`,
+    {
+      headers: {
+        apikey: env.SUPABASE_SERVICE_KEY,
+        Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
+      },
+    },
+  );
+  if (!res.ok) throw new AppError("Failed to fetch jobs", res.status);
+  const data = await res.json();
+  return apiResponse(data);
+}
+
+/**
+ * GET /admin/audit-logs — Read real audit logs from DB (super_admin only).
+ */
+async function handleAdminAuditLogs(request, env, ctx) {
+  requireRole(ctx, "super_admin", "superadmin");
+
+  const url = new URL(request.url);
+  const limit = Math.min(parseInt(url.searchParams.get("limit") || "100"), 500);
+  const action = url.searchParams.get("action");
+
+  let query = `/rest/v1/audit_logs?select=*&order=timestamp.desc&limit=${limit}`;
+  if (action && action !== "all") {
+    query += `&action=eq.${encodeURIComponent(action)}`;
+  }
+
+  const res = await fetch(`${env.SUPABASE_URL}${query}`, {
+    headers: {
+      apikey: env.SUPABASE_SERVICE_KEY,
+      Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
+    },
+  });
+
+  if (!res.ok) {
+    // Table may not exist yet — return empty
+    return apiResponse([]);
+  }
+  const data = await res.json();
+  return apiResponse(data);
+}
+
+/**
+ * POST /admin/test-email — Actually send a test email via Resend (super_admin only).
+ */
+async function handleAdminTestEmail(request, env, ctx) {
+  requireRole(ctx, "super_admin", "superadmin", "company_admin");
+
+  const body = await safeJson(request);
+  const to = body.to || ctx.actorEmail;
+  if (!to) throw new ValidationError("Email address required");
+
+  await sendEmail(env, {
+    to,
+    subject: "✅ SimpaticoHR — Test Email",
+    html: `
+      <div style="font-family:'Inter',system-ui,sans-serif;max-width:500px;margin:0 auto;padding:32px;background:#fff;border-radius:16px;border:1px solid #E5E7EB;">
+        <div style="text-align:center;margin-bottom:24px;">
+          <div style="width:48px;height:48px;border-radius:12px;background:linear-gradient(135deg,#10B981,#059669);display:inline-flex;align-items:center;justify-content:center;font-size:24px;">✓</div>
+        </div>
+        <h2 style="font-size:20px;font-weight:700;color:#0F172A;text-align:center;margin:0 0 8px;">Email System Working</h2>
+        <p style="font-size:14px;color:#6B7280;text-align:center;margin:0 0 24px;">Your SimpaticoHR email configuration is active and operational.</p>
+        <div style="background:#F9FAFB;border-radius:10px;padding:16px;font-size:13px;color:#374151;">
+          <div><strong>Sent by:</strong> ${ctx.actorEmail || "Super Admin"}</div>
+          <div><strong>Tenant:</strong> ${ctx.tenantId}</div>
+          <div><strong>Timestamp:</strong> ${new Date().toISOString()}</div>
+          <div><strong>Worker Version:</strong> ${VERSION}</div>
+        </div>
+      </div>
+    `,
+  });
+
+  await audit(env, ctx, "admin.test_email", "admin", null, { to });
+  return apiResponse({ sent: true, to });
+}
+
+// ═════════════════════════════════════════════════════════════════════════════════════
+// § ATTENDANCE — Clock In / Clock Out / Records
+// ═════════════════════════════════════════════════════════════════════════════════════
+
+/**
+ * POST /attendance/clock-in — Record a clock-in event.
+ */
+async function handleClockIn(request, env, ctx) {
+  requireAuth(ctx);
+  const body = await safeJson(request);
+  const employee_id = body.employee_id;
+  if (!employee_id) throw new ValidationError("employee_id required");
+
+  const today = new Date().toISOString().split("T")[0];
+
+  // Check if already clocked in today without clock-out
+  const checkRes = await sbFetch(
+    env,
+    "GET",
+    `/rest/v1/attendance_records?employee_id=eq.${employee_id}&date=eq.${today}&check_out=is.null&select=id`,
+    null,
+    false,
+    ctx.tenantId,
+  );
+  if (checkRes.ok) {
+    const existing = await checkRes.json();
+    if (existing.length > 0) {
+      throw new AppError("Already clocked in today. Please clock out first.", 409, "ALREADY_CLOCKED_IN");
+    }
+  }
+
+  const record = {
+    employee_id,
+    date: today,
+    check_in: new Date().toISOString(),
+    status: "present",
+    tenant_id: ctx.tenantId,
+  };
+
+  const res = await sbFetch(env, "POST", "/rest/v1/attendance_records", record, false, ctx.tenantId);
+  if (!res.ok) {
+    const errText = await res.text().catch(() => "unknown");
+    throw new AppError(`Failed to record clock-in: ${errText}`, res.status, "DB_ERROR");
+  }
+
+  await audit(env, ctx, "attendance.clock_in", "attendance_records", employee_id, { date: today });
+  return apiResponse({ clocked_in: true, date: today, check_in: record.check_in });
+}
+
+/**
+ * POST /attendance/clock-out — Record a clock-out event.
+ */
+async function handleClockOut(request, env, ctx) {
+  requireAuth(ctx);
+  const body = await safeJson(request);
+  const employee_id = body.employee_id;
+  if (!employee_id) throw new ValidationError("employee_id required");
+
+  const today = new Date().toISOString().split("T")[0];
+
+  // Find today's open record
+  const checkRes = await sbFetch(
+    env,
+    "GET",
+    `/rest/v1/attendance_records?employee_id=eq.${employee_id}&date=eq.${today}&check_out=is.null&select=*&limit=1`,
+    null,
+    false,
+    ctx.tenantId,
+  );
+  if (!checkRes.ok) throw new AppError("Failed to query attendance", checkRes.status, "DB_ERROR");
+
+  const records = await checkRes.json();
+  if (records.length === 0) {
+    throw new AppError("No active clock-in found for today.", 404, "NO_CLOCK_IN");
+  }
+
+  const record = records[0];
+  const checkOut = new Date().toISOString();
+  const checkIn = new Date(record.check_in);
+  const hoursWorked = ((new Date(checkOut) - checkIn) / 3600000).toFixed(2);
+
+  const res = await sbFetch(
+    env,
+    "PATCH",
+    `/rest/v1/attendance_records?id=eq.${record.id}`,
+    { check_out: checkOut, hours_worked: parseFloat(hoursWorked) },
+    false,
+    ctx.tenantId,
+  );
+
+  if (!res.ok) {
+    const errText = await res.text().catch(() => "unknown");
+    throw new AppError(`Failed to record clock-out: ${errText}`, res.status, "DB_ERROR");
+  }
+
+  await audit(env, ctx, "attendance.clock_out", "attendance_records", employee_id, { date: today, hours_worked: hoursWorked });
+  return apiResponse({ clocked_out: true, date: today, check_out: checkOut, hours_worked: parseFloat(hoursWorked) });
+}
+
+/**
+ * GET /attendance/records — List attendance records (filterable by employee_id, date range).
+ */
+async function handleListAttendance(request, env, ctx) {
+  requireAuth(ctx);
+  const url = new URL(request.url);
+  const employee_id = url.searchParams.get("employee_id");
+  const from = url.searchParams.get("from");
+  const to = url.searchParams.get("to");
+  const limit = Math.min(parseInt(url.searchParams.get("limit") || "100"), 500);
+
+  let query = `/rest/v1/attendance_records?select=*,employees(first_name,last_name)&order=date.desc&limit=${limit}`;
+  if (employee_id) query += `&employee_id=eq.${employee_id}`;
+  if (from) query += `&date=gte.${from}`;
+  if (to) query += `&date=lte.${to}`;
+
+  const res = await sbFetch(env, "GET", query, null, false, ctx.tenantId);
+  if (!res.ok) throw new AppError("Failed to fetch attendance records", res.status, "DB_ERROR");
+
+  const data = await res.json();
+  return apiResponse(data);
+}
+
+/**
+ * GET /attendance/summary — Get attendance summary for an employee or all employees.
+ */
+async function handleAttendanceSummary(request, env, ctx) {
+  requireAuth(ctx);
+  const url = new URL(request.url);
+  const employee_id = url.searchParams.get("employee_id");
+  const month = url.searchParams.get("month"); // YYYY-MM format
+
+  const now = new Date();
+  const targetMonth = month || `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  const from = `${targetMonth}-01`;
+  const lastDay = new Date(parseInt(targetMonth.split("-")[0]), parseInt(targetMonth.split("-")[1]), 0).getDate();
+  const to = `${targetMonth}-${String(lastDay).padStart(2, "0")}`;
+
+  let query = `/rest/v1/attendance_records?select=*&date=gte.${from}&date=lte.${to}&order=date.asc`;
+  if (employee_id) query += `&employee_id=eq.${employee_id}`;
+
+  const res = await sbFetch(env, "GET", query, null, false, ctx.tenantId);
+  if (!res.ok) throw new AppError("Failed to fetch attendance summary", res.status, "DB_ERROR");
+
+  const records = await res.json();
+
+  // Aggregate
+  const byEmployee = {};
+  for (const r of records) {
+    if (!byEmployee[r.employee_id]) {
+      byEmployee[r.employee_id] = { present: 0, absent: 0, late: 0, total_hours: 0 };
+    }
+    const e = byEmployee[r.employee_id];
+    if (r.status === "present") e.present++;
+    else if (r.status === "absent") e.absent++;
+    else if (r.status === "late") e.late++;
+    e.total_hours += r.hours_worked || 0;
+  }
+
+  return apiResponse({
+    month: targetMonth,
+    total_records: records.length,
+    by_employee: byEmployee,
+  });
+}
+
+// ═════════════════════════════════════════════════════════════════════════════════════
+// § BILLING — Cashfree (Domestic) + Paddle (International)
+// ═════════════════════════════════════════════════════════════════════════════════════
+
+const PLAN_PRICING = {
+  starter: {
+    monthly: { inr: 4999, usd: 59 },
+    annual:  { inr: 49990, usd: 590 },
+  },
+  professional: {
+    monthly: { inr: 14999, usd: 179 },
+    annual:  { inr: 149990, usd: 1790 },
+  },
+  enterprise: {
+    monthly: { inr: 0, usd: 0 }, // custom
+    annual:  { inr: 0, usd: 0 },
+  },
+};
+
+/**
+ * POST /billing/create-order — Create a Cashfree payment order (domestic INR).
+ * Body: { plan, billing_cycle, customer_name, customer_email, customer_phone }
+ */
+async function handleCreateOrder(request, env, ctx) {
+  requireAuth(ctx);
+  const body = await safeJson(request);
+  const { plan, billing_cycle = "monthly", customer_name, customer_email, customer_phone } = body;
+
+  if (!plan || !PLAN_PRICING[plan]) throw new ValidationError("Invalid plan");
+  if (!customer_email) throw new ValidationError("customer_email required");
+
+  const pricing = PLAN_PRICING[plan][billing_cycle];
+  if (!pricing || !pricing.inr) throw new ValidationError("Invalid billing cycle or plan");
+
+  const companyId = ctx.tenantId;
+  const orderId = `SIMP_${plan.toUpperCase()}_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+
+  const cfApiBase = env.CASHFREE_ENV === "production"
+    ? "https://api.cashfree.com/pg"
+    : "https://sandbox.cashfree.com/pg";
+
+  // Create Cashfree Order
+  const cfRes = await fetch(`${cfApiBase}/orders`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-client-id": env.CASHFREE_APP_ID,
+      "x-client-secret": env.CASHFREE_SECRET_KEY,
+      "x-api-version": "2023-08-01",
+    },
+    body: JSON.stringify({
+      order_id: orderId,
+      order_amount: pricing.inr,
+      order_currency: "INR",
+      customer_details: {
+        customer_id: companyId,
+        customer_name: customer_name || ctx.actorEmail,
+        customer_email: customer_email,
+        customer_phone: customer_phone || "9999999999",
+      },
+      order_meta: {
+        return_url: `${env.FRONTEND_URL || "https://simpaticohr.github.io"}/platform/payment-success.html?order_id={order_id}`,
+        notify_url: `${env.WORKER_URL || "https://simpatico-hr-ats.simpaticohrconsultancy.workers.dev"}/billing/verify-payment`,
+      },
+      order_note: `SimpaticoHR ${plan} plan (${billing_cycle})`,
+      order_tags: {
+        plan: plan,
+        billing_cycle: billing_cycle,
+        company_id: companyId,
+      },
+    }),
+  });
+
+  const cfData = await cfRes.json();
+  if (!cfRes.ok) {
+    console.error("[Cashfree] Order creation failed:", JSON.stringify(cfData));
+    throw new AppError(`Cashfree order failed: ${cfData.message || "Unknown error"}`, 502, "CASHFREE_ERROR");
+  }
+
+  // Record the pending transaction
+  await sbFetch(env, "POST", "/rest/v1/payment_transactions", {
+    company_id: companyId,
+    gateway: "cashfree",
+    gateway_order_id: orderId,
+    amount: pricing.inr,
+    currency: "INR",
+    status: "pending",
+    plan: plan,
+    billing_cycle: billing_cycle,
+    metadata: { cashfree_order: cfData },
+  }, false, companyId);
+
+  await audit(env, ctx, "billing.order_created", "payment_transactions", orderId, {
+    plan, billing_cycle, amount: pricing.inr,
+  });
+
+  return apiResponse({
+    order_id: orderId,
+    payment_session_id: cfData.payment_session_id,
+    cf_order_id: cfData.cf_order_id,
+    order_amount: pricing.inr,
+    order_currency: "INR",
+    gateway: "cashfree",
+    environment: env.CASHFREE_ENV || "sandbox",
+  });
+}
+
+/**
+ * POST /billing/verify-payment — Verify Cashfree payment and activate subscription.
+ * Body: { order_id }
+ */
+async function handleVerifyPayment(request, env, ctx) {
+  const body = await safeJson(request);
+  const { order_id } = body;
+  if (!order_id) throw new ValidationError("order_id required");
+
+  const cfApiBase = env.CASHFREE_ENV === "production"
+    ? "https://api.cashfree.com/pg"
+    : "https://sandbox.cashfree.com/pg";
+
+  // Verify payment with Cashfree
+  const cfRes = await fetch(`${cfApiBase}/orders/${order_id}`, {
+    headers: {
+      "x-client-id": env.CASHFREE_APP_ID,
+      "x-client-secret": env.CASHFREE_SECRET_KEY,
+      "x-api-version": "2023-08-01",
+    },
+  });
+
+  const cfOrder = await cfRes.json();
+  if (!cfRes.ok) {
+    throw new AppError("Failed to verify order with Cashfree", 502, "CASHFREE_VERIFY_ERROR");
+  }
+
+  const isPaid = cfOrder.order_status === "PAID";
+  const plan = cfOrder.order_tags?.plan || "starter";
+  const billingCycle = cfOrder.order_tags?.billing_cycle || "monthly";
+  const companyId = cfOrder.order_tags?.company_id || cfOrder.customer_details?.customer_id;
+
+  // Update transaction record
+  await fetch(
+    `${env.SUPABASE_URL}/rest/v1/payment_transactions?gateway_order_id=eq.${order_id}`,
+    {
+      method: "PATCH",
+      headers: {
+        apikey: env.SUPABASE_SERVICE_KEY,
+        Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
+        "Content-Type": "application/json",
+        Prefer: "return=minimal",
+      },
+      body: JSON.stringify({
+        status: isPaid ? "paid" : "failed",
+        gateway_payment_id: cfOrder.cf_order_id,
+        payment_method: cfOrder.payment_method || "cashfree",
+        metadata: { cashfree_response: cfOrder },
+      }),
+    },
+  );
+
+  if (isPaid) {
+    // Activate subscription
+    const now = new Date();
+    const periodEnd = new Date(now);
+    periodEnd.setMonth(periodEnd.getMonth() + (billingCycle === "annual" ? 12 : 1));
+
+    // Upsert subscription
+    await fetch(
+      `${env.SUPABASE_URL}/rest/v1/subscriptions?company_id=eq.${companyId}`,
+      {
+        method: "DELETE",
+        headers: {
+          apikey: env.SUPABASE_SERVICE_KEY,
+          Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
+        },
+      },
+    );
+
+    await fetch(`${env.SUPABASE_URL}/rest/v1/subscriptions`, {
+      method: "POST",
+      headers: {
+        apikey: env.SUPABASE_SERVICE_KEY,
+        Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
+        "Content-Type": "application/json",
+        Prefer: "return=minimal",
+      },
+      body: JSON.stringify({
+        company_id: companyId,
+        plan: plan,
+        status: "active",
+        gateway: "cashfree",
+        gateway_subscription_id: cfOrder.cf_order_id,
+        amount: cfOrder.order_amount,
+        currency: "INR",
+        billing_cycle: billingCycle,
+        current_period_start: now.toISOString(),
+        current_period_end: periodEnd.toISOString(),
+      }),
+    });
+
+    // Update company plan
+    await fetch(
+      `${env.SUPABASE_URL}/rest/v1/companies?id=eq.${companyId}`,
+      {
+        method: "PATCH",
+        headers: {
+          apikey: env.SUPABASE_SERVICE_KEY,
+          Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
+          "Content-Type": "application/json",
+          Prefer: "return=minimal",
+        },
+        body: JSON.stringify({ subscription_plan: plan }),
+      },
+    );
+  }
+
+  if (ctx.actorEmail || ctx.actorId) {
+    await audit(env, ctx, isPaid ? "billing.payment_success" : "billing.payment_failed", "payment_transactions", order_id, {
+      plan, amount: cfOrder.order_amount, status: cfOrder.order_status,
+    });
+  }
+
+  return apiResponse({
+    verified: true,
+    paid: isPaid,
+    plan: isPaid ? plan : null,
+    order_status: cfOrder.order_status,
+  });
+}
+
+/**
+ * POST /billing/paddle-webhook — Handle Paddle webhook events (international).
+ * Paddle sends: subscription.created, subscription.updated, transaction.completed, etc.
+ */
+async function handlePaddleWebhook(request, env, ctx) {
+  const rawBody = await request.text();
+
+  // Verify Paddle webhook signature (if secret is set)
+  if (env.PADDLE_WEBHOOK_SECRET) {
+    const signature = request.headers.get("Paddle-Signature") || "";
+    const ts = signature.match(/ts=(\d+)/)?.[1];
+    const h1 = signature.match(/h1=([a-f0-9]+)/)?.[1];
+
+    if (ts && h1) {
+      const signedPayload = `${ts}:${rawBody}`;
+      const key = await crypto.subtle.importKey(
+        "raw",
+        new TextEncoder().encode(env.PADDLE_WEBHOOK_SECRET),
+        { name: "HMAC", hash: "SHA-256" },
+        false,
+        ["sign"],
+      );
+      const sig = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(signedPayload));
+      const computed = Array.from(new Uint8Array(sig)).map(b => b.toString(16).padStart(2, "0")).join("");
+
+      if (computed !== h1) {
+        console.error("[Paddle] Webhook signature mismatch");
+        return new Response("Invalid signature", { status: 401 });
+      }
+    }
+  }
+
+  let event;
+  try {
+    event = JSON.parse(rawBody);
+  } catch {
+    return new Response("Invalid JSON", { status: 400 });
+  }
+
+  const eventType = event.event_type;
+  const data = event.data;
+  console.log(`[Paddle] Webhook: ${eventType}`, JSON.stringify(data).substring(0, 500));
+
+  if (eventType === "transaction.completed") {
+    const companyId = data.custom_data?.company_id;
+    const plan = data.custom_data?.plan || "professional";
+    const billingCycle = data.custom_data?.billing_cycle || "monthly";
+
+    if (companyId) {
+      // Record transaction
+      await fetch(`${env.SUPABASE_URL}/rest/v1/payment_transactions`, {
+        method: "POST",
+        headers: {
+          apikey: env.SUPABASE_SERVICE_KEY,
+          Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
+          "Content-Type": "application/json",
+          Prefer: "return=minimal",
+        },
+        body: JSON.stringify({
+          company_id: companyId,
+          gateway: "paddle",
+          gateway_order_id: data.id,
+          gateway_payment_id: data.checkout?.id || data.id,
+          amount: parseFloat(data.details?.totals?.total || 0) / 100,
+          currency: data.currency_code || "USD",
+          status: "paid",
+          plan: plan,
+          billing_cycle: billingCycle,
+          payment_method: "paddle",
+          metadata: { paddle_event: event },
+        }),
+      });
+    }
+  }
+
+  if (eventType === "subscription.created" || eventType === "subscription.updated") {
+    const companyId = data.custom_data?.company_id;
+    const plan = data.custom_data?.plan || "professional";
+
+    if (companyId) {
+      const paddleStatus = data.status; // active, paused, canceled
+      const mappedStatus = paddleStatus === "active" ? "active" :
+                           paddleStatus === "paused" ? "paused" :
+                           paddleStatus === "canceled" ? "cancelled" : "active";
+
+      // Upsert subscription
+      await fetch(`${env.SUPABASE_URL}/rest/v1/subscriptions?company_id=eq.${companyId}`, {
+        method: "DELETE",
+        headers: {
+          apikey: env.SUPABASE_SERVICE_KEY,
+          Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
+        },
+      });
+
+      await fetch(`${env.SUPABASE_URL}/rest/v1/subscriptions`, {
+        method: "POST",
+        headers: {
+          apikey: env.SUPABASE_SERVICE_KEY,
+          Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
+          "Content-Type": "application/json",
+          Prefer: "return=minimal",
+        },
+        body: JSON.stringify({
+          company_id: companyId,
+          plan: plan,
+          status: mappedStatus,
+          gateway: "paddle",
+          gateway_subscription_id: data.id,
+          gateway_customer_id: data.customer_id,
+          currency: data.currency_code || "USD",
+          billing_cycle: data.billing_cycle?.interval === "year" ? "annual" : "monthly",
+          current_period_start: data.current_billing_period?.starts_at,
+          current_period_end: data.current_billing_period?.ends_at,
+        }),
+      });
+
+      // Update company plan
+      await fetch(`${env.SUPABASE_URL}/rest/v1/companies?id=eq.${companyId}`, {
+        method: "PATCH",
+        headers: {
+          apikey: env.SUPABASE_SERVICE_KEY,
+          Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
+          "Content-Type": "application/json",
+          Prefer: "return=minimal",
+        },
+        body: JSON.stringify({ subscription_plan: plan }),
+      });
+    }
+  }
+
+  if (eventType === "subscription.canceled") {
+    const companyId = data.custom_data?.company_id;
+    if (companyId) {
+      await fetch(`${env.SUPABASE_URL}/rest/v1/subscriptions?company_id=eq.${companyId}`, {
+        method: "PATCH",
+        headers: {
+          apikey: env.SUPABASE_SERVICE_KEY,
+          Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
+          "Content-Type": "application/json",
+          Prefer: "return=minimal",
+        },
+        body: JSON.stringify({ status: "cancelled", cancelled_at: new Date().toISOString() }),
+      });
+    }
+  }
+
+  return new Response(JSON.stringify({ received: true }), {
+    status: 200,
+    headers: { "Content-Type": "application/json", ...getCorsHeaders(request) },
+  });
+}
+
+/**
+ * GET /billing/subscription — Get current subscription status.
+ */
+async function handleGetSubscription(request, env, ctx) {
+  requireAuth(ctx);
+  const companyId = ctx.tenantId;
+
+  const res = await sbFetch(
+    env, "GET",
+    `/rest/v1/subscriptions?company_id=eq.${companyId}&select=*&limit=1`,
+    null, false, companyId,
+  );
+
+  if (!res.ok) return apiResponse({ subscription: null, plan: "trial" });
+  const subs = await res.json();
+
+  if (subs.length === 0) {
+    return apiResponse({ subscription: null, plan: "trial", status: "trial" });
+  }
+
+  return apiResponse({
+    subscription: subs[0],
+    plan: subs[0].plan,
+    status: subs[0].status,
+    expires: subs[0].current_period_end,
+  });
+}
+
+/**
+ * POST /billing/cancel — Cancel current subscription.
+ */
+async function handleCancelSubscription(request, env, ctx) {
+  requireRole(ctx, "company_admin", "companyadmin", "super_admin", "superadmin");
+  const companyId = ctx.tenantId;
+
+  // Get current subscription
+  const subRes = await sbFetch(
+    env, "GET",
+    `/rest/v1/subscriptions?company_id=eq.${companyId}&select=*&limit=1`,
+    null, false, companyId,
+  );
+
+  if (!subRes.ok) throw new AppError("Failed to fetch subscription", 500);
+  const subs = await subRes.json();
+  if (subs.length === 0) throw new AppError("No active subscription found", 404);
+
+  const sub = subs[0];
+
+  // If Paddle subscription, cancel via Paddle API
+  if (sub.gateway === "paddle" && sub.gateway_subscription_id && env.PADDLE_API_KEY) {
+    const paddleBase = env.PADDLE_ENV === "production"
+      ? "https://api.paddle.com"
+      : "https://sandbox-api.paddle.com";
+
+    await fetch(`${paddleBase}/subscriptions/${sub.gateway_subscription_id}/cancel`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${env.PADDLE_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ effective_from: "next_billing_period" }),
+    });
+  }
+
+  // Update local subscription
+  await sbFetch(
+    env, "PATCH",
+    `/rest/v1/subscriptions?id=eq.${sub.id}`,
+    { status: "cancelled", cancelled_at: new Date().toISOString() },
+    false, companyId,
+  );
+
+  await audit(env, ctx, "billing.subscription_cancelled", "subscriptions", sub.id, {
+    plan: sub.plan, gateway: sub.gateway,
+  });
+
+  return apiResponse({ cancelled: true, effective_until: sub.current_period_end });
+}
+
+/**
+ * GET /billing/transactions — List payment transaction history.
+ */
+async function handleListTransactions(request, env, ctx) {
+  requireAuth(ctx);
+  const companyId = ctx.tenantId;
+
+  const res = await sbFetch(
+    env, "GET",
+    `/rest/v1/payment_transactions?company_id=eq.${companyId}&select=*&order=created_at.desc&limit=50`,
+    null, false, companyId,
+  );
+
+  if (!res.ok) return apiResponse([]);
+  const data = await res.json();
+  return apiResponse(data);
 }

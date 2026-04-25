@@ -2324,10 +2324,44 @@ let loadedModules = {};
 let selectedInterviewMode = '';
 let activeChannels = new Set(['email']); 
 
+// ===== FEATURE FLAG ENFORCEMENT =====
+// Reads cfg_features set by Super Admin and hides disabled modules from the sidebar
+function enforceFeatureFlags() {
+    try {
+        const flags = JSON.parse(localStorage.getItem('cfg_features') || '{}');
+        // Map: feature_flag_key → sidebar data-section values to hide
+        const flagToSections = {
+            payroll_module:     ['payroll'],
+            training_module:    ['training'],
+            analytics_advanced: ['analytics', 'dbAnalytics'],
+            ai_screening:      ['atsAutomation'],
+        };
+
+        Object.entries(flagToSections).forEach(([flagKey, sections]) => {
+            // Only act if the flag is explicitly set to false (undefined = use default)
+            if (flags[flagKey] === false) {
+                sections.forEach(section => {
+                    // Hide sidebar nav item
+                    const navItem = document.querySelector(`.nav-item[data-section="${section}"]`);
+                    if (navItem) navItem.style.display = 'none';
+                    // Hide content section
+                    const contentSection = document.getElementById(`section-${section}`);
+                    if (contentSection) contentSection.style.display = 'none';
+                });
+                console.log(`[FeatureFlags] Disabled module: ${flagKey} → hidden sections: ${sections.join(', ')}`);
+            }
+        });
+    } catch(e) {
+        console.warn('[FeatureFlags] Could not enforce flags:', e.message);
+    }
+}
+
 // ===== INIT =====
 document.addEventListener('DOMContentLoaded', () => { initApp(); });
 
 async function initApp() {
+    // ★ Enforce feature flags immediately (hides modules before render)
+    enforceFeatureFlags();
     const realToken = localStorage.getItem('simpatico_token');
     let realUser = JSON.parse(localStorage.getItem('simpatico_user') || '{}');
 
@@ -2708,6 +2742,7 @@ async function sendWhatsAppNotification(int) {
 async function sendEmailNotification(int, recipientType = 'candidate') {
     const workerUrl = window.SIMPATICO_CONFIG?.workerUrl;
     if (!workerUrl) {
+        console.error('[sendEmailNotification] Worker URL not configured');
         return { success: false, reason: 'Worker not configured' };
     }
 
@@ -2730,19 +2765,53 @@ async function sendEmailNotification(int, recipientType = 'candidate') {
             recipientType 
         };
 
+        // Build headers with auth token for backend authentication
+        const headers = {
+            'Content-Type': 'application/json',
+            'X-Tenant-ID': window.SIMPATICO_CONFIG?.tenantId || 'default'
+        };
+
+        // Attach a fresh Bearer token from the active Supabase session
+        let authToken = window._simpatico_liveToken || '';
+        if (!authToken) {
+            try {
+                const db = (typeof getSupabaseClient === 'function' ? getSupabaseClient() : null) || window.SimpaticoDB || window._supabaseClient;
+                if (db?.auth?.getSession) {
+                    const { data: sessionData } = await db.auth.getSession();
+                    authToken = sessionData?.session?.access_token || '';
+                }
+            } catch (tokenErr) {
+                console.warn('[sendEmailNotification] Session refresh failed:', tokenErr.message);
+            }
+        }
+        if (!authToken && typeof getAuthToken === 'function') {
+            authToken = getAuthToken();
+        }
+        if (authToken) {
+            headers['Authorization'] = 'Bearer ' + authToken;
+        }
+        if (window.SIMPATICO_CONFIG?.supabaseAnonKey) {
+            headers['apikey'] = window.SIMPATICO_CONFIG.supabaseAnonKey;
+        }
+
+        console.log('[sendEmailNotification] Sending to', payload.candidateEmail, '| recipientType:', recipientType);
+
         const res = await fetch(`${workerUrl}/interviews/schedule`, {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-Tenant-ID': window.SIMPATICO_CONFIG?.tenantId || 'default'
-            },
+            headers,
             body: JSON.stringify(payload)
         });
 
-        if (res.ok) return { success: true };
+        if (res.ok) {
+            console.log('[sendEmailNotification] ✅ Email sent successfully');
+            return { success: true };
+        }
         const data = await res.json().catch(() => ({}));
-        return { success: false, reason: data.error || 'API error' };
+        const reason = data?.error?.message || data?.error || `HTTP ${res.status}`;
+        console.error('[sendEmailNotification] ❌ Failed:', reason, data);
+        return { success: false, reason };
     } catch(e) {
+        console.error('[sendEmailNotification] ❌ Exception:', e.message);
         return { success: false, reason: e.message };
     }
 }
