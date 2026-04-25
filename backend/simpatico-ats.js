@@ -3866,7 +3866,7 @@ async function handleInterviewEmail(request, env) {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        from: "Simpatico HR <hr@simpaticohr.in>",
+        from: "Simpatico HR <hr@ats.simpaticohr.in>",
         to: data.candidateEmail,
         subject: `Interview Invitation: ${data.position} at Simpatico`,
         html: `
@@ -4308,8 +4308,8 @@ async function sbFetch(
 
 async function sendEmail(env, { to, subject, html, replyTo }) {
   if (!env.RESEND_API_KEY) {
-    console.warn("RESEND_API_KEY not set â€” email suppressed");
-    return;
+    console.error("[sendEmail] RESEND_API_KEY not set — cannot send email to:", to);
+    throw new AppError("Email service not configured (RESEND_API_KEY missing)", 503, "EMAIL_NOT_CONFIGURED");
   }
 
   const res = await fetch("https://api.resend.com/emails", {
@@ -4319,7 +4319,7 @@ async function sendEmail(env, { to, subject, html, replyTo }) {
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      from: env.EMAIL_FROM || "Simpatico HR <hr@simpaticohr.in>",
+      from: env.EMAIL_FROM || "Simpatico HR <hr@ats.simpaticohr.in>",
       to: Array.isArray(to) ? to : [to],
       subject,
       html,
