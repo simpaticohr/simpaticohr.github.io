@@ -1,6 +1,6 @@
 /**
  * â•”â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•—
- * â•‘          SIMPATICO HR  â€”  ENTERPRISE PLATFORM ENGINE  v5.0                 â•‘
+ * â•‘          SIMPATICO HR  —  ENTERPRISE PLATFORM ENGINE  v5.0                 â•‘
  * ╔═════════════════════════════════════════════════════════════════════════════════════╗
  * ║          SIMPATICO HR  —  ENTERPRISE PLATFORM ENGINE  v5.0                 ║
  * ║          Cloudflare Workers · Edge-Native · Zero Cold-Start                 ║
@@ -1068,7 +1068,7 @@ async function handleCreateEmployee(request, env, ctx) {
   // Welcome email (fire-and-forget)
   sendEmail(env, {
     to: body.email,
-    subject: `Welcome to the Team, ${body.first_name}! ðŸŽ‰`,
+    subject: `Welcome to the Team, ${body.first_name}! 🎉`,
     html: welcomeEmailHtml(body.first_name, empNum),
   }).catch(console.error);
 
@@ -1775,7 +1775,7 @@ async function handlePerformanceFeedback(request, env, ctx) {
 Generate a balanced, constructive, STAR-method performance review paragraph for:
 Employee: ${emp?.first_name} ${emp?.last_name} | Role: ${emp?.job_title}
 Manager Rating: ${rating}/5 | Strengths noted: ${strengths} | Areas for improvement: ${improvements}
-Be specific, professional, growth-oriented, and 150-200 words. Avoid clichÃ©s.`;
+Be specific, professional, growth-oriented, and 150-200 words. Avoid clichés.`;
 
   const result = await env.AI.run("@cf/meta/llama-3.1-8b-instruct", {
     messages: [{ role: "user", content: prompt }],
@@ -2694,7 +2694,7 @@ async function handleCreateJob(request, env, ctx) {
   const body = await safeJson(request);
   validate(body, "job_posting");
 
-  // Accept status from frontend (open, draft, closed) â€” default to "open"
+  // Accept status from frontend (open, draft, closed) — default to "open"
   const jobStatus = ["open", "draft", "closed"].includes(body.status) ? body.status : "open";
 
   // Validate syndication_targets values
@@ -2784,7 +2784,7 @@ async function handleCreateJob(request, env, ctx) {
 }
 
 async function handleListJobs(request, env, ctx, _, url) {
-  // No strict role check â€” tenant isolation enforced by sbFetch
+  // No strict role check — tenant isolation enforced by sbFetch
   const status = url.searchParams.get("status") || "open";
   const res = await sbFetch(
     env,
@@ -2948,7 +2948,7 @@ Return ONLY valid JSON in format: {"match_score": 85, "reason": "Brief 1-sentenc
   // Check if job has auto_shortlist enabled (database flag on jobs table)
   // Falls back to true by default for AI-first automation pipeline
   const autoEnabled = job?.auto_shortlist !== false;
-  // Configurable rejection threshold â€” jobs can set auto_reject_threshold (default: 40)
+  // Configurable rejection threshold — jobs can set auto_reject_threshold (default: 40)
   const rejectThreshold = job?.auto_reject_threshold ?? 40;
 
   if (autoEnabled && match_score !== null) {
@@ -3050,11 +3050,11 @@ Return ONLY valid JSON in format: {"match_score": 85, "reason": "Brief 1-sentenc
     try {
       await sendEmail(env, {
         to: app.candidate_email,
-        subject: `Interview Invitation â€” ${job.title} at SimpaticoHR`,
+        subject: `Interview Invitation — ${job.title} at SimpaticoHR`,
         html: `<div style="max-width:600px;margin:0 auto;font-family:'Inter',Arial,sans-serif;background:#f8fafc;padding:32px 0;">
   <div style="background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,0.06);margin:0 16px;">
     <div style="background:linear-gradient(135deg,#4f46e5,#7c3aed);padding:32px 24px;text-align:center;">
-      <h1 style="color:#fff;font-size:22px;margin:0;font-weight:800;">Interview Invitation ðŸŽ‰</h1>
+      <h1 style="color:#fff;font-size:22px;margin:0;font-weight:800;">Interview Invitation 🎉</h1>
       <p style="color:rgba(255,255,255,0.85);font-size:14px;margin:8px 0 0;">You've been shortlisted by our AI screening</p>
     </div>
     <div style="padding:32px 24px;">
@@ -3073,14 +3073,14 @@ Return ONLY valid JSON in format: {"match_score": 85, "reason": "Brief 1-sentenc
         <a href="${meetingLink}" style="display:inline-block;background:linear-gradient(135deg,#4f46e5,#7c3aed);color:#fff;text-decoration:none;padding:14px 32px;border-radius:10px;font-weight:700;font-size:15px;">Start Your Interview â†’</a>
       </div>
       <div style="background:#fef3c7;border-left:4px solid #f59e0b;padding:12px 16px;border-radius:0 8px 8px 0;font-size:13px;color:#92400e;line-height:1.6;">
-        <strong>Tips:</strong> Use Chrome or Edge Â· Ensure good lighting Â· Use a quiet room Â· Have your camera and microphone ready
+        <strong>Tips:</strong> Use Chrome or Edge · Ensure good lighting · Use a quiet room · Have your camera and microphone ready
       </div>
     </div>
     <div style="background:#f1f5f9;padding:16px 24px;text-align:center;border-top:1px solid #e2e8f0;">
-      <p style="font-size:12px;color:#94a3b8;margin:0;">Â© ${new Date().getFullYear()} SimpaticoHR Consultancy Pvt Ltd Â· <a href="https://simpaticohr.in" style="color:#4f46e5;text-decoration:none;">simpaticohr.in</a></p>
+      <p style="font-size:12px;color:#94a3b8;margin:0;">© ${new Date().getFullYear()} SimpaticoHR Consultancy Pvt Ltd · <a href="https://simpaticohr.in" style="color:#4f46e5;text-decoration:none;">simpaticohr.in</a></p>
     </div>
   </div>
-</div>`,
+</div></body></html>`,
       });
     } catch (e) {
       console.warn("[ATS] Auto-shortlist email failed:", e.message);
@@ -3092,8 +3092,8 @@ Return ONLY valid JSON in format: {"match_score": 85, "reason": "Brief 1-sentenc
     try {
       await sendEmail(env, {
         to: app.candidate_email,
-        subject: `Application Update â€” ${job.title}`,
-        html: `<div style="max-width:600px;margin:0 auto;font-family:'Inter',Arial,sans-serif;background:#f8fafc;padding:32px 0;">
+        subject: `Application Update — ${job.title}`,
+        html: `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head><body style="margin:0;padding:0;background:#f4f5f7;"><div style="max-width:600px;margin:0 auto;font-family:'Inter',Arial,sans-serif;background:#f8fafc;padding:32px 0;">
   <div style="background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,0.06);margin:0 16px;">
     <div style="background:linear-gradient(135deg,#1e293b,#334155);padding:32px 24px;text-align:center;">
       <h1 style="color:#fff;font-size:22px;margin:0;font-weight:800;">Application Update</h1>
@@ -3105,10 +3105,10 @@ Return ONLY valid JSON in format: {"match_score": 85, "reason": "Brief 1-sentenc
       <p style="font-size:14px;color:#6b7280;margin:0;">Best regards,<br/><strong>SimpaticoHR Recruitment Team</strong></p>
     </div>
     <div style="background:#f1f5f9;padding:16px 24px;text-align:center;border-top:1px solid #e2e8f0;">
-      <p style="font-size:12px;color:#94a3b8;margin:0;">Â© ${new Date().getFullYear()} SimpaticoHR Consultancy Pvt Ltd</p>
+      <p style="font-size:12px;color:#94a3b8;margin:0;">© ${new Date().getFullYear()} SimpaticoHR Consultancy Pvt Ltd</p>
     </div>
   </div>
-</div>`,
+</div></body></html>`,
       });
     } catch (e) {
       console.warn("[ATS] Auto-reject email failed:", e.message);
@@ -3165,7 +3165,7 @@ Return ONLY valid JSON in format: {"match_score": 85, "reason": "Brief 1-sentenc
 }
 
 async function handleListApplications(request, env, ctx, _, url) {
-  // No strict role check â€” tenant isolation enforced by sbFetch tenant_id filter
+  // No strict role check — tenant isolation enforced by sbFetch tenant_id filter
   const jobId = url.searchParams.get("job_id");
   const status = url.searchParams.get("status");
   let qp = `select=*,jobs(title,department)&order=created_at.desc`;
@@ -3241,7 +3241,7 @@ async function handleUpdateApplication(request, env, ctx, [id]) {
       await sendEmail(env, {
         to: app.candidate_email,
         subject: `Application Update — ${jobTitle}`,
-        html: `<div style="max-width:600px;margin:0 auto;font-family:'Inter',Arial,sans-serif;background:#f8fafc;padding:32px 0;">
+        html: `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head><body style="margin:0;padding:0;background:#f4f5f7;"><div style="max-width:600px;margin:0 auto;font-family:'Inter',Arial,sans-serif;background:#f8fafc;padding:32px 0;">
   <div style="background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,0.06);margin:0 16px;">
     <div style="background:linear-gradient(135deg,#1e293b,#334155);padding:32px 24px;text-align:center;">
       <h1 style="color:#fff;font-size:22px;margin:0;font-weight:800;">Application Update</h1>
@@ -3256,7 +3256,7 @@ async function handleUpdateApplication(request, env, ctx, [id]) {
       <p style="font-size:12px;color:#94a3b8;margin:0;">© ${new Date().getFullYear()} SimpaticoHR Consultancy Pvt Ltd</p>
     </div>
   </div>
-</div>`,
+</div></body></html>`,
       });
       console.log(`[ATS] Manual rejection email sent to ${app.candidate_email}`);
     } catch (emailErr) {
@@ -3859,50 +3859,46 @@ async function handleInterviewEmail(request, env) {
   try {
     const data = await request.json();
 
-    const resendResponse = await fetch("https://api.resend.com/emails", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${env.RESEND_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        from: "Simpatico HR <hr@ats.simpaticohr.in>",
-        to: data.candidateEmail,
-        subject: `Interview Invitation: ${data.position} at Simpatico`,
-        html: `
-                    <div style="font-family: sans-serif; padding: 20px; color: #1f2937;">
-                        <h2 style="color: #4f46e5;">Interview Invitation</h2>
-                        <p>Hi ${data.candidateName},</p>
-                        <p>You have been invited to an interview for the <strong>${data.position}</strong> role.</p>
-                        <div style="background-color: #f3f4f6; padding: 15px; border-radius: 8px; margin: 20px 0;">
-                            <ul style="list-style: none; padding: 0; margin: 0;">
-                                <li style="margin-bottom: 8px;"><strong>ðŸ“… Date:</strong> ${data.date}</li>
-                                <li style="margin-bottom: 8px;"><strong>â° Time:</strong> ${data.startTime}</li>
-                                <li><strong>ðŸ“ Mode:</strong> ${data.mode.toUpperCase()}</li>
-                            </ul>
-                        </div>
-                        ${data.meetingLink ? `<p><strong>Link/Location:</strong> <a href="${data.meetingLink}" style="color: #4f46e5;">${data.meetingLink}</a></p>` : ""}
-                        <p>Best regards,<br>Simpatico HR Team</p>
-                    </div>
-                `,
-      }),
+    await sendEmail(env, {
+      to: data.candidateEmail,
+      subject: `Interview Invitation: ${data.position} at Simpatico`,
+      html: `<!DOCTYPE html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:0;background:#f4f5f7;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="padding:40px 20px;"><tr><td align="center">
+    <table width="600" cellpadding="0" cellspacing="0" style="background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08);">
+      <tr><td style="background:linear-gradient(135deg,#4f46e5,#7c3aed);padding:32px;text-align:center;">
+        <h2 style="color:#fff;margin:0;font-size:22px;font-weight:700;">Interview Invitation</h2>
+      </td></tr>
+      <tr><td style="padding:32px;">
+        <p style="font-size:16px;color:#374151;">Hi <strong>${data.candidateName}</strong>,</p>
+        <p style="font-size:15px;color:#6b7280;line-height:1.6;">You have been invited to an interview for the <strong>${data.position}</strong> role.</p>
+        <div style="background:#f9fafb;border-radius:10px;padding:20px;margin:24px 0;border:1px solid #e5e7eb;">
+          <table width="100%" cellpadding="0" cellspacing="0" style="font-size:14px;color:#374151;">
+            <tr><td style="padding:8px 0;color:#6b7280;width:120px;">Date</td><td style="padding:8px 0;font-weight:600;">${data.date}</td></tr>
+            <tr><td style="padding:8px 0;color:#6b7280;">Time</td><td style="padding:8px 0;font-weight:600;">${data.startTime}</td></tr>
+            <tr><td style="padding:8px 0;color:#6b7280;">Mode</td><td style="padding:8px 0;font-weight:600;">${(data.mode || '').toUpperCase()}</td></tr>
+          </table>
+        </div>
+        ${data.meetingLink ? `<div style="text-align:center;margin:24px 0;"><a href="${data.meetingLink}" style="display:inline-block;background:linear-gradient(135deg,#4f46e5,#7c3aed);color:#fff;text-decoration:none;padding:14px 32px;border-radius:10px;font-weight:700;font-size:15px;">Join Meeting</a></div>` : ""}
+        <p style="font-size:14px;color:#6b7280;line-height:1.6;">If you need to reschedule, please reply to this email.</p>
+        <p style="font-size:15px;color:#374151;">Best regards,<br><strong>Simpatico HR Team</strong></p>
+      </td></tr>
+      <tr><td style="background:#f9fafb;padding:16px;text-align:center;border-top:1px solid #e5e7eb;">
+        <p style="margin:0;font-size:12px;color:#9ca3af;">&copy; ${new Date().getFullYear()} Simpatico HR</p>
+      </td></tr>
+    </table>
+  </td></tr></table>
+</body></html>`,
     });
 
-    if (!resendResponse.ok) throw new Error("Resend API rejected the request");
-
     return new Response(JSON.stringify({ success: true }), {
-      headers: {
-        "Content-Type": "application/json",
-        "Access-Control-Allow-Origin": "*",
-      },
+      headers: { "Content-Type": "application/json", ...CORS_HEADERS },
     });
   } catch (error) {
     return new Response(
       JSON.stringify({ success: false, error: error.message }),
-      {
-        status: 500,
-        headers: { "Access-Control-Allow-Origin": "*" },
-      },
+      { status: 500, headers: { "Content-Type": "application/json", ...CORS_HEADERS } },
     );
   }
 }
@@ -4306,10 +4302,54 @@ async function sbFetch(
 // Â§ 16.  EMAIL HELPER
 // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
-async function sendEmail(env, { to, subject, html, replyTo }) {
+async function sendEmail(env, { to, subject, html, replyTo, tags }) {
   if (!env.RESEND_API_KEY) {
     console.error("[sendEmail] RESEND_API_KEY not set — cannot send email to:", to);
     throw new AppError("Email service not configured (RESEND_API_KEY missing)", 503, "EMAIL_NOT_CONFIGURED");
+  }
+
+  // ── Ensure proper DOCTYPE + charset wrapping for deliverability ──
+  let finalHtml = html;
+  if (!finalHtml.includes('<!DOCTYPE') && !finalHtml.includes('<!doctype')) {
+    finalHtml = `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head><body style="margin:0;padding:0;background:#f4f5f7;">${finalHtml}</body></html>`;
+  }
+
+  // ── Generate plain-text fallback (improves spam score significantly) ──
+  const text = finalHtml
+    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/p>/gi, '\n\n')
+    .replace(/<\/div>/gi, '\n')
+    .replace(/<\/tr>/gi, '\n')
+    .replace(/<\/li>/gi, '\n')
+    .replace(/<a[^>]+href="([^"]+)"[^>]*>(.*?)<\/a>/gi, '$2 ($1)')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&copy;/g, '©')
+    .replace(/&#?\w+;/g, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+
+  const fromAddr = env.EMAIL_FROM || "Simpatico HR <hr@ats.simpaticohr.in>";
+
+  const payload = {
+    from: fromAddr,
+    to: Array.isArray(to) ? to : [to],
+    subject,
+    html: finalHtml,
+    text,
+    reply_to: replyTo || undefined,
+    headers: {
+      "X-Entity-Ref-ID": crypto.randomUUID(),   // Prevent threading/dedup issues
+    },
+  };
+
+  // Resend supports tags for tracking
+  if (tags && Array.isArray(tags)) {
+    payload.tags = tags;
   }
 
   const res = await fetch("https://api.resend.com/emails", {
@@ -4318,13 +4358,7 @@ async function sendEmail(env, { to, subject, html, replyTo }) {
       Authorization: `Bearer ${env.RESEND_API_KEY}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({
-      from: env.EMAIL_FROM || "Simpatico HR <hr@ats.simpaticohr.in>",
-      to: Array.isArray(to) ? to : [to],
-      subject,
-      html,
-      reply_to: replyTo || undefined,
-    }),
+    body: JSON.stringify(payload),
   });
 
   if (!res.ok) {
@@ -4416,7 +4450,7 @@ function welcomeEmailHtml(firstName, empNum) {
     <tr><td align="center">
       <table width="600" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08)">
         <tr><td style="background:linear-gradient(135deg,#6366f1,#8b5cf6);padding:40px;text-align:center">
-          <h1 style="color:white;margin:0;font-size:28px;font-weight:700">Welcome to the Team! ðŸŽ‰</h1>
+          <h1 style="color:white;margin:0;font-size:28px;font-weight:700">Welcome to the Team! 🎉</h1>
         </td></tr>
         <tr><td style="padding:40px">
           <p style="font-size:16px;color:#374151">Hi <strong>${firstName}</strong>,</p>
@@ -4431,7 +4465,7 @@ function welcomeEmailHtml(firstName, empNum) {
           </div>
         </td></tr>
         <tr><td style="background:#f9fafb;padding:20px;text-align:center;border-top:1px solid #e5e7eb">
-          <p style="margin:0;font-size:12px;color:#9ca3af">Â© ${new Date().getFullYear()} Simpatico HR. All rights reserved.</p>
+          <p style="margin:0;font-size:12px;color:#9ca3af">© ${new Date().getFullYear()} Simpatico HR. All rights reserved.</p>
         </td></tr>
       </table>
     </td></tr>
@@ -4480,13 +4514,13 @@ function payslipEmailHtml(ps) {
  * â•‘  REQUIRED CLOUDFLARE BINDINGS (wrangler.toml)                              â•‘
  * â• â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•£
  * â•‘  Secrets (wrangler secret put):                                             â•‘
- * â•‘    SUPABASE_URL          â€” Supabase project URL                             â•‘
- * â•‘    SUPABASE_SERVICE_KEY  â€” Supabase service role key                        â•‘
- * â•‘    JWT_SECRET            â€” HMAC-SHA256 secret for JWT verification           â•‘
- * â•‘    RESEND_API_KEY        â€” Resend email API key                              â•‘
- * â•‘    WEBHOOK_SECRET        â€” HMAC secret for outbound webhook signatures       â•‘
- * â•‘    R2_PUBLIC_URL         â€” Public base URL for R2 bucket                    â•‘
- * â•‘    EMAIL_FROM            â€” Sender address (optional, has default)            â•‘
+ * â•‘    SUPABASE_URL          — Supabase project URL                             â•‘
+ * â•‘    SUPABASE_SERVICE_KEY  — Supabase service role key                        â•‘
+ * â•‘    JWT_SECRET            — HMAC-SHA256 secret for JWT verification           â•‘
+ * â•‘    RESEND_API_KEY        — Resend email API key                              â•‘
+ * â•‘    WEBHOOK_SECRET        — HMAC secret for outbound webhook signatures       â•‘
+ * â•‘    R2_PUBLIC_URL         — Public base URL for R2 bucket                    â•‘
+ * â•‘    EMAIL_FROM            — Sender address (optional, has default)            â•‘
  * â•‘                                                                             â•‘
  * â•‘  KV Namespace:  HR_KV   (rate limiting, idempotency, circuit breaker)       â•‘
  * â•‘  R2 Bucket:     HR_BUCKET (avatars, documents)                              â•‘
@@ -4515,7 +4549,7 @@ async function handleScheduleInterviewEmail(request, env, ctx) {
     notes,
     interviewLink,
     token, // From frontend: unique string for the candidate
-    interviewerEmail, // optional â€” cc the interviewer if provided
+    interviewerEmail, // optional — cc the interviewer if provided
   } = body;
 
   if (!candidateName || !candidateEmail || !position || !date || !startTime) {
@@ -4534,10 +4568,10 @@ async function handleScheduleInterviewEmail(request, env, ctx) {
 
   const modeLabel =
     {
-      video: "ðŸ“¹ Video Call",
-      inperson: "ðŸ¢ In-Person",
-      phone: "ðŸ“ž Phone Call",
-      proctored: "ðŸ”’ Proctored (AI-Monitored)",
+      video: "📹 Video Call",
+      inperson: "🏢 In-Person",
+      phone: "📞 Phone Call",
+      proctored: "🔑 Proctored (AI-Monitored)",
     }[mode] || mode;
 
   let meetingSection = "";
@@ -4553,7 +4587,7 @@ async function handleScheduleInterviewEmail(request, env, ctx) {
 
   const notesSection = notes
     ? `<div style="margin-top:20px;background:#fef3c7;border-left:4px solid #f59e0b;padding:12px 16px;border-radius:6px;font-size:14px;color:#92400e;">
-        <strong>ðŸ“ Notes:</strong> ${notes}
+        <strong>📝 Notes:</strong> ${notes}
        </div>`
     : "";
 
@@ -4566,7 +4600,7 @@ async function handleScheduleInterviewEmail(request, env, ctx) {
     <tr><td align="center">
       <table width="600" cellpadding="0" cellspacing="0" style="background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08);">
         <tr><td style="background:linear-gradient(135deg,#4f46e5,#7c3aed);padding:36px;text-align:center;">
-          <h1 style="color:white;margin:0;font-size:24px;font-weight:700;">Interview Scheduled ðŸŽ‰</h1>
+          <h1 style="color:white;margin:0;font-size:24px;font-weight:700;">Interview Scheduled 🎉</h1>
           <p style="color:rgba(255,255,255,0.85);margin:8px 0 0;font-size:15px;">You have been invited for an interview</p>
         </td></tr>
         <tr><td style="padding:36px;">
@@ -4597,7 +4631,7 @@ async function handleScheduleInterviewEmail(request, env, ctx) {
             mode === "proctored"
               ? `
           <div style="background:#ede9fe;border-left:4px solid #7c3aed;padding:14px 16px;border-radius:6px;margin-bottom:20px;font-size:14px;color:#5b21b6;">
-            <strong>ðŸ”’ This is a Proctored Interview.</strong><br>
+            <strong>🔑 This is a Proctored Interview.</strong><br>
             Your session will be AI-monitored. Please ensure your camera and microphone are working, and take the interview from a quiet, well-lit location.
           </div>`
               : ""
@@ -4609,10 +4643,10 @@ async function handleScheduleInterviewEmail(request, env, ctx) {
             If you need to reschedule or have any questions, please reply to this email or contact our HR team.
           </p>
 
-          <p style="font-size:15px;color:#374151;margin-top:20px;">Best of luck! ðŸ™Œ<br><strong>Simpatico HR Team</strong></p>
+          <p style="font-size:15px;color:#374151;margin-top:20px;">Best of luck! 🙌<br><strong>Simpatico HR Team</strong></p>
         </td></tr>
         <tr><td style="background:#f9fafb;padding:20px;text-align:center;border-top:1px solid #e5e7eb;">
-          <p style="margin:0;font-size:12px;color:#9ca3af;">Â© ${new Date().getFullYear()} Simpatico HR Â· interviews@simpaticohr.in</p>
+          <p style="margin:0;font-size:12px;color:#9ca3af;">© ${new Date().getFullYear()} Simpatico HR · interviews@simpaticohr.in</p>
         </td></tr>
       </table>
     </td></tr>
@@ -4629,7 +4663,7 @@ async function handleScheduleInterviewEmail(request, env, ctx) {
   try {
     await sendEmail(env, {
       to: candidateEmail,
-      subject: `Interview Scheduled: ${position} â€” ${formattedDate}`,
+      subject: `Interview Scheduled: ${position} — ${formattedDate}`,
       html: candidateHtml,
     });
     candidateSent = true;
@@ -4644,7 +4678,7 @@ async function handleScheduleInterviewEmail(request, env, ctx) {
     try {
       await sendEmail(env, {
         to: interviewerEmail,
-        subject: `[Action Required] You are interviewing ${candidateName} â€” ${formattedDate}`,
+        subject: `[Action Required] You are interviewing ${candidateName} — ${formattedDate}`,
         html: candidateHtml.replace(
           `Hi <strong>${candidateName}</strong>`,
           `Hi <strong>${interviewer}</strong>, you have an upcoming interview with <strong>${candidateName}</strong>`,
@@ -4774,7 +4808,7 @@ async function handleCompanyRegister(request, env, ctx) {
   try {
     await sendEmail(env, {
       to: email,
-      subject: `Welcome to SimpaticoHR, ${admin_name || "Team"}! ðŸŽ‰`,
+      subject: `Welcome to SimpaticoHR, ${admin_name || "Team"}! 🎉`,
       html: registrationWelcomeHtml(admin_name || "there", name, "company"),
     });
   } catch (e) {
@@ -4794,8 +4828,8 @@ async function handleWelcomeEmail(request, env, ctx) {
 
   const subject =
     type === "company"
-      ? `Welcome to SimpaticoHR, ${name}! Your company is ready ðŸš€`
-      : `Welcome to SimpaticoHR, ${name}! ðŸŽ‰`;
+      ? `Welcome to SimpaticoHR, ${name}! Your company is ready 🚀`
+      : `Welcome to SimpaticoHR, ${name}! 🎉`;
 
   await sendEmail(env, {
     to: email,
@@ -4842,7 +4876,7 @@ function registrationWelcomeHtml(name, companyName, type) {
           </div>
         </div>
         <div style="background:#f1f5f9;padding:16px 24px;text-align:center;border-top:1px solid #e2e8f0;">
-          <p style="font-size:12px;color:#94a3b8;margin:0;">Â© ${new Date().getFullYear()} SimpaticoHR Consultancy Pvt Ltd Â· <a href="https://simpaticohr.in" style="color:#3B82F6;text-decoration:none;">simpaticohr.in</a></p>
+          <p style="font-size:12px;color:#94a3b8;margin:0;">© ${new Date().getFullYear()} SimpaticoHR Consultancy Pvt Ltd · <a href="https://simpaticohr.in" style="color:#3B82F6;text-decoration:none;">simpaticohr.in</a></p>
         </div>
       </div>
     </div>`;
