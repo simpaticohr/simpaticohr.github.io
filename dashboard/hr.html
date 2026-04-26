@@ -1591,11 +1591,31 @@
                     <div class="form-group">
                         <label>AI Provider</label>
                         <select class="form-control-custom" id="aiProvider" onchange="toggleAiFields()">
-                            <option value="cloudflare">Use Platform Default (Cloudflare)</option>
+                            <option value="cloudflare">Use Platform Default (Cloudflare - Free)</option>
                             <option value="openai">OpenAI</option>
-                            <option value="anthropic">Anthropic</option>
+                            <option value="anthropic">Anthropic (Claude)</option>
+                            <option value="kimi">Moonshot AI (Kimi K2.5)</option>
+                            <option value="gemini">Google Gemini</option>
+                            <option value="deepseek">DeepSeek</option>
                             <option value="custom">Custom Endpoint (Local/vLLM)</option>
                             <option value="other">Other (Any Model / Universal API)</option>
+                        </select>
+                    </div>
+
+                    <!-- Cloudflare Free Model Selector -->
+                    <div id="cfModelSelector" style="margin-top:15px; padding:15px; background:linear-gradient(135deg,#fff7ed,#fef3c7); border-radius:8px; border:1px solid #fbbf24;">
+                        <div style="display:flex; align-items:center; gap:8px; margin-bottom:12px;">
+                            <span style="font-size:18px;">⚡</span>
+                            <div>
+                                <div style="font-weight:600; color:#92400e; font-size:14px;">Free Cloudflare Workers AI Model</div>
+                                <div style="font-size:12px; color:#a16207;">All models below are free — no API key needed</div>
+                            </div>
+                        </div>
+                        <select class="form-control-custom" id="cfModelSelect" style="font-size:13px;">
+                            <option value="@cf/meta/llama-3.3-70b-instruct-fp8-fast">⭐ Llama 3.3 70B — Best interview quality (recommended)</option>
+                            <option value="@cf/meta/llama-3.1-8b-instruct">Llama 3.1 8B — Fast responses, lighter evaluations</option>
+                            <option value="@cf/deepseek-ai/deepseek-r1-distill-qwen-32b">DeepSeek R1 32B — Deep reasoning, thorough scoring</option>
+                            <option value="@cf/mistral/mistral-7b-instruct-v0.2">Mistral 7B — Fast, good multilingual interviews</option>
                         </select>
                     </div>
 
@@ -1705,19 +1725,31 @@
                 function toggleAiFields() {
                     const provider = document.getElementById('aiProvider').value;
                     const customFields = document.getElementById('customAiFields');
+                    const cfSelector = document.getElementById('cfModelSelector');
                     const baseUrlInput = document.getElementById('aiBaseUrl');
                     const modelInput = document.getElementById('aiModel');
 
                     if (provider === 'cloudflare') {
                         customFields.style.display = 'none';
+                        cfSelector.style.display = 'block';
                     } else {
                         customFields.style.display = 'block';
+                        cfSelector.style.display = 'none';
                         if (provider === 'openai') {
                             if(!baseUrlInput.value) baseUrlInput.value = 'https://api.openai.com/v1';
                             if(!modelInput.value) modelInput.value = 'gpt-4o-mini';
                         } else if (provider === 'anthropic') {
                             if(!baseUrlInput.value) baseUrlInput.value = 'https://api.anthropic.com/v1';
                             if(!modelInput.value) modelInput.value = 'claude-3-haiku-20240307';
+                        } else if (provider === 'kimi') {
+                            if(!baseUrlInput.value) baseUrlInput.value = 'https://api.moonshot.cn/v1';
+                            if(!modelInput.value) modelInput.value = 'kimi-k2-0520';
+                        } else if (provider === 'gemini') {
+                            if(!baseUrlInput.value) baseUrlInput.value = 'https://generativelanguage.googleapis.com/v1beta/openai';
+                            if(!modelInput.value) modelInput.value = 'gemini-2.5-flash';
+                        } else if (provider === 'deepseek') {
+                            if(!baseUrlInput.value) baseUrlInput.value = 'https://api.deepseek.com/v1';
+                            if(!modelInput.value) modelInput.value = 'deepseek-chat';
                         } else if (provider === 'other') {
                             if(!baseUrlInput.value) baseUrlInput.value = '';
                             if(!modelInput.value) modelInput.value = '';
@@ -1740,7 +1772,7 @@
                             ai_provider: provider,
                             ai_api_key: provider === 'cloudflare' ? null : document.getElementById('aiApiKey').value,
                             ai_base_url: provider === 'cloudflare' ? null : document.getElementById('aiBaseUrl').value,
-                            ai_model: provider === 'cloudflare' ? null : document.getElementById('aiModel').value
+                            ai_model: provider === 'cloudflare' ? document.getElementById('cfModelSelect').value : document.getElementById('aiModel').value
                         };
 
                         const db = (typeof getSupabaseClient === 'function' ? getSupabaseClient() : null) || window.SimpaticoDB || window._supabaseClient;
@@ -1762,7 +1794,16 @@
                         Object.assign(compData, updates);
                         localStorage.setItem('simpatico_company', JSON.stringify(compData));
 
-                        if (typeof showToast === 'function') showToast('AI Settings saved successfully');
+                        if (typeof showToast === 'function') {
+                            let modelLabel;
+                            if (provider === 'cloudflare') {
+                                const sel = document.getElementById('cfModelSelect');
+                                modelLabel = sel.options[sel.selectedIndex].text;
+                            } else {
+                                modelLabel = updates.ai_model || provider;
+                            }
+                            showToast('AI Config saved — Active: ' + modelLabel);
+                        }
                     } catch (err) {
                         console.error(err);
                         alert("Failed to save AI settings: " + err.message);
@@ -1787,7 +1828,11 @@
                         document.getElementById('aiProvider').value = compData.ai_provider;
                         if (compData.ai_api_key) document.getElementById('aiApiKey').value = compData.ai_api_key;
                         if (compData.ai_base_url) document.getElementById('aiBaseUrl').value = compData.ai_base_url;
-                        if (compData.ai_model) document.getElementById('aiModel').value = compData.ai_model;
+                        if (compData.ai_model && compData.ai_provider === 'cloudflare') {
+                            document.getElementById('cfModelSelect').value = compData.ai_model;
+                        } else if (compData.ai_model) {
+                            document.getElementById('aiModel').value = compData.ai_model;
+                        }
                         toggleAiFields();
                     }
 

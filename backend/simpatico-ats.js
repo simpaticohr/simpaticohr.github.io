@@ -438,6 +438,242 @@ async function invalidateCache(env, ...keys) {
 }
 
 // ═════════════════════════════════════════════════════════════════════════════════════
+// § 7b. BYOK AI LAYER — Custom Provider Routing
+// ═════════════════════════════════════════════════════════════════════════════════════
+
+// In-memory cache for AI config per tenant (refreshes every 5 min)
+const _aiConfigCache = {};
+const AI_CONFIG_TTL_MS = 5 * 60 * 1000;
+
+/**
+ * Fetches the company's custom AI configuration from the companies table.
+ * Returns { provider, apiKey, baseUrl, model } or null if using platform default.
+ */
+async function getCompanyAIConfig(env, tenantId) {
+  if (!tenantId || tenantId === "default") return null;
+  if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_KEY) return null;
+
+  // Check in-memory cache first
+  const cached = _aiConfigCache[tenantId];
+  if (cached && (Date.now() - cached._ts) < AI_CONFIG_TTL_MS) {
+    return cached.config;
+  }
+
+  try {
+    const url = `${env.SUPABASE_URL}/rest/v1/companies?select=ai_provider,ai_api_key,ai_base_url,ai_model&or=(id.eq.${tenantId},tenant_id.eq.${tenantId})&limit=1`;
+    const res = await fetch(url, {
+      headers: {
+        apikey: env.SUPABASE_SERVICE_KEY,
+        Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
+      },
+    });
+    if (!res.ok) {
+      console.warn("[BYOK] Failed to fetch company AI config:", res.status);
+      return null;
+    }
+    const rows = await res.json();
+    const row = rows?.[0];
+
+    let config = null;
+    if (row && row.ai_provider && row.ai_provider !== "cloudflare" && row.ai_api_key) {
+      config = {
+        provider: row.ai_provider,       // openai | anthropic | kimi | gemini | deepseek | custom | other
+        apiKey: row.ai_api_key,
+        baseUrl: row.ai_base_url || null,
+        model: row.ai_model || null,
+      };
+    } else if (row && row.ai_provider === "cloudflare" && row.ai_model) {
+      // Cloudflare with a specific model selected (not default)
+      config = {
+        provider: "cloudflare",
+        cfModel: row.ai_model,           // e.g. @cf/meta/llama-3.3-70b-instruct-fp8-fast
+      };
+    }
+
+    _aiConfigCache[tenantId] = { config, _ts: Date.now() };
+    return config;
+  } catch (err) {
+    console.warn("[BYOK] AI config lookup error:", err.message);
+    return null;
+  }
+}
+
+/**
+ * Resolves the correct base URL and model for a given provider config.
+ */
+function resolveProviderDefaults(cfg) {
+  const p = cfg.provider;
+  let baseUrl = cfg.baseUrl;
+  let model = cfg.model;
+
+  if (p === "openai") {
+    baseUrl = baseUrl || "https://api.openai.com/v1";
+    model = model || "gpt-4o-mini";
+  } else if (p === "anthropic") {
+    baseUrl = baseUrl || "https://api.anthropic.com/v1";
+    model = model || "claude-3-haiku-20240307";
+  } else if (p === "kimi") {
+    baseUrl = baseUrl || "https://api.moonshot.cn/v1";
+    model = model || "kimi-k2-0520";
+  } else if (p === "gemini") {
+    baseUrl = baseUrl || "https://generativelanguage.googleapis.com/v1beta/openai";
+    model = model || "gemini-2.5-flash";
+  } else if (p === "deepseek") {
+    baseUrl = baseUrl || "https://api.deepseek.com/v1";
+    model = model || "deepseek-chat";
+  }
+  // custom / other: user must supply both
+
+  return { baseUrl, model };
+}
+
+/**
+ * Calls an OpenAI-compatible chat completions endpoint.
+ * Works for OpenAI, vLLM, LiteLLM, Ollama, and most custom providers.
+ */
+async function callExternalLLM(cfg, messages, maxTokens, stream = false) {
+  const { baseUrl, model } = resolveProviderDefaults(cfg);
+
+  if (!baseUrl || !model) {
+    throw new AppError(
+      "Custom AI provider requires base_url and model to be set",
+      HTTP.BAD_REQUEST,
+      "AI_CONFIG_INCOMPLETE",
+    );
+  }
+
+  const isAnthropic = cfg.provider === "anthropic" && baseUrl.includes("anthropic.com");
+
+  if (isAnthropic) {
+    // Anthropic uses a different API shape
+    const systemMsg = messages.find(m => m.role === "system");
+    const userMsgs = messages.filter(m => m.role !== "system");
+
+    const body = {
+      model,
+      max_tokens: maxTokens || 1024,
+      ...(systemMsg ? { system: systemMsg.content } : {}),
+      messages: userMsgs,
+      ...(stream ? { stream: true } : {}),
+    };
+
+    const res = await fetch(`${baseUrl}/messages`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": cfg.apiKey,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify(body),
+    });
+
+    if (!res.ok) {
+      const errText = await res.text().catch(() => "Unknown error");
+      throw new AppError(
+        `Anthropic API error (${res.status}): ${errText.substring(0, 200)}`,
+        HTTP.UNAVAILABLE,
+        "CUSTOM_AI_ERROR",
+      );
+    }
+
+    if (stream) return res.body;
+
+    const data = await res.json();
+    return {
+      response: data.content?.[0]?.text || "",
+      usage: data.usage || null,
+    };
+  }
+
+  // OpenAI-compatible endpoint (OpenAI, vLLM, custom, other)
+  const chatUrl = baseUrl.replace(/\/$/, "") + "/chat/completions";
+  const body = {
+    model,
+    messages,
+    max_tokens: maxTokens || 1024,
+    ...(stream ? { stream: true } : {}),
+  };
+
+  const res = await fetch(chatUrl, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${cfg.apiKey}`,
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!res.ok) {
+    const errText = await res.text().catch(() => "Unknown error");
+    throw new AppError(
+      `Custom AI API error (${res.status}): ${errText.substring(0, 200)}`,
+      HTTP.UNAVAILABLE,
+      "CUSTOM_AI_ERROR",
+    );
+  }
+
+  if (stream) return res.body;
+
+  const data = await res.json();
+  return {
+    response: data.choices?.[0]?.message?.content || "",
+    usage: data.usage || null,
+  };
+}
+
+/**
+ * Universal LLM runner — checks for BYOK config, routes accordingly.
+ * Drop-in replacement for env.AI.run("@cf/meta/llama-3.1-8b-instruct", opts).
+ * Returns { response: string, usage?: object }
+ */
+const CF_DEFAULT_MODEL = "@cf/meta/llama-3.1-8b-instruct";
+
+async function runLLM(env, tenantId, messages, maxTokens = 1024) {
+  const aiConfig = await getCompanyAIConfig(env, tenantId);
+
+  if (aiConfig && aiConfig.provider === "cloudflare") {
+    // Cloudflare with a user-selected model
+    if (!env.AI) throw new ServiceUnavailableError("AI");
+    const cfModel = aiConfig.cfModel || CF_DEFAULT_MODEL;
+    console.log(`[CF-AI] Using Cloudflare model: ${cfModel}`);
+    return await env.AI.run(cfModel, { messages, max_tokens: maxTokens });
+  }
+
+  if (aiConfig) {
+    console.log(`[BYOK] Using custom AI: provider=${aiConfig.provider}, model=${aiConfig.model || "(default)"}`);
+    return await callExternalLLM(aiConfig, messages, maxTokens, false);
+  }
+
+  // Fallback: Cloudflare Workers AI (default model)
+  if (!env.AI) throw new ServiceUnavailableError("AI");
+  return await env.AI.run(CF_DEFAULT_MODEL, { messages, max_tokens: maxTokens });
+}
+
+/**
+ * Universal LLM streaming runner — BYOK-aware.
+ * Returns a ReadableStream for SSE consumption.
+ */
+async function runLLMStream(env, tenantId, messages, maxTokens = 2048) {
+  const aiConfig = await getCompanyAIConfig(env, tenantId);
+
+  if (aiConfig && aiConfig.provider === "cloudflare") {
+    if (!env.AI) throw new ServiceUnavailableError("AI");
+    const cfModel = aiConfig.cfModel || CF_DEFAULT_MODEL;
+    console.log(`[CF-AI-Stream] Using Cloudflare model: ${cfModel}`);
+    return await env.AI.run(cfModel, { messages, max_tokens: maxTokens, stream: true });
+  }
+
+  if (aiConfig) {
+    console.log(`[BYOK-Stream] Using custom AI: provider=${aiConfig.provider}`);
+    return await callExternalLLM(aiConfig, messages, maxTokens, true);
+  }
+
+  // Fallback: Cloudflare Workers AI streaming (default model)
+  if (!env.AI) throw new ServiceUnavailableError("AI");
+  return await env.AI.run(CF_DEFAULT_MODEL, { messages, max_tokens: maxTokens, stream: true });
+}
+
+// ═════════════════════════════════════════════════════════════════════════════════════
 // § 8.  STRUCTURED AUDIT LOGGER
 // ═════════════════════════════════════════════════════════════════════════════════════
 
@@ -1777,10 +2013,7 @@ Employee: ${emp?.first_name} ${emp?.last_name} | Role: ${emp?.job_title}
 Manager Rating: ${rating}/5 | Strengths noted: ${strengths} | Areas for improvement: ${improvements}
 Be specific, professional, growth-oriented, and 150-200 words. Avoid clichés.`;
 
-  const result = await env.AI.run("@cf/meta/llama-3.1-8b-instruct", {
-    messages: [{ role: "user", content: prompt }],
-    max_tokens: 400,
-  });
+  const result = await runLLM(env, ctx.tenantId, [{ role: "user", content: prompt }], 400);
   return apiResponse({
     feedback: result.response,
     generated_at: new Date().toISOString(),
@@ -2909,7 +3142,7 @@ async function handleCreateApplication(request, env, ctx) {
   let ai_summary = "";
 
   // 2. AI Resume Parsing & Scoring (if resume_text is available and env.AI exists)
-  if (body.resume_text && job && env.AI) {
+  if (body.resume_text && job) {
     const prompt = `You are an expert ATS AI. Compare the candidate's resume to the job description.
 Job Title: ${job.title}
 Job Desc: ${job.description || job.department}
@@ -2920,10 +3153,7 @@ Also extract the candidate's top skills (max 8) from their resume.
 Return ONLY valid JSON in format: {"match_score": 85, "reason": "Brief 1-sentence reason", "skills": ["JavaScript", "React", "Node.js"]}`;
 
     try {
-      const result = await env.AI.run("@cf/meta/llama-3.1-8b-instruct", {
-        messages: [{ role: "user", content: prompt }],
-        max_tokens: 400,
-      });
+      const result = await runLLM(env, ctx.tenantId, [{ role: "user", content: prompt }], 400);
       const cleaned = result.response.replace(/```json|```/g, "").trim();
       const analysis = JSON.parse(cleaned);
       match_score = analysis.match_score || null;
@@ -3313,11 +3543,7 @@ async function handleInterviewQuestion(request, env, ctx) {
   // but for efficiency we trust the system prompt built by the frontend
   // which already has the JD. We just need to make sure the AI prioritizes it.
 
-  const result = await env.AI.run("@cf/meta/llama-3.1-8b-instruct", {
-    messages: messages, // Frontend provides the FULL system prompt + history
-    max_tokens: 600,
-    temperature: 0.7,
-  });
+  const result = await runLLM(env, ctx.tenantId, messages, 600);
 
   await audit(env, ctx, "interview.ai_question", "interviews", null, {
     token_hint: token?.slice(0, 8),
@@ -3339,10 +3565,7 @@ ${receipt_text}
 Return ONLY valid JSON (no markdown, no backticks) in this exact format:
 {"vendor": "Vendor Name", "amount": 120.50, "currency": "USD", "date": "2024-05-10", "category": "meals"}`;
 
-  const result = await env.AI.run("@cf/meta/llama-3.1-8b-instruct", {
-    messages: [{ role: "user", content: prompt }],
-    max_tokens: 300,
-  });
+  const result = await runLLM(env, ctx.tenantId, [{ role: "user", content: prompt }], 300);
 
   try {
     const text = result.response.replace(/```json|```/g, "").trim();
@@ -3393,10 +3616,7 @@ ${ragContext ? `Policy & Knowledge Context:\n${ragContext}` : ""}
 Be precise, professional, and actionable. Cite sources when using context. Never fabricate HR data.`,
   };
 
-  const result = await env.AI.run("@cf/meta/llama-3.1-8b-instruct", {
-    messages: [systemMsg, ...messages],
-    max_tokens: 2048,
-  });
+  const result = await runLLM(env, ctx.tenantId, [systemMsg, ...messages], 2048);
   await audit(env, ctx, "ai.chat", "ai_sessions", null, {
     turns: messages.length,
   });
@@ -3423,11 +3643,7 @@ async function handleAIChatStream(request, env, ctx) {
 
   (async () => {
     try {
-      const stream = await env.AI.run("@cf/meta/llama-3.1-8b-instruct", {
-        messages: [systemMsg, ...messages],
-        max_tokens: 2048,
-        stream: true,
-      });
+      const stream = await runLLMStream(env, ctx.tenantId, [systemMsg, ...messages], 2048);
       for await (const chunk of stream) {
         await writer.write(encode(`data: ${JSON.stringify(chunk)}\n\n`));
       }
@@ -3470,13 +3686,10 @@ Schema:
 }
 Include 2-4 logical actions. Keep it practical for enterprise HR.`;
 
-  const result = await env.AI.run("@cf/meta/llama-3.1-8b-instruct", {
-    messages: [
-      { role: "system", content: systemPrompt },
-      { role: "user", content: query },
-    ],
-    max_tokens: 1024,
-  });
+  const result = await runLLM(env, ctx.tenantId, [
+    { role: "system", content: systemPrompt },
+    { role: "user", content: query },
+  ], 1024);
 
   try {
     const text = result.response.replace(/```json|```/g, "").trim();
@@ -3562,16 +3775,13 @@ Return ONLY valid JSON in this exact format (no markdown, no code fences, no ext
 
   let aiResponse;
   try {
-    aiResponse = await env.AI.run("@cf/meta/llama-3.1-8b-instruct", {
-      messages: [
-        {
-          role: "system",
-          content: "You are a JSON-only assessment generator. You MUST respond with valid JSON only. No markdown, no code blocks, no explanatory text. Just pure JSON.",
-        },
-        { role: "user", content: userPrompt },
-      ],
-      max_tokens: 3000,
-    });
+    aiResponse = await runLLM(env, ctx.tenantId, [
+      {
+        role: "system",
+        content: "You are a JSON-only assessment generator. You MUST respond with valid JSON only. No markdown, no code blocks, no explanatory text. Just pure JSON.",
+      },
+      { role: "user", content: userPrompt },
+    ], 3000);
   } catch (aiErr) {
     console.error("[assessment] AI.run() failed:", aiErr.message);
     throw new AppError(
@@ -3684,10 +3894,7 @@ async function handleGenerateCourse(request, env, ctx) {
 Return ONLY valid JSON with these fields:
 {"description": "A compelling 2-3 sentence overview of what employees will learn...", "duration_hours": 2.5}`;
   
-  const result = await env.AI.run("@cf/meta/llama-3.1-8b-instruct", {
-    messages: [{ role: "user", content: prompt }],
-    max_tokens: 300,
-  });
+  const result = await runLLM(env, ctx.tenantId, [{ role: "user", content: prompt }], 300);
   
   const cleaned = result.response.replace(/```json|```/g, "").trim();
   let data;
@@ -3789,10 +3996,7 @@ Recent Leave History: ${JSON.stringify(leaves)}
 Training Enrollments: ${JSON.stringify(enrollments)}
 Return ONLY valid JSON: {"summary": "...", "strengths": ["..."], "risks": ["..."], "recommendations": ["..."], "engagement_score": 0-100}`;
 
-  const result = await env.AI.run("@cf/meta/llama-3.1-8b-instruct", {
-    messages: [{ role: "user", content: prompt }],
-    max_tokens: 600,
-  });
+  const result = await runLLM(env, ctx.tenantId, [{ role: "user", content: prompt }], 600);
   const cleaned = result.response.replace(/```json|```/g, "").trim();
 
   let insight;
@@ -3814,10 +4018,7 @@ async function handleSentimentAnalysis(request, env, ctx) {
 Context: ${feedbackCtx || "general"}
 Text: "${text}"`;
 
-  const result = await env.AI.run("@cf/meta/llama-3.1-8b-instruct", {
-    messages: [{ role: "user", content: prompt }],
-    max_tokens: 300,
-  });
+  const result = await runLLM(env, ctx.tenantId, [{ role: "user", content: prompt }], 300);
   const cleaned = result.response.replace(/```json|```/g, "").trim();
   let analysis;
   try {
@@ -3846,10 +4047,7 @@ Role: ${title} | Department: ${department} | Experience: ${experience || "unspec
 Structure: Overview â†’ Responsibilities (5-7 bullets) â†’ Requirements (must-have vs nice-to-have) â†’ Benefits â†’ Diversity statement.
 Use engaging, modern language. Avoid jargon. Max 500 words.`;
 
-  const result = await env.AI.run("@cf/meta/llama-3.1-8b-instruct", {
-    messages: [{ role: "user", content: prompt }],
-    max_tokens: 700,
-  });
+  const result = await runLLM(env, ctx.tenantId, [{ role: "user", content: prompt }], 700);
   return apiResponse({
     jd: result.response,
     generated_at: new Date().toISOString(),
@@ -3913,10 +4111,7 @@ Categories: hr, it, compliance, social, training.
 Format: [{"title": "...", "category": "...", "due_days": 1, "priority": "high|medium|low"}]
 Return ONLY valid JSON array, no markdown.`;
 
-  const result = await env.AI.run("@cf/meta/llama-3.1-8b-instruct", {
-    messages: [{ role: "user", content: prompt }],
-    max_tokens: 600,
-  });
+  const result = await runLLM(env, ctx.tenantId, [{ role: "user", content: prompt }], 600);
   const cleaned = result.response.replace(/```json|```/g, "").trim();
 
   let tasks;
@@ -5072,10 +5267,7 @@ Return as JSON:
   "summary": "Overall assessment summary"
 }`;
 
-    const aiResponse = await env.AI.run('@cf/meta/llama-3.1-8b-instruct', {
-      messages: [{ role: 'user', content: scoringPrompt }],
-      max_tokens: 1500
-    });
+    const aiResponse = await runLLM(env, ctx.tenantId, [{ role: 'user', content: scoringPrompt }], 1500);
 
     if (!aiResponse?.response) {
       throw new Error('AI scoring failed');
