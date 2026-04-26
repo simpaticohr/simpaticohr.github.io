@@ -93,7 +93,6 @@ async function loadDepartments() {
   let data = null, error = null;
   if (cid) {
     let res = await client.from('departments').select('id, name').eq('tenant_id', cid).order('name');
-    if (res.error) res = await client.from('departments').select('id, name').eq('company_id', cid).order('name');
     if (res.error) res = await client.from('departments').select('id, name').order('name');
     data = res.data; error = res.error;
   } else {
@@ -136,19 +135,19 @@ async function loadEmployees() {
   try {
     const complexQuery = `id, first_name, last_name, email, job_title, employment_type, start_date, location, status, avatar_url, departments(name), manager:employees!manager_id(first_name, last_name)`;
     
-    // Attempt 1: company_id
-    let res = await client.from('employees').select(complexQuery).eq('company_id', cid).order('first_name');
+    // Attempt 1: tenant_id
+    let res = await client.from('employees').select(complexQuery).eq('tenant_id', cid).order('first_name');
     
-    // Attempt 2: tenant_id
-    if (res.error) res = await client.from('employees').select(complexQuery).eq('tenant_id', cid).order('first_name');
+    // Attempt 2: company_id fallback
+    if (res.error) res = await client.from('employees').select(complexQuery).eq('company_id', cid).order('first_name');
     
     // Attempt 3: no tenant filter (table lacks tenant columns)
     if (res.error) res = await client.from('employees').select(complexQuery).order('first_name');
 
     // Attempt 4: basic select (relations missing)
     if (res.error) {
-       res = await client.from('employees').select('*').eq('company_id', cid).order('first_name');
-       if (res.error) res = await client.from('employees').select('*').eq('tenant_id', cid).order('first_name');
+       res = await client.from('employees').select('*').eq('tenant_id', cid).order('first_name');
+       if (res.error) res = await client.from('employees').select('*').eq('company_id', cid).order('first_name');
        if (res.error) res = await client.from('employees').select('*').order('first_name');
     }
     
@@ -362,6 +361,7 @@ async function saveEmployee() {
     location:         document.getElementById('emp-location')?.value.trim() || null,
     manager_id:       document.getElementById('emp-manager')?.value || null,
     status:           'active',
+    tenant_id:        companyId,
     company_id:       companyId,
   };
 
@@ -422,7 +422,7 @@ async function renderProfilePage(id) {
       training_enrollments(id, course_id, status, completed_at, training_courses(title))
     `)
     .eq('id', id);
-  if (profileCid) profileQuery = profileQuery.eq('company_id', profileCid);
+  if (profileCid) profileQuery = profileQuery.eq('tenant_id', profileCid);
   const { data: emp, error } = await profileQuery.single();
 
   if (loading) loading.style.display = 'none';

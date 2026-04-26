@@ -201,6 +201,27 @@ CREATE TABLE IF NOT EXISTS leave_requests (
 );
 
 -- ════════════════════════════════════════════════════════
+-- HR OPS — ATTENDANCE
+-- ════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS attendance_records (
+  id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  employee_id  UUID NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+  date         DATE NOT NULL,
+  check_in     TIMESTAMPTZ,
+  check_out    TIMESTAMPTZ,
+  hours_worked NUMERIC(5,2),
+  status       TEXT DEFAULT 'present' CHECK (status IN ('present','absent','late','half_day')),
+  notes        TEXT,
+  tenant_id    TEXT,
+  created_at   TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE (employee_id, date)
+);
+
+CREATE INDEX IF NOT EXISTS idx_attendance_employee_date ON attendance_records(employee_id, date);
+ALTER TABLE attendance_records ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Service role full access" ON attendance_records FOR ALL TO service_role USING (true);
+
+-- ════════════════════════════════════════════════════════
 -- HR OPS — POLICIES
 -- ════════════════════════════════════════════════════════
 CREATE TABLE IF NOT EXISTS hr_policies (
@@ -462,3 +483,52 @@ CREATE POLICY "Auth users delete rules" ON automation_rules FOR DELETE TO authen
 CREATE POLICY "Service public logs" ON automation_logs FOR ALL TO service_role USING (true);
 CREATE POLICY "Auth users read logs" ON automation_logs FOR SELECT TO authenticated USING (true);
 CREATE POLICY "Auth users insert logs" ON automation_logs FOR INSERT TO authenticated WITH CHECK (true);
+
+-- ════════════════════════════════════════════════════════
+-- BILLING & SUBSCRIPTIONS
+-- ════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS subscriptions (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  company_id      UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+  plan            TEXT NOT NULL DEFAULT 'trial' CHECK (plan IN ('trial','starter','professional','enterprise')),
+  status          TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('trial','active','past_due','cancelled','expired','paused')),
+  gateway         TEXT CHECK (gateway IN ('cashfree','paddle','manual')),
+  gateway_subscription_id TEXT,         -- Cashfree subscription ID or Paddle subscription ID
+  gateway_customer_id     TEXT,         -- Gateway customer reference
+  amount          NUMERIC(10,2),
+  currency        TEXT DEFAULT 'INR',
+  billing_cycle   TEXT DEFAULT 'monthly' CHECK (billing_cycle IN ('monthly','annual')),
+  current_period_start TIMESTAMPTZ,
+  current_period_end   TIMESTAMPTZ,
+  trial_ends_at   TIMESTAMPTZ,
+  cancelled_at    TIMESTAMPTZ,
+  created_at      TIMESTAMPTZ DEFAULT NOW(),
+  updated_at      TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE (company_id)
+);
+
+CREATE TABLE IF NOT EXISTS payment_transactions (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  company_id      UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+  subscription_id UUID REFERENCES subscriptions(id),
+  gateway         TEXT NOT NULL CHECK (gateway IN ('cashfree','paddle','manual')),
+  gateway_order_id    TEXT,             -- Cashfree order_id or Paddle transaction_id
+  gateway_payment_id  TEXT,             -- Cashfree cf_payment_id or Paddle checkout_id
+  amount          NUMERIC(10,2) NOT NULL,
+  currency        TEXT DEFAULT 'INR',
+  status          TEXT DEFAULT 'pending' CHECK (status IN ('pending','paid','failed','refunded')),
+  plan            TEXT,
+  billing_cycle   TEXT,
+  payment_method  TEXT,                 -- upi, card, netbanking, paddle_card, etc.
+  receipt_url     TEXT,
+  metadata        JSONB DEFAULT '{}',
+  created_at      TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_subscriptions_company ON subscriptions(company_id);
+CREATE INDEX IF NOT EXISTS idx_transactions_company ON payment_transactions(company_id);
+CREATE INDEX IF NOT EXISTS idx_transactions_gateway ON payment_transactions(gateway_order_id);
+ALTER TABLE subscriptions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE payment_transactions ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Service role full access" ON subscriptions FOR ALL TO service_role USING (true);
+CREATE POLICY "Service role full access" ON payment_transactions FOR ALL TO service_role USING (true);

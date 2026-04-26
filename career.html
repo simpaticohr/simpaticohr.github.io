@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
@@ -55,9 +55,37 @@ let currentJobId = new URLSearchParams(window.location.search).get('job_id');
 async function init() {
   if (!window.SIMPATICO_CONFIG) return setTimeout(init, 300);
   if (currentJobId) {
-    const { data } = await window.SimpaticoDB.from('jobs').select('title').eq('id', currentJobId).single();
-    if (data) document.getElementById('jobTitle').textContent = 'Apply for ' + data.title;
+    try {
+      const { data } = await window.SimpaticoDB.from('jobs').select('title').eq('id', currentJobId).single();
+      if (data) document.getElementById('jobTitle').textContent = 'Apply for ' + data.title;
+    } catch(e) { console.warn('Job title fetch failed:', e); }
   }
+}
+
+// Extract text from a PDF file for AI resume parsing
+async function extractPDFText(file) {
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onload = function() {
+      try {
+        const text = reader.result;
+        // Basic text extraction from PDF binary — extract readable ASCII runs
+        const ascii = [];
+        for (let i = 0; i < text.length; i++) {
+          const code = text.charCodeAt(i);
+          if (code >= 32 && code <= 126) ascii.push(text[i]);
+          else if (ascii.length > 0 && ascii[ascii.length - 1] !== ' ') ascii.push(' ');
+        }
+        const extracted = ascii.join('').replace(/\s+/g, ' ').trim();
+        // Return first 3000 chars to stay within AI token limits
+        resolve(extracted.length > 50 ? extracted.substring(0, 3000) : '');
+      } catch(e) {
+        resolve('');
+      }
+    };
+    reader.onerror = () => resolve('');
+    reader.readAsBinaryString(file);
+  });
 }
 
 document.getElementById('applyForm').onsubmit = async (e) => {
@@ -66,33 +94,68 @@ document.getElementById('applyForm').onsubmit = async (e) => {
   const status = document.getElementById('status');
   btn.disabled = true;
   btn.textContent = 'Submitting...';
+  status.style.color = '';
   
   try {
-    const name = document.getElementById('candName').value;
-    const email = document.getElementById('candEmail').value;
+    const name = document.getElementById('candName').value.trim();
+    const email = document.getElementById('candEmail').value.trim();
     const file = document.getElementById('resumeFile').files[0];
     
+    if (!name) throw new Error('Please enter your name');
+    if (!email) throw new Error('Please enter your email');
     if (!file) throw new Error('Please upload a resume');
-    
-    // 1. Upload Resume
+    if (file.size > 5 * 1024 * 1024) throw new Error('Resume must be under 5MB');
+
+    // 1. Extract resume text for AI scoring
+    status.textContent = 'Analyzing resume...';
+    const resumeText = await extractPDFText(file);
+
+    // 2. Convert file to base64 for Worker upload
     status.textContent = 'Uploading resume...';
-    const filePath = `resumes/${Date.now()}_${file.name}`;
-    const { data: uploadData, error: uploadError } = await window.SimpaticoDB.storage.from('resumes').upload(filePath, file);
-    if (uploadError) throw uploadError;
-    
-    const resumeUrl = window.SimpaticoDB.storage.from('resumes').getPublicUrl(filePath).data.publicUrl;
-    
-    // 2. Save Application
-    status.textContent = 'Saving application...';
-    const { error: appError } = await window.SimpaticoDB.from('job_applications').insert({
-      job_id: currentJobId,
-      candidate_name: name,
-      candidate_email: email,
-      resume_url: resumeUrl,
-      status: 'applied',
-      tenant_id: window.SIMPATICO_CONFIG.tenantId
+    const base64 = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = () => reject(new Error('File read failed'));
+      reader.readAsDataURL(file);
     });
-    if (appError) throw appError;
+
+    // 3. Submit via Worker API (triggers duplicate check, AI scoring, auto-actions, emails)
+    status.textContent = 'Submitting application...';
+    const cfg = window.SIMPATICO_CONFIG || {};
+    const workerUrl = cfg.workerUrl || 'https://simpatico-hr-ats.simpaticohrconsultancy.workers.dev';
+    const tenantId = cfg.tenantId || 'SIMP_PRO_MAIN';
+
+    const resp = await fetch(workerUrl + '/recruitment/applications', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Tenant-ID': tenantId
+      },
+      body: JSON.stringify({
+        job_id: currentJobId,
+        candidate_name: name,
+        candidate_email: email,
+        resume_text: resumeText || null,
+        resume_base64: base64,
+        resume_filename: file.name,
+        source: 'Careers Page'
+      })
+    });
+
+    const result = await resp.json();
+
+    // Handle duplicate application (HTTP 409)
+    if (resp.status === 409 || result.duplicate) {
+      status.textContent = 'You have already applied to this position. Check your email for updates.';
+      status.style.color = '#f59e0b';
+      btn.disabled = false;
+      btn.textContent = 'Submit Application';
+      return;
+    }
+
+    if (!resp.ok) {
+      throw new Error(result.error?.message || 'Application submission failed');
+    }
     
     document.getElementById('formCard').style.display = 'none';
     document.getElementById('successBox').style.display = 'block';

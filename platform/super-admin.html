@@ -237,35 +237,56 @@ const token = localStorage.getItem('simpatico_token') || sessionStorage.getItem(
 const user  = JSON.parse(localStorage.getItem('simpatico_user') || sessionStorage.getItem('simpatico_user') || '{}');
 const sbHeaders = { 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' };
 let cachedCompanies = null;
+let serverVerified = false;
 
-function checkAuth() {
+// ★ WORKER API HELPER — All admin operations go through the backend
+const WORKER_URL = window.SIMPATICO_CONFIG?.workerUrl || 'https://simpatico-hr-ats.simpaticohrconsultancy.workers.dev';
+const TENANT_ID = window.SIMPATICO_CONFIG?.tenantId || 'SIMP_PRO_MAIN';
+async function adminFetch(path, opts = {}) {
+    const res = await fetch(WORKER_URL + path, {
+        method: opts.method || 'GET',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`,
+            'X-Tenant-ID': TENANT_ID,
+        },
+        body: opts.body ? JSON.stringify(opts.body) : undefined,
+    });
+    const json = await res.json();
+    if (!res.ok) throw new Error(json?.error?.message || json?.message || `Admin API error (${res.status})`);
+    return json.data || json;
+}
+
+// ★ SERVER-SIDE AUTH CHECK — Replaces the old localStorage-only check
+async function checkAuth() {
     if (!token) { showAccessDenied('No authentication token found. Please log in first.'); return false; }
-    if (user.role && user.role !== 'super_admin' && user.role !== 'superadmin') { showAccessDenied(`Your role is "${user.role}". Super admin access required.`); return false; }
-    return true;
+    if (serverVerified) return true;
+    try {
+        const result = await adminFetch('/admin/verify');
+        serverVerified = true;
+        try { document.getElementById('adminName').textContent = result.email || user.full_name || 'Super Admin'; } catch(e) {}
+        return true;
+    } catch(e) {
+        showAccessDenied(e.message || 'Server rejected your admin credentials. Role verification failed.');
+        return false;
+    }
 }
 function showAccessDenied(msg) {
     document.getElementById('mainContent').innerHTML = `
         <div class="access-denied">
             <div class="icon"><i class="fas fa-lock"></i></div>
             <h2>Access Denied</h2><p>${msg}</p>
-            <a href="/login.html"><i class="fas fa-arrow-left"></i> Go to Login</a>
+            <a href="/platform/login.html"><i class="fas fa-arrow-left"></i> Go to Login</a>
         </div>`;
 }
 try { document.getElementById('adminName').textContent = user.full_name || user.name || user.email || 'Super Admin'; } catch(e) {}
 
+// Legacy helpers (kept for settings page which reads local config)
 async function sbQuery(table, params = '') {
     const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}?${params}`, { headers: sbHeaders });
     const data = await res.json();
     if (!res.ok) throw new Error(data?.message || data?.hint || `Failed to query ${table}`);
     return data;
-}
-async function sbCount(table, filter = '') {
-    const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}?${filter}select=id`, {
-        headers: { ...sbHeaders, 'Prefer':'count=exact', 'Range-Unit':'items', 'Range':'0-0' }
-    });
-    const range = res.headers.get('Content-Range') || '';
-    const match = range.match(/\/(\d+)$/);
-    return match ? parseInt(match[1]) : 0;
 }
 
 function showSection(section) {
@@ -280,20 +301,17 @@ function showSection(section) {
 
 async function loadDashboard() {
     document.getElementById('pageTitle').textContent = 'Super Admin Dashboard';
-    document.getElementById('mainContent').innerHTML = '<div class="loader"><div class="spin"></div><p>Loading stats...</p></div>';
-    if (!checkAuth()) return;
+    document.getElementById('mainContent').innerHTML = '<div class="loader"><div class="spin"></div><p>Verifying admin access...</p></div>';
+    if (!(await checkAuth())) return;
     try {
-        const [companies, users, jobs, applications, interviews] = await Promise.all([
-            sbCount('companies'), sbCount('users'), sbCount('jobs'),
-            sbCount('applications').catch(() => 0), sbCount('interviews').catch(() => 0)
-        ]);
+        const stats = await adminFetch('/admin/stats');
         document.getElementById('mainContent').innerHTML = `
             <div class="stat-grid">
-                <div class="stat-card"><div class="stat-icon" style="background:rgba(59,130,246,.1);color:#3B82F6"><i class="fas fa-building"></i></div><div class="stat-value">${companies}</div><div class="stat-label">Companies</div></div>
-                <div class="stat-card"><div class="stat-icon" style="background:rgba(16,185,129,.1);color:#10B981"><i class="fas fa-users"></i></div><div class="stat-value">${users}</div><div class="stat-label">Users</div></div>
-                <div class="stat-card"><div class="stat-icon" style="background:rgba(245,158,11,.1);color:#F59E0B"><i class="fas fa-briefcase"></i></div><div class="stat-value">${jobs}</div><div class="stat-label">Jobs</div></div>
-                <div class="stat-card"><div class="stat-icon" style="background:rgba(139,92,246,.1);color:#8B5CF6"><i class="fas fa-file-alt"></i></div><div class="stat-value">${applications}</div><div class="stat-label">Applications</div></div>
-                <div class="stat-card"><div class="stat-icon" style="background:rgba(239,68,68,.1);color:#EF4444"><i class="fas fa-video"></i></div><div class="stat-value">${interviews}</div><div class="stat-label">Interviews</div></div>
+                <div class="stat-card"><div class="stat-icon" style="background:rgba(59,130,246,.1);color:#3B82F6"><i class="fas fa-building"></i></div><div class="stat-value">${stats.companies||0}</div><div class="stat-label">Companies</div></div>
+                <div class="stat-card"><div class="stat-icon" style="background:rgba(16,185,129,.1);color:#10B981"><i class="fas fa-users"></i></div><div class="stat-value">${stats.users||0}</div><div class="stat-label">Users</div></div>
+                <div class="stat-card"><div class="stat-icon" style="background:rgba(245,158,11,.1);color:#F59E0B"><i class="fas fa-briefcase"></i></div><div class="stat-value">${stats.jobs||0}</div><div class="stat-label">Jobs</div></div>
+                <div class="stat-card"><div class="stat-icon" style="background:rgba(139,92,246,.1);color:#8B5CF6"><i class="fas fa-file-alt"></i></div><div class="stat-value">${stats.applications||0}</div><div class="stat-label">Applications</div></div>
+                <div class="stat-card"><div class="stat-icon" style="background:rgba(239,68,68,.1);color:#EF4444"><i class="fas fa-users-cog"></i></div><div class="stat-value">${stats.employees||0}</div><div class="stat-label">Employees</div></div>
             </div>
             <div class="panel">
                 <div class="panel-header">
@@ -315,10 +333,10 @@ async function loadDashboard() {
 
 async function loadRecentCompanies() {
     try {
-        const companies = await sbQuery('companies', 'select=*&order=created_at.desc&limit=5');
+        const companies = await adminFetch('/admin/companies');
         cachedCompanies = companies;
         const c = document.getElementById('recentCompanies');
-        if (c) renderCompaniesTable(c, companies);
+        if (c) renderCompaniesTable(c, Array.isArray(companies) ? companies.slice(0,5) : []);
     } catch(e) {
         const c = document.getElementById('recentCompanies');
         if (c) c.innerHTML = `<p style="text-align:center;color:#EF4444;padding:20px">${e.message}</p>`;
@@ -328,9 +346,9 @@ async function loadRecentCompanies() {
 async function loadCompanies() {
     document.getElementById('pageTitle').textContent = 'All Companies';
     document.getElementById('mainContent').innerHTML = '<div class="loader"><div class="spin"></div><p>Loading companies...</p></div>';
-    if (!checkAuth()) return;
+    if (!(await checkAuth())) return;
     try {
-        const companies = await sbQuery('companies', 'select=*&order=created_at.desc');
+        const companies = await adminFetch('/admin/companies');
         cachedCompanies = companies;
         document.getElementById('mainContent').innerHTML = `
             <div class="panel">
@@ -367,9 +385,9 @@ function renderCompaniesTable(container, companies) {
 async function loadUsers() {
     document.getElementById('pageTitle').textContent = 'All Users';
     document.getElementById('mainContent').innerHTML = '<div class="loader"><div class="spin"></div><p>Loading users...</p></div>';
-    if (!checkAuth()) return;
+    if (!(await checkAuth())) return;
     try {
-        const users = await sbQuery('users', 'select=*&order=created_at.desc');
+        const users = await adminFetch('/admin/users');
         if (Array.isArray(users) && users.length > 0) {
             document.getElementById('mainContent').innerHTML = `
                 <div class="panel">
@@ -402,9 +420,9 @@ async function loadUsers() {
 async function loadJobs() {
     document.getElementById('pageTitle').textContent = 'All Jobs';
     document.getElementById('mainContent').innerHTML = '<div class="loader"><div class="spin"></div><p>Loading jobs...</p></div>';
-    if (!checkAuth()) return;
+    if (!(await checkAuth())) return;
     try {
-        const jobs = await sbQuery('jobs', 'select=*,companies(name)&order=created_at.desc');
+        const jobs = await adminFetch('/admin/jobs');
         if (Array.isArray(jobs) && jobs.length > 0) {
             document.getElementById('mainContent').innerHTML = `
                 <div class="panel">
@@ -436,9 +454,9 @@ async function loadJobs() {
 // ══════════════════════════════════════════
 // SETTINGS
 // ══════════════════════════════════════════
-function loadSettings() {
+async function loadSettings() {
     document.getElementById('pageTitle').textContent = 'Platform Settings';
-    if (!checkAuth()) return;
+    if (!(await checkAuth())) return;
 
     const savedUrl      = localStorage.getItem('cfg_supabase_url')  || SUPABASE_URL;
     const savedKey      = localStorage.getItem('cfg_supabase_key')  || SUPABASE_ANON_KEY;
@@ -666,9 +684,9 @@ function toast(msg, type='info') {
 // ══════════════════════════════════════════
 // EMAIL & SMTP SETTINGS
 // ══════════════════════════════════════════
-function loadEmailSettings() {
+async function loadEmailSettings() {
     document.getElementById('pageTitle').textContent = 'Email & SMTP Configuration';
-    if (!checkAuth()) return;
+    if (!(await checkAuth())) return;
     const smtp = JSON.parse(localStorage.getItem('cfg_smtp') || '{}');
     document.getElementById('mainContent').innerHTML = `
         <div class="panel">
@@ -732,15 +750,20 @@ async function testEmail() {
     const email = prompt('Send test email to:', user.email || '');
     if (!email) return;
     toast('Sending test email...', 'info');
-    setTimeout(() => toast('Test email queued. Check your inbox.', 'success'), 1500);
+    try {
+        const result = await adminFetch('/admin/test-email', { method: 'POST', body: { to: email } });
+        toast(`✅ Test email sent to ${result.to || email}!`, 'success');
+    } catch(e) {
+        toast('❌ Email failed: ' + e.message, 'error');
+    }
 }
 
 // ══════════════════════════════════════════
 // INTERVIEW DEFAULTS
 // ══════════════════════════════════════════
-function loadInterviewDefaults() {
+async function loadInterviewDefaults() {
     document.getElementById('pageTitle').textContent = 'Interview Defaults';
-    if (!checkAuth()) return;
+    if (!(await checkAuth())) return;
     const cfg = JSON.parse(localStorage.getItem('cfg_interview') || '{}');
     document.getElementById('mainContent').innerHTML = `
         <div class="panel">
@@ -839,9 +862,9 @@ function saveInterviewDefaults() {
 // ══════════════════════════════════════════
 // BRANDING
 // ══════════════════════════════════════════
-function loadBranding() {
+async function loadBranding() {
     document.getElementById('pageTitle').textContent = 'Branding & Appearance';
-    if (!checkAuth()) return;
+    if (!(await checkAuth())) return;
     const brand = JSON.parse(localStorage.getItem('cfg_brand') || '{}');
     document.getElementById('mainContent').innerHTML = `
         <div class="panel">
@@ -900,43 +923,44 @@ function saveBranding() {
 // ══════════════════════════════════════════
 // AUDIT LOGS
 // ══════════════════════════════════════════
-function loadAuditLogs() {
+async function loadAuditLogs() {
     document.getElementById('pageTitle').textContent = 'Audit Logs';
-    if (!checkAuth()) return;
-    const logs = JSON.parse(localStorage.getItem('cfg_audit_logs') || '[]');
-    // Add current session as sample if empty
-    if (logs.length === 0) {
-        const sampleLogs = [
-            { ts: new Date().toISOString(), user: user.email || 'admin', action: 'login', detail: 'Super admin login', ip: '—' },
-            { ts: new Date(Date.now()-3600000).toISOString(), user: 'system', action: 'config_change', detail: 'Platform settings updated', ip: '—' },
-            { ts: new Date(Date.now()-7200000).toISOString(), user: user.email || 'admin', action: 'company_create', detail: 'New company registered', ip: '—' }
-        ];
-        localStorage.setItem('cfg_audit_logs', JSON.stringify(sampleLogs));
-        logs.push(...sampleLogs);
+    if (!(await checkAuth())) return;
+    document.getElementById('mainContent').innerHTML = '<div class="loader"><div class="spin"></div><p>Loading audit logs from server...</p></div>';
+    let logs = [];
+    try {
+        logs = await adminFetch('/admin/audit-logs?limit=100');
+        if (!Array.isArray(logs)) logs = [];
+    } catch(e) {
+        console.warn('Audit logs fetch failed, falling back to empty:', e.message);
     }
     document.getElementById('mainContent').innerHTML = `
         <div class="panel">
             <div class="panel-header">
                 <div class="panel-title"><i class="fas fa-clipboard-list" style="color:#10B981;margin-right:8px"></i>System Audit Logs</div>
-                <div style="display:flex;gap:8px">
+                <div style="display:flex;gap:8px;align-items:center">
+                    <span class="panel-badge">${logs.length} entries</span>
                     <select id="auditFilter" class="settings-input" style="width:160px;padding:6px 10px;font-size:12px" onchange="filterAuditLogs()">
                         <option value="all">All Actions</option>
-                        <option value="login">Logins</option>
-                        <option value="config_change">Config Changes</option>
-                        <option value="company_create">Company Events</option>
+                        <option value="admin.verify">Admin Logins</option>
+                        <option value="application.create">Applications</option>
+                        <option value="employee.create">Employee Events</option>
+                        <option value="interview.submit">Interviews</option>
                     </select>
-                    <button class="btn-ghost" style="padding:6px 12px;font-size:12px" onclick="clearAuditLogs()"><i class="fas fa-trash"></i> Clear</button>
+                    <button class="btn-ghost" style="padding:6px 12px;font-size:12px" onclick="loadAuditLogs()"><i class="fas fa-sync"></i> Refresh</button>
                 </div>
             </div>
+            ${logs.length === 0 ? '<p style="text-align:center;color:#9CA3AF;padding:40px">No audit logs recorded yet. Actions will appear here automatically.</p>' : `
             <div class="table-wrap"><table>
-                <thead><tr><th>Timestamp</th><th>User</th><th>Action</th><th>Detail</th></tr></thead>
-                <tbody id="auditTableBody">${logs.map(l => `<tr data-action="${l.action}">
-                    <td style="font-size:12px;color:#6B7280;font-family:monospace;white-space:nowrap">${formatDate(l.ts)} ${new Date(l.ts).toLocaleTimeString()}</td>
-                    <td style="font-size:13px">${esc(l.user)}</td>
-                    <td><span class="badge badge-${l.action==='login'?'active':l.action==='config_change'?'trial':'premium'}">${esc(l.action)}</span></td>
-                    <td style="font-size:13px;color:#6B7280">${esc(l.detail)}</td>
+                <thead><tr><th>Timestamp</th><th>Actor</th><th>Action</th><th>Resource</th><th>IP</th></tr></thead>
+                <tbody id="auditTableBody">${logs.map(l => `<tr data-action="${l.action||''}">
+                    <td style="font-size:12px;color:#6B7280;font-family:monospace;white-space:nowrap">${formatDate(l.timestamp)} ${l.timestamp ? new Date(l.timestamp).toLocaleTimeString() : ''}</td>
+                    <td style="font-size:13px">${esc(l.actor_email||l.actor_id||'system')}</td>
+                    <td><span class="badge badge-${(l.action||'').includes('admin')?'inactive':(l.action||'').includes('create')?'active':'trial'}">${esc(l.action||'-')}</span></td>
+                    <td style="font-size:13px;color:#6B7280">${esc(l.resource||'-')} ${l.resource_id ? '<br><code style="font-size:10px">'+esc(String(l.resource_id).substring(0,8))+'…</code>' : ''}</td>
+                    <td style="font-size:12px;color:#9CA3AF">${esc(l.ip||'—')}</td>
                 </tr>`).join('')}</tbody>
-            </table></div>
+            </table></div>`}
         </div>
     `;
 }
@@ -946,19 +970,14 @@ function filterAuditLogs() {
         tr.style.display = filter === 'all' || tr.dataset.action === filter ? '' : 'none';
     });
 }
-function clearAuditLogs() {
-    if (!confirm('Clear all audit logs?')) return;
-    localStorage.removeItem('cfg_audit_logs');
-    toast('Audit logs cleared', 'info');
-    loadAuditLogs();
-}
+// Audit logs are now server-side — no local clear needed
 
 // ══════════════════════════════════════════
 // FEATURE FLAGS
 // ══════════════════════════════════════════
-function loadFeatureFlags() {
+async function loadFeatureFlags() {
     document.getElementById('pageTitle').textContent = 'Feature Flags';
-    if (!checkAuth()) return;
+    if (!(await checkAuth())) return;
     const flags = JSON.parse(localStorage.getItem('cfg_features') || '{}');
     const features = [
         { key: 'ai_interviews', label: 'AI Voice Interviews', desc: 'Enable AI-powered proctored interviews', icon: 'fa-robot', default: true },

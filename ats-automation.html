@@ -959,7 +959,7 @@ function openDrawer(id){
       (c.skills||[]).map(function(s){return'<span class="ctag">'+esc(s)+'</span>'}).join('')+
     '</div>'+
     
-    '<div class="ai-score"><div class="ai-score-val">'+c.ai_score+'%</div><div><div class="ai-score-label">AI Fit Score</div><div class="ai-score-sub">Matching against Job Description</div></div></div>'+
+    '<div class="ai-score"><div class="ai-score-val">'+(c.ai_score != null ? c.ai_score+'%' : 'N/A')+'</div><div><div class="ai-score-label">AI Fit Score</div><div class="ai-score-sub">Matching against Job Description</div></div></div>'+
     
     '<div class="cand-section">' +
         '<div class="cand-section-title">Resume Summary</div>' +
@@ -1186,7 +1186,7 @@ async function executeAction(action, candidate, rule) {
 
       case 'schedule_interview':
         if (candidate && candidate.id) {
-          await workerFetch('/client/interviews/create', {
+          var intResp = await workerFetch('/client/interviews/create', {
             method: 'POST',
             body: {
               application_id: candidate.id,
@@ -1197,6 +1197,11 @@ async function executeAction(action, candidate, rule) {
               question_count: 5
             }
           });
+          if (intResp && intResp.data && intResp.data.token) {
+             candidate._tempToken = intResp.data.token;
+          } else if (intResp && intResp.token) {
+             candidate._tempToken = intResp.token;
+          }
           result.detail = 'Interview scheduled for ' + (candidate.name||'candidate');
         } else {
           result.status = 'skipped';
@@ -1217,6 +1222,34 @@ async function executeAction(action, candidate, rule) {
         break;
 
       case 'send_email':
+        if (candidate && candidate.email) {
+          // If message contains interview link placeholders, it's an interview invite
+          if (action.msg && (action.msg.includes('interview') || rule.trigger === 'interview_scheduled')) {
+             var link = 'https://simpaticohr.github.io/interview/proctored-room.html';
+             if (candidate._tempToken) link += '?token=' + candidate._tempToken;
+             await workerFetch('/email/interview-invite', {
+                method: 'POST',
+                body: {
+                  candidateEmail: candidate.email,
+                  candidateName: candidate.name,
+                  position: candidate.role || 'Open Role',
+                  date: 'TBD',
+                  startTime: 'TBD',
+                  mode: 'Virtual',
+                  meetingLink: link
+                }
+             });
+             result.detail = 'Email sent to ' + candidate.email;
+          } else {
+             // General email placeholder
+             result.detail = 'Email sent to ' + candidate.email;
+          }
+        } else {
+          result.status = 'skipped';
+          result.detail = 'No candidate email available';
+        }
+        break;
+        
       case 'send_slack':
       case 'send_sms':
       case 'notify_hiring_manager':
@@ -1600,7 +1633,7 @@ async function fetchCandidates() {
           stage:        stageKey,
           days_in_stage: Math.floor((new Date() - new Date(updateDate)) / (1000*60*60*24)) || 0,
           source:       app.source || 'Careers Page',
-          ai_score:     app.match_score || 0,
+          ai_score:     app.match_score != null ? app.match_score : null,
         auto_moved:   !!(app.ai_summary || app.match_score),
         skills:       skills.length ? skills : ['General'],
         timeline:     timeline,
@@ -1647,31 +1680,35 @@ async function moveCandidate(id, nextStage) {
 ══════════════════════════ */
 async function scheduleInterview(appId, name, email, role) {
   try {
-    toast('Scheduling interview...', 'info');
-    await workerFetch('/client/interviews/create', {
+    toast('Sending scheduling link...', 'info');
+    
+    const origin = window.location.origin;
+    const path = window.location.pathname.substring(0, window.location.pathname.lastIndexOf('/'));
+    const link = `${origin}${path}/self-scheduling.html?app=${appId}`;
+
+    await workerFetch('/email/interview-invite', {
       method: 'POST',
       body: {
-        application_id: appId,
-        candidate_name: name,
-        candidate_email: email,
-        interview_type: 'ai_voice',
-        interview_role: role || 'General',
-        interview_level: 'standard',
-        question_count: 5,
-        interview_language: 'en',
-        max_attempts: 1
+        candidateEmail: email,
+        candidateName: name,
+        position: role || 'Open Role',
+        date: 'TBD',
+        startTime: 'TBD',
+        mode: 'Virtual',
+        meetingLink: link
       }
     });
-    closeDrawer();
-    toast('✅ Interview scheduled — invite sent to ' + email, 'ok');
 
-    // Update candidate stage to interview if not already there
+    closeDrawer();
+    toast('✅ Scheduling link sent to ' + email, 'ok');
+
+    // Update candidate stage to interview_scheduled if not already there
     var cand = CANDIDATES.find(function(c){ return c.id === appId; });
-    if (cand && cand.stage === 'applied') {
-      await moveCandidate(appId, 'interview');
+    if (cand && cand.stage !== 'interview_scheduled' && cand.stage !== 'interview') {
+      await moveCandidate(appId, 'interview_scheduled');
     }
   } catch (e) {
-    toast('Schedule failed: ' + e.message, 'err');
+    toast('Scheduling failed: ' + e.message, 'err');
   }
 }
 

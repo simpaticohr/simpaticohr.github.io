@@ -4461,11 +4461,11 @@ function welcomeEmailHtml(firstName, empNum) {
           </div>
           <p style="font-size:15px;color:#6b7280">Log in to your dashboard to complete your onboarding checklist.</p>
           <div style="text-align:center;margin-top:32px">
-            <a href="${"https://app.simpaticohr.in"}" style="display:inline-block;background:linear-gradient(135deg,#6366f1,#8b5cf6);color:white;text-decoration:none;padding:14px 32px;border-radius:8px;font-weight:600;font-size:15px">Go to Dashboard â†’</a>
+            <a href="${"https://app.simpaticohr.in"}" style="display:inline-block;background:linear-gradient(135deg,#6366f1,#8b5cf6);color:white;text-decoration:none;padding:14px 32px;border-radius:8px;font-weight:600;font-size:15px">Go to Dashboard &rarr;</a>
           </div>
         </td></tr>
         <tr><td style="background:#f9fafb;padding:20px;text-align:center;border-top:1px solid #e5e7eb">
-          <p style="margin:0;font-size:12px;color:#9ca3af">© ${new Date().getFullYear()} Simpatico HR. All rights reserved.</p>
+          <p style="margin:0;font-size:12px;color:#9ca3af">&copy; ${new Date().getFullYear()} Simpatico HR. All rights reserved.</p>
         </td></tr>
       </table>
     </td></tr>
@@ -4594,7 +4594,7 @@ async function handleScheduleInterviewEmail(request, env, ctx) {
   const candidateHtml = `
 <!DOCTYPE html>
 <html>
-<head><meta charset="utf-8"></head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
 <body style="margin:0;padding:0;background:#f4f5f7;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
   <table width="100%" cellpadding="0" cellspacing="0" style="padding:40px 20px;">
     <tr><td align="center">
@@ -4606,7 +4606,7 @@ async function handleScheduleInterviewEmail(request, env, ctx) {
         <tr><td style="padding:36px;">
           <p style="font-size:16px;color:#374151;">Hi <strong>${candidateName}</strong>,</p>
           <p style="font-size:15px;color:#6b7280;line-height:1.6;">
-            We're pleased to invite you for an interview at <strong>Simpatico</strong>. Please find the details below.
+            We&#39;re pleased to invite you for an interview at <strong>Simpatico</strong>. Please find the details below.
           </p>
 
           <div style="background:#f9fafb;border-radius:10px;padding:24px;margin:24px 0;border:1px solid #e5e7eb;">
@@ -4646,7 +4646,7 @@ async function handleScheduleInterviewEmail(request, env, ctx) {
           <p style="font-size:15px;color:#374151;margin-top:20px;">Best of luck!<br><strong>Simpatico HR Team</strong></p>
         </td></tr>
         <tr><td style="background:#f9fafb;padding:20px;text-align:center;border-top:1px solid #e5e7eb;">
-          <p style="margin:0;font-size:12px;color:#9ca3af;">© ${new Date().getFullYear()} Simpatico HR · interviews@simpaticohr.in</p>
+          <p style="margin:0;font-size:12px;color:#9ca3af;">&copy; ${new Date().getFullYear()} Simpatico HR &middot; interviews@simpaticohr.in</p>
         </td></tr>
       </table>
     </td></tr>
@@ -4663,7 +4663,7 @@ async function handleScheduleInterviewEmail(request, env, ctx) {
   try {
     await sendEmail(env, {
       to: candidateEmail,
-      subject: `Interview Scheduled: ${position} — ${formattedDate}`,
+      subject: `Interview Scheduled: ${position} - ${formattedDate}`,
       html: candidateHtml,
     });
     candidateSent = true;
@@ -4678,7 +4678,7 @@ async function handleScheduleInterviewEmail(request, env, ctx) {
     try {
       await sendEmail(env, {
         to: interviewerEmail,
-        subject: `[Action Required] You are interviewing ${candidateName} — ${formattedDate}`,
+        subject: `[Action Required] You are interviewing ${candidateName} - ${formattedDate}`,
         html: candidateHtml.replace(
           `Hi <strong>${candidateName}</strong>`,
           `Hi <strong>${interviewer}</strong>, you have an upcoming interview with <strong>${candidateName}</strong>`,
@@ -4864,7 +4864,7 @@ function registrationWelcomeHtml(name, companyName, type) {
       <div style="background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,0.06);margin:0 16px;">
         <div style="background:linear-gradient(135deg,#1E40AF,#3B82F6);padding:32px 24px;text-align:center;">
           <h1 style="color:#fff;font-size:24px;margin:0;font-weight:800;">Welcome to SimpaticoHR</h1>
-          <p style="color:rgba(255,255,255,0.85);font-size:14px;margin:8px 0 0;">India's AI-Powered Recruitment Platform</p>
+          <p style="color:rgba(255,255,255,0.85);font-size:14px;margin:8px 0 0;">India&#39;s AI-Powered Recruitment Platform</p>
         </div>
         <div style="padding:32px 24px;">
           <p style="font-size:16px;color:#1f2937;margin:0 0 16px;">Hi <strong>${name}</strong>,</p>
@@ -4872,11 +4872,11 @@ function registrationWelcomeHtml(name, companyName, type) {
           <p style="font-size:14px;color:#4b5563;font-weight:600;margin:0 0 12px;">Here's what to do next:</p>
           <ul style="font-size:14px;color:#4b5563;line-height:2;padding-left:20px;margin:0 0 24px;">${nextSteps}</ul>
           <div style="text-align:center;margin:24px 0;">
-            <a href="https://simpaticohr.in/platform/login.html" style="display:inline-block;background:linear-gradient(135deg,#1E40AF,#3B82F6);color:#fff;text-decoration:none;padding:14px 32px;border-radius:10px;font-weight:700;font-size:15px;">Go to Dashboard â†’</a>
+            <a href="https://simpaticohr.in/platform/login.html" style="display:inline-block;background:linear-gradient(135deg,#1E40AF,#3B82F6);color:#fff;text-decoration:none;padding:14px 32px;border-radius:10px;font-weight:700;font-size:15px;">Go to Dashboard &rarr;</a>
           </div>
         </div>
         <div style="background:#f1f5f9;padding:16px 24px;text-align:center;border-top:1px solid #e2e8f0;">
-          <p style="font-size:12px;color:#94a3b8;margin:0;">© ${new Date().getFullYear()} SimpaticoHR Consultancy Pvt Ltd · <a href="https://simpaticohr.in" style="color:#3B82F6;text-decoration:none;">simpaticohr.in</a></p>
+          <p style="font-size:12px;color:#94a3b8;margin:0;">&copy; ${new Date().getFullYear()} SimpaticoHR Consultancy Pvt Ltd &middot; <a href="https://simpaticohr.in" style="color:#3B82F6;text-decoration:none;">simpaticohr.in</a></p>
         </div>
       </div>
     </div>`;

@@ -32,23 +32,50 @@
     } catch(e) { return null; }
   }
 
-  // ── Check trial status ──
+  // ── Check trial status (Worker-first, Supabase fallback) ──
   async function checkTrialStatus() {
-    const client = sb();
     const companyId = getCompanyId();
-    if (!client || !companyId) return null;
+    if (!companyId) return null;
 
+    // 1) Try worker-verified subscription status (authoritative)
+    try {
+      const cfg = window.SIMPATICO_CONFIG || {};
+      const workerUrl = cfg.workerUrl || 'https://simpatico-hr-ats.simpaticohrconsultancy.workers.dev';
+      const token = localStorage.getItem('simpatico_token') || sessionStorage.getItem('simpatico_token');
+      if (token) {
+        const res = await fetch(`${workerUrl}/billing/subscription`, {
+          headers: { 'Authorization': `Bearer ${token}`, 'X-Tenant-ID': companyId },
+        });
+        if (res.ok) {
+          const json = await res.json();
+          const d = json.data || json;
+          if (d.plan && d.plan !== 'trial') {
+            // Worker confirms a paid plan — synthesize a company-like object
+            return {
+              id: companyId, subscription_plan: d.plan, is_active: true,
+              subscription_end: d.expires || d.subscription?.current_period_end,
+              _source: 'worker',
+            };
+          }
+        }
+      }
+    } catch(e) {
+      console.warn('[trial-guard] Worker check failed, falling back:', e.message);
+    }
+
+    // 2) Fallback: read from Supabase companies table
+    const client = sb();
+    if (!client) return null;
     try {
       const { data: company, error } = await client
         .from('companies')
         .select('id, name, subscription_plan, subscription_start, subscription_end, is_active')
         .eq('id', companyId)
         .maybeSingle();
-
       if (error || !company) return null;
       return company;
     } catch(e) {
-      console.warn('[trial-guard] Error checking trial:', e.message);
+      console.warn('[trial-guard] Supabase check failed:', e.message);
       return null;
     }
   }
@@ -60,8 +87,8 @@
 
     try {
       const [jobsRes, interviewsRes] = await Promise.all([
-        client.from('jobs').select('id', { count: 'exact', head: true }).eq('company_id', companyId),
-        client.from('interviews').select('id', { count: 'exact', head: true }).eq('company_id', companyId),
+        client.from('jobs').select('id', { count: 'exact', head: true }).eq('tenant_id', companyId),
+        client.from('interviews').select('id', { count: 'exact', head: true }).eq('tenant_id', companyId),
       ]);
 
       return {
