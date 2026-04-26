@@ -1580,6 +1580,45 @@
         <div id="section-settings" class="content-section" style="display:none;">
             <div class="page-header"><div><h1>Settings</h1><div class="breadcrumb-nav"><a href="#" onclick="navigateTo('dashboard')">Dashboard</a> / Settings</div></div></div>
             
+            <!-- AI Custom Integration (BYOK) -->
+            <div class="card" style="margin-bottom: 24px;">
+                <div class="card-header">
+                    <h4><i class="fas fa-robot"></i> Custom AI Integration (BYOK)</h4>
+                </div>
+                <div class="card-body">
+                    <p style="font-size: 14px; color: #4b5563; margin-bottom: 20px;">Configure your own LLM provider for AI interviews and ATS screening. This overrides the platform's default AI.</p>
+                    
+                    <div class="form-group">
+                        <label>AI Provider</label>
+                        <select class="form-control-custom" id="aiProvider" onchange="toggleAiFields()">
+                            <option value="cloudflare">Use Platform Default (Cloudflare)</option>
+                            <option value="openai">OpenAI</option>
+                            <option value="anthropic">Anthropic</option>
+                            <option value="custom">Custom Endpoint (Local/vLLM)</option>
+                        </select>
+                    </div>
+
+                    <div id="customAiFields" style="display:none; margin-top:15px; padding:15px; background:#f9fafb; border-radius:8px; border:1px solid #e5e7eb;">
+                        <div class="form-group" style="margin-bottom:15px;">
+                            <label>API Key <span style="font-weight:normal;color:#6b7280;">(Stored securely)</span></label>
+                            <input type="password" class="form-control-custom" id="aiApiKey" placeholder="sk-...">
+                        </div>
+                        
+                        <div class="form-group" style="margin-bottom:15px;">
+                            <label>Base URL <span style="font-weight:normal;color:#6b7280;">(For custom proxies/endpoints)</span></label>
+                            <input type="text" class="form-control-custom" id="aiBaseUrl" placeholder="https://api.openai.com/v1">
+                        </div>
+
+                        <div class="form-group">
+                            <label>Model Name</label>
+                            <input type="text" class="form-control-custom" id="aiModel" placeholder="gpt-4o-mini">
+                        </div>
+                    </div>
+
+                    <button class="btn-primary-custom" style="margin-top:15px;" id="btnSaveAiSettings" onclick="saveAiSettings()"><i class="fas fa-save"></i> Save AI Config</button>
+                </div>
+            </div>
+
             <div class="card" style="margin-bottom: 24px;">
                 <div class="card-header">
                     <h4>Public Careers Page & Job Widget</h4>
@@ -1662,8 +1701,76 @@
                 .slider.round:before { border-radius: 50%; }
             </style>
             <script>
+                function toggleAiFields() {
+                    const provider = document.getElementById('aiProvider').value;
+                    const customFields = document.getElementById('customAiFields');
+                    const baseUrlInput = document.getElementById('aiBaseUrl');
+                    const modelInput = document.getElementById('aiModel');
+
+                    if (provider === 'cloudflare') {
+                        customFields.style.display = 'none';
+                    } else {
+                        customFields.style.display = 'block';
+                        if (provider === 'openai') {
+                            if(!baseUrlInput.value) baseUrlInput.value = 'https://api.openai.com/v1';
+                            if(!modelInput.value) modelInput.value = 'gpt-4o-mini';
+                        } else if (provider === 'anthropic') {
+                            if(!baseUrlInput.value) baseUrlInput.value = 'https://api.anthropic.com/v1';
+                            if(!modelInput.value) modelInput.value = 'claude-3-haiku-20240307';
+                        }
+                    }
+                }
+
+                async function saveAiSettings() {
+                    const btn = document.getElementById('btnSaveAiSettings');
+                    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving...';
+                    btn.disabled = true;
+
+                    try {
+                        const compData = JSON.parse(localStorage.getItem('simpatico_company') || '{}');
+                        const compId = compData.id || JSON.parse(localStorage.getItem('simpatico_user') || '{}').company_id;
+                        if (!compId) throw new Error("Company ID not found");
+
+                        const provider = document.getElementById('aiProvider').value;
+                        const updates = {
+                            ai_provider: provider,
+                            ai_api_key: provider === 'cloudflare' ? null : document.getElementById('aiApiKey').value,
+                            ai_base_url: provider === 'cloudflare' ? null : document.getElementById('aiBaseUrl').value,
+                            ai_model: provider === 'cloudflare' ? null : document.getElementById('aiModel').value
+                        };
+
+                        const db = (typeof getSupabaseClient === 'function' ? getSupabaseClient() : null) || window.SimpaticoDB || window._supabaseClient;
+                        if (!db) throw new Error('Database connection not available');
+
+                        const res = await db.from('companies').update(updates).eq('id', compId);
+                        if(res.error) throw new Error(res.error.message);
+                        
+                        // Update local cache
+                        Object.assign(compData, updates);
+                        localStorage.setItem('simpatico_company', JSON.stringify(compData));
+
+                        if (typeof showToast === 'function') showToast('AI Settings saved successfully');
+                    } catch (err) {
+                        console.error(err);
+                        alert("Failed to save AI settings: " + err.message);
+                    } finally {
+                        btn.innerHTML = '<i class="fas fa-save"></i> Save AI Config';
+                        btn.disabled = false;
+                    }
+                }
+
                 function initCareersSettings() {
                     const compData = JSON.parse(localStorage.getItem('simpatico_company') || '{}');
+                    
+                    // Load AI settings
+                    if (compData.ai_provider) {
+                        document.getElementById('aiProvider').value = compData.ai_provider;
+                        if (compData.ai_api_key) document.getElementById('aiApiKey').value = compData.ai_api_key;
+                        if (compData.ai_base_url) document.getElementById('aiBaseUrl').value = compData.ai_base_url;
+                        if (compData.ai_model) document.getElementById('aiModel').value = compData.ai_model;
+                        toggleAiFields();
+                    }
+
                     const companyId = compData.id || 'YOUR_COMPANY_ID';
                     
                     const atsUrl = window.location.origin + window.location.pathname.replace('/dashboard/hr.html', '');
@@ -4035,9 +4142,12 @@ async function handleScheduleInterview(e) {
     toastContainer.appendChild(toast);
     setTimeout(() => { toast.style.transition='opacity 0.3s'; toast.style.opacity='0'; setTimeout(()=>toast.remove(),300); }, 8000);
 
+    let emailPromise = Promise.resolve({ success: true, skipped: true });
+    
     if (sendEmail || sendInterviewerEmail) {
+        showToast('⏳ Sending interview invitations...', 'info');
         const recipientType = sendEmail && sendInterviewerEmail ? 'both' : sendEmail ? 'candidate' : 'interviewer';
-        sendEmailNotification({ ...localPayload, interviewLink, token }, recipientType).then(result => {
+        emailPromise = sendEmailNotification({ ...localPayload, interviewLink, token }, recipientType).then(result => {
             DataStore.update(data => {
                 const stored = data.interviews.find(i => i.id === localPayload.id);
                 if (stored) {
@@ -4053,13 +4163,21 @@ async function handleScheduleInterview(e) {
             });
             appData = DataStore.get();
             renderInterviewTable();
-
-            if (!result.success) {
-                showToast(`⚠️ Email delivery issue: ${result.reason || 'Check worker logs'}`, 'warning');
-            } else {
-                showToast('✉️ Email notification sent successfully!');
-            }
+            return result;
+        }).catch(err => {
+            console.error('[ScheduleInterview] Email dispatch failed completely:', err);
+            return { success: false, reason: err.message };
         });
+    }
+
+    const emailResult = await emailPromise;
+
+    if (!emailResult.skipped) {
+        if (!emailResult.success) {
+            showToast(`⚠️ Email delivery issue: ${emailResult.reason || 'Check worker logs'}`, 'error');
+        } else {
+            showToast('✉️ Email notification sent successfully!', 'success');
+        }
     }
 
     if (sendWhatsApp && candidatePhone) {
