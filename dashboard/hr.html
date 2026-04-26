@@ -1595,6 +1595,7 @@
                             <option value="openai">OpenAI</option>
                             <option value="anthropic">Anthropic</option>
                             <option value="custom">Custom Endpoint (Local/vLLM)</option>
+                            <option value="other">Other (Any Model / Universal API)</option>
                         </select>
                     </div>
 
@@ -1717,6 +1718,9 @@
                         } else if (provider === 'anthropic') {
                             if(!baseUrlInput.value) baseUrlInput.value = 'https://api.anthropic.com/v1';
                             if(!modelInput.value) modelInput.value = 'claude-3-haiku-20240307';
+                        } else if (provider === 'other') {
+                            if(!baseUrlInput.value) baseUrlInput.value = '';
+                            if(!modelInput.value) modelInput.value = '';
                         }
                     }
                 }
@@ -1743,9 +1747,18 @@
                         if (!db) throw new Error('Database connection not available');
 
                         const res = await db.from('companies').update(updates).eq('id', compId);
-                        if(res.error) throw new Error(res.error.message);
+                        if (res.error) {
+                            if (res.error.message.includes('schema cache') || res.error.message.includes('column') || res.error.code === 'PGRST204') {
+                                console.warn('Supabase schema cache is stale or columns missing. Saving to local cache only.', res.error);
+                            } else {
+                                throw new Error(res.error.message);
+                            }
+                        }
                         
-                        // Update local cache
+                        // Update local cache with Multi-Tenant Isolation
+                        const tenantId = window.SIMPATICO_CONFIG?.tenantId || compId;
+                        localStorage.setItem('simpatico_ai_settings_' + tenantId, JSON.stringify(updates));
+                        
                         Object.assign(compData, updates);
                         localStorage.setItem('simpatico_company', JSON.stringify(compData));
 
@@ -1761,6 +1774,13 @@
 
                 function initCareersSettings() {
                     const compData = JSON.parse(localStorage.getItem('simpatico_company') || '{}');
+                    const tenantId = window.SIMPATICO_CONFIG?.tenantId || compData.id || 'SIMP_PRO_MAIN';
+                    
+                    // Apply Tenant-Isolated AI Settings if present
+                    const isolatedSettings = JSON.parse(localStorage.getItem('simpatico_ai_settings_' + tenantId));
+                    if (isolatedSettings) {
+                        Object.assign(compData, isolatedSettings);
+                    }
                     
                     // Load AI settings
                     if (compData.ai_provider) {
