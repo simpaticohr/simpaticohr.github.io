@@ -2893,20 +2893,26 @@ async function syncWithSupabase() {
                     };
                 });
                 // DEDUP: Remove duplicate interview records (keep first = newest by created_at)
-                const seen = new Set();
+                // Use composite key as primary dedup: candidate + date + position + round
+                const seenIds = new Set();
+                const seenKeys = new Set();
                 data.interviews = data.interviews.filter(int => {
-                    // Primary key: DB id
-                    if (int.id && seen.has('id:' + int.id)) return false;
-                    if (int.id) seen.add('id:' + int.id);
-                    // Secondary key: token (unique per interview)
-                    if (int.token && seen.has('tk:' + int.token)) return false;
-                    if (int.token) seen.add('tk:' + int.token);
-                    // Tertiary key: composite (email + date + position)
-                    const ck = (int.candidateEmail + '|' + int.date + '|' + int.position).toLowerCase();
-                    if (seen.has('ck:' + ck)) return false;
-                    seen.add('ck:' + ck);
+                    // Skip exact same DB id (paranoia check)
+                    if (int.id && seenIds.has(int.id)) return false;
+                    if (int.id) seenIds.add(int.id);
+                    // Composite key: name + email + date + position (trims whitespace)
+                    const name = (int.candidateName || '').trim().toLowerCase();
+                    const email = (int.candidateEmail || '').trim().toLowerCase();
+                    const dt = (int.date || '').trim();
+                    const pos = (int.position || '').trim().toLowerCase();
+                    const ck = name + '|' + email + '|' + dt + '|' + pos;
+                    if (seenKeys.has(ck)) return false;
+                    seenKeys.add(ck);
                     return true;
                 });
+                if (seenKeys.size < data.interviews.length + (seenIds.size - seenKeys.size)) {
+                    console.log('[sync] Deduped interviews: ' + seenIds.size + ' rows -> ' + data.interviews.length + ' unique');
+                }
             });
             synced++;
         } else if (intRes.error) {
