@@ -3,7 +3,7 @@
  * Leave management, policies (R2), HR tickets, org chart
  */
 
-const OPS_CONFIG = {
+var OPS_CONFIG = {
   supabaseUrl: window.SIMPATICO_CONFIG?.supabaseUrl    || '',
   supabaseKey: window.SIMPATICO_CONFIG?.supabaseAnonKey || '',
   workerUrl:   window.SIMPATICO_CONFIG?.workerUrl       || 'https://simpatico-hr-ats.simpaticohrconsultancy.workers.dev',
@@ -17,10 +17,10 @@ function sb() {
   return null;
 }
 
-let allLeave   = [];
-let allTickets = [];
-let allExpenses = [];
-let allOffboarding = [];
+var allLeave   = [];
+var allTickets = [];
+var allExpenses = [];
+var allOffboarding = [];
 
 (function() {
   async function boot() {
@@ -615,21 +615,24 @@ window.loadOrgChart = async function() {
   function buildTree(managerId, depth=0) {
     const reports = employees.filter(e => e.manager_id === managerId || (!managerId && !e.manager_id));
     if (reports.length === 0) return '';
-    return reports.map(e => {
-      const _e = typeof escapeHtml === 'function' ? escapeHtml : s => s;
-      const color = avatarColor(e.id);
-      const fName = e.first_name || 'U';
-      const lName = e.last_name || 'N';
-      const initials = _e(`${fName[0]}${lName[0]}`);
-      return `<div style="display:inline-flex;flex-direction:column;align-items:center;margin:0 12px">
-        <div style="display:flex;flex-direction:column;align-items:center;padding:12px 16px;background:var(--hr-bg-card);border:1px solid var(--hr-border);border-radius:var(--hr-radius-lg);min-width:140px;position:relative">
-          <div class="hr-emp-avatar" style="background:${color};color:#fff;margin-bottom:6px">${initials}</div>
-          <div style="font-weight:600;font-size:13px;text-align:center">${_e(e.first_name || 'Unknown')} ${_e(e.last_name || 'Employee')}</div>
-          <div style="font-size:11px;color:var(--hr-text-muted);text-align:center">${_e(e.job_title||'—')}</div>
-        </div>
-        ${buildTree(e.id, depth+1) ? `<div style="width:1px;height:20px;background:var(--hr-border)"></div><div style="display:flex;gap:0">${buildTree(e.id, depth+1)}</div>` : ''}
-      </div>`;
-    }).join('');
+      return reports.map(e => {
+        const _e = typeof escapeHtml === 'function' ? escapeHtml : s => s;
+        const color = avatarColor(e.id);
+        const fName = e.first_name || 'U';
+        const lName = e.last_name || 'N';
+        const initials = _e(`${fName[0]}${lName[0]}`);
+        const childrenHtml = buildTree(e.id, depth + 1);
+        const childrenMarkup = childrenHtml ? `<div style="width:1px;height:20px;background:var(--hr-border)"></div><div style="display:flex;gap:0">${childrenHtml}</div>` : '';
+
+        return `<div style="display:inline-flex;flex-direction:column;align-items:center;margin:0 12px">
+          <div style="display:flex;flex-direction:column;align-items:center;padding:12px 16px;background:var(--hr-bg-card);border:1px solid var(--hr-border);border-radius:var(--hr-radius-lg);min-width:140px;position:relative">
+            <div class="hr-emp-avatar" style="background:${color};color:#fff;margin-bottom:6px">${initials}</div>
+            <div style="font-weight:600;font-size:13px;text-align:center">${_e(e.first_name || 'Unknown')} ${_e(e.last_name || 'Employee')}</div>
+            <div style="font-size:11px;color:var(--hr-text-muted);text-align:center">${_e(e.job_title||'—')}</div>
+          </div>
+          ${childrenMarkup}
+        </div>`;
+      }).join('');
   }
 
   container.innerHTML = `<div style="display:flex;justify-content:center">${buildTree(null)}</div>`;
