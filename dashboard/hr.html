@@ -2892,6 +2892,21 @@ async function syncWithSupabase() {
                         proctorSettings: dbInt.proctor_settings || null
                     };
                 });
+                // DEDUP: Remove duplicate interview records (keep first = newest by created_at)
+                const seen = new Set();
+                data.interviews = data.interviews.filter(int => {
+                    // Primary key: DB id
+                    if (int.id && seen.has('id:' + int.id)) return false;
+                    if (int.id) seen.add('id:' + int.id);
+                    // Secondary key: token (unique per interview)
+                    if (int.token && seen.has('tk:' + int.token)) return false;
+                    if (int.token) seen.add('tk:' + int.token);
+                    // Tertiary key: composite (email + date + position)
+                    const ck = (int.candidateEmail + '|' + int.date + '|' + int.position).toLowerCase();
+                    if (seen.has('ck:' + ck)) return false;
+                    seen.add('ck:' + ck);
+                    return true;
+                });
             });
             synced++;
         } else if (intRes.error) {
@@ -4375,8 +4390,8 @@ async function handleScheduleInterview(e) {
             });
         });
 
-        appData = DataStore.get();
         await syncWithSupabase();
+        appData = DataStore.get(); // Refresh AFTER sync so dedup data is used
     renderInterviewTable();
     renderCompletedInterviewTable();
     renderCancelledInterviewTable();
