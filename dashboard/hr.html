@@ -3120,6 +3120,44 @@ function navigateTo(sectionId, navEl) {
     if (dd) dd.classList.remove('open');
 }
 
+// ── CSS Scoper: prevents external module styles from leaking into the parent dashboard ──
+function scopeModuleCss(cssText, containerId) {
+    const scope = '#' + containerId;
+    let css = cssText.replace(/\/\*[\s\S]*?\*\//g, ''); // strip comments
+
+    // Preserve @keyframes (don't scope them)
+    const preserved = [];
+    css = css.replace(/@keyframes\s+[\w-]+\s*\{(?:[^{}]*\{[^{}]*\})*[^{}]*\}/g, m => {
+        preserved.push(m); return '/*__KF' + (preserved.length - 1) + '__*/';
+    });
+
+    // Scope rules inside @media blocks
+    css = css.replace(/@media\s*([^{]+)\{((?:[^{}]*\{[^{}]*\})*)\s*\}/g, (_, query, inner) => {
+        return '@media ' + query.trim() + '{' + scopeRules(inner, scope) + '}';
+    });
+
+    // Scope remaining top-level rules
+    css = scopeRules(css, scope);
+
+    // Restore @keyframes
+    preserved.forEach((kf, i) => { css = css.replace('/*__KF' + i + '__*/', kf); });
+    return css;
+}
+function scopeRules(css, scope) {
+    return css.replace(/([^{}]+)\{([^{}]*)\}/g, (match, sel, decls) => {
+        sel = sel.trim();
+        if (!sel || sel.startsWith('@') || sel.startsWith('/*__KF')) return match;
+        const scoped = sel.split(',').map(s => {
+            s = s.trim(); if (!s) return '';
+            if (/^(html|body|\*)$/.test(s)) return scope;
+            if (/^(html|body)\s/.test(s)) return scope + ' ' + s.replace(/^(html|body)\s+/, '');
+            if (s.startsWith('*::') || s.startsWith('*,')) return scope + ' ' + s;
+            return scope + ' ' + s;
+        }).join(',');
+        return scoped + '{' + decls + '}';
+    });
+}
+
 async function loadExternalModule(sectionId, href) {
     const container = document.getElementById(sectionId + '-module-container');
     if (!container || loadedModules[sectionId]) return;
@@ -3184,7 +3222,13 @@ async function loadExternalModule(sectionId, href) {
                 document.head.appendChild(newLink);
             }
         });
-        doc.querySelectorAll('style').forEach(style => document.head.appendChild(style.cloneNode(true)));
+        // Scope external module styles to their container to prevent CSS leaking
+        doc.querySelectorAll('style').forEach(style => {
+            const newStyle = document.createElement('style');
+            newStyle.dataset.module = sectionId;
+            newStyle.textContent = scopeModuleCss(style.textContent, sectionId + '-module-container');
+            document.head.appendChild(newStyle);
+        });
 
         window.loadedScripts = window.loadedScripts || new Set();
 
