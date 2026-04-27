@@ -2421,6 +2421,24 @@
     </div>
 </div>
 
+<!-- ===== JOB DETAIL MODAL ===== -->
+<div class="modal fade" id="jobDetailModal" tabindex="-1">
+    <div class="modal-dialog modal-xl">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="jobDetailTitle"><i class="fas fa-briefcase me-2" style="color:var(--primary)"></i>Job Details</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body" id="jobDetailBody">
+                <!-- Job info & applications rendered here -->
+            </div>
+            <div class="modal-footer">
+                <button class="btn-outline-custom" data-bs-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="../js/hr-config.js"></script>
@@ -3505,12 +3523,16 @@ function renderJobTable() {
             <td>${escapeHtml(job.department)}</td>
             <td>${escapeHtml(job.location)}</td>
             <td>${escapeHtml(job.type)}</td>
-            <td>${job.applications || 0}</td>
+            <td>
+                <span style="font-weight:700;color:var(--primary);cursor:pointer;text-decoration:underline;text-underline-offset:3px;" onclick="viewJob(${index})" title="Click to view applications">
+                    ${job.applications || 0}
+                </span>
+            </td>
             <td><span class="status-badge ${job.status}">${capitalize(job.status)}</span></td>
             <td>${formatDate(job.createdAt || job.created_at)}</td>
             <td>
                 <button class="btn-sm-action" style="color:#0a66c2;" title="Share on LinkedIn" onclick="shareJobToLinkedIn(${index})"><i class="fab fa-linkedin"></i></button>
-                <button class="btn-sm-action view" title="View" onclick="viewJob(${index})"><i class="fas fa-eye"></i></button>
+                <button class="btn-sm-action view" title="View Job & Applications" onclick="viewJob(${index})"><i class="fas fa-eye"></i></button>
                 <button class="btn-sm-action edit" title="Edit" onclick="editJob(${index})"><i class="fas fa-pen"></i></button>
                 <button class="btn-sm-action delete" title="Delete" onclick="deleteJob(${index})"><i class="fas fa-trash"></i></button>
             </td>
@@ -4487,7 +4509,143 @@ function filterJobs() {
 
 function viewJob(index) {
     const job = appData.jobs[index];
-    if (job) showToast(`📋 ${job.title} — ${job.department} — ${job.applications || 0} applications`);
+    if (!job) return;
+
+    // Find all applications for this job
+    const allApps = appData.job_applications || [];
+    const jobApps = allApps.filter(a => a.job_id === job.id);
+    const appCount = jobApps.length || job.applications || 0;
+
+    // Set the modal title
+    const titleEl = document.getElementById('jobDetailTitle');
+    if (titleEl) titleEl.innerHTML = `<i class="fas fa-briefcase me-2" style="color:var(--primary)"></i>${escapeHtml(job.title)}`;
+
+    // Build the modal body
+    const body = document.getElementById('jobDetailBody');
+    if (!body) return;
+
+    // Status color helper
+    const statusColors = { open: '#10b981', active: '#10b981', closed: '#64748b', draft: '#8b5cf6' };
+    const sColor = statusColors[(job.status || '').toLowerCase()] || '#64748b';
+
+    let html = `
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:16px;margin-bottom:24px;">
+        <div style="background:var(--bg-main);border-radius:10px;padding:14px;">
+            <div style="font-size:0.75rem;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">Department</div>
+            <div style="font-weight:600;">${escapeHtml(job.department || '-')}</div>
+        </div>
+        <div style="background:var(--bg-main);border-radius:10px;padding:14px;">
+            <div style="font-size:0.75rem;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">Location</div>
+            <div style="font-weight:600;">${escapeHtml(job.location || 'Remote')}</div>
+        </div>
+        <div style="background:var(--bg-main);border-radius:10px;padding:14px;">
+            <div style="font-size:0.75rem;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">Type</div>
+            <div style="font-weight:600;">${escapeHtml(job.type || job.employment_type || 'Full-time')}</div>
+        </div>
+        <div style="background:var(--bg-main);border-radius:10px;padding:14px;">
+            <div style="font-size:0.75rem;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">Status</div>
+            <div style="font-weight:600;"><span style="display:inline-flex;align-items:center;gap:6px;"><span style="width:8px;height:8px;border-radius:50%;background:${sColor};"></span>${capitalize(job.status || 'draft')}</span></div>
+        </div>
+        <div style="background:var(--bg-main);border-radius:10px;padding:14px;">
+            <div style="font-size:0.75rem;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">Posted</div>
+            <div style="font-weight:600;">${formatDate(job.createdAt || job.created_at)}</div>
+        </div>
+        <div style="background:linear-gradient(135deg,#eef2ff,#e0e7ff);border-radius:10px;padding:14px;border:1.5px solid #c7d2fe;">
+            <div style="font-size:0.75rem;color:var(--primary);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;font-weight:600;">Applications</div>
+            <div style="font-size:1.5rem;font-weight:800;color:var(--primary);">${appCount}</div>
+        </div>
+    </div>`;
+
+    // Description section (if available)
+    if (job.description) {
+        html += `
+        <div style="margin-bottom:24px;">
+            <h6 style="font-size:0.88rem;font-weight:600;margin-bottom:8px;"><i class="fas fa-align-left me-2" style="color:var(--text-secondary)"></i>Description</h6>
+            <div style="background:var(--bg-main);border-radius:10px;padding:16px;font-size:0.88rem;line-height:1.7;max-height:200px;overflow-y:auto;white-space:pre-wrap;">${escapeHtml(job.description)}</div>
+        </div>`;
+    }
+
+    // Applications table
+    html += `
+    <div>
+        <h6 style="font-size:0.88rem;font-weight:600;margin-bottom:12px;display:flex;align-items:center;gap:8px;">
+            <i class="fas fa-users" style="color:var(--primary)"></i>Applications 
+            <span style="background:var(--primary);color:white;padding:2px 10px;border-radius:20px;font-size:0.72rem;font-weight:700;">${appCount}</span>
+        </h6>`;
+
+    if (jobApps.length === 0) {
+        html += `
+        <div style="text-align:center;padding:40px 20px;color:var(--text-secondary);background:var(--bg-main);border-radius:10px;">
+            <i class="fas fa-inbox" style="font-size:2.5rem;margin-bottom:12px;opacity:0.4;"></i>
+            <h6 style="color:var(--text-primary);margin-bottom:4px;">No Applications Yet</h6>
+            <p style="font-size:0.85rem;margin:0;">Candidates will appear here once they apply to this job.</p>
+        </div>`;
+    } else {
+        html += `
+        <div class="table-responsive" style="max-height:400px;overflow-y:auto;">
+            <table class="data-table">
+                <thead style="position:sticky;top:0;z-index:1;">
+                    <tr>
+                        <th>Candidate</th>
+                        <th>Contact</th>
+                        <th>ATS Score</th>
+                        <th>Status</th>
+                        <th>Applied</th>
+                        <th>Resume</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>`;
+
+        jobApps.forEach(app => {
+            const name   = app.candidate_name  || app.candidateName  || 'Unknown';
+            const email  = app.candidate_email || app.candidateEmail || '';
+            const phone  = app.candidate_phone || app.candidatePhone || '';
+            const score  = app.ats_score       || app.ai_match_score || null;
+            const status = app.status          || 'applied';
+            const date   = app.created_at      || app.dateApplied    || '';
+            const resume = app.resume_url      || app.resumeLink     || '';
+
+            const scoreColor = score >= 70 ? '#10b981' : score >= 40 ? '#f59e0b' : score ? '#ef4444' : '#94a3b8';
+            const badgeClass = status === 'shortlisted' || status === 'Shortlisted' ? 'active' :
+                               status === 'rejected' || status === 'Rejected' ? 'cancelled' :
+                               status === 'hired' || status === 'Hired' ? 'completed' : 'pending';
+
+            html += `
+                <tr>
+                    <td><strong style="font-size:0.88rem;">${escapeHtml(name)}</strong></td>
+                    <td>
+                        <div style="font-size:0.82rem;">${escapeHtml(email)}</div>
+                        ${phone ? '<div style="font-size:0.78rem;color:var(--text-secondary);">' + escapeHtml(phone) + '</div>' : ''}
+                    </td>
+                    <td>
+                        <span style="font-weight:700;color:${scoreColor};font-size:0.9rem;">${score !== null ? score + '%' : '--'}</span>
+                    </td>
+                    <td><span class="status-badge ${badgeClass}">${capitalize(status)}</span></td>
+                    <td style="font-size:0.82rem;color:var(--text-secondary);">${date ? formatDate(date.split('T')[0]) : '--'}</td>
+                    <td>${resume ? '<a href="' + escapeHtml(resume) + '" target="_blank" style="color:var(--primary);font-size:0.82rem;"><i class="fas fa-file-pdf me-1"></i>View</a>' : '<span style="color:var(--text-secondary);font-size:0.82rem;">--</span>'}</td>
+                    <td>
+                        <div style="display:flex;gap:4px;">
+                            <button class="btn-sm-action link-btn" title="Shortlist" onclick="updateAppStatus('${app.id}','Shortlisted');viewJob(${index});"><i class="fas fa-check"></i></button>
+                            <button class="btn-sm-action delete" title="Reject" onclick="updateAppStatus('${app.id}','Rejected');viewJob(${index});"><i class="fas fa-times"></i></button>
+                        </div>
+                    </td>
+                </tr>`;
+        });
+
+        html += `
+                </tbody>
+            </table>
+        </div>`;
+    }
+
+    html += `</div>`;
+
+    body.innerHTML = html;
+
+    // Open the modal
+    const modal = new bootstrap.Modal(document.getElementById('jobDetailModal'));
+    modal.show();
 }
 
 function editJob(index) { showToast('✏️ Edit job — coming soon', 'success'); }
