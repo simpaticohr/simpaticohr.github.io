@@ -242,52 +242,80 @@ function simulate360Feedback(id) {
 })();
 
 // ===== 360° ROOM CAMERA (QR Code + Secondary Camera) =====
-function show360QRCode() {
-    var token = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+
+// Called after scheduling an interview with 360° camera enabled
+function show360QRModal(candidateName, interviewToken) {
     var baseUrl = window.location.origin;
-    var roomUrl = baseUrl + '/room-camera.html?token=' + token;
+    var roomUrl = baseUrl + '/room-camera.html?token=' + interviewToken;
 
-    var container = document.getElementById('qr360Container');
-    var canvas = document.getElementById('qr360Canvas');
-    var linkEl = document.getElementById('qr360Link');
-    var directLink = document.getElementById('qr360DirectLink');
+    // Remove old modal if exists
+    var old = document.getElementById('qr360PopupModal');
+    if (old) old.remove();
 
-    // Generate QR code using qrcode-generator library
+    // Create modal dynamically
+    var modalHtml = '<div class="modal fade" id="qr360PopupModal" tabindex="-1">' +
+        '<div class="modal-dialog modal-dialog-centered">' +
+        '<div class="modal-content">' +
+        '<div class="modal-header" style="background:linear-gradient(135deg,#faf5ff,#f3e8ff);border-bottom:1.5px solid #d8b4fe;">' +
+        '<h5 class="modal-title" style="font-size:0.95rem;"><i class="fas fa-mobile-screen me-2" style="color:#7c3aed;"></i>360\u00b0 Room Camera for ' + escapeHtml(candidateName) + '</h5>' +
+        '<button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>' +
+        '<div class="modal-body" style="text-align:center;padding:24px;">' +
+        '<p style="font-size:0.84rem;color:#6b7280;margin-bottom:16px;">Share this QR code with the candidate. They scan it on their phone to start the secondary room camera.</p>' +
+        '<div style="background:white;display:inline-block;padding:20px;border-radius:16px;border:2px solid #d8b4fe;">' +
+        '<div id="qr360ModalCanvas" style="width:200px;height:200px;margin:0 auto;"></div>' +
+        '<div style="margin-top:10px;font-size:0.78rem;color:#6b21a8;font-weight:600;">Scan with phone camera</div>' +
+        '</div>' +
+        '<div id="qr360ModalLink" style="margin-top:12px;font-size:0.72rem;color:#94a3b8;word-break:break-all;padding:0 20px;"></div>' +
+        '<div style="margin-top:14px;display:flex;justify-content:center;gap:8px;flex-wrap:wrap;">' +
+        '<button class="btn-outline-custom" style="font-size:0.78rem;padding:5px 14px;" onclick="copy360ModalLink()"><i class="fas fa-copy me-1"></i>Copy Link</button>' +
+        '<a href="' + roomUrl + '" target="_blank" class="btn-outline-custom" style="font-size:0.78rem;padding:5px 14px;text-decoration:none;"><i class="fas fa-external-link-alt me-1"></i>Test Page</a>' +
+        '</div>' +
+        '<div style="margin-top:16px;padding:12px;background:#f0fdf4;border-radius:10px;border:1px solid #bbf7d0;text-align:left;">' +
+        '<div style="font-size:0.76rem;color:#166534;font-weight:600;margin-bottom:4px;"><i class="fas fa-lightbulb me-1"></i>Instructions for candidate:</div>' +
+        '<ol style="font-size:0.73rem;color:#15803d;margin:0;padding-left:16px;line-height:1.7;">' +
+        '<li>Scan QR code with smartphone</li>' +
+        '<li>Allow camera access</li>' +
+        '<li>Place phone behind desk (rear camera facing workspace)</li>' +
+        '<li>Keep page open during entire interview</li></ol></div>' +
+        '</div>' +
+        '<div class="modal-footer"><button type="button" class="btn-primary-custom" data-bs-dismiss="modal" style="background:#7c3aed;border-color:#7c3aed;"><i class="fas fa-check me-1"></i>Done</button></div>' +
+        '</div></div></div>';
+
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+
+    // Generate QR code
+    var canvas = document.getElementById('qr360ModalCanvas');
     if (typeof qrcode !== 'undefined') {
         var qr = qrcode(0, 'M');
         qr.addData(roomUrl);
         qr.make();
         canvas.innerHTML = qr.createSvgTag({ cellSize: 5, margin: 2, scalable: true });
-        // Make SVG fill container
         var svg = canvas.querySelector('svg');
-        if (svg) {
-            svg.setAttribute('width', '100%');
-            svg.setAttribute('height', '100%');
-            svg.style.maxWidth = '200px';
-        }
+        if (svg) { svg.setAttribute('width', '100%'); svg.setAttribute('height', '100%'); svg.style.maxWidth = '200px'; }
     } else {
-        // Fallback: show link-only
-        canvas.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#7c3aed;font-size:0.8rem;"><i class="fas fa-qrcode" style="font-size:3rem;"></i></div>';
+        canvas.innerHTML = '<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;color:#7c3aed;"><i class="fas fa-qrcode" style="font-size:3rem;margin-bottom:8px;"></i><span style="font-size:0.75rem;">QR library loading...</span></div>';
     }
 
-    linkEl.textContent = roomUrl;
-    directLink.href = roomUrl;
-    container.style.display = 'block';
+    document.getElementById('qr360ModalLink').textContent = roomUrl;
+    window._room360Url = roomUrl;
 
-    // Store the token
-    window._room360Token = token;
-    if (window.showToast) showToast('QR code generated! Candidate can scan to start room camera.', 'success');
+    // Show the modal
+    var modal = new bootstrap.Modal(document.getElementById('qr360PopupModal'));
+    modal.show();
+
+    // Cleanup on hide
+    document.getElementById('qr360PopupModal').addEventListener('hidden.bs.modal', function() {
+        this.remove();
+    });
 }
 
-function copy360Link() {
-    var linkEl = document.getElementById('qr360Link');
-    if (!linkEl) return;
-    navigator.clipboard.writeText(linkEl.textContent).then(function() {
+function copy360ModalLink() {
+    if (!window._room360Url) return;
+    navigator.clipboard.writeText(window._room360Url).then(function() {
         if (window.showToast) showToast('Room camera link copied!', 'success');
     }).catch(function() {
-        // Fallback
         var ta = document.createElement('textarea');
-        ta.value = linkEl.textContent;
+        ta.value = window._room360Url;
         document.body.appendChild(ta);
         ta.select();
         document.execCommand('copy');
@@ -295,3 +323,7 @@ function copy360Link() {
         if (window.showToast) showToast('Room camera link copied!', 'success');
     });
 }
+
+// Keep legacy function for backward compat
+function show360QRCode() { show360QRModal('Candidate', Date.now().toString(36)); }
+function copy360Link() { copy360ModalLink(); }
