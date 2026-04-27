@@ -1304,7 +1304,7 @@ async function handleCreateEmployee(request, env, ctx) {
   // Welcome email (fire-and-forget)
   sendEmail(env, {
     to: body.email,
-    subject: `Welcome to the Team, ${body.first_name}! 🎉`,
+    subject: `Welcome to the Team, ${body.first_name}!`,
     html: welcomeEmailHtml(body.first_name, empNum),
   }).catch(console.error);
 
@@ -3183,7 +3183,7 @@ Return ONLY valid JSON in format: {"match_score": 85, "reason": "Brief 1-sentenc
 
   if (autoEnabled && match_score !== null) {
     if (match_score >= 70) {
-      // HIGH SCORE â†’ Auto-shortlist to interview stage
+      // HIGH SCORE &rarr; Auto-shortlist to interview stage
       status = "interview";
       autoInterview = true;
       const chars =
@@ -3280,11 +3280,11 @@ Return ONLY valid JSON in format: {"match_score": 85, "reason": "Brief 1-sentenc
     try {
       await sendEmail(env, {
         to: app.candidate_email,
-        subject: `Interview Invitation — ${job.title} at SimpaticoHR`,
+        subject: `Interview Invitation - ${job.title} at SimpaticoHR`,
         html: `<div style="max-width:600px;margin:0 auto;font-family:'Inter',Arial,sans-serif;background:#f8fafc;padding:32px 0;">
   <div style="background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,0.06);margin:0 16px;">
     <div style="background:linear-gradient(135deg,#4f46e5,#7c3aed);padding:32px 24px;text-align:center;">
-      <h1 style="color:#fff;font-size:22px;margin:0;font-weight:800;">Interview Invitation 🎉</h1>
+      <h1 style="color:#fff;font-size:22px;margin:0;font-weight:800;">Interview Invitation</h1>
       <p style="color:rgba(255,255,255,0.85);font-size:14px;margin:8px 0 0;">You've been shortlisted by our AI screening</p>
     </div>
     <div style="padding:32px 24px;">
@@ -3300,14 +3300,14 @@ Return ONLY valid JSON in format: {"match_score": 85, "reason": "Brief 1-sentenc
         </table>
       </div>
       <div style="text-align:center;margin:24px 0;">
-        <a href="${meetingLink}" style="display:inline-block;background:linear-gradient(135deg,#4f46e5,#7c3aed);color:#fff;text-decoration:none;padding:14px 32px;border-radius:10px;font-weight:700;font-size:15px;">Start Your Interview â†’</a>
+        <a href="${meetingLink}" style="display:inline-block;background:linear-gradient(135deg,#4f46e5,#7c3aed);color:#fff;text-decoration:none;padding:14px 32px;border-radius:10px;font-weight:700;font-size:15px;">Start Your Interview &rarr;</a>
       </div>
       <div style="background:#fef3c7;border-left:4px solid #f59e0b;padding:12px 16px;border-radius:0 8px 8px 0;font-size:13px;color:#92400e;line-height:1.6;">
-        <strong>Tips:</strong> Use Chrome or Edge · Ensure good lighting · Use a quiet room · Have your camera and microphone ready
+        <strong>Tips:</strong> Use Chrome or Edge &middot; Ensure good lighting &middot; Use a quiet room &middot; Have your camera and microphone ready
       </div>
     </div>
     <div style="background:#f1f5f9;padding:16px 24px;text-align:center;border-top:1px solid #e2e8f0;">
-      <p style="font-size:12px;color:#94a3b8;margin:0;">© ${new Date().getFullYear()} SimpaticoHR Consultancy Pvt Ltd · <a href="https://simpaticohr.in" style="color:#4f46e5;text-decoration:none;">simpaticohr.in</a></p>
+      <p style="font-size:12px;color:#94a3b8;margin:0;">&copy; ${new Date().getFullYear()} SimpaticoHR Consultancy Pvt Ltd &middot; <a href="https://simpaticohr.in" style="color:#4f46e5;text-decoration:none;">simpaticohr.in</a></p>
     </div>
   </div>
 </div></body></html>`,
@@ -3322,7 +3322,7 @@ Return ONLY valid JSON in format: {"match_score": 85, "reason": "Brief 1-sentenc
     try {
       await sendEmail(env, {
         to: app.candidate_email,
-        subject: `Application Update — ${job.title}`,
+        subject: `Application Update - ${job.title}`,
         html: `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head><body style="margin:0;padding:0;background:#f4f5f7;"><div style="max-width:600px;margin:0 auto;font-family:'Inter',Arial,sans-serif;background:#f8fafc;padding:32px 0;">
   <div style="background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,0.06);margin:0 16px;">
     <div style="background:linear-gradient(135deg,#1e293b,#334155);padding:32px 24px;text-align:center;">
@@ -3335,7 +3335,7 @@ Return ONLY valid JSON in format: {"match_score": 85, "reason": "Brief 1-sentenc
       <p style="font-size:14px;color:#6b7280;margin:0;">Best regards,<br/><strong>SimpaticoHR Recruitment Team</strong></p>
     </div>
     <div style="background:#f1f5f9;padding:16px 24px;text-align:center;border-top:1px solid #e2e8f0;">
-      <p style="font-size:12px;color:#94a3b8;margin:0;">© ${new Date().getFullYear()} SimpaticoHR Consultancy Pvt Ltd</p>
+      <p style="font-size:12px;color:#94a3b8;margin:0;">&copy; ${new Date().getFullYear()} SimpaticoHR Consultancy Pvt Ltd</p>
     </div>
   </div>
 </div></body></html>`,
@@ -3355,11 +3355,11 @@ Return ONLY valid JSON in format: {"match_score": 85, "reason": "Brief 1-sentenc
     try {
       await sendEmail(env, {
         to: app.candidate_email,
-        subject: `Application Received — ${job?.title || 'Open Position'}`,
+        subject: `Application Received - ${job?.title || 'Open Position'}`,
         html: `<div style="max-width:600px;margin:0 auto;font-family:'Inter',Arial,sans-serif;background:#f8fafc;padding:32px 0;">
   <div style="background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,0.06);margin:0 16px;">
     <div style="background:linear-gradient(135deg,#4f46e5,#6366f1);padding:32px 24px;text-align:center;">
-      <h1 style="color:#fff;font-size:22px;margin:0;font-weight:800;">Application Received ✓</h1>
+      <h1 style="color:#fff;font-size:22px;margin:0;font-weight:800;">Application Received &#10003;</h1>
       <p style="color:rgba(255,255,255,0.85);font-size:14px;margin:8px 0 0;">We're reviewing your profile</p>
     </div>
     <div style="padding:32px 24px;">
@@ -3371,7 +3371,7 @@ Return ONLY valid JSON in format: {"match_score": 85, "reason": "Brief 1-sentenc
       </div>
     </div>
     <div style="background:#f1f5f9;padding:16px 24px;text-align:center;border-top:1px solid #e2e8f0;">
-      <p style="font-size:12px;color:#94a3b8;margin:0;">© ${new Date().getFullYear()} SimpaticoHR Consultancy Pvt Ltd · <a href="https://simpaticohr.in" style="color:#4f46e5;text-decoration:none;">simpaticohr.in</a></p>
+      <p style="font-size:12px;color:#94a3b8;margin:0;">&copy; ${new Date().getFullYear()} SimpaticoHR Consultancy Pvt Ltd &middot; <a href="https://simpaticohr.in" style="color:#4f46e5;text-decoration:none;">simpaticohr.in</a></p>
     </div>
   </div>
 </div>`,
@@ -3470,7 +3470,7 @@ async function handleUpdateApplication(request, env, ctx, [id]) {
       }
       await sendEmail(env, {
         to: app.candidate_email,
-        subject: `Application Update — ${jobTitle}`,
+        subject: `Application Update - ${jobTitle}`,
         html: `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head><body style="margin:0;padding:0;background:#f4f5f7;"><div style="max-width:600px;margin:0 auto;font-family:'Inter',Arial,sans-serif;background:#f8fafc;padding:32px 0;">
   <div style="background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,0.06);margin:0 16px;">
     <div style="background:linear-gradient(135deg,#1e293b,#334155);padding:32px 24px;text-align:center;">
@@ -3483,7 +3483,7 @@ async function handleUpdateApplication(request, env, ctx, [id]) {
       <p style="font-size:14px;color:#6b7280;margin:0;">Best regards,<br/><strong>SimpaticoHR Recruitment Team</strong></p>
     </div>
     <div style="background:#f1f5f9;padding:16px 24px;text-align:center;border-top:1px solid #e2e8f0;">
-      <p style="font-size:12px;color:#94a3b8;margin:0;">© ${new Date().getFullYear()} SimpaticoHR Consultancy Pvt Ltd</p>
+      <p style="font-size:12px;color:#94a3b8;margin:0;">&copy; ${new Date().getFullYear()} SimpaticoHR Consultancy Pvt Ltd</p>
     </div>
   </div>
 </div></body></html>`,
@@ -5003,7 +5003,7 @@ async function handleCompanyRegister(request, env, ctx) {
   try {
     await sendEmail(env, {
       to: email,
-      subject: `Welcome to SimpaticoHR, ${admin_name || "Team"}! 🎉`,
+      subject: `Welcome to SimpaticoHR, ${admin_name || "Team"}!`,
       html: registrationWelcomeHtml(admin_name || "there", name, "company"),
     });
   } catch (e) {
@@ -5655,11 +5655,11 @@ async function handleAdminTestEmail(request, env, ctx) {
 
   await sendEmail(env, {
     to,
-    subject: "✅ SimpaticoHR — Test Email",
+    subject: "SimpaticoHR - Test Email",
     html: `
       <div style="font-family:'Inter',system-ui,sans-serif;max-width:500px;margin:0 auto;padding:32px;background:#fff;border-radius:16px;border:1px solid #E5E7EB;">
         <div style="text-align:center;margin-bottom:24px;">
-          <div style="width:48px;height:48px;border-radius:12px;background:linear-gradient(135deg,#10B981,#059669);display:inline-flex;align-items:center;justify-content:center;font-size:24px;">✓</div>
+          <div style="width:48px;height:48px;border-radius:12px;background:linear-gradient(135deg,#10B981,#059669);display:inline-flex;align-items:center;justify-content:center;font-size:24px;">&#10003;</div>
         </div>
         <h2 style="font-size:20px;font-weight:700;color:#0F172A;text-align:center;margin:0 0 8px;">Email System Working</h2>
         <p style="font-size:14px;color:#6B7280;text-align:center;margin:0 0 24px;">Your SimpaticoHR email configuration is active and operational.</p>
