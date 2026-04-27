@@ -1,0 +1,506 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Simpatico HR - 360° Room Camera</title>
+    <meta name="description" content="Secondary room camera for proctored interview. Place your phone behind your desk.">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: 'Inter', -apple-system, sans-serif;
+            background: #0f0a1a;
+            color: #f8fafc;
+            min-height: 100vh;
+            overflow-x: hidden;
+        }
+
+        /* ── Header ── */
+        .header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 16px;
+            background: linear-gradient(135deg, #1e1b4b, #312e81);
+            border-bottom: 1px solid #4338ca40;
+        }
+        .header .brand {
+            font-size: 0.85rem;
+            font-weight: 700;
+            color: #c4b5fd;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .header .status {
+            font-size: 0.72rem;
+            font-weight: 600;
+            padding: 4px 10px;
+            border-radius: 20px;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+        .status.connecting { background: #fbbf2420; color: #fbbf24; }
+        .status.live { background: #10b98120; color: #10b981; }
+        .status.error { background: #ef444420; color: #ef4444; }
+        .status-dot {
+            width: 6px; height: 6px; border-radius: 50%;
+            animation: pulse-dot 1.5s infinite;
+        }
+        .status.live .status-dot { background: #10b981; }
+        .status.connecting .status-dot { background: #fbbf24; }
+        .status.error .status-dot { background: #ef4444; animation: none; }
+        @keyframes pulse-dot { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
+
+        /* ── Camera View ── */
+        .camera-container {
+            position: relative;
+            width: 100%;
+            aspect-ratio: 16/9;
+            background: #1a1625;
+            overflow: hidden;
+        }
+        .camera-container video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transform: scaleX(1); /* Don't mirror - this is rear camera */
+        }
+        .camera-overlay {
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            pointer-events: none;
+            border: 3px solid transparent;
+            transition: border-color 0.3s;
+        }
+        .camera-overlay.live { border-color: #10b98150; }
+        .camera-label {
+            position: absolute;
+            top: 10px; left: 10px;
+            background: #00000080;
+            backdrop-filter: blur(8px);
+            padding: 4px 10px;
+            border-radius: 6px;
+            font-size: 0.7rem;
+            font-weight: 600;
+            color: #c4b5fd;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        .rec-dot {
+            width: 7px; height: 7px; border-radius: 50%;
+            background: #ef4444;
+            animation: rec-blink 1s infinite;
+        }
+        @keyframes rec-blink { 0%,100% { opacity: 1; } 50% { opacity: 0; } }
+
+        /* ── Setup Screen ── */
+        .setup-screen {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 40px 24px;
+            text-align: center;
+            min-height: calc(100vh - 54px);
+        }
+        .setup-icon {
+            width: 80px; height: 80px;
+            background: linear-gradient(135deg, #7c3aed, #4f46e5);
+            border-radius: 24px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 2rem;
+            margin-bottom: 20px;
+            box-shadow: 0 8px 32px #7c3aed40;
+        }
+        .setup-title {
+            font-size: 1.3rem;
+            font-weight: 800;
+            margin-bottom: 6px;
+            background: linear-gradient(135deg, #c4b5fd, #818cf8);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .setup-desc {
+            font-size: 0.85rem;
+            color: #94a3b8;
+            max-width: 300px;
+            line-height: 1.5;
+            margin-bottom: 24px;
+        }
+        .btn-start {
+            background: linear-gradient(135deg, #7c3aed, #6d28d9);
+            color: white;
+            border: none;
+            padding: 14px 32px;
+            border-radius: 14px;
+            font-size: 1rem;
+            font-weight: 700;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            box-shadow: 0 4px 20px #7c3aed50;
+            transition: all 0.2s;
+        }
+        .btn-start:active { transform: scale(0.96); }
+        .btn-start:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        /* ── Instructions Steps ── */
+        .steps {
+            margin-top: 28px;
+            text-align: left;
+            width: 100%;
+            max-width: 320px;
+        }
+        .step {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 14px;
+        }
+        .step-num {
+            width: 28px; height: 28px;
+            border-radius: 50%;
+            background: #312e81;
+            color: #a78bfa;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.75rem;
+            font-weight: 700;
+            flex-shrink: 0;
+        }
+        .step-text {
+            font-size: 0.82rem;
+            color: #94a3b8;
+            padding-top: 3px;
+            line-height: 1.4;
+        }
+        .step-text strong { color: #c4b5fd; }
+
+        /* ── Live Info Bar ── */
+        .info-bar {
+            display: flex;
+            justify-content: space-around;
+            padding: 14px 16px;
+            background: #1e1b4b;
+            border-top: 1px solid #312e8160;
+        }
+        .info-item {
+            text-align: center;
+        }
+        .info-item .label { font-size: 0.65rem; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; }
+        .info-item .value { font-size: 0.85rem; font-weight: 700; color: #a78bfa; margin-top: 2px; }
+
+        /* ── Bottom Controls ── */
+        .controls {
+            display: flex;
+            justify-content: center;
+            gap: 16px;
+            padding: 16px;
+            background: #0f0a1a;
+        }
+        .ctrl-btn {
+            width: 52px; height: 52px;
+            border-radius: 50%;
+            border: 2px solid #312e81;
+            background: #1e1b4b;
+            color: #a78bfa;
+            font-size: 1.1rem;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .ctrl-btn:active { transform: scale(0.9); }
+        .ctrl-btn.danger { border-color: #ef444450; color: #ef4444; background: #ef444415; }
+
+        /* ── Placement Guide ── */
+        .placement-guide {
+            padding: 20px;
+            text-align: center;
+        }
+        .placement-diagram {
+            background: #1e1b4b;
+            border-radius: 16px;
+            padding: 24px;
+            margin: 12px 0;
+            border: 1px solid #312e81;
+        }
+        .desk-layout {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            grid-template-rows: auto auto auto;
+            gap: 8px;
+            max-width: 240px;
+            margin: 0 auto;
+        }
+        .desk-item {
+            padding: 10px 6px;
+            border-radius: 8px;
+            font-size: 0.68rem;
+            font-weight: 600;
+            text-align: center;
+        }
+        .desk-item.monitor { grid-column: 1/4; background: #312e81; color: #a78bfa; }
+        .desk-item.desk { grid-column: 1/4; background: #1e1b4b; color: #64748b; border: 1px dashed #475569; min-height: 40px; display: flex; align-items: center; justify-content: center; }
+        .desk-item.phone { grid-column: 2/3; background: linear-gradient(135deg,#7c3aed,#6d28d9); color: white; animation: phone-glow 2s infinite; }
+        @keyframes phone-glow { 0%,100% { box-shadow: 0 0 10px #7c3aed40; } 50% { box-shadow: 0 0 20px #7c3aed80; } }
+
+        .err-msg {
+            padding: 20px;
+            text-align: center;
+            color: #f87171;
+            font-size: 0.88rem;
+        }
+    </style>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+</head>
+<body>
+
+<div class="header">
+    <div class="brand">
+        <i class="fas fa-shield-halved"></i> Simpatico 360°
+    </div>
+    <div class="status connecting" id="statusBadge">
+        <span class="status-dot"></span>
+        <span id="statusText">Ready</span>
+    </div>
+</div>
+
+<!-- Setup Screen -->
+<div id="setupScreen" class="setup-screen">
+    <div class="setup-icon">📱</div>
+    <div class="setup-title">360° Room Camera</div>
+    <div class="setup-desc">
+        This device will stream your rear camera as a secondary view for the proctored interview.
+    </div>
+
+    <button class="btn-start" id="startBtn" onclick="startCamera()">
+        <i class="fas fa-camera"></i> Start Camera
+    </button>
+
+    <div class="steps">
+        <div class="step">
+            <div class="step-num">1</div>
+            <div class="step-text">Tap <strong>"Start Camera"</strong> and allow camera access</div>
+        </div>
+        <div class="step">
+            <div class="step-num">2</div>
+            <div class="step-text">Place phone <strong>behind your desk</strong>, leaning against something stable</div>
+        </div>
+        <div class="step">
+            <div class="step-num">3</div>
+            <div class="step-text">Rear camera should capture <strong>your workspace area</strong></div>
+        </div>
+        <div class="step">
+            <div class="step-num">4</div>
+            <div class="step-text">Keep this page <strong>open</strong> during the entire interview</div>
+        </div>
+    </div>
+
+    <!-- Placement Diagram -->
+    <div class="placement-diagram" style="margin-top:20px;">
+        <div style="font-size:0.72rem;color:#64748b;margin-bottom:10px;font-weight:600;">RECOMMENDED PLACEMENT</div>
+        <div class="desk-layout">
+            <div class="desk-item monitor"><i class="fas fa-desktop me-1"></i> Your Monitor / Laptop</div>
+            <div class="desk-item desk">Your Desk Area</div>
+            <div class="desk-item" style="color:#475569;font-size:0.6rem;">← You</div>
+            <div class="desk-item phone"><i class="fas fa-mobile-screen me-1"></i> Phone Here</div>
+            <div class="desk-item" style="color:#475569;font-size:0.6rem;">Chair →</div>
+        </div>
+    </div>
+</div>
+
+<!-- Live Camera View -->
+<div id="liveScreen" style="display:none;">
+    <div class="camera-container">
+        <video id="cameraFeed" autoplay playsinline muted></video>
+        <div class="camera-overlay" id="cameraOverlay"></div>
+        <div class="camera-label">
+            <span class="rec-dot"></span>
+            360° ROOM VIEW
+        </div>
+    </div>
+
+    <div class="info-bar">
+        <div class="info-item">
+            <div class="label">Camera</div>
+            <div class="value" id="cameraType">Rear</div>
+        </div>
+        <div class="info-item">
+            <div class="label">Duration</div>
+            <div class="value" id="duration">00:00</div>
+        </div>
+        <div class="info-item">
+            <div class="label">Quality</div>
+            <div class="value" id="quality">HD</div>
+        </div>
+    </div>
+
+    <div class="placement-guide">
+        <div style="font-size:0.82rem;color:#a78bfa;font-weight:600;margin-bottom:4px;">
+            <i class="fas fa-check-circle me-1" style="color:#10b981;"></i> Camera Active
+        </div>
+        <div style="font-size:0.76rem;color:#64748b;">
+            Keep this page open. Place phone behind your desk with the rear camera facing your workspace.
+        </div>
+    </div>
+
+    <div class="controls">
+        <button class="ctrl-btn" onclick="switchCamera()" title="Switch Camera">
+            <i class="fas fa-camera-rotate"></i>
+        </button>
+        <button class="ctrl-btn" onclick="togglePause()" id="pauseBtn" title="Pause">
+            <i class="fas fa-pause" id="pauseIcon"></i>
+        </button>
+        <button class="ctrl-btn danger" onclick="stopCamera()" title="Stop">
+            <i class="fas fa-stop"></i>
+        </button>
+    </div>
+</div>
+
+<!-- Error Screen -->
+<div id="errorScreen" style="display:none;" class="err-msg">
+    <div style="font-size:2rem;margin-bottom:12px;">⚠️</div>
+    <div style="font-weight:700;margin-bottom:6px;">Camera Access Denied</div>
+    <div style="font-size:0.8rem;color:#94a3b8;margin-bottom:16px;">Please allow camera permission in your browser settings and refresh the page.</div>
+    <button class="btn-start" onclick="startCamera()">
+        <i class="fas fa-redo"></i> Try Again
+    </button>
+</div>
+
+<script>
+let stream = null;
+let startTime = null;
+let durationTimer = null;
+let useFront = false;
+let paused = false;
+
+// Parse session token from URL
+const params = new URLSearchParams(window.location.search);
+const sessionToken = params.get('token') || 'local-preview';
+
+async function startCamera() {
+    const btn = document.getElementById('startBtn');
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Starting...';
+
+    try {
+        stream = await navigator.mediaDevices.getUserMedia({
+            video: {
+                facingMode: useFront ? 'user' : { ideal: 'environment' },
+                width: { ideal: 1280 },
+                height: { ideal: 720 }
+            },
+            audio: false
+        });
+
+        const video = document.getElementById('cameraFeed');
+        video.srcObject = stream;
+
+        // Show live view
+        document.getElementById('setupScreen').style.display = 'none';
+        document.getElementById('errorScreen').style.display = 'none';
+        document.getElementById('liveScreen').style.display = 'block';
+
+        // Update status
+        setStatus('live', 'Live');
+        document.getElementById('cameraOverlay').classList.add('live');
+
+        // Check which camera is active
+        const track = stream.getVideoTracks()[0];
+        const settings = track.getSettings();
+        document.getElementById('cameraType').textContent =
+            settings.facingMode === 'user' ? 'Front' : 'Rear';
+
+        // Resolution
+        const w = settings.width || 0;
+        document.getElementById('quality').textContent =
+            w >= 1280 ? 'HD' : w >= 640 ? 'SD' : 'Low';
+
+        // Start duration timer
+        startTime = Date.now();
+        durationTimer = setInterval(updateDuration, 1000);
+
+    } catch (err) {
+        console.error('Camera error:', err);
+        document.getElementById('setupScreen').style.display = 'none';
+        document.getElementById('errorScreen').style.display = 'block';
+        setStatus('error', 'Error');
+    }
+}
+
+function setStatus(type, text) {
+    const badge = document.getElementById('statusBadge');
+    badge.className = 'status ' + type;
+    document.getElementById('statusText').textContent = text;
+}
+
+function updateDuration() {
+    if (!startTime) return;
+    const elapsed = Math.floor((Date.now() - startTime) / 1000);
+    const mins = String(Math.floor(elapsed / 60)).padStart(2, '0');
+    const secs = String(elapsed % 60).padStart(2, '0');
+    document.getElementById('duration').textContent = mins + ':' + secs;
+}
+
+async function switchCamera() {
+    useFront = !useFront;
+    if (stream) {
+        stream.getTracks().forEach(t => t.stop());
+    }
+    await startCamera();
+}
+
+function togglePause() {
+    if (!stream) return;
+    const track = stream.getVideoTracks()[0];
+    paused = !paused;
+    track.enabled = !paused;
+    document.getElementById('pauseIcon').className = paused ? 'fas fa-play' : 'fas fa-pause';
+    setStatus(paused ? 'connecting' : 'live', paused ? 'Paused' : 'Live');
+}
+
+function stopCamera() {
+    if (!confirm('Stop the room camera? You may need to restart it if the interview is still in progress.')) return;
+    if (stream) {
+        stream.getTracks().forEach(t => t.stop());
+    }
+    clearInterval(durationTimer);
+    document.getElementById('liveScreen').style.display = 'none';
+    document.getElementById('setupScreen').style.display = 'flex';
+    setStatus('connecting', 'Stopped');
+    const btn = document.getElementById('startBtn');
+    btn.disabled = false;
+    btn.innerHTML = '<i class="fas fa-camera"></i> Restart Camera';
+}
+
+// Prevent screen from sleeping
+async function keepAwake() {
+    try {
+        if ('wakeLock' in navigator) {
+            await navigator.wakeLock.request('screen');
+        }
+    } catch (e) { /* ignore */ }
+}
+keepAwake();
+
+// Handle page visibility
+document.addEventListener('visibilitychange', function() {
+    if (document.hidden && stream) {
+        setStatus('connecting', 'Tab Hidden');
+    } else if (!document.hidden && stream && !paused) {
+        setStatus('live', 'Live');
+    }
+});
+</script>
+</body>
+</html>

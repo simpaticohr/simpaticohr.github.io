@@ -240,3 +240,58 @@ function simulate360Feedback(id) {
         });
     }
 })();
+
+// ===== 360° ROOM CAMERA (QR Code + Secondary Camera) =====
+function show360QRCode() {
+    var token = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+    var baseUrl = window.location.origin;
+    var roomUrl = baseUrl + '/room-camera.html?token=' + token;
+
+    var container = document.getElementById('qr360Container');
+    var canvas = document.getElementById('qr360Canvas');
+    var linkEl = document.getElementById('qr360Link');
+    var directLink = document.getElementById('qr360DirectLink');
+
+    // Generate QR code using qrcode-generator library
+    if (typeof qrcode !== 'undefined') {
+        var qr = qrcode(0, 'M');
+        qr.addData(roomUrl);
+        qr.make();
+        canvas.innerHTML = qr.createSvgTag({ cellSize: 5, margin: 2, scalable: true });
+        // Make SVG fill container
+        var svg = canvas.querySelector('svg');
+        if (svg) {
+            svg.setAttribute('width', '100%');
+            svg.setAttribute('height', '100%');
+            svg.style.maxWidth = '200px';
+        }
+    } else {
+        // Fallback: show link-only
+        canvas.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#7c3aed;font-size:0.8rem;"><i class="fas fa-qrcode" style="font-size:3rem;"></i></div>';
+    }
+
+    linkEl.textContent = roomUrl;
+    directLink.href = roomUrl;
+    container.style.display = 'block';
+
+    // Store the token
+    window._room360Token = token;
+    if (window.showToast) showToast('QR code generated! Candidate can scan to start room camera.', 'success');
+}
+
+function copy360Link() {
+    var linkEl = document.getElementById('qr360Link');
+    if (!linkEl) return;
+    navigator.clipboard.writeText(linkEl.textContent).then(function() {
+        if (window.showToast) showToast('Room camera link copied!', 'success');
+    }).catch(function() {
+        // Fallback
+        var ta = document.createElement('textarea');
+        ta.value = linkEl.textContent;
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+        if (window.showToast) showToast('Room camera link copied!', 'success');
+    });
+}
