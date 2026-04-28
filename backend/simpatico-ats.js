@@ -626,7 +626,8 @@ async function callExternalLLM(cfg, messages, maxTokens, stream = false) {
  * Drop-in replacement for env.AI.run("@cf/meta/llama-3.1-8b-instruct", opts).
  * Returns { response: string, usage?: object }
  */
-const CF_DEFAULT_MODEL = "@cf/meta/llama-3.1-8b-instruct";
+const CF_DEFAULT_MODEL = "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
+const CF_LIGHT_MODEL   = "@cf/meta/llama-3.1-8b-instruct";
 
 async function runLLM(env, tenantId, messages, maxTokens = 1024) {
   const aiConfig = await getCompanyAIConfig(env, tenantId);
@@ -3534,19 +3535,33 @@ async function handleMarkNotificationRead(request, env, ctx, [id]) {
 // â”€â”€ AI Intelligence â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 async function handleInterviewQuestion(request, env, ctx) {
-  // requireAuth(ctx);
-  const { messages, token } = await safeJson(request);
+  // requireAuth(ctx);  -- candidates are unauthenticated
+  const { messages, token, max_tokens } = await safeJson(request);
   if (!Array.isArray(messages))
     throw new ValidationError("messages array required");
 
-  // We could fetch the JD again here using the token,
-  // but for efficiency we trust the system prompt built by the frontend
-  // which already has the JD. We just need to make sure the AI prioritizes it.
+  // Resolve tenant: prefer X-Tenant-ID header, fallback to interview token lookup
+  let tenantId = ctx.tenantId;
+  if ((!tenantId || tenantId === "default") && token && env.SUPABASE_URL) {
+    try {
+      const ivRes = await sbFetch(env, "GET",
+        `/rest/v1/interviews?token=eq.${encodeURIComponent(token)}&select=company_id&limit=1`,
+        null, false, "default");
+      if (ivRes.ok) {
+        const rows = await ivRes.json();
+        if (rows?.[0]?.company_id) tenantId = rows[0].company_id;
+      }
+    } catch (e) { console.warn("[interview] tenant lookup failed:", e.message); }
+  }
 
-  const result = await runLLM(env, ctx.tenantId, messages, 600);
+  // Use tenant's custom AI if configured (BYOK), otherwise use platform default (70B)
+  // This enables enterprise customers to use GPT-4o, Claude, Gemini etc. for interviews
+  const maxTok = Math.min(Math.max(parseInt(max_tokens) || 600, 100), 2048);
+  const result = await runLLM(env, tenantId, messages, maxTok);
 
   await audit(env, ctx, "interview.ai_question", "interviews", null, {
     token_hint: token?.slice(0, 8),
+    tenant_resolved: tenantId,
   });
   return apiResponse({ response: result.response });
 }
