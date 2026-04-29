@@ -2669,18 +2669,64 @@ ${Object.entries(this.skillsCovered).map(([s, d]) => `- ${s}: Score ${d.score}/1
                 console.warn('AI health check failed:', e.message);
             }
 
-            // Camera + Mic
-            try {
-                state.media.stream = await navigator.mediaDevices.getUserMedia({
-                    video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' },
-                    audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
-                });
-                document.getElementById('setupVid').srcObject = state.media.stream;
-                setChk('c1', 'pass');
-                setChk('c2', 'pass');
+            // Camera + Mic — with retry logic for device-in-use errors
+            async function tryGetMedia(attempt) {
+                // Release any existing streams first
+                if (state.media.stream) {
+                    state.media.stream.getTracks().forEach(t => t.stop());
+                    state.media.stream = null;
+                }
+
+                const constraints = attempt <= 1
+                    ? { video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' }, audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } }
+                    : { video: true, audio: true }; // Simplified constraints on retry
+
+                return navigator.mediaDevices.getUserMedia(constraints);
+            }
+
+            let mediaAcquired = false;
+            for (let attempt = 1; attempt <= 3 && !mediaAcquired; attempt++) {
+                try {
+                    console.log(`[Media] Attempt ${attempt}/3...`);
+                    state.media.stream = await tryGetMedia(attempt);
+                    document.getElementById('setupVid').srcObject = state.media.stream;
+                    setChk('c1', 'pass');
+                    setChk('c2', 'pass');
+                    mediaAcquired = true;
+                } catch (err) {
+                    console.warn(`[Media] Attempt ${attempt} failed:`, err.name, err.message);
+                    if (attempt < 3 && (err.name === 'NotReadableError' || err.name === 'AbortError' || err.name === 'NotFoundError')) {
+                        // Device busy — wait and retry
+                        showSetupError(`Camera busy, retrying... (attempt ${attempt + 1}/3)`);
+                        await new Promise(r => setTimeout(r, attempt * 1500));
+                    } else if (err.name === 'NotAllowedError') {
+                        setChk('c1', 'fail');
+                        setChk('c2', 'fail');
+                        showSetupError('Camera and microphone permission denied. Please click the lock icon in the address bar, allow Camera & Microphone, then refresh.');
+                        break;
+                    } else {
+                        // Last attempt or unknown error — try video-only or audio-only
+                        try {
+                            console.log('[Media] Trying video-only...');
+                            state.media.stream = await navigator.mediaDevices.getUserMedia({ video: true });
+                            document.getElementById('setupVid').srcObject = state.media.stream;
+                            setChk('c1', 'pass');
+                            setChk('c2', 'fail');
+                            showSetupError('Microphone unavailable. Camera is active but voice interview requires a microphone.');
+                            mediaAcquired = true;
+                        } catch (e2) {
+                            setChk('c1', 'fail');
+                            setChk('c2', 'fail');
+                            showSetupError('Camera and microphone access failed. Close other apps using the camera (Teams, Zoom, Meet), then refresh this page.');
+                            console.error('[Media] All attempts failed:', err);
+                        }
+                    }
+                }
+            }
+
+            if (mediaAcquired) {
                 setChk('c3', 'spin');
                 setChk('c4', 'spin');
-
                 setTimeout(() => {
                     setChk('c3', 'pass');
                     document.getElementById('faceGuide').classList.add('detected');
@@ -2694,11 +2740,6 @@ ${Object.entries(this.skillsCovered).map(([s, d]) => `- ${s}: Score ${d.score}/1
                     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
                     document.getElementById('btnBegin').disabled = hasBlockingError || !token || !SR;
                 }, 2800);
-            } catch (err) {
-                setChk('c1', 'fail');
-                setChk('c2', 'fail');
-                showSetupError('Camera and microphone access is required. Please allow access and refresh the page.');
-                console.error('getUserMedia error:', err);
             }
 
             // Speech Recognition
