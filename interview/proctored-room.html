@@ -629,6 +629,8 @@
             transition: opacity .3s;
             padding: 0 20px;
             letter-spacing: -0.01em;
+            /* Hidden: subtitles must not be visible to candidates */
+            display: none !important;
         }
 
         .ai-subtitle-text.show {
@@ -646,6 +648,8 @@
             text-align: center;
             pointer-events: none;
             min-height: 30px;
+            /* Hidden: candidate speech text must not be visible */
+            display: none !important;
         }
 
         .live-transcript-text {
@@ -2147,6 +2151,13 @@
                 language: 'javascript',
                 submissions: [],
             },
+            interviewLanguage: 'en-IN',
+            roomAnalysis: {
+                interval: null,
+                lastAnalysis: null,
+                analysisCount: 0,
+                flags: [],
+            },
         };
 
         const SILENCE_THRESHOLD = 2500;
@@ -2171,7 +2182,19 @@
             jobTitle: '',
 
             buildSystemPrompt() {
+                const langCode = state.interviewLanguage || 'en-IN';
+                const langNames = {
+                    'en-IN': 'English', 'en-US': 'English', 'hi-IN': 'Hindi',
+                    'ta-IN': 'Tamil', 'te-IN': 'Telugu', 'kn-IN': 'Kannada',
+                    'ml-IN': 'Malayalam', 'bn-IN': 'Bengali', 'mr-IN': 'Marathi',
+                    'gu-IN': 'Gujarati', 'pa-IN': 'Punjabi', 'ur-IN': 'Urdu', 'ar-SA': 'Arabic'
+                };
+                const langName = langNames[langCode] || 'English';
+
                 return `You are an elite technical interviewer at a top-tier company (think Google, Stripe, OpenAI caliber). You are conducting a LIVE voice interview that the candidate takes seriously.
+
+## LANGUAGE INSTRUCTION
+You MUST conduct this entire interview in ${langName}. All your questions, follow-ups, and responses must be spoken in ${langName}. If the candidate responds in a different language, gently continue in ${langName}.
 
 ## YOUR PERSONA
 - Warm, conversational, intellectually curious
@@ -2500,6 +2523,11 @@ ${Object.entries(this.skillsCovered).map(([s, d]) => `- ${s}: Score ${d.score}/1
                         client_id: state.meta.interview.client_id || null,
                     };
                     state.session.seconds = Math.min((state.meta.interview.duration_minutes || 15), 20) * 60;
+                    // Apply saved interview language
+                    if (state.meta.interview.interview_language) {
+                        state.interviewLanguage = state.meta.interview.interview_language;
+                        console.log('[Lang] Interview language set to:', state.interviewLanguage);
+                    }
                 }
             } catch (e) {
                 console.warn('Interview fetch error:', e);
@@ -2602,6 +2630,19 @@ ${Object.entries(this.skillsCovered).map(([s, d]) => `- ${s}: Score ${d.score}/1
 
         function loadVoices() {
             const voices = state.voice.synth.getVoices();
+            const lang = state.interviewLanguage || 'en-IN';
+            const langBase = lang.split('-')[0]; // e.g. 'hi', 'ta', 'en'
+
+            // For non-English languages, find a matching voice first
+            if (langBase !== 'en') {
+                const exactMatch = voices.find(v => v.lang === lang);
+                if (exactMatch) { state.voice.preferredVoice = exactMatch; return; }
+                const baseMatch = voices.find(v => v.lang.startsWith(langBase));
+                if (baseMatch) { state.voice.preferredVoice = baseMatch; return; }
+                console.warn(`[Voice] No voice found for ${lang}, falling back to English`);
+            }
+
+            // English preferred voices
             const preferred = [
                 'Google UK English Female', 'Google US English', 'Samantha',
                 'Microsoft Zira', 'Karen', 'Moira', 'Fiona',
@@ -2666,8 +2707,9 @@ ${Object.entries(this.skillsCovered).map(([s, d]) => `- ${s}: Score ${d.score}/1
                 state.voice.recognition = new SR();
                 state.voice.recognition.continuous = true;
                 state.voice.recognition.interimResults = true;
-                state.voice.recognition.lang = 'en-IN';
+                state.voice.recognition.lang = state.interviewLanguage || 'en-IN';
                 state.voice.recognition.maxAlternatives = 1;
+                console.log('[STT] Speech recognition language:', state.voice.recognition.lang);
 
                 state.voice.recognition.onresult = handleSpeechResult;
                 state.voice.recognition.onerror = (e) => {
@@ -3133,6 +3175,9 @@ ${Object.entries(this.skillsCovered).map(([s, d]) => `- ${s}: Score ${d.score}/1
             // Face monitoring via canvas pixel analysis (lightweight real detection)
             startFaceMonitoring();
 
+            // Start 360° room camera real-time analysis
+            start360Analysis();
+
             // Periodic screen share check
             state.session.faceCheckInt = setInterval(() => {
                 if (!state.media.screenShared && state.session.started && !state.session.ended) {
@@ -3238,6 +3283,147 @@ ${Object.entries(this.skillsCovered).map(([s, d]) => `- ${s}: Score ${d.score}/1
                 trust_score: state.session.trust,
                 timestamp: new Date().toISOString()
             }).catch(() => { });
+        }
+
+        // ══════════════════════════════════════════════════════════════
+        // 360° ROOM CAMERA — REAL-TIME ANALYSIS
+        // ══════════════════════════════════════════════════════════════
+        function start360Analysis() {
+            const screenVid = document.getElementById('screenVid');
+            if (!screenVid) return;
+
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            let prevFrame = null;
+
+            const ANALYSIS_INTERVAL = 8000; // Every 8 seconds
+            const MOTION_THRESHOLD = 0.15;  // 15% pixel change = suspicious motion
+            const PERSON_SKIN_THRESHOLD = 0.08; // Multiple skin regions
+
+            function analyzeRoomFrame() {
+                if (!state.session.started || state.session.ended) return;
+
+                // Only analyze if screen share (used as 360° feed) is active
+                if (!state.media.screenShared || !screenVid.srcObject) {
+                    setTimeout(analyzeRoomFrame, ANALYSIS_INTERVAL);
+                    return;
+                }
+
+                try {
+                    canvas.width = 320;
+                    canvas.height = 240;
+                    ctx.drawImage(screenVid, 0, 0, 320, 240);
+                    const imgData = ctx.getImageData(0, 0, 320, 240);
+                    const data = imgData.data;
+
+                    // ── 1. Motion Detection (compare with previous frame) ──
+                    let motionPixels = 0;
+                    const totalPixels = (data.length / 4);
+
+                    if (prevFrame) {
+                        for (let i = 0; i < data.length; i += 16) { // Sample every 4th pixel
+                            const diff = Math.abs(data[i] - prevFrame[i]) +
+                                         Math.abs(data[i+1] - prevFrame[i+1]) +
+                                         Math.abs(data[i+2] - prevFrame[i+2]);
+                            if (diff > 60) motionPixels++;
+                        }
+                    }
+                    const motionRatio = prevFrame ? (motionPixels / (totalPixels / 4)) : 0;
+
+                    // Store current frame for next comparison
+                    prevFrame = new Uint8ClampedArray(data);
+
+                    // ── 2. Multiple Person Detection (skin tone regions) ──
+                    let skinPixels = 0;
+                    let skinRegions = [];
+                    let currentRegionStart = -1;
+
+                    // Scan horizontal strips for skin clusters
+                    for (let y = 0; y < 240; y += 8) {
+                        let stripSkin = 0;
+                        for (let x = 0; x < 320; x += 4) {
+                            const idx = (y * 320 + x) * 4;
+                            const r = data[idx], g = data[idx+1], b = data[idx+2];
+                            if (r > 95 && g > 40 && b > 20 && r > g && r > b &&
+                                Math.max(r,g,b) - Math.min(r,g,b) > 15) {
+                                stripSkin++;
+                                skinPixels++;
+                            }
+                        }
+                        if (stripSkin > 10 && currentRegionStart === -1) {
+                            currentRegionStart = y;
+                        } else if (stripSkin <= 3 && currentRegionStart !== -1) {
+                            if (y - currentRegionStart > 16) {
+                                skinRegions.push({ start: currentRegionStart, end: y });
+                            }
+                            currentRegionStart = -1;
+                        }
+                    }
+
+                    const skinRatio = skinPixels / (totalPixels / 4);
+                    const possiblePersons = skinRegions.length;
+
+                    // ── 3. Brightness Check (screen covered / dark room) ──
+                    let sumBrightness = 0;
+                    for (let i = 0; i < data.length; i += 16) {
+                        sumBrightness += (data[i] + data[i+1] + data[i+2]) / 3;
+                    }
+                    const avgBrightness = sumBrightness / (totalPixels / 4);
+
+                    // ── 4. Evaluate & Log ──
+                    state.roomAnalysis.analysisCount++;
+                    const analysis = {
+                        timestamp: Date.now(),
+                        motionRatio: motionRatio.toFixed(3),
+                        skinRatio: skinRatio.toFixed(3),
+                        possiblePersons,
+                        avgBrightness: avgBrightness.toFixed(1),
+                    };
+                    state.roomAnalysis.lastAnalysis = analysis;
+
+                    // Flag: Excessive motion (someone moving around)
+                    if (motionRatio > MOTION_THRESHOLD) {
+                        state.session.trust = Math.max(0, state.session.trust - 3);
+                        addProcLog('warn', `360° Room: Suspicious motion detected (${(motionRatio*100).toFixed(0)}%)`);
+                        logProcEvent('room_motion', 'medium');
+                        state.roomAnalysis.flags.push({ type: 'motion', ...analysis });
+                        if (motionRatio > 0.35) {
+                            showToast('warn', '360° Camera: Significant movement in room');
+                        }
+                    }
+
+                    // Flag: Multiple persons detected
+                    if (possiblePersons >= 2) {
+                        state.session.trust = Math.max(0, state.session.trust - 8);
+                        addProcLog('danger', `360° Room: Multiple persons detected (${possiblePersons} regions)`);
+                        logProcEvent('room_multiple_persons', 'high');
+                        showToast('danger', '360° Camera: Additional person detected in room!');
+                        state.roomAnalysis.flags.push({ type: 'multi_person', ...analysis });
+                    }
+
+                    // Flag: Camera obstructed (too dark)
+                    if (avgBrightness < 15) {
+                        state.session.trust = Math.max(0, state.session.trust - 5);
+                        addProcLog('danger', '360° Room: Camera appears obstructed');
+                        logProcEvent('room_camera_blocked', 'high');
+                        showToast('danger', '360° Camera: View appears blocked!');
+                    }
+
+                    // Periodic log for audit trail
+                    if (state.roomAnalysis.analysisCount % 5 === 0) {
+                        console.log('[360° Analysis]', analysis);
+                    }
+
+                } catch (e) {
+                    console.warn('[360°] Frame analysis error:', e.message);
+                }
+
+                setTimeout(analyzeRoomFrame, ANALYSIS_INTERVAL);
+            }
+
+            // Start analysis after a brief delay
+            setTimeout(analyzeRoomFrame, 5000);
+            console.log('[360°] Room camera real-time analysis started');
         }
 
         // ══════════════════════════════════════════════════════════════
@@ -3468,9 +3654,15 @@ ${Object.entries(this.skillsCovered).map(([s, d]) => `- ${s}: Score ${d.score}/1
                         weak_areas: engine.weakAreas,
                         job_title: engine.jobTitle,
                         level: engine.level,
+                        interview_language: state.interviewLanguage,
                         conversation_turns: engine.history.length,
                         phases_covered: [...new Set(engine.history.map(h => h.meta?.phase).filter(Boolean))],
                         code_submissions: state.code.submissions,
+                        room_analysis: {
+                            total_checks: state.roomAnalysis.analysisCount,
+                            flags: state.roomAnalysis.flags.slice(-20),
+                            last_analysis: state.roomAnalysis.lastAnalysis,
+                        },
                     },
                     conversation_log: engine.history.map(h => ({
                         role: h.role,
