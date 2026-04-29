@@ -1043,6 +1043,7 @@ route("POST", "/ai/employee-insight", handleEmployeeInsight);
 route("POST", "/ai/sentiment", handleSentimentAnalysis);
 route("POST", "/ai/interview-question", handleInterviewQuestion);
 route("POST", "/ai/ats-generator", handleATSGenerator);
+route("POST", "/ai/hr-automation-generator", handleHRAutomationGenerator);
 route("POST", "/ai/generate-assessment", handleGenerateAssessment);
 route("POST", "/ai/assessments", handleSaveAssessment);
 route("POST", "/ai/generate-course", handleGenerateCourse);
@@ -3932,6 +3933,49 @@ Include 2-4 logical actions. Keep it practical for enterprise HR.`;
   } catch (e) {
     throw new AppError(
       "Failed to parse AI-generated rule",
+      HTTP.SERVER_ERROR,
+      "PARSE_ERROR",
+      result.response,
+    );
+  }
+}
+
+async function handleHRAutomationGenerator(request, env, ctx) {
+  const { query } = await safeJson(request);
+  if (!query) throw new ValidationError("query is required");
+  if (!env.AI) throw new ServiceUnavailableError("AI");
+
+  const systemPrompt = `You are an enterprise HR automation expert. Given a description, output ONLY valid JSON (no markdown, no backticks) for an HR workflow automation rule.
+Schema:
+{
+  "name": "short rule name",
+  "desc": "one sentence description",
+  "trigger": "one of: employee_joined|employee_offboarded|leave_submitted|leave_approved|probation_ending|work_anniversary|birthday|performance_due|schedule",
+  "cond_dept": "department filter or empty",
+  "cond_level": "junior|mid|senior|exec or empty",
+  "actions": [{"type": "send_email|send_slack|create_task|auto_approve|update_status|assign_manager|trigger_webhook|generate_doc|add_to_calendar|send_reminder", "target": "target email or channel", "msg": "message content"}]
+}
+Include 2-3 logical actions. Keep it practical for enterprise HR operations.
+Examples of good rules:
+- On employee_joined: send welcome email + create onboarding task + assign buddy
+- On leave_submitted: auto-approve if days <= 2 + notify manager
+- On probation_ending: create review task + send reminder to manager
+- On birthday: send celebration email + add to calendar`;
+
+  const result = await runLLM(env, ctx.tenantId, [
+    { role: "system", content: systemPrompt },
+    { role: "user", content: query },
+  ], 1024);
+
+  try {
+    const text = result.response.replace(/```json|```/g, "").trim();
+    const rule = JSON.parse(text);
+    // Enforce module tag
+    rule.module = "hr";
+    return apiResponse({ rule });
+  } catch (e) {
+    throw new AppError(
+      "Failed to parse AI-generated HR rule",
       HTTP.SERVER_ERROR,
       "PARSE_ERROR",
       result.response,
