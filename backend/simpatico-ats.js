@@ -537,6 +537,8 @@ async function getCompanyAIConfig(env, tenantId) {
     const rows = await res.json();
     const row = rows?.[0];
 
+    console.log(`[BYOK] Config lookup for tenant=${tenantId}: found=${!!row}, provider=${row?.ai_provider || 'none'}, hasKey=${!!row?.ai_api_key}, model=${row?.ai_model || 'none'}`);
+
     let config = null;
     if (row && row.ai_provider && row.ai_provider !== "cloudflare" && row.ai_api_key) {
       config = {
@@ -565,7 +567,10 @@ async function getCompanyAIConfig(env, tenantId) {
  * Resolves the correct base URL and model for a given provider config.
  */
 function resolveProviderDefaults(cfg) {
-  const p = cfg.provider;
+  // Normalize provider names (handle aliases)
+  let p = cfg.provider;
+  if (p === "google") p = "gemini"; // Dashboard may save as "google"
+
   let baseUrl = cfg.baseUrl;
   let model = cfg.model;
 
