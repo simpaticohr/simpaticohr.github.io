@@ -264,31 +264,54 @@ class AuthManager {
   }
 
   // Create Default Automation Rules
+  // Schema must match the ATS/HR automation module format:
+  //   trigger (not trigger_event), enabled (not is_active),
+  //   module ('ats'|'hr'), cond_score/cond_stage (flat fields),
+  //   actions: [{type, target, msg}]
   async createDefaultAutomation(companyId) {
     const rules = [
       {
         company_id: companyId,
+        module: 'ats',
         name: 'Auto-send application confirmation',
-        trigger_event: 'application.created',
-        conditions: {},
-        actions: [{ type: 'send_email', template: 'Application Received' }],
-        is_active: true
+        trigger: 'app_received',
+        actions: [{ type: 'send_email', target: '{candidate.email}', msg: 'Thank you for applying! Your application is under review and you will hear from us soon.' }],
+        enabled: true,
+        run_count: 0
       },
       {
         company_id: companyId,
+        module: 'ats',
         name: 'Auto-screen high-match candidates',
-        trigger_event: 'application.created',
-        conditions: { ai_match_score: { gte: 80 } },
-        actions: [{ type: 'move_stage', stage: 'screened' }],
-        is_active: true
+        trigger: 'app_received',
+        cond_score: '80',
+        actions: [{ type: 'move_stage', target: 'screening', msg: 'Auto-shortlisted by AI score' }],
+        enabled: true,
+        run_count: 0
       },
       {
         company_id: companyId,
-        name: 'Send WhatsApp reminder 1hr before interview',
-        trigger_event: 'interview.reminder',
-        conditions: { hours_before: 1 },
-        actions: [{ type: 'send_whatsapp', template: 'WhatsApp Interview Reminder' }],
-        is_active: true
+        module: 'ats',
+        name: 'Interview confirmation and reminder',
+        trigger: 'interview_scheduled',
+        actions: [
+          { type: 'send_email', target: '{candidate.email}', msg: 'Your interview has been confirmed. Details will follow shortly.' },
+          { type: 'create_task', target: '{recruiter.email}', msg: 'Prepare interview scorecard' }
+        ],
+        enabled: true,
+        run_count: 0
+      },
+      {
+        company_id: companyId,
+        module: 'hr',
+        name: 'Onboarding welcome email',
+        trigger: 'employee_joined',
+        actions: [
+          { type: 'send_email', target: '{employee.email}', msg: 'Welcome aboard! Your onboarding checklist is ready.' },
+          { type: 'create_task', target: 'hr@company.com', msg: 'Prepare workstation and access credentials' }
+        ],
+        enabled: true,
+        run_count: 0
       }
     ];
     await this.db.from('automation_rules').insert(rules);
