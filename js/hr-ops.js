@@ -162,8 +162,8 @@ window.uploadExpenseReceipt = async function() {
     // Simulate OCR text extraction then pass to our backend AI OCR route
     setTimeout(async () => {
       try {
-        const text = \`Vendor: Apple Store\nDate: 2026-04-10\nAmount: 199.99\nItem: Magic Keyboard\`;
-        const res = await fetch(\`\${OPS_CONFIG.workerUrl}/ai/expense-ocr\`, {
+        const text = `Vendor: Apple Store\nDate: 2026-04-10\nAmount: 199.99\nItem: Magic Keyboard`;
+        const res = await fetch(`${OPS_CONFIG.workerUrl}/ai/expense-ocr`, {
           method: 'POST',
           headers: authHeaders(),
           body: JSON.stringify({ receipt_text: text })
@@ -232,19 +232,19 @@ function renderOffboarding(list) {
     const name = emp ? _e(`${emp.first_name} ${emp.last_name}`) : '—';
     const badgeClass = { pending:'hr-badge-pending', in_progress:'hr-badge-info', completed:'hr-badge-active' }[o.status] || 'hr-badge-inactive';
     
-    let actions = \`<button class="hr-btn hr-btn-ghost hr-btn-sm" onclick="showToast('Tasks feature coming soon','info')">View Tasks</button>\`;
+    let actions = `<button class="hr-btn hr-btn-ghost hr-btn-sm" onclick="showToast('Tasks feature coming soon','info')">View Tasks</button>`;
     if (o.status !== 'completed') {
-      actions += \`<button class="hr-btn hr-btn-primary hr-btn-sm" style="margin-left:4px" onclick="completeOffboarding('\${o.id}')">Complete</button>\`;
+      actions += `<button class="hr-btn hr-btn-primary hr-btn-sm" style="margin-left:4px" onclick="completeOffboarding('${o.id}')">Complete</button>`;
     }
     
-    return \`<tr>
-      <td><span class="primary-text">\${name}</span></td>
-      <td>\${_e(o.resignation_date || '—')}</td>
-      <td><strong style="color:var(--hr-danger)">\${_e(o.last_working_day || '—')}</strong></td>
-      <td>\${_e(o.reason || '—')}</td>
-      <td><span class="hr-badge \${badgeClass}">\${_e((o.status||'').replace('_',' '))}</span></td>
-      <td>\${actions}</td>
-    </tr>\`;
+    return `<tr>
+      <td><span class="primary-text">${name}</span></td>
+      <td>${_e(o.resignation_date || '—')}</td>
+      <td><strong style="color:var(--hr-danger)">${_e(o.last_working_day || '—')}</strong></td>
+      <td>${_e(o.reason || '—')}</td>
+      <td><span class="hr-badge ${badgeClass}">${_e((o.status||'').replace('_',' '))}</span></td>
+      <td>${actions}</td>
+    </tr>`;
   }).join('');
 }
 
@@ -253,7 +253,7 @@ window.completeOffboarding = async function(id) {
     const client = sb(); if (!client) throw new Error('Database not connected');
     const { error } = await client.from('offboarding_records').update({ status: 'completed', completed_at: new Date().toISOString() }).eq('id', id);
     if (error) throw new Error(error.message);
-    showToast(\`Offboarding marked as completed\`, 'success');
+    showToast(`Offboarding marked as completed`, 'success');
     await loadOffboarding();
   } catch (err) { showToast(err.message, 'error'); }
 };
