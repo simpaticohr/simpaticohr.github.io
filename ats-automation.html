@@ -1279,11 +1279,14 @@ async function executeAction(action, candidate, rule) {
   return result;
 }
 
+// Action types that mutate candidate state - must run sequentially
+var DEPENDENT_ACT_TYPES = ['move_stage','reject_candidate','shortlist','schedule_interview'];
+
 function simRule(id){
   var rules=loadRules(), r=rules.find(function(x){return x.id===id});
   if(!r)return;
   el('simBar').classList.add('on');
-  toast('▶ Executing "'+r.name+'"…','info');
+  toast('Executing "'+r.name+'"...','info');
   setTimeout(async function(){
     try {
       // Find matching candidates based on rule conditions
@@ -1295,17 +1298,27 @@ function simRule(id){
       var acts = r.actions || [];
       var allResults = [];
 
-      for (var i = 0; i < acts.length; i++) {
-        var res = await executeAction(acts[i], cand, r);
+      // Separate independent (notification) and dependent (state-changing) actions
+      var independentActs = acts.filter(function(a){ return DEPENDENT_ACT_TYPES.indexOf(a.type) < 0; });
+      var dependentActs = acts.filter(function(a){ return DEPENDENT_ACT_TYPES.indexOf(a.type) >= 0; });
+
+      // Run independent actions in parallel for performance
+      if (independentActs.length > 0) {
+        var settled = await Promise.allSettled(independentActs.map(function(a){ return executeAction(a, cand, r); }));
+        settled.forEach(function(s){ allResults.push(s.status === 'fulfilled' ? s.value : { type: 'unknown', status: 'failed', detail: (s.reason && s.reason.message) || 'Parallel error' }); });
+      }
+      // Run dependent actions sequentially to avoid race conditions
+      for (var i = 0; i < dependentActs.length; i++) {
+        var res = await executeAction(dependentActs[i], cand, r);
         allResults.push(res);
       }
 
       var anyFailed = allResults.some(function(a){ return a.status === 'failed'; });
-      var detail = allResults.map(function(a){ return (a.status==='success'?'✓':'✗') + ' ' + a.detail; }).join(' | ');
+      var detail = allResults.map(function(a){ return (a.status==='success'?'OK':'FAIL') + ' ' + a.detail; }).join(' | ');
 
       await logToDB({
         rule_name: r.name,
-        target_id: cand ? cand.name : '—',
+        target_id: cand ? cand.name : '--',
         action_taken: detail,
         status: anyFailed ? 'failed' : 'success',
         created_at: new Date().toISOString(),
@@ -1314,19 +1327,19 @@ function simRule(id){
 
       if (r.id) await saveRuleToDB({run_count: (r.run_count||0)+1}, r.id);
 
-      // Refresh pipeline data if we made changes
-      if (acts.some(function(a){ return ['move_stage','reject_candidate','shortlist','schedule_interview'].indexOf(a.type) >= 0; })) {
+      // Refresh pipeline data if we made stage changes
+      if (dependentActs.length > 0) {
         await fetchCandidates();
       }
 
       renderRules();
       renderLog();
       updateStats();
-      toast(anyFailed ? '⚠️ Completed with errors — see log' : '✅ Executed successfully', anyFailed ? 'err' : 'ok');
+      toast(anyFailed ? 'Completed with errors - see log' : 'Executed successfully', anyFailed ? 'err' : 'ok');
     } catch (e) {
-      await logToDB({rule_name:r.name, target_id:'—', action_taken:'Engine error: '+e.message, status:'failed', created_at:new Date().toISOString()});
+      await logToDB({rule_name:r.name, target_id:'--', action_taken:'Engine error: '+e.message, status:'failed', created_at:new Date().toISOString()});
       renderLog();
-      toast('❌ Execution failed: ' + e.message, 'err');
+      toast('Execution failed: ' + e.message, 'err');
     }
     el('simBar').classList.remove('on');
   }, 400);
@@ -1336,12 +1349,22 @@ function simRule(id){
    EVENT-DRIVEN AUTOMATION ENGINE
    Evaluates all active rules against a trigger event.
    Called automatically when candidates change stage.
+   Uses rule caching and parallel action execution.
 ══════════════════════════ */
+var _evalRulesCache = null;
+var _evalRulesCacheTs = 0;
+
 async function evaluateAutomation(triggerType, candidate) {
-  var rules = loadRules().filter(function(r) {
+  // Cache rules for 2s to avoid N+1 localStorage reads during rapid triggers
+  var now = Date.now();
+  if (!_evalRulesCache || now - _evalRulesCacheTs > 2000) {
+    _evalRulesCache = loadRules();
+    _evalRulesCacheTs = now;
+  }
+
+  var rules = _evalRulesCache.filter(function(r) {
     if (!r.enabled) return false;
     if (r.trigger !== triggerType) return false;
-    // Condition matching
     if (r.cond_stage && candidate && candidate.stage !== r.cond_stage) return false;
     if (r.cond_score && candidate && (candidate.ai_score||0) < parseInt(r.cond_score)) return false;
     return true;
@@ -1354,20 +1377,33 @@ async function evaluateAutomation(triggerType, candidate) {
     var r = rules[i];
     var acts = r.actions || [];
     var allResults = [];
-    for (var j = 0; j < acts.length; j++) {
-      allResults.push(await executeAction(acts[j], candidate, r));
+
+    // Parallel for independent, sequential for dependent
+    var independentActs = acts.filter(function(a){ return DEPENDENT_ACT_TYPES.indexOf(a.type) < 0; });
+    var dependentActs = acts.filter(function(a){ return DEPENDENT_ACT_TYPES.indexOf(a.type) >= 0; });
+
+    if (independentActs.length > 0) {
+      var settled = await Promise.allSettled(independentActs.map(function(a){ return executeAction(a, candidate, r); }));
+      settled.forEach(function(s){ allResults.push(s.status === 'fulfilled' ? s.value : { type: 'unknown', status: 'failed', detail: (s.reason && s.reason.message) || 'Error' }); });
     }
+    for (var j = 0; j < dependentActs.length; j++) {
+      allResults.push(await executeAction(dependentActs[j], candidate, r));
+    }
+
     var anyFailed = allResults.some(function(a){ return a.status === 'failed'; });
-    var detail = allResults.map(function(a){ return (a.status==='success'?'✓':'✗') + ' ' + a.detail; }).join(' | ');
+    var detail = allResults.map(function(a){ return (a.status==='success'?'OK':'FAIL') + ' ' + a.detail; }).join(' | ');
     await logToDB({
       rule_name: r.name,
-      target_id: candidate ? candidate.name : '—',
+      target_id: candidate ? candidate.name : '--',
       action_taken: detail,
       status: anyFailed ? 'failed' : 'success',
       created_at: new Date().toISOString()
     });
     await saveRuleToDB({run_count: (r.run_count||0)+1}, r.id);
   }
+
+  // Invalidate cache after batch completes
+  _evalRulesCache = null;
   renderLog();
   updateStats();
 }
