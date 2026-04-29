@@ -3752,6 +3752,100 @@ ${Object.entries(this.skillsCovered).map(([s, d]) => `- ${s}: Score ${d.score}/1
         }
 
         // ══════════════════════════════════════════════════════════════
+        // EMERGENCY SAVE — fires when candidate closes tab mid-interview
+        // Uses navigator.sendBeacon (fire-and-forget, survives tab close)
+        // ══════════════════════════════════════════════════════════════
+        let emergencySaved = false;
+
+        function emergencySave() {
+            // Only save if interview was started and NOT already ended normally
+            if (emergencySaved || !state.session.started || state.session.ended || isEnding) return;
+            if (!magicToken) return;
+            emergencySaved = true;
+
+            const score = engine.getOverallScore();
+            const violations = state.proctoring.logs.filter(l => l.level === 'danger').length;
+
+            const payload = {
+                status: 'abandoned',
+                overall_score: score,
+                trust_score: state.session.trust,
+                violation_count: violations,
+                violation_log: state.proctoring.logs.slice(-50),
+                completed_at: new Date().toISOString(),
+                client_id: user?.client_id || state.meta.interview?.client_id || null,
+                feedback: {
+                    total_questions: engine.questionCount,
+                    skill_scores: engine.skillsCovered,
+                    strong_areas: engine.strongAreas,
+                    weak_areas: engine.weakAreas,
+                    job_title: engine.jobTitle,
+                    level: engine.level,
+                    interview_language: state.interviewLanguage,
+                    conversation_turns: engine.history.length,
+                    abandoned: true,
+                    abandoned_at_question: engine.questionCount,
+                    room_analysis: {
+                        total_checks: state.roomAnalysis.analysisCount,
+                        flags: state.roomAnalysis.flags.slice(-20),
+                        last_analysis: state.roomAnalysis.lastAnalysis,
+                    },
+                },
+                conversation_log: engine.history.slice(-30).map(h => ({
+                    role: h.role,
+                    content: (h.content || '').slice(0, 1500),
+                    phase: h.meta?.phase,
+                    score: h.meta?.analysis?.score,
+                })),
+            };
+
+            // fetch with keepalive survives page unload in modern browsers
+            // sendBeacon cannot set custom headers (Supabase needs apikey + Authorization)
+            const url = `${SB_URL}/rest/v1/interviews?token=eq.${encodeURIComponent(magicToken)}`;
+
+            try {
+                // Primary: fetch with keepalive (supports headers, survives tab close)
+                fetch(url, {
+                    method: 'PATCH',
+                    headers: {
+                        'apikey': SB_KEY,
+                        'Authorization': 'Bearer ' + SB_KEY,
+                        'Content-Type': 'application/json',
+                        'Prefer': 'return=minimal',
+                    },
+                    body: JSON.stringify(payload),
+                    keepalive: true,
+                }).catch(() => {
+                    // Fallback: try our backend endpoint as relay
+                    navigator.sendBeacon(
+                        `${API}/interview-emergency-save`,
+                        new Blob([JSON.stringify({ token: magicToken, payload })], { type: 'application/json' })
+                    );
+                });
+                console.log('[Emergency] Partial results saved (keepalive fetch)');
+            } catch (e) {
+                console.warn('[Emergency] Save failed:', e.message);
+            }
+        }
+
+        // Fire on tab close, navigation away, or app switch
+        window.addEventListener('beforeunload', (e) => {
+            if (state.session.started && !state.session.ended) {
+                emergencySave();
+            }
+        });
+
+        window.addEventListener('pagehide', () => {
+            emergencySave();
+        });
+
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'hidden' && state.session.started && !state.session.ended) {
+                emergencySave();
+            }
+        });
+
+        // ══════════════════════════════════════════════════════════════
         // BOOT
         // ══════════════════════════════════════════════════════════════
         init();
