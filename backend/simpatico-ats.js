@@ -1207,6 +1207,9 @@ route("GET", "/billing/subscription", handleGetSubscription);
 route("POST", "/billing/cancel", handleCancelSubscription);
 route("GET", "/billing/transactions", handleListTransactions);
 
+// ── BYOK AI Diagnostics ──
+route("GET", "/ai/byok-test", handleBYOKTest);
+
 // ═════════════════════════════════════════════════════════════════════════════════════
 // § 13.  MAIN ENTRY POINT
 // ═════════════════════════════════════════════════════════════════════════════════════
@@ -6969,4 +6972,72 @@ async function handleListTransactions(request, env, ctx) {
   if (!res.ok) return apiResponse([]);
   const data = await res.json();
   return apiResponse(data);
+}
+
+/**
+ * GET /ai/byok-test — Diagnostic endpoint to verify BYOK AI configuration.
+ * Returns provider info, model, latency, and a sample response.
+ */
+async function handleBYOKTest(request, env, ctx) {
+  requireAuth(ctx);
+  const tenantId = ctx.tenantId;
+
+  // 1. Fetch AI config
+  const aiConfig = await getCompanyAIConfig(env, tenantId);
+
+  if (!aiConfig) {
+    return apiResponse({
+      status: "default",
+      message: "No custom AI configured. Using Cloudflare Workers AI (default).",
+      provider: "cloudflare",
+      model: CF_DEFAULT_MODEL,
+      byok_active: false,
+    });
+  }
+
+  // 2. Resolve provider details
+  const { baseUrl, model } = resolveProviderDefaults(aiConfig);
+
+  // 3. Send a tiny test prompt
+  const testMessages = [
+    { role: "system", content: "You are a helpful assistant. Respond in exactly one sentence." },
+    { role: "user", content: "Say hello and confirm which AI model you are." },
+  ];
+
+  const startTime = Date.now();
+  try {
+    const result = aiConfig.provider === "cloudflare"
+      ? await env.AI.run(aiConfig.cfModel || CF_DEFAULT_MODEL, { messages: testMessages, max_tokens: 100 })
+      : await callExternalLLM(aiConfig, testMessages, 100, false);
+
+    const latencyMs = Date.now() - startTime;
+    const responseText = result?.response || result?.choices?.[0]?.message?.content || "(empty response)";
+
+    console.log(`[BYOK-TEST] SUCCESS for tenant=${tenantId}: provider=${aiConfig.provider}, model=${model}, latency=${latencyMs}ms`);
+
+    return apiResponse({
+      status: "connected",
+      byok_active: true,
+      provider: aiConfig.provider,
+      model: model || aiConfig.cfModel || "(default)",
+      base_url: baseUrl || "(cloudflare native)",
+      latency_ms: latencyMs,
+      response_snippet: responseText.slice(0, 200),
+      message: `Custom AI (${aiConfig.provider}) is working. Response received in ${latencyMs}ms.`,
+    });
+  } catch (err) {
+    const latencyMs = Date.now() - startTime;
+    console.error(`[BYOK-TEST] FAILED for tenant=${tenantId}: provider=${aiConfig.provider}, error=${err.message}`);
+
+    return apiResponse({
+      status: "error",
+      byok_active: true,
+      provider: aiConfig.provider,
+      model: model || "(unknown)",
+      base_url: baseUrl || "(unknown)",
+      latency_ms: latencyMs,
+      error: err.message,
+      message: `Custom AI (${aiConfig.provider}) failed: ${err.message}`,
+    }, HTTP.OK); // Return 200 with error details for diagnostic visibility
+  }
 }
