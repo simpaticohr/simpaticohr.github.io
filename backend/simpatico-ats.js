@@ -764,6 +764,55 @@ async function hmacSign(secret, data) {
 }
 
 // ═════════════════════════════════════════════════════════════════════════════════════
+// § 9b. SLACK INTEGRATION
+// Posts formatted messages to a tenant's configured Slack Incoming Webhook URL.
+// Webhook URL is stored on the companies table (slack_webhook_url column).
+// ═════════════════════════════════════════════════════════════════════════════════════
+
+async function dispatchSlack(env, tenantId, message, channel) {
+  try {
+    // Fetch tenant's Slack webhook URL from companies table
+    const companyRes = await sbFetch(
+      env,
+      "GET",
+      `/rest/v1/companies?id=eq.${tenantId}&select=slack_webhook_url,company_name`,
+      null,
+      false,
+      tenantId,
+    );
+    const [company] = await companyRes.json();
+    if (!company?.slack_webhook_url) {
+      console.log(`[SLACK] No webhook URL configured for tenant ${tenantId}`);
+      return { success: false, reason: "no_webhook_url" };
+    }
+
+    const slackPayload = {
+      text: message,
+      username: "SimpaticoHR",
+      icon_emoji: ":briefcase:",
+    };
+    if (channel) slackPayload.channel = channel;
+
+    const res = await fetch(company.slack_webhook_url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(slackPayload),
+    });
+
+    if (!res.ok) {
+      console.warn(`[SLACK] Webhook failed (${res.status}) for tenant ${tenantId}`);
+      return { success: false, reason: `http_${res.status}` };
+    }
+
+    console.log(`[SLACK] Message sent for tenant ${tenantId}: ${message.slice(0, 60)}...`);
+    return { success: true };
+  } catch (e) {
+    console.warn("[SLACK] Dispatch error:", e.message);
+    return { success: false, reason: e.message };
+  }
+}
+
+// ═════════════════════════════════════════════════════════════════════════════════════
 // § 10.  MIDDLEWARE PIPELINE
 // ═════════════════════════════════════════════════════════════════════════════════════
 
@@ -1087,9 +1136,9 @@ route("GET", "/billing/subscription", handleGetSubscription);
 route("POST", "/billing/cancel", handleCancelSubscription);
 route("GET", "/billing/transactions", handleListTransactions);
 
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-// Â§ 13.  MAIN ENTRY POINT
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ═════════════════════════════════════════════════════════════════════════════════════
+// § 13.  MAIN ENTRY POINT
+// ═════════════════════════════════════════════════════════════════════════════════════
 
 export default {
   async fetch(request, env, execCtx) {
@@ -1260,16 +1309,45 @@ export default {
 
           const tenantId = rule.tenant_id || rule.company_id || "default";
           const actions = rule.actions || [];
-          const actionSummary = actions
-            .map(a => `${a.type}${a.target ? " -> " + a.target : ""}`)
-            .join(", ");
+          const actionResults = [];
+
+          // Execute each action during cron run
+          for (const action of actions) {
+            try {
+              switch (action.type) {
+                case 'send_email':
+                  if (action.target && !action.target.includes('{')) {
+                    await sendEmail(env, {
+                      to: action.target,
+                      subject: `[Scheduled] ${rule.name}`,
+                      html: `<p>${action.msg || rule.desc || rule.name}</p>`,
+                    });
+                    actionResults.push('send_email:success');
+                  } else {
+                    actionResults.push('send_email:skipped');
+                  }
+                  break;
+                case 'send_slack':
+                  await dispatchSlack(env, tenantId, action.msg || rule.name, action.target);
+                  actionResults.push('send_slack:success');
+                  break;
+                default:
+                  actionResults.push(`${action.type}:dispatched`);
+              }
+            } catch (actErr) {
+              actionResults.push(`${action.type}:failed`);
+              console.warn(`[CRON] Action ${action.type} failed:`, actErr.message);
+            }
+          }
+
+          const actionSummary = actionResults.join(", ");
 
           // Log the execution
           const logEntry = {
             rule_name: rule.name,
             trigger: rule.trigger,
             module: rule.module || "system",
-            status: "success",
+            status: actionResults.some(r => r.includes('failed')) ? "partial" : "success",
             detail: `[CRON] ${actionSummary}`,
             target_id: "scheduled",
             action_taken: actionSummary,
@@ -3571,6 +3649,27 @@ Return ONLY valid JSON in format: {"match_score": 85, "reason": "Brief 1-sentenc
                   await sbFetch(env, "PATCH", `/rest/v1/job_applications?id=eq.${app.id}`, { status: 'rejected' }, false, ctx.tenantId);
                   results.push({ type: 'reject_candidate', status: 'success', detail: 'Auto-rejected by rule' });
                 }
+                break;
+
+              case 'send_slack': {
+                const slackMsg = (action.msg || '').replace(/\{candidate\.name\}/g, app.candidate_name || 'Candidate')
+                  .replace(/\{job\.title\}/g, job?.title || 'Open Position')
+                  .replace(/\{match_score\}/g, match_score || 'N/A');
+                const slackResult = await dispatchSlack(env, ctx.tenantId, slackMsg, action.target);
+                results.push({ type: 'send_slack', status: slackResult.success ? 'success' : 'skipped', detail: slackResult.success ? 'Slack sent' : 'Slack: ' + slackResult.reason });
+                break;
+              }
+
+              case 'notify_hiring_manager':
+              case 'create_task':
+                // Log as dispatched — these will be routed to the task/notification system
+                await dispatchWebhook(env, ctx.tenantId, `automation.${action.type}`, {
+                  rule_name: rule.name,
+                  application_id: app.id,
+                  target: action.target,
+                  message: action.msg,
+                });
+                results.push({ type: action.type, status: 'success', detail: action.msg || action.type });
                 break;
 
               default:
