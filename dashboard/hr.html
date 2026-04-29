@@ -1683,6 +1683,32 @@
                 </div>
             </div>
 
+            <!-- Slack Integration -->
+            <div class="card" style="margin-bottom: 24px;">
+                <div class="card-header">
+                    <h4><i class="fab fa-slack" style="color:#E01E5A;"></i> Slack Integration</h4>
+                </div>
+                <div class="card-body">
+                    <p style="font-size: 14px; color: #4b5563; margin-bottom: 20px;">Connect your Slack workspace to receive real-time automation notifications (new hires, interview updates, leave approvals, etc.)</p>
+                    
+                    <div id="slackStatusBadge" style="display:none; margin-bottom:16px; padding:12px 16px; border-radius:10px; font-size:13px; font-weight:600; display:inline-flex; align-items:center; gap:8px;">
+                    </div>
+
+                    <div class="form-group" style="margin-bottom: 15px;">
+                        <label>Incoming Webhook URL</label>
+                        <input type="url" class="form-control-custom" id="slackWebhookUrl" placeholder="https://hooks.slack.com/services/T00000/B00000/XXXXXXXXX" style="font-family:monospace; font-size:13px;">
+                        <small style="color:#6b7280; font-size:12px; margin-top:6px; display:block;">
+                            <i class="fas fa-info-circle"></i> Create one at <a href="https://api.slack.com/messaging/webhooks" target="_blank" style="color:var(--primary);">api.slack.com/messaging/webhooks</a>
+                        </small>
+                    </div>
+
+                    <div style="display:flex; gap:10px; margin-top:15px;">
+                        <button class="btn-primary-custom" id="btnSaveSlack" onclick="saveSlackSettings()"><i class="fas fa-save"></i> Save & Test Connection</button>
+                        <button class="btn-primary-custom" style="background:#dc2626;" id="btnDisconnectSlack" onclick="disconnectSlack()" title="Remove Slack integration"><i class="fas fa-unlink"></i> Disconnect</button>
+                    </div>
+                </div>
+            </div>
+
             <div class="card" style="margin-bottom: 24px;">
                 <div class="card-header">
                     <h4>Public Careers Page & Job Widget</h4>
@@ -1922,7 +1948,124 @@
                         alert('Code copied!');
                     }
                 }
-                
+                // ── Slack Integration ──
+                async function loadSlackSettings() {
+                    try {
+                        const workerUrl = window.SIMPATICO_CONFIG?.workerUrl || '';
+                        const token = typeof getAuthToken === 'function' ? getAuthToken() : '';
+                        const tenantId = typeof getCompanyId === 'function' ? getCompanyId() : (window.SIMPATICO_CONFIG?.tenantId || 'default');
+                        const headers = { 'Content-Type': 'application/json', 'X-Tenant-ID': tenantId };
+                        if (token) headers['Authorization'] = 'Bearer ' + token;
+                        if (window.SIMPATICO_CONFIG?.supabaseAnonKey) headers['apikey'] = window.SIMPATICO_CONFIG.supabaseAnonKey;
+
+                        const res = await fetch(workerUrl + '/settings/slack', { headers });
+                        if (!res.ok) return;
+                        const json = await res.json();
+                        const data = json.data || json;
+
+                        const urlInput = document.getElementById('slackWebhookUrl');
+                        const badge = document.getElementById('slackStatusBadge');
+                        const disconnectBtn = document.getElementById('btnDisconnectSlack');
+
+                        if (data.configured && data.slack_webhook_url) {
+                            if (urlInput) urlInput.value = data.slack_webhook_url;
+                            if (badge) {
+                                badge.style.display = 'inline-flex';
+                                badge.style.background = '#dcfce7';
+                                badge.style.color = '#166534';
+                                badge.innerHTML = '<i class="fas fa-check-circle"></i> Connected to Slack';
+                            }
+                            if (disconnectBtn) disconnectBtn.style.display = 'inline-flex';
+                        } else {
+                            if (badge) {
+                                badge.style.display = 'inline-flex';
+                                badge.style.background = '#fef3c7';
+                                badge.style.color = '#92400e';
+                                badge.innerHTML = '<i class="fas fa-exclamation-triangle"></i> Not connected';
+                            }
+                            if (disconnectBtn) disconnectBtn.style.display = 'none';
+                        }
+                    } catch (e) {
+                        console.warn('[Slack] Failed to load settings:', e.message);
+                    }
+                }
+
+                async function saveSlackSettings() {
+                    const btn = document.getElementById('btnSaveSlack');
+                    const url = document.getElementById('slackWebhookUrl')?.value.trim();
+
+                    if (!url) {
+                        showToast('Please enter a Slack webhook URL', 'error');
+                        return;
+                    }
+                    if (!url.startsWith('https://hooks.slack.com/')) {
+                        showToast('Invalid URL. Must start with https://hooks.slack.com/', 'error');
+                        return;
+                    }
+
+                    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Testing...';
+                    btn.disabled = true;
+
+                    try {
+                        const workerUrl = window.SIMPATICO_CONFIG?.workerUrl || '';
+                        const token = typeof getAuthToken === 'function' ? getAuthToken() : '';
+                        const tenantId = typeof getCompanyId === 'function' ? getCompanyId() : (window.SIMPATICO_CONFIG?.tenantId || 'default');
+                        const headers = { 'Content-Type': 'application/json', 'X-Tenant-ID': tenantId };
+                        if (token) headers['Authorization'] = 'Bearer ' + token;
+                        if (window.SIMPATICO_CONFIG?.supabaseAnonKey) headers['apikey'] = window.SIMPATICO_CONFIG.supabaseAnonKey;
+
+                        const res = await fetch(workerUrl + '/settings/slack', {
+                            method: 'POST',
+                            headers,
+                            body: JSON.stringify({ slack_webhook_url: url })
+                        });
+
+                        if (!res.ok) {
+                            const errJson = await res.json().catch(() => ({}));
+                            throw new Error(errJson.error?.message || 'Server error');
+                        }
+
+                        showToast('Slack connected! Check your channel for the test message.', 'success');
+                        await loadSlackSettings();
+                    } catch (err) {
+                        showToast('Failed to save Slack settings: ' + err.message, 'error');
+                    } finally {
+                        btn.innerHTML = '<i class="fas fa-save"></i> Save & Test Connection';
+                        btn.disabled = false;
+                    }
+                }
+
+                async function disconnectSlack() {
+                    if (!confirm('Disconnect Slack? You will stop receiving automation notifications.')) return;
+                    const btn = document.getElementById('btnDisconnectSlack');
+                    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+                    btn.disabled = true;
+
+                    try {
+                        const workerUrl = window.SIMPATICO_CONFIG?.workerUrl || '';
+                        const token = typeof getAuthToken === 'function' ? getAuthToken() : '';
+                        const tenantId = typeof getCompanyId === 'function' ? getCompanyId() : (window.SIMPATICO_CONFIG?.tenantId || 'default');
+                        const headers = { 'Content-Type': 'application/json', 'X-Tenant-ID': tenantId };
+                        if (token) headers['Authorization'] = 'Bearer ' + token;
+                        if (window.SIMPATICO_CONFIG?.supabaseAnonKey) headers['apikey'] = window.SIMPATICO_CONFIG.supabaseAnonKey;
+
+                        await fetch(workerUrl + '/settings/slack', {
+                            method: 'POST',
+                            headers,
+                            body: JSON.stringify({ slack_webhook_url: null })
+                        });
+
+                        document.getElementById('slackWebhookUrl').value = '';
+                        showToast('Slack disconnected', 'info');
+                        await loadSlackSettings();
+                    } catch (e) {
+                        showToast('Error: ' + e.message, 'error');
+                    } finally {
+                        btn.innerHTML = '<i class="fas fa-unlink"></i> Disconnect';
+                        btn.disabled = false;
+                    }
+                }
+
                 // Hook into navigation or run once
                 document.addEventListener('DOMContentLoaded', () => {
                     initCareersSettings();
@@ -1935,6 +2078,7 @@
                         originalNav(sectionId, navEl);
                         if (sectionId === 'settings') {
                             initCareersSettings();
+                            loadSlackSettings();
                         }
                     };
                 }

@@ -439,6 +439,68 @@ async function invalidateCache(env, ...keys) {
 }
 
 // ═════════════════════════════════════════════════════════════════════════════════════
+// § 7c. DEAD-LETTER QUEUE (DLQ) — KV-based failed action persistence
+// Failed automation actions are stored here for inspection and manual retry.
+// Each entry has a 7-day TTL and is keyed by tenant + timestamp.
+// ═════════════════════════════════════════════════════════════════════════════════════
+
+async function dlqPush(env, tenantId, failedAction) {
+  if (!env.HR_KV) {
+    console.warn("[DLQ] HR_KV not available — failed action lost:", failedAction);
+    return;
+  }
+  const entryId = `dlq:${tenantId}:${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const entry = {
+    id: entryId,
+    tenant_id: tenantId,
+    action: failedAction.action || "unknown",
+    payload: failedAction.payload || {},
+    error: failedAction.error || "Unknown error",
+    rule_name: failedAction.rule_name || null,
+    rule_id: failedAction.rule_id || null,
+    retries: 0,
+    max_retries: 3,
+    created_at: new Date().toISOString(),
+    next_retry_at: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
+  };
+  await env.HR_KV.put(entryId, JSON.stringify(entry), { expirationTtl: 7 * 86400 });
+  console.log(`[DLQ] Queued failed action: ${entryId} (${failedAction.action})`);
+  return entryId;
+}
+
+async function dlqList(env, tenantId, limit = 50) {
+  if (!env.HR_KV) return [];
+  const prefix = `dlq:${tenantId}:`;
+  const keys = await env.HR_KV.list({ prefix, limit });
+  const entries = [];
+  for (const key of keys.keys) {
+    const val = await env.HR_KV.get(key.name, { type: "json" });
+    if (val) entries.push(val);
+  }
+  return entries.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+}
+
+async function dlqRetry(env, entryId) {
+  if (!env.HR_KV) return null;
+  const entry = await env.HR_KV.get(entryId, { type: "json" });
+  if (!entry) return null;
+  entry.retries = (entry.retries || 0) + 1;
+  entry.last_retry_at = new Date().toISOString();
+  if (entry.retries >= entry.max_retries) {
+    entry.status = "exhausted";
+  } else {
+    entry.next_retry_at = new Date(Date.now() + entry.retries * 30 * 60 * 1000).toISOString();
+  }
+  await env.HR_KV.put(entryId, JSON.stringify(entry), { expirationTtl: 7 * 86400 });
+  return entry;
+}
+
+async function dlqDelete(env, entryId) {
+  if (!env.HR_KV) return;
+  await env.HR_KV.delete(entryId);
+}
+
+// ═════════════════════════════════════════════════════════════════════════════════════
 // § 7b. BYOK AI LAYER — Custom Provider Routing
 // ═════════════════════════════════════════════════════════════════════════════════════
 
@@ -1097,6 +1159,15 @@ route("POST", "/ai/generate-assessment", handleGenerateAssessment);
 route("POST", "/ai/assessments", handleSaveAssessment);
 route("POST", "/ai/generate-course", handleGenerateCourse);
 
+// Calendar & ICS
+route("POST", "/calendar/ics", handleGenerateICS);
+
+// Settings
+route("GET", "/settings/slack", handleGetSlackSettings);
+route("POST", "/settings/slack", handleSaveSlackSettings);
+route("GET", "/settings/dlq", handleListDLQ);
+route("DELETE", "/settings/dlq/:id", handleDeleteDLQ);
+
 // Candidate Assessments
 route("POST", "/candidates/:id/assessments/:assessmentId/assign", handleAssignAssessment);
 route("POST", "/candidates/:id/assessments/:assessmentId/submit", handleSubmitAssessment);
@@ -1337,6 +1408,14 @@ export default {
             } catch (actErr) {
               actionResults.push(`${action.type}:failed`);
               console.warn(`[CRON] Action ${action.type} failed:`, actErr.message);
+              // Push to Dead-Letter Queue for retry
+              await dlqPush(env, tenantId, {
+                action: action.type,
+                payload: { target: action.target, msg: action.msg },
+                error: actErr.message,
+                rule_name: rule.name,
+                rule_id: rule.id,
+              });
             }
           }
 
@@ -4434,7 +4513,23 @@ async function handleInterviewEmail(request, env) {
   try {
     const data = await request.json();
 
-    await sendEmail(env, {
+    // Generate .ics calendar attachment if date/time is provided
+    let icsAttachment = null;
+    if (data.date && data.startTime) {
+      const icsContent = generateICS({
+        summary: `Interview: ${data.position} at Simpatico HR`,
+        description: `Interview for ${data.candidateName} - ${data.position} (${(data.mode || 'video').toUpperCase()})${data.meetingLink ? '\nJoin: ' + data.meetingLink : ''}`,
+        location: data.meetingLink || 'TBD',
+        date: data.date,
+        startTime: data.startTime,
+        endTime: data.endTime || '',
+        organizer: 'Simpatico HR',
+        attendee: data.candidateEmail,
+      });
+      icsAttachment = icsContent;
+    }
+
+    const emailPayload = {
       to: data.candidateEmail,
       subject: `Interview Invitation: ${data.position} at Simpatico`,
       html: `<!DOCTYPE html>
@@ -4456,6 +4551,7 @@ async function handleInterviewEmail(request, env) {
           </table>
         </div>
         ${data.meetingLink ? `<div style="text-align:center;margin:24px 0;"><a href="${data.meetingLink}" style="display:inline-block;background:linear-gradient(135deg,#4f46e5,#7c3aed);color:#fff;text-decoration:none;padding:14px 32px;border-radius:10px;font-weight:700;font-size:15px;">Join Meeting</a></div>` : ""}
+        <p style="font-size:14px;color:#10b981;font-weight:600;">A calendar invite (.ics) is attached to this email.</p>
         <p style="font-size:14px;color:#6b7280;line-height:1.6;">If you need to reschedule, please reply to this email.</p>
         <p style="font-size:15px;color:#374151;">Best regards,<br><strong>Simpatico HR Team</strong></p>
       </td></tr>
@@ -4465,9 +4561,20 @@ async function handleInterviewEmail(request, env) {
     </table>
   </td></tr></table>
 </body></html>`,
-    });
+    };
 
-    return new Response(JSON.stringify({ success: true }), {
+    // Attach .ics file via Resend attachments API
+    if (icsAttachment) {
+      emailPayload.attachments = [{
+        filename: 'interview-invite.ics',
+        content: btoa(icsAttachment),
+        content_type: 'text/calendar; method=REQUEST',
+      }];
+    }
+
+    await sendEmail(env, emailPayload);
+
+    return new Response(JSON.stringify({ success: true, ics_attached: !!icsAttachment }), {
       headers: { "Content-Type": "application/json", ...CORS_HEADERS },
     });
   } catch (error) {
@@ -4874,7 +4981,165 @@ async function sbFetch(
 // Â§ 16.  EMAIL HELPER
 // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
-async function sendEmail(env, { to, subject, html, replyTo, tags }) {
+// ═════════════════════════════════════════════════════════════════════════════════════
+// § 16.3 ICS CALENDAR GENERATION
+// Generates RFC 5545 compliant .ics calendar files for interview invitations.
+// ═════════════════════════════════════════════════════════════════════════════════════
+
+function generateICS({ summary, description, location, date, startTime, endTime, organizer, attendee }) {
+  // Parse date (YYYY-MM-DD) and time (HH:MM) into DTSTART/DTEND
+  const dateParts = (date || '').split('-');
+  const startParts = (startTime || '09:00').split(':');
+  const endParts = (endTime || '10:00').split(':');
+
+  const yy = dateParts[0] || '2026';
+  const mm = (dateParts[1] || '01').padStart(2, '0');
+  const dd = (dateParts[2] || '01').padStart(2, '0');
+  const sh = (startParts[0] || '09').padStart(2, '0');
+  const sm = (startParts[1] || '00').padStart(2, '0');
+  const eh = (endParts[0] || String(parseInt(sh) + 1)).padStart(2, '0');
+  const em = (endParts[1] || '00').padStart(2, '0');
+
+  const dtStart = `${yy}${mm}${dd}T${sh}${sm}00`;
+  const dtEnd = `${yy}${mm}${dd}T${eh}${em}00`;
+  const now = new Date().toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
+  const uid = crypto.randomUUID() + '@simpaticohr.in';
+
+  // Escape special characters per RFC 5545
+  const esc = (str) => (str || '').replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\n/g, '\\n');
+
+  return [
+    'BEGIN:VCALENDAR',
+    'VERSION:2.0',
+    'PRODID:-//SimpaticoHR//Interview//EN',
+    'CALSCALE:GREGORIAN',
+    'METHOD:REQUEST',
+    'BEGIN:VEVENT',
+    `UID:${uid}`,
+    `DTSTAMP:${now}`,
+    `DTSTART:${dtStart}`,
+    `DTEND:${dtEnd}`,
+    `SUMMARY:${esc(summary)}`,
+    `DESCRIPTION:${esc(description)}`,
+    `LOCATION:${esc(location)}`,
+    `ORGANIZER;CN=${esc(organizer)}:mailto:hr@ats.simpaticohr.in`,
+    attendee ? `ATTENDEE;RSVP=TRUE;ROLE=REQ-PARTICIPANT:mailto:${attendee}` : '',
+    'STATUS:CONFIRMED',
+    'SEQUENCE:0',
+    'BEGIN:VALARM',
+    'TRIGGER:-PT30M',
+    'ACTION:DISPLAY',
+    'DESCRIPTION:Interview in 30 minutes',
+    'END:VALARM',
+    'END:VEVENT',
+    'END:VCALENDAR',
+  ].filter(Boolean).join('\r\n');
+}
+
+// POST /calendar/ics — Generate and return a .ics file download
+async function handleGenerateICS(request, env, ctx) {
+  const data = await safeJson(request);
+  if (!data.date || !data.startTime) {
+    throw new ValidationError('date and startTime are required');
+  }
+
+  const icsContent = generateICS({
+    summary: data.summary || `Interview: ${data.position || 'Role'}`,
+    description: data.description || '',
+    location: data.location || data.meetingLink || 'TBD',
+    date: data.date,
+    startTime: data.startTime,
+    endTime: data.endTime || '',
+    organizer: data.organizer || 'Simpatico HR',
+    attendee: data.attendeeEmail || '',
+  });
+
+  return new Response(icsContent, {
+    headers: {
+      'Content-Type': 'text/calendar; charset=utf-8',
+      'Content-Disposition': 'attachment; filename="interview.ics"',
+      ...CORS_HEADERS,
+    },
+  });
+}
+
+// ═════════════════════════════════════════════════════════════════════════════════════
+// § 16.4 SLACK SETTINGS HANDLERS
+// GET/POST /settings/slack — Tenant Slack webhook URL management
+// ═════════════════════════════════════════════════════════════════════════════════════
+
+async function handleGetSlackSettings(request, env, ctx) {
+  requireAuth(ctx);
+  const res = await sbFetch(
+    env, "GET",
+    `/rest/v1/companies?id=eq.${ctx.tenantId}&select=slack_webhook_url`,
+    null, false, ctx.tenantId
+  );
+  const [company] = await res.json();
+  return apiResponse({
+    slack_webhook_url: company?.slack_webhook_url || null,
+    configured: !!company?.slack_webhook_url,
+  });
+}
+
+async function handleSaveSlackSettings(request, env, ctx) {
+  requireRole(ctx, "hr", "admin", "superadmin");
+  const { slack_webhook_url } = await safeJson(request);
+
+  // Validate URL format if provided
+  if (slack_webhook_url && !slack_webhook_url.startsWith('https://hooks.slack.com/')) {
+    throw new ValidationError('Invalid Slack webhook URL. Must start with https://hooks.slack.com/');
+  }
+
+  const res = await sbFetch(
+    env, "PATCH",
+    `/rest/v1/companies?id=eq.${ctx.tenantId}`,
+    { slack_webhook_url: slack_webhook_url || null },
+    false, ctx.tenantId
+  );
+
+  if (!res.ok) {
+    const err = await res.text();
+    throw new AppError(`Failed to save Slack settings: ${err}`, 500);
+  }
+
+  // Send a test message if URL was just configured
+  if (slack_webhook_url) {
+    try {
+      await fetch(slack_webhook_url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          text: 'SimpaticoHR connected successfully! You will now receive automation notifications here.',
+          username: 'SimpaticoHR',
+          icon_emoji: ':briefcase:',
+        }),
+      });
+    } catch (e) {
+      console.warn('[SLACK] Test message failed:', e.message);
+    }
+  }
+
+  return apiResponse({ success: true, configured: !!slack_webhook_url });
+}
+
+// ── DLQ Management Endpoints ──
+async function handleListDLQ(request, env, ctx) {
+  requireRole(ctx, "hr", "admin", "superadmin");
+  const entries = await dlqList(env, ctx.tenantId);
+  return apiResponse({ entries, count: entries.length });
+}
+
+async function handleDeleteDLQ(request, env, ctx) {
+  requireRole(ctx, "hr", "admin", "superadmin");
+  const id = ctx.params?.id;
+  if (!id) throw new ValidationError('DLQ entry ID is required');
+  const fullId = `dlq:${ctx.tenantId}:${id}`;
+  await dlqDelete(env, fullId);
+  return apiResponse({ success: true, deleted: fullId });
+}
+
+async function sendEmail(env, { to, subject, html, replyTo, tags, attachments }) {
   if (!env.RESEND_API_KEY) {
     console.error("[sendEmail] RESEND_API_KEY not set — cannot send email to:", to);
     throw new AppError("Email service not configured (RESEND_API_KEY missing)", 503, "EMAIL_NOT_CONFIGURED");
@@ -4922,6 +5187,15 @@ async function sendEmail(env, { to, subject, html, replyTo, tags }) {
   // Resend supports tags for tracking
   if (tags && Array.isArray(tags)) {
     payload.tags = tags;
+  }
+
+  // Attach files (e.g. .ics calendar invites)
+  if (attachments && Array.isArray(attachments) && attachments.length > 0) {
+    payload.attachments = attachments.map(a => ({
+      filename: a.filename,
+      content: a.content,  // Base64 encoded
+      type: a.content_type || undefined,
+    }));
   }
 
   const res = await fetch("https://api.resend.com/emails", {
