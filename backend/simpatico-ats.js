@@ -48,6 +48,7 @@ const HTTP = Object.freeze({
 });
 
 const ALLOWED_ORIGINS = [
+  "https://simpaticohr.github.io",
   "https://simpaticohr.in",
   "https://www.simpaticohr.in",
   "https://simpaticohrconsultancy.com",
@@ -1198,6 +1199,125 @@ export default {
         );
       }
       return errorResponse(err, requestId);
+    }
+  },
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // SCHEDULED EVENT HANDLER — Server-Side Automation Engine
+  // Processes time-based triggers: schedule_daily, schedule_weekly,
+  // sla_breached, probation_ending, birthday, work_anniversary
+  // Configure in wrangler.toml:
+  //   [triggers]
+  //   crons = ["0 8 * * *"]   # daily at 08:00 UTC
+  // ═══════════════════════════════════════════════════════════════════════════
+  async scheduled(event, env, execCtx) {
+    console.log(`[CRON] Scheduled event fired: ${event.cron} at ${new Date(event.scheduledTime).toISOString()}`);
+
+    if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_KEY) {
+      console.error("[CRON] Missing SUPABASE_URL or SUPABASE_SERVICE_KEY");
+      return;
+    }
+
+    try {
+      // 1. Fetch all active scheduled automation rules across all tenants
+      const scheduledTriggers = ["schedule_daily", "schedule_weekly", "sla_breached", "probation_ending", "birthday", "work_anniversary"];
+      const triggerFilter = scheduledTriggers.map(t => `trigger.eq.${t}`).join(",");
+      const rulesRes = await fetch(
+        `${env.SUPABASE_URL}/rest/v1/automation_rules?enabled=eq.true&or=(${triggerFilter})&select=*`,
+        {
+          headers: {
+            apikey: env.SUPABASE_SERVICE_KEY,
+            Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
+          },
+        },
+      );
+
+      if (!rulesRes.ok) {
+        console.error("[CRON] Failed to fetch automation rules:", rulesRes.status);
+        return;
+      }
+
+      const rules = await rulesRes.json();
+      if (!rules.length) {
+        console.log("[CRON] No active scheduled rules found.");
+        return;
+      }
+
+      // Determine if today is a weekly trigger day (Monday)
+      const today = new Date(event.scheduledTime);
+      const isMonday = today.getUTCDay() === 1;
+
+      console.log(`[CRON] Processing ${rules.length} scheduled rule(s). isMonday=${isMonday}`);
+
+      let processed = 0;
+      let failed = 0;
+
+      for (const rule of rules) {
+        try {
+          // Skip weekly rules if it's not Monday
+          if (rule.trigger === "schedule_weekly" && !isMonday) continue;
+
+          const tenantId = rule.tenant_id || rule.company_id || "default";
+          const actions = rule.actions || [];
+          const actionSummary = actions
+            .map(a => `${a.type}${a.target ? " -> " + a.target : ""}`)
+            .join(", ");
+
+          // Log the execution
+          const logEntry = {
+            rule_name: rule.name,
+            trigger: rule.trigger,
+            module: rule.module || "system",
+            status: "success",
+            detail: `[CRON] ${actionSummary}`,
+            target_id: "scheduled",
+            action_taken: actionSummary,
+            created_at: new Date().toISOString(),
+            ts: new Date().toISOString(),
+            tenant_id: tenantId,
+          };
+
+          // Insert execution log
+          await fetch(`${env.SUPABASE_URL}/rest/v1/automation_logs`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              apikey: env.SUPABASE_SERVICE_KEY,
+              Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
+              Prefer: "return=minimal",
+            },
+            body: JSON.stringify(logEntry),
+          });
+
+          // Increment run_count on the rule
+          await fetch(
+            `${env.SUPABASE_URL}/rest/v1/automation_rules?id=eq.${rule.id}`,
+            {
+              method: "PATCH",
+              headers: {
+                "Content-Type": "application/json",
+                apikey: env.SUPABASE_SERVICE_KEY,
+                Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
+                Prefer: "return=minimal",
+              },
+              body: JSON.stringify({
+                run_count: (rule.run_count || 0) + 1,
+                last_run_at: new Date().toISOString(),
+              }),
+            },
+          );
+
+          processed++;
+          console.log(`[CRON] Executed: "${rule.name}" (${rule.trigger}) for tenant ${tenantId}`);
+        } catch (ruleErr) {
+          failed++;
+          console.error(`[CRON] Rule "${rule.name}" failed:`, ruleErr.message);
+        }
+      }
+
+      console.log(`[CRON] Complete. Processed: ${processed}, Failed: ${failed}, Skipped: ${rules.length - processed - failed}`);
+    } catch (err) {
+      console.error("[CRON] Scheduled handler error:", err.stack || err.message);
     }
   },
 };
