@@ -3509,6 +3509,105 @@ Return ONLY valid JSON in format: {"match_score": 85, "reason": "Brief 1-sentenc
     auto_rejected: autoRejected,
     match_score,
   });
+
+  // ═══════════════════════════════════════════════════════════════
+  // 7. SERVER-SIDE AUTOMATION: Evaluate 'app_received' rules
+  //    This ensures automations fire even when no user has the
+  //    ATS dashboard open (e.g., candidates applying via careers page)
+  // ═══════════════════════════════════════════════════════════════
+  try {
+    const rulesRes = await sbFetch(
+      env,
+      "GET",
+      `/rest/v1/automation_rules?enabled=eq.true&trigger=eq.app_received&module=eq.ats&select=*`,
+      null,
+      false,
+      ctx.tenantId,
+    );
+    const rules = await rulesRes.json();
+
+    if (Array.isArray(rules) && rules.length > 0) {
+      console.log(`[ATS-AUTO] Evaluating ${rules.length} app_received rule(s) for tenant ${ctx.tenantId}`);
+
+      for (const rule of rules) {
+        try {
+          // Check conditions
+          if (rule.cond_score && match_score !== null && match_score < parseInt(rule.cond_score)) {
+            continue; // Score below threshold, skip
+          }
+          if (rule.cond_stage && status !== rule.cond_stage) {
+            continue; // Stage mismatch, skip
+          }
+
+          const actions = rule.actions || [];
+          const results = [];
+
+          for (const action of actions) {
+            switch (action.type) {
+              case 'send_email':
+                // Email is already handled by the auto-shortlist/reject/confirmation flow above
+                results.push({ type: 'send_email', status: 'skipped', detail: 'Handled by built-in email flow' });
+                break;
+
+              case 'move_stage':
+                if (action.target && action.target !== status) {
+                  await sbFetch(env, "PATCH", `/rest/v1/job_applications?id=eq.${app.id}`, { status: action.target }, false, ctx.tenantId);
+                  results.push({ type: 'move_stage', status: 'success', detail: `Moved to ${action.target}` });
+                } else {
+                  results.push({ type: 'move_stage', status: 'skipped', detail: 'Already in target stage' });
+                }
+                break;
+
+              case 'shortlist':
+                if (status !== 'screening') {
+                  await sbFetch(env, "PATCH", `/rest/v1/job_applications?id=eq.${app.id}`, { status: 'screening' }, false, ctx.tenantId);
+                  results.push({ type: 'shortlist', status: 'success', detail: 'Moved to screening' });
+                }
+                break;
+
+              case 'reject_candidate':
+                if (status !== 'rejected') {
+                  await sbFetch(env, "PATCH", `/rest/v1/job_applications?id=eq.${app.id}`, { status: 'rejected' }, false, ctx.tenantId);
+                  results.push({ type: 'reject_candidate', status: 'success', detail: 'Auto-rejected by rule' });
+                }
+                break;
+
+              default:
+                results.push({ type: action.type, status: 'dispatched', detail: action.msg || action.type });
+            }
+          }
+
+          // Log execution
+          const logEntry = {
+            rule_name: rule.name,
+            trigger: 'app_received',
+            module: 'ats',
+            status: 'success',
+            detail: `[SERVER] ${results.map(r => r.type + ':' + r.status).join(', ')}`,
+            target_id: app.id,
+            action_taken: results.map(r => r.detail).join(' | '),
+            created_at: new Date().toISOString(),
+            ts: new Date().toISOString(),
+            tenant_id: ctx.tenantId,
+          };
+          await sbFetch(env, "POST", "/rest/v1/automation_logs", logEntry, false, ctx.tenantId);
+
+          // Update run count
+          await sbFetch(env, "PATCH", `/rest/v1/automation_rules?id=eq.${rule.id}`, {
+            run_count: (rule.run_count || 0) + 1,
+            last_run_at: new Date().toISOString(),
+          }, false, ctx.tenantId);
+
+          console.log(`[ATS-AUTO] Rule "${rule.name}" executed for application ${app.id}`);
+        } catch (ruleErr) {
+          console.warn(`[ATS-AUTO] Rule "${rule.name}" failed:`, ruleErr.message);
+        }
+      }
+    }
+  } catch (autoErr) {
+    console.warn("[ATS-AUTO] Server-side automation evaluation failed:", autoErr.message);
+  }
+
   return apiResponse(
     { application: app, auto_scheduled: autoInterview, auto_rejected: autoRejected, match_score },
     HTTP.CREATED,
