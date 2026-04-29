@@ -567,6 +567,17 @@ async function getCompanyAIConfig(env, tenantId) {
 /**
  * Resolves the correct base URL and model for a given provider config.
  */
+// Deprecated / sunset models → working replacements
+const DEPRECATED_MODELS = {
+  "gemini-1.5-flash":       "gemini-2.5-flash",
+  "gemini-1.5-pro":         "gemini-2.5-pro",
+  "gemini-1.0-pro":         "gemini-2.5-flash",
+  "gemini-pro":             "gemini-2.5-flash",
+  "gpt-4-turbo-preview":    "gpt-4o-mini",
+  "gpt-3.5-turbo":          "gpt-4o-mini",
+  "claude-instant-1.2":     "claude-3-haiku-20240307",
+};
+
 function resolveProviderDefaults(cfg) {
   // Normalize provider names (handle aliases)
   let p = cfg.provider;
@@ -574,6 +585,12 @@ function resolveProviderDefaults(cfg) {
 
   let baseUrl = cfg.baseUrl;
   let model = cfg.model;
+
+  // Auto-migrate deprecated model names to current equivalents
+  if (model && DEPRECATED_MODELS[model]) {
+    console.log(`[BYOK] Auto-migrating deprecated model: ${model} → ${DEPRECATED_MODELS[model]}`);
+    model = DEPRECATED_MODELS[model];
+  }
 
   if (p === "openai") {
     baseUrl = baseUrl || "https://api.openai.com/v1";
