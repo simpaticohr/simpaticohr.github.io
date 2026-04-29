@@ -523,7 +523,7 @@ async function getCompanyAIConfig(env, tenantId) {
   }
 
   try {
-    const url = `${env.SUPABASE_URL}/rest/v1/companies?select=ai_provider,ai_api_key,ai_base_url,ai_model&or=(id.eq.${tenantId},tenant_id.eq.${tenantId})&limit=1`;
+    const url = `${env.SUPABASE_URL}/rest/v1/companies?select=ai_provider,ai_api_key,ai_base_url,ai_model&id=eq.${tenantId}&limit=1`;
     const res = await fetch(url, {
       headers: {
         apikey: env.SUPABASE_SERVICE_KEY,
@@ -531,7 +531,8 @@ async function getCompanyAIConfig(env, tenantId) {
       },
     });
     if (!res.ok) {
-      console.warn("[BYOK] Failed to fetch company AI config:", res.status);
+      const errBody = await res.text().catch(() => "");
+      console.warn(`[BYOK] Failed to fetch company AI config: status=${res.status}, body=${errBody}`);
       return null;
     }
     const rows = await res.json();
