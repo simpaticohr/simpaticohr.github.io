@@ -1,10 +1,10 @@
 /**
- * â•”â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•—
- * â•‘          SIMPATICO HR  —  ENTERPRISE PLATFORM ENGINE  v5.0                 â•‘
- * ╔═════════════════════════════════════════════════════════════════════════════════════╗
+ * ============================================================================================================================================
+ * ║          SIMPATICO HR  —  ENTERPRISE PLATFORM ENGINE  v5.0                 ║
+ * =================================================================
  * ║          SIMPATICO HR  —  ENTERPRISE PLATFORM ENGINE  v5.0                 ║
  * ║          Cloudflare Workers · Edge-Native · Zero Cold-Start                 ║
- * ╠═════════════════════════════════════════════════════════════════════════════════════╣
+ * =================================================================
  * ║  Architecture  : Edge-Native Multi-Tenant API                               ║
  * ║  Auth          : JWT RS256 / HMAC-SHA256 Webhook Signatures                 ║
  * ║  Intelligence  : Workers AI (Llama 3.1) + Vectorize RAG                     ║
@@ -12,14 +12,14 @@
  * ║  Patterns      : Middleware Pipeline · Circuit Breaker · Idempotency        ║
  * ║                  Cursor Pagination · Audit Trail · Rate Limiting            ║
  * ║                  Outbound Webhooks · SSE Streaming · Background Jobs        ║
- * ╚═════════════════════════════════════════════════════════════════════════════════════╝ 
+ * ================================================================= 
  */
 
-// ═════════════════════════════════════════════════════════════════════════════════════
+// ===============================================================
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 
 // § 0.  CONSTANTS & CONFIGURATION
-// ═════════════════════════════════════════════════════════════════════════════════════
+// ===============================================================
 
 const VERSION = "5.0.0";
 const REQUEST_TIMEOUT_MS = 28_000; // stay under CF 30 s wall
@@ -96,9 +96,9 @@ const CORS_HEADERS = Object.freeze({
   "X-API-Version": VERSION,
 });
 
-// ═════════════════════════════════════════════════════════════════════════════════════
+// ===============================================================
 // § 1.  CUSTOM ERROR HIERARCHY
-// ═════════════════════════════════════════════════════════════════════════════════════
+// ===============================================================
 
 class AppError extends Error {
   constructor(
@@ -155,9 +155,9 @@ class ServiceUnavailableError extends AppError {
   }
 }
 
-// ═════════════════════════════════════════════════════════════════════════════════════
+// ===============================================================
 // § 2.  VALIDATION SCHEMAS
-// ═════════════════════════════════════════════════════════════════════════════════════
+// ===============================================================
 
 const SCHEMAS = {
   employee: {
@@ -290,9 +290,9 @@ function validate(data, schemaName) {
   return true;
 }
 
-// ═════════════════════════════════════════════════════════════════════════════════════
+// ===============================================================
 // § 3.  JWT AUTHENTICATION
-// ═════════════════════════════════════════════════════════════════════════════════════
+// ===============================================================
 
 async function verifyJWT(token, secret) {
   try {
@@ -334,9 +334,9 @@ function base64UrlDecode(str) {
   return Uint8Array.from(binary, (c) => c.charCodeAt(0));
 }
 
-// ═════════════════════════════════════════════════════════════════════════════════════
+// ===============================================================
 // § 4.  RATE LIMITER  (KV-backed sliding window)
-// ═════════════════════════════════════════════════════════════════════════════════════
+// ===============================================================
 
 async function checkRateLimit(env, key) {
   if (!env.HR_KV) return { remaining: 999 };
@@ -359,9 +359,9 @@ async function checkRateLimit(env, key) {
   return { remaining: RATE_LIMIT_MAX - count - 1 };
 }
 
-// ═════════════════════════════════════════════════════════════════════════════════════
+// ===============================================================
 // § 5.  CIRCUIT BREAKER  (KV-backed)
-// ═════════════════════════════════════════════════════════════════════════════════════
+// ===============================================================
 
 async function withCircuitBreaker(env, service, fn) {
   if (!env.HR_KV) return fn();
@@ -398,9 +398,9 @@ async function withCircuitBreaker(env, service, fn) {
   }
 }
 
-// ═════════════════════════════════════════════════════════════════════════════════════
+// ===============================================================
 // § 6.  IDEMPOTENCY  (KV-backed)
-// ═════════════════════════════════════════════════════════════════════════════════════
+// ===============================================================
 
 async function withIdempotency(env, key, tenantId, fn) {
   if (!key || !env.HR_KV) return fn();
@@ -420,9 +420,9 @@ async function withIdempotency(env, key, tenantId, fn) {
   return result;
 }
 
-// ═════════════════════════════════════════════════════════════════════════════════════
+// ===============================================================
 // § 7.  KV CACHE LAYER
-// ═════════════════════════════════════════════════════════════════════════════════════
+// ===============================================================
 
 async function withCache(env, key, ttl, fn) {
   if (!env.HR_KV) return fn();
@@ -438,11 +438,11 @@ async function invalidateCache(env, ...keys) {
   await Promise.allSettled(keys.map((k) => env.HR_KV.delete(k)));
 }
 
-// ═════════════════════════════════════════════════════════════════════════════════════
+// ===============================================================
 // § 7c. DEAD-LETTER QUEUE (DLQ) — KV-based failed action persistence
 // Failed automation actions are stored here for inspection and manual retry.
 // Each entry has a 7-day TTL and is keyed by tenant + timestamp.
-// ═════════════════════════════════════════════════════════════════════════════════════
+// ===============================================================
 
 async function dlqPush(env, tenantId, failedAction) {
   if (!env.HR_KV) {
@@ -500,9 +500,9 @@ async function dlqDelete(env, entryId) {
   await env.HR_KV.delete(entryId);
 }
 
-// ═════════════════════════════════════════════════════════════════════════════════════
+// ===============================================================
 // § 7b. BYOK AI LAYER — Custom Provider Routing
-// ═════════════════════════════════════════════════════════════════════════════════════
+// ===============================================================
 
 // In-memory cache for AI config per tenant (refreshes every 5 min)
 const _aiConfigCache = {};
@@ -760,9 +760,9 @@ async function runLLMStream(env, tenantId, messages, maxTokens = 2048) {
   return await env.AI.run(CF_DEFAULT_MODEL, { messages, max_tokens: maxTokens, stream: true });
 }
 
-// ═════════════════════════════════════════════════════════════════════════════════════
+// ===============================================================
 // § 8.  STRUCTURED AUDIT LOGGER
-// ═════════════════════════════════════════════════════════════════════════════════════
+// ===============================================================
 
 const auditBuffer = [];
 
@@ -798,9 +798,9 @@ async function audit(env, ctx, action, resource, resourceId, meta = {}) {
   console.log(JSON.stringify({ type: "AUDIT", ...event }));
 }
 
-// ═════════════════════════════════════════════════════════════════════════════════════
+// ===============================================================
 // § 9.  OUTBOUND WEBHOOK DISPATCHER
-// ═════════════════════════════════════════════════════════════════════════════════════
+// ===============================================================
 
 async function dispatchWebhook(env, tenantId, event, payload) {
   if (!env.HR_KV) return;
@@ -848,11 +848,11 @@ async function hmacSign(secret, data) {
     .join("");
 }
 
-// ═════════════════════════════════════════════════════════════════════════════════════
+// ===============================================================
 // § 9b. SLACK INTEGRATION
 // Posts formatted messages to a tenant's configured Slack Incoming Webhook URL.
 // Webhook URL is stored on the companies table (slack_webhook_url column).
-// ═════════════════════════════════════════════════════════════════════════════════════
+// ===============================================================
 
 async function dispatchSlack(env, tenantId, message, channel) {
   try {
@@ -897,9 +897,9 @@ async function dispatchSlack(env, tenantId, message, channel) {
   }
 }
 
-// ═════════════════════════════════════════════════════════════════════════════════════
+// ===============================================================
 // § 10.  MIDDLEWARE PIPELINE
-// ═════════════════════════════════════════════════════════════════════════════════════
+// ===============================================================
 
 async function buildContext(request, env) {
   const url = new URL(request.url);
@@ -1005,9 +1005,9 @@ function requireRole(ctx, ...roles) {
     throw new ForbiddenError(`Required roles: ${roles.join(", ")}`);
 }
 
-// ═════════════════════════════════════════════════════════════════════════════════════
+// ===============================================================
 // § 11.  RESPONSE HELPERS
-// ═════════════════════════════════════════════════════════════════════════════════════
+// ===============================================================
 
 function apiResponse(data, status = HTTP.OK, extra = {}) {
   return Response.json(
@@ -1051,9 +1051,9 @@ function paginatedResponse(items, cursor, total, extra = {}) {
   );
 }
 
-// ═════════════════════════════════════════════════════════════════════════════════════
+// ===============================================================
 // § 12.  ROUTER
-// ═════════════════════════════════════════════════════════════════════════════════════
+// ===============================================================
 
 const ROUTES = [];
 
@@ -1078,7 +1078,7 @@ function matchRoute(method, path) {
   return null;
 }
 
-// ——— Route Declarations —————————————————————————————————————————————————————————————
+// === Route Declarations —————————————————————————————————————————————————————————————
 
 // Health & Meta (Trigger GH Action)
 route("GET", "/health", handleHealth);
@@ -1233,9 +1233,9 @@ route("GET", "/billing/transactions", handleListTransactions);
 // ── BYOK AI Diagnostics ──
 route("GET", "/ai/byok-test", handleBYOKTest);
 
-// ═════════════════════════════════════════════════════════════════════════════════════
+// ===============================================================
 // § 13.  MAIN ENTRY POINT
-// ═════════════════════════════════════════════════════════════════════════════════════
+// ===============================================================
 
 export default {
   async fetch(request, env, execCtx) {
@@ -1273,17 +1273,17 @@ export default {
     const { requestId, tenantId } = ctx;
 
     try {
-      // â”€â”€ Global Rate Limiting â”€â”€
+      // ── Global Rate Limiting ──
       const { remaining } = await checkRateLimit(env, `${tenantId}:${ctx.ip}`);
 
-      // â”€â”€ Route Matching â”€â”€
+      // ── Route Matching ──
       const match = matchRoute(method, path);
       if (!match) return errorResponse(new NotFoundError("Route"), requestId);
 
       const { route: r, params } = match;
       const idempotencyKey = request.headers.get("X-Idempotency-Key");
 
-      // â”€â”€ Handler Execution with timeout â”€â”€
+      // ── Handler Execution with timeout ──
       const handlerFn = async () => {
         const result = await Promise.race([
           r.fns[0](request, env, ctx, params, url),
@@ -1305,7 +1305,7 @@ export default {
         handlerFn,
       );
 
-      // â”€â”€ Flush Audit Buffer â”€â”€
+      // ── Flush Audit Buffer ──
       if (auditBuffer.length) {
         execCtx?.waitUntil?.(
           sbFetch(
@@ -1349,14 +1349,14 @@ export default {
     }
   },
 
-  // ═══════════════════════════════════════════════════════════════════════════
+  // ========================================================
   // SCHEDULED EVENT HANDLER — Server-Side Automation Engine
   // Processes time-based triggers: schedule_daily, schedule_weekly,
   // sla_breached, probation_ending, birthday, work_anniversary
   // Configure in wrangler.toml:
   //   [triggers]
   //   crons = ["0 8 * * *"]   # daily at 08:00 UTC
-  // ═══════════════════════════════════════════════════════════════════════════
+  // ========================================================
   async scheduled(event, env, execCtx) {
     console.log(`[CRON] Scheduled event fired: ${event.cron} at ${new Date(event.scheduledTime).toISOString()}`);
 
@@ -1506,11 +1506,11 @@ export default {
   },
 };
 
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-// Â§ 14.  HANDLER IMPLEMENTATIONS
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ==========================================================================================================================================
+// § 14.  HANDLER IMPLEMENTATIONS
+// ==========================================================================================================================================
 
-// â”€â”€ Health & Meta â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Health & Meta ──────────────────────────────────────────────────────────────
 
 async function handleHealth(request, env, ctx) {
   const checks = await Promise.allSettled([
@@ -1541,7 +1541,7 @@ async function handleVersion() {
   });
 }
 
-// â”€â”€ Webhook Registration â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Webhook Registration ───────────────────────────────────────────────────────
 
 async function handleRegisterWebhook(request, env, ctx) {
   requireAuth(ctx);
@@ -1560,7 +1560,7 @@ async function handleRegisterWebhook(request, env, ctx) {
   return apiResponse({ registered: true, url, events }, HTTP.CREATED);
 }
 
-// â”€â”€ Employees â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Employees ─────────────────────────────────────────────────────────────────
 
 async function handleCreateEmployee(request, env, ctx) {
   requireAuth(ctx);
@@ -1739,7 +1739,7 @@ async function handleBulkCreateEmployees(request, env, ctx) {
   requireRole(ctx, "hr", "admin", "superadmin");
   const { employees } = await safeJson(request);
   if (!Array.isArray(employees) || employees.length > 200)
-    throw new ValidationError("employees must be an array of â‰¤ 200");
+    throw new ValidationError("employees must be an array of ≤ 200");
 
   const results = await Promise.allSettled(
     employees.map(async (emp) => {
@@ -1798,7 +1798,7 @@ async function handleUploadAvatar(request, env, ctx, [id]) {
   const file = formData.get("file");
   if (!file) throw new ValidationError("file is required");
   if (file.size > 5 * 1024 * 1024)
-    throw new ValidationError("Avatar must be â‰¤ 5 MB");
+    throw new ValidationError("Avatar must be ≤ 5 MB");
 
   const key = `avatars/${ctx.tenantId}/${id}/${Date.now()}-${sanitizeFilename(file.name)}`;
   await env.HR_BUCKET.put(key, file.stream(), {
@@ -1870,7 +1870,7 @@ async function handleSignedUrl(request, env, ctx, _, url) {
   return apiResponse({ url: publicUrl, expires_in: 3600 });
 }
 
-// â”€â”€ Onboarding â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Onboarding ────────────────────────────────────────────────────────────────
 
 async function handleStartOnboarding(request, env, ctx) {
   requireRole(ctx, "hr", "admin", "superadmin");
@@ -2035,7 +2035,7 @@ async function handleUploadPolicy(request, env, ctx) {
   return apiResponse({ policy }, HTTP.CREATED);
 }
 
-// â”€â”€ Training â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Training ──────────────────────────────────────────────────────────────────
 
 async function handleCreateCourse(request, env, ctx) {
   requireRole(ctx, "hr", "admin", "superadmin");
@@ -2202,7 +2202,7 @@ async function handleSendReminder(request, env, ctx, [id]) {
   return apiResponse({ sent: true });
 }
 
-// â”€â”€ Performance â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Performance ───────────────────────────────────────────────────────────────
 
 async function handleCreateCycle(request, env, ctx) {
   requireRole(ctx, "hr", "admin", "superadmin");
@@ -2325,7 +2325,7 @@ Be specific, professional, growth-oriented, and 150-200 words. Avoid clichés.`;
   });
 }
 
-// â”€â”€ OKRs / Goals â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── OKRs / Goals ─────────────────────────────────────────────────────────────
 
 async function handleCreateGoal(request, env, ctx) {
   requireAuth(ctx);
@@ -2385,7 +2385,7 @@ async function handleUpdateGoal(request, env, ctx, [id]) {
   return apiResponse({ goal });
 }
 
-// â”€â”€ Leave â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Leave ─────────────────────────────────────────────────────────────────────
 
 async function handleSubmitLeave(request, env, ctx) {
   requireAuth(ctx);
@@ -2505,7 +2505,7 @@ async function handleLeaveDecision(request, env, ctx, [id]) {
   return apiResponse({ status: decision, leave_id: leaveId });
 }
 
-// â”€â”€ Payroll â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Payroll ───────────────────────────────────────────────────────────────────
 
 const TAX_PROFILES = {
   IN: {
@@ -3225,7 +3225,7 @@ async function handleSendAllPayslips(request, env, ctx) {
   });
 }
 
-// â”€â”€ Recruitment / ATS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Recruitment / ATS ─────────────────────────────────────────────────────────
 
 async function handleCreateJob(request, env, ctx) {
   requireRole(ctx, "hr", "admin", "superadmin");
@@ -3391,7 +3391,7 @@ async function handleCreateApplication(request, env, ctx) {
   }
 
   // 0. Base64 Upload Handling (Bypass Frontend RLS limit)
-  // â˜… ENTERPRISE B2B MULTI-TENANT FIX:
+  // ★ ENTERPRISE B2B MULTI-TENANT FIX:
   // Store CVs in a tenant-isolated path. Do not use public URLs for PII data.
   let secureFileKey = null;
   if (body.resume_base64 && body.resume_filename) {
@@ -3497,11 +3497,11 @@ Return ONLY valid JSON in format: {"match_score": 85, "reason": "Brief 1-sentenc
         interviewToken += chars.charAt(Math.floor(Math.random() * chars.length));
       }
     } else if (match_score < rejectThreshold) {
-      // LOW SCORE â†’ Auto-reject with notification
+      // LOW SCORE → Auto-reject with notification
       status = "rejected";
       autoRejected = true;
     }
-    // MIDDLE SCORE (rejectThreshold..69) â†’ stays as "applied" for manual review
+    // MIDDLE SCORE (rejectThreshold..69) → stays as "applied" for manual review
   }
 
   // Preserve resume_text for the candidate profile drawer
@@ -3694,11 +3694,11 @@ Return ONLY valid JSON in format: {"match_score": 85, "reason": "Brief 1-sentenc
     match_score,
   });
 
-  // ═══════════════════════════════════════════════════════════════
+  // ===============================================
   // 7. SERVER-SIDE AUTOMATION: Evaluate 'app_received' rules
   //    This ensures automations fire even when no user has the
   //    ATS dashboard open (e.g., candidates applying via careers page)
-  // ═══════════════════════════════════════════════════════════════
+  // ===============================================
   try {
     const rulesRes = await sbFetch(
       env,
@@ -3925,7 +3925,7 @@ async function handleUpdateApplication(request, env, ctx, [id]) {
   return apiResponse({ application: app || { id, ...patch } });
 }
 
-// â”€â”€ Notifications â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Notifications ─────────────────────────────────────────────────────────────
 
 async function handleListNotifications(request, env, ctx, _, url) {
   requireAuth(ctx);
@@ -3956,7 +3956,7 @@ async function handleMarkNotificationRead(request, env, ctx, [id]) {
   return new Response(null, { status: HTTP.NO_CONTENT, headers: CORS_HEADERS });
 }
 
-// â”€â”€ AI Intelligence â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── AI Intelligence ───────────────────────────────────────────────────────────
 
 async function handleInterviewQuestion(request, env, ctx) {
   // requireAuth(ctx);  -- candidates are unauthenticated
@@ -4526,7 +4526,7 @@ async function handleGenerateJD(request, env, ctx) {
 
   const prompt = `You are a world-class talent acquisition specialist. Write a compelling, inclusive, bias-free job description.
 Role: ${title} | Department: ${department} | Experience: ${experience || "unspecified"} | Key Skills: ${skills || "unspecified"} | Tone: ${tone}
-Structure: Overview â†’ Responsibilities (5-7 bullets) â†’ Requirements (must-have vs nice-to-have) â†’ Benefits â†’ Diversity statement.
+Structure: Overview → Responsibilities (5-7 bullets) → Requirements (must-have vs nice-to-have) → Benefits → Diversity statement.
 Use engaging, modern language. Avoid jargon. Max 500 words.`;
 
   const result = await runLLM(env, ctx.tenantId, [{ role: "user", content: prompt }], 700);
@@ -4638,7 +4638,7 @@ Return ONLY valid JSON array, no markdown.`;
   return apiResponse({ tasks, role, department });
 }
 
-// â”€â”€ Analytics â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Analytics ─────────────────────────────────────────────────────────────────
 
 async function handleAnalyticsSummary(request, env, ctx) {
   requireAuth(ctx);
@@ -4894,9 +4894,9 @@ async function handleAttritionReport(request, env, ctx) {
   });
 }
 
-// ——————————————————————————————————————————————————————————————————————————————————————————————————
+// =========================================================================
 // § 15.  SUPABASE HELPER  (tenant-scoped)
-// ——————————————————————————————————————————————————————————————————————————————————————————————————
+// =========================================================================
 
 async function sbFetch(
   env,
@@ -4909,7 +4909,7 @@ async function sbFetch(
   if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_KEY)
     throw new ServiceUnavailableError("Database");
 
-  // â”€â”€ TENANT ISOLATION: Only inject tenant filter for tables that have tenant_id â”€â”€
+  // ── TENANT ISOLATION: Only inject tenant filter for tables that have tenant_id ──
   // Tables without tenant_id: job_applications, jobs, interviews, employees (core schema)
   // We use service_role key which bypasses RLS, so tenant isolation is opt-in per table
   let finalPath = path;
@@ -5003,14 +5003,14 @@ async function sbFetch(
   return response;
 }
 
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-// Â§ 16.  EMAIL HELPER
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ==========================================================================================================================================
+// § 16.  EMAIL HELPER
+// ==========================================================================================================================================
 
-// ═════════════════════════════════════════════════════════════════════════════════════
+// ===============================================================
 // § 16.3 ICS CALENDAR GENERATION
 // Generates RFC 5545 compliant .ics calendar files for interview invitations.
-// ═════════════════════════════════════════════════════════════════════════════════════
+// ===============================================================
 
 function generateICS({ summary, description, location, date, startTime, endTime, organizer, attendee }) {
   // Parse date (YYYY-MM-DD) and time (HH:MM) into DTSTART/DTEND
@@ -5089,10 +5089,10 @@ async function handleGenerateICS(request, env, ctx) {
   });
 }
 
-// ═════════════════════════════════════════════════════════════════════════════════════
+// ===============================================================
 // § 16.4 SLACK SETTINGS HANDLERS
 // GET/POST /settings/slack — Tenant Slack webhook URL management
-// ═════════════════════════════════════════════════════════════════════════════════════
+// ===============================================================
 
 async function handleGetSlackSettings(request, env, ctx) {
   requireAuth(ctx);
@@ -5241,9 +5241,9 @@ async function sendEmail(env, { to, subject, html, replyTo, tags, attachments })
   return res;
 }
 
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-// Â§ 16.5 WHATSAPP AUTOMATION
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ==========================================================
+// § 16.5 WHATSAPP AUTOMATION
+// ==========================================================
 async function handleWhatsAppNotification(request, env, ctx) {
   const body = await safeJson(request);
   const { phone, message } = body;
@@ -5277,9 +5277,9 @@ async function handleWhatsAppNotification(request, env, ctx) {
   return apiResponse({ success: true, method: "api" });
 }
 
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-// Â§ 17.  UTILITY FUNCTIONS
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ==========================================================================================================================================
+// § 17.  UTILITY FUNCTIONS
+// ==========================================================================================================================================
 
 async function safeJson(request) {
   try {
@@ -5308,9 +5308,9 @@ function addDays(dateStr, days) {
   return d.toISOString().split("T")[0];
 }
 
-// ══════════════════════════════════════════════════════════════════════════════════════════════════
+// =========================================================================
 // § 18.  EMAIL TEMPLATES
-// ══════════════════════════════════════════════════════════════════════════════════════════════════
+// =========================================================================
 
 function welcomeEmailHtml(firstName, empNum) {
   return `
@@ -5382,27 +5382,27 @@ function payslipEmailHtml(ps) {
 }
 
 /**
- * â•”â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•—
- * â•‘  REQUIRED CLOUDFLARE BINDINGS (wrangler.toml)                              â•‘
- * â• â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•£
- * â•‘  Secrets (wrangler secret put):                                             â•‘
- * â•‘    SUPABASE_URL          — Supabase project URL                             â•‘
- * â•‘    SUPABASE_SERVICE_KEY  — Supabase service role key                        â•‘
- * â•‘    JWT_SECRET            — HMAC-SHA256 secret for JWT verification           â•‘
- * â•‘    RESEND_API_KEY        — Resend email API key                              â•‘
- * â•‘    WEBHOOK_SECRET        — HMAC secret for outbound webhook signatures       â•‘
- * â•‘    R2_PUBLIC_URL         — Public base URL for R2 bucket                    â•‘
- * â•‘    EMAIL_FROM            — Sender address (optional, has default)            â•‘
- * â•‘                                                                             â•‘
- * â•‘  KV Namespace:  HR_KV   (rate limiting, idempotency, circuit breaker)       â•‘
- * â•‘  R2 Bucket:     HR_BUCKET (avatars, documents)                              â•‘
- * â•‘  AI Binding:    AI       (Workers AI)                                       â•‘
- * â•‘  Vectorize:     VECTORIZE (semantic search index)                           â•‘
- * â•šâ•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
- */ // â”€â”€ ADD THIS ROUTE to your ROUTES declarations (Â§12) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+ * ============================================================================================================================================
+ * ║  REQUIRED CLOUDFLARE BINDINGS (wrangler.toml)                              ║
+ * ============================================================================================================================================
+ * ║  Secrets (wrangler secret put):                                             ║
+ * ║    SUPABASE_URL          — Supabase project URL                             ║
+ * ║    SUPABASE_SERVICE_KEY  — Supabase service role key                        ║
+ * ║    JWT_SECRET            — HMAC-SHA256 secret for JWT verification           ║
+ * ║    RESEND_API_KEY        — Resend email API key                              ║
+ * ║    WEBHOOK_SECRET        — HMAC secret for outbound webhook signatures       ║
+ * ║    R2_PUBLIC_URL         — Public base URL for R2 bucket                    ║
+ * ║    EMAIL_FROM            — Sender address (optional, has default)            ║
+ * ║                                                                             ║
+ * ║  KV Namespace:  HR_KV   (rate limiting, idempotency, circuit breaker)       ║
+ * ║  R2 Bucket:     HR_BUCKET (avatars, documents)                              ║
+ * ║  AI Binding:    AI       (Workers AI)                                       ║
+ * ║  Vectorize:     VECTORIZE (semantic search index)                           ║
+ * ============================================================================================================================================
+ */ // ── ADD THIS ROUTE to your ROUTES declarations (§12) ──────────────────────────
 // route('POST', '/interviews/schedule', handleScheduleInterviewEmail);
 
-// â”€â”€ ADD THIS HANDLER (paste into Â§ 14) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── ADD THIS HANDLER (paste into § 14) ────────────────────────────────────────
 
 async function handleScheduleInterviewEmail(request, env, ctx) {
   const body = await safeJson(request);
@@ -5591,9 +5591,9 @@ function formatTimeStr(timeStr) {
   return `${hour}:${String(m).padStart(2, "0")} ${ampm}`;
 }
 
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-// Â§ REGISTRATION & WELCOME EMAIL HANDLERS
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ==========================================================================================================================================
+// § REGISTRATION & WELCOME EMAIL HANDLERS
+// ==========================================================================================================================================
 
 async function handleCompanyRegister(request, env, ctx) {
   const body = await safeJson(request);
@@ -5764,9 +5764,9 @@ function registrationWelcomeHtml(name, companyName, type) {
 // route('GET',    '/candidates/:id/assessments',                       handleGetCandidateAssessments);
 // route('POST',   '/assessments/:assessmentId/score',                  handleScoreAssessment);
 
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ============================================
 // Assign assessment to candidate
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ============================================
 async function handleAssignAssessment(request, env, ctx) {
   requireRole(ctx, 'hr', 'hr_manager', 'company_admin', 'admin', 'superadmin');
   
@@ -5796,9 +5796,9 @@ async function handleAssignAssessment(request, env, ctx) {
   }
 }
 
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ============================================
 // Submit candidate responses to assessment
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ============================================
 async function handleSubmitAssessment(request, env, ctx) {
   // Candidates can submit their own assessments
   const { id: candidateId, assessmentId } = ctx.params;
@@ -5852,9 +5852,9 @@ async function handleSubmitAssessment(request, env, ctx) {
   }
 }
 
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ============================================
 // Get candidate's assessments
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ============================================
 async function handleGetCandidateAssessments(request, env, ctx) {
   const { id: candidateId } = ctx.params;
   
@@ -5882,9 +5882,9 @@ async function handleGetCandidateAssessments(request, env, ctx) {
   }
 }
 
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ============================================
 // Score candidate's assessment using AI
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ============================================
 async function handleScoreAssessment(request, env, ctx) {
   requireRole(ctx, 'hr', 'hr_manager', 'company_admin', 'admin', 'superadmin');
   
@@ -5990,9 +5990,9 @@ Return as JSON:
   }
 }
 
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-// Â§ CLIENT INTERVIEW MANAGEMENT HANDLERS
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ==========================================================================================================================================
+// § CLIENT INTERVIEW MANAGEMENT HANDLERS
+// ==========================================================================================================================================
 
 async function handleListClientInterviews(request, env, ctx, _, url) {
   requireAuth(ctx);
@@ -6163,9 +6163,9 @@ async function handleSubmitInterview(request, env, ctx) {
   return apiResponse({ submitted: true, interview_id: interview.id });
 }
 
-// ═════════════════════════════════════════════════════════════════════════════════════
+// ===============================================================
 // § ADMIN — Server-Side Protected Super Admin Handlers
-// ═════════════════════════════════════════════════════════════════════════════════════
+// ===============================================================
 
 /**
  * GET /admin/verify — Verify the caller is a super_admin/company_admin.
@@ -6354,9 +6354,9 @@ async function handleAdminTestEmail(request, env, ctx) {
   return apiResponse({ sent: true, to });
 }
 
-// ═════════════════════════════════════════════════════════════════════════════════════
+// ===============================================================
 // § ATTENDANCE — Clock In / Clock Out / Records
-// ═════════════════════════════════════════════════════════════════════════════════════
+// ===============================================================
 
 /**
  * POST /attendance/clock-in — Record a clock-in event.
@@ -6519,9 +6519,9 @@ async function handleAttendanceSummary(request, env, ctx) {
   });
 }
 
-// ═════════════════════════════════════════════════════════════════════════════════════
+// ===============================================================
 // § BILLING — Cashfree (Domestic) + Paddle (International)
-// ═════════════════════════════════════════════════════════════════════════════════════
+// ===============================================================
 
 const PLAN_PRICING = {
   starter: {

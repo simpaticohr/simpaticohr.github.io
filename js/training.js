@@ -1,5 +1,5 @@
 /**
-* training.js â€” Simpatico HR Platform
+* training.js — Simpatico HR Platform
 * Training & LMS: Supabase + Cloudflare AI + R2 + Vectorize for semantic course search
 */
 
@@ -355,7 +355,7 @@ function filterCourses() {
 }
 window.filterCourses = filterCourses;
 
-// â”€â”€ Create Course â”€â”€
+// ── Create Course ──
 window.openCreateCourseModal = () => openModal('create-course-modal');
 
 /**
@@ -420,7 +420,7 @@ window.saveCourse = async function () {
 };
 
 
-// â”€â”€ AI Course Generation via Cloudflare AI â”€â”€
+// ── AI Course Generation via Cloudflare AI ──
 window.generateCourseWithAI = async function () {
   const title = document.getElementById('course-title')?.value.trim();
   if (!title) { showToast('Enter a course title first', 'error'); return; }
@@ -451,7 +451,7 @@ window.generateCourseWithAI = async function () {
   }
 };
 
-// â”€â”€ Semantic course search via Cloudflare Vectorize â”€â”€
+// ── Semantic course search via Cloudflare Vectorize ──
 window.semanticSearch = async function (query) {
   try {
     const headers = await getFreshAuthHeaders();
@@ -465,7 +465,7 @@ window.semanticSearch = async function (query) {
   } catch { filterCourses(); }
 };
 
-// â”€â”€ Enroll â”€â”€
+// ── Enroll ──
 function loadEnrollSelects() {
   const coursesSel = document.getElementById('enroll-course');
   if (coursesSel) {
@@ -475,7 +475,7 @@ function loadEnrollSelects() {
       coursesSel.appendChild(opt);
     });
   }
-  // Employees â€” filtered by company_id
+  // Employees — filtered by company_id
   const empSel = document.getElementById('enroll-employees');
   if (empSel && sb()) {
     let query = sb().from('employees').select('id,first_name,last_name').eq('status', 'active').order('first_name');
@@ -620,7 +620,7 @@ window.editCourse = function (id) {
   openModal('create-course-modal');
 };
 
-// â”€â”€ Tab switching â”€â”€
+// ── Tab switching ──
 window.switchTab = function (btn, tabId) {
   document.querySelectorAll('.hr-tab').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
@@ -631,7 +631,7 @@ window.switchTab = function (btn, tabId) {
   currentTabId = tabId;
 };
 
-// â”€â”€ AI Recommendations â”€â”€
+// ── AI Recommendations ──
 async function loadAIRecommendations() {
   const client = sb(); if (!client) return;
   const cid = typeof getCompanyId === 'function' ? getCompanyId() : null;
@@ -703,7 +703,7 @@ async function loadAIRecommendations() {
   }).join('');
 }
 
-// â”€â”€ Utility functions: use shared-utils.js if loaded, else define locally â”€â”€
+// ── Utility functions: use shared-utils.js if loaded, else define locally ──
 if (typeof window.authHeaders === 'undefined') {
   window.authHeaders = function () {
     let token = window._simpatico_liveToken || ''; if (!token) { token = localStorage.getItem('sh_token') || localStorage.getItem('simpatico_token') || localStorage.getItem('sb-token') || ''; }
