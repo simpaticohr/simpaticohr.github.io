@@ -4,14 +4,12 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Pricing — Simpatico HR</title>
-  <meta name="description" content="Simple pricing for AI-powered HR & recruitment. Cashfree for India, Paddle for international.">
+  <meta name="description" content="Simple pricing for AI-powered HR & recruitment. Secure payments via Razorpay.">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
   <script src="../js/hr-config.js"></script>
-  <!-- Cashfree JS SDK -->
-  <script src="https://sdk.cashfree.com/js/v3/cashfree.js"></script>
-  <!-- Paddle JS SDK -->
-  <script src="https://cdn.paddle.com/paddle/v2/paddle.js"></script>
+  <!-- Razorpay Checkout JS SDK -->
+  <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
   <style>
     :root {
       --primary: #4F46E5; --primary-hover: #4338CA;
@@ -206,7 +204,7 @@
       <button class="plan-btn plan-btn-outline" id="btn-starter" onclick="subscribe('starter')">
         <i class="fas fa-bolt" style="margin-right:6px"></i>Get Started
       </button>
-      <div class="gateway-row"><i class="fas fa-lock" style="font-size:10px"></i> Secured by Cashfree & Paddle</div>
+      <div class="gateway-row"><i class="fas fa-lock" style="font-size:10px"></i> Secured by Razorpay</div>
     </div>
 
     <!-- Professional -->
@@ -261,7 +259,7 @@
     <h2>Frequently Asked Questions</h2>
     <div class="faq-item" onclick="this.classList.toggle('open')">
       <div class="faq-q">Which payment methods do you support? <i class="fas fa-chevron-down" style="font-size:12px;color:#94a3b8"></i></div>
-      <div class="faq-a"><strong>India:</strong> UPI, credit/debit cards, netbanking, wallets via Cashfree.<br><strong>International:</strong> Visa, Mastercard, American Express, and more via Paddle. Tax compliance handled automatically.</div>
+      <div class="faq-a">We accept UPI, credit/debit cards, netbanking, wallets, and more via Razorpay — our secure PCI DSS Level 1 certified payment partner.</div>
     </div>
     <div class="faq-item" onclick="this.classList.toggle('open')">
       <div class="faq-q">How does the 2-day free trial work? <i class="fas fa-chevron-down" style="font-size:12px;color:#94a3b8"></i></div>
@@ -277,7 +275,7 @@
     </div>
     <div class="faq-item" onclick="this.classList.toggle('open')">
       <div class="faq-q">Is my payment data secure? <i class="fas fa-chevron-down" style="font-size:12px;color:#94a3b8"></i></div>
-      <div class="faq-a">Absolutely. We never store your card details. Cashfree (PCI DSS Level 1) handles Indian payments and Paddle (Merchant of Record) handles international payments with full tax compliance.</div>
+      <div class="faq-a">Absolutely. We never store your card details. Razorpay (PCI DSS Level 1) handles all payment processing with bank-grade security.</div>
     </div>
   </div>
 
@@ -295,6 +293,7 @@ const WORKER_URL = window.SIMPATICO_CONFIG?.workerUrl || 'https://simpatico-hr-a
 const token = localStorage.getItem('simpatico_token') || sessionStorage.getItem('simpatico_token');
 const user = JSON.parse(localStorage.getItem('simpatico_user') || sessionStorage.getItem('simpatico_user') || '{}');
 const TENANT_ID = user.company_id || user.tenant_id || window.SIMPATICO_CONFIG?.tenantId || '';
+const RZP_KEY = window.SIMPATICO_CONFIG?.razorpayKeyId || '';
 
 let billingCycle = 'monthly';
 let currentPlan = null;
@@ -304,7 +303,7 @@ const PRICES = {
   professional: { monthly: { inr: 14999, usd: 179 }, annual: { inr: 149990, usd: 1790 } },
 };
 
-// ── Detect region ──
+// ── Detect region (for price display only) ──
 function isIndianUser() {
   const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || '';
   return tz.includes('Kolkata') || tz.includes('Calcutta') || tz.includes('Asia/Colombo') ||
@@ -313,17 +312,6 @@ function isIndianUser() {
 }
 
 const isDomestic = isIndianUser();
-
-// ── Initialize Paddle (international) ──
-if (typeof Paddle !== 'undefined' && window.SIMPATICO_CONFIG?.paddleClientToken) {
-  try {
-    const paddleEnv = window.SIMPATICO_CONFIG?.paddleEnv || 'sandbox';
-    Paddle.Initialize({
-      token: window.SIMPATICO_CONFIG.paddleClientToken,
-      environment: paddleEnv,
-    });
-  } catch(e) { console.warn('[Paddle] Init failed:', e.message); }
-}
 
 // ── Billing toggle ──
 function toggleBilling() {
@@ -387,7 +375,7 @@ async function loadCurrentPlan() {
   } catch(e) { console.warn('Could not load subscription:', e.message); }
 }
 
-// ── Subscribe ──
+// ── Subscribe via Razorpay ──
 async function subscribe(plan) {
   if (!token) {
     alert('Please log in first to subscribe.');
@@ -395,21 +383,13 @@ async function subscribe(plan) {
     return;
   }
 
-  if (isDomestic) {
-    await subscribeCashfree(plan);
-  } else {
-    subscribePaddle(plan);
-  }
-}
-
-// ── Cashfree (Domestic INR) ──
-async function subscribeCashfree(plan) {
   const btn = document.getElementById(`btn-${plan}`);
   const origText = btn.innerHTML;
   btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Creating order...';
   btn.disabled = true;
 
   try {
+    // 1. Create Razorpay order on backend
     const res = await fetch(`${WORKER_URL}/billing/create-order`, {
       method: 'POST',
       headers: {
@@ -430,79 +410,82 @@ async function subscribeCashfree(plan) {
     if (!res.ok) throw new Error(json?.error?.message || 'Order creation failed');
 
     const orderData = json.data || json;
-    const cfEnv = orderData.environment === 'production' ? 'production' : 'sandbox';
 
-    // Open Cashfree checkout
-    const cashfree = Cashfree({ mode: cfEnv });
-    const result = await cashfree.checkout({
-      paymentSessionId: orderData.payment_session_id,
-      redirectTarget: '_modal',
-    });
-
-    if (result.error) {
-      console.error('[Cashfree]', result.error);
-      alert('Payment was cancelled or failed. Please try again.');
-    } else if (result.paymentDetails) {
-      // Verify payment
-      document.getElementById('payOverlay').classList.add('active');
-      const verifyRes = await fetch(`${WORKER_URL}/billing/verify-payment`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
-          'X-Tenant-ID': TENANT_ID,
-        },
-        body: JSON.stringify({ order_id: orderData.order_id }),
-      });
-      const verifyData = await verifyRes.json();
-      document.getElementById('payOverlay').classList.remove('active');
-
-      if (verifyData.data?.paid || verifyData.paid) {
-        // Update local user
-        user.subscription_plan = plan;
-        localStorage.setItem('simpatico_user', JSON.stringify(user));
-        window.location.href = `/platform/payment-success.html?plan=${plan}&gateway=cashfree`;
-      } else {
-        alert('Payment verification pending. Please check your dashboard.');
-      }
-    }
-  } catch(e) {
-    alert('Error: ' + e.message);
-  } finally {
-    btn.innerHTML = origText;
-    btn.disabled = false;
-  }
-}
-
-// ── Paddle (International) ──
-function subscribePaddle(plan) {
-  const priceIds = window.SIMPATICO_CONFIG?.paddlePriceIds || {};
-  const priceKey = `${plan}_${billingCycle}`;
-  const priceId = priceIds[priceKey];
-
-  if (!priceId) {
-    alert(`Paddle price not configured for ${plan} (${billingCycle}). Please contact sales.`);
-    return;
-  }
-
-  try {
-    Paddle.Checkout.open({
-      items: [{ priceId: priceId, quantity: 1 }],
-      customer: { email: user.email },
-      customData: {
-        company_id: TENANT_ID,
+    // 2. Open Razorpay Checkout
+    const options = {
+      key: RZP_KEY,
+      amount: orderData.order_amount * 100, // Razorpay expects paise
+      currency: orderData.order_currency || 'INR',
+      name: 'Simpatico HR',
+      description: `${plan.charAt(0).toUpperCase() + plan.slice(1)} Plan (${billingCycle})`,
+      order_id: orderData.razorpay_order_id,
+      prefill: {
+        name: user.full_name || user.name || '',
+        email: user.email || '',
+        contact: user.phone || '',
+      },
+      notes: {
         plan: plan,
         billing_cycle: billingCycle,
+        company_id: TENANT_ID,
+        internal_order_id: orderData.order_id,
       },
-      settings: {
-        successUrl: `${window.location.origin}/platform/payment-success.html?plan=${plan}&gateway=paddle`,
-        displayMode: 'overlay',
-        theme: 'light',
-        locale: 'en',
+      theme: {
+        color: '#4F46E5',
       },
+      handler: async function(response) {
+        // 3. Payment successful — verify on backend
+        document.getElementById('payOverlay').classList.add('active');
+        try {
+          const verifyRes = await fetch(`${WORKER_URL}/billing/verify-payment`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${token}`,
+              'X-Tenant-ID': TENANT_ID,
+            },
+            body: JSON.stringify({
+              order_id: orderData.order_id,
+              razorpay_order_id: response.razorpay_order_id,
+              razorpay_payment_id: response.razorpay_payment_id,
+              razorpay_signature: response.razorpay_signature,
+            }),
+          });
+          const verifyData = await verifyRes.json();
+          document.getElementById('payOverlay').classList.remove('active');
+
+          if (verifyData.data?.paid || verifyData.paid) {
+            user.subscription_plan = plan;
+            localStorage.setItem('simpatico_user', JSON.stringify(user));
+            window.location.href = `/platform/payment-success.html?plan=${plan}&gateway=razorpay`;
+          } else {
+            alert('Payment verification pending. Please check your dashboard.');
+          }
+        } catch(e) {
+          document.getElementById('payOverlay').classList.remove('active');
+          alert('Verification error: ' + e.message);
+        }
+      },
+      modal: {
+        ondismiss: function() {
+          btn.innerHTML = origText;
+          btn.disabled = false;
+        },
+      },
+    };
+
+    const rzp = new Razorpay(options);
+    rzp.on('payment.failed', function(response) {
+      alert('Payment failed: ' + (response.error?.description || 'Unknown error'));
+      btn.innerHTML = origText;
+      btn.disabled = false;
     });
+    rzp.open();
+
   } catch(e) {
-    alert('Paddle checkout error: ' + e.message);
+    alert('Error: ' + e.message);
+    btn.innerHTML = origText;
+    btn.disabled = false;
   }
 }
 

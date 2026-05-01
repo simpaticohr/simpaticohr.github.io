@@ -961,6 +961,7 @@ async function verifyViaSupabase(token, env) {
   const user = await res.json();
   let role = user.app_metadata?.role || user.user_metadata?.role || "viewer";
   if (role === "viewer") {
+    // Try employees table first
     const pRes = await fetch(
       `${env.SUPABASE_URL}/rest/v1/employees?auth_id=eq.${user.id}&select=role`,
       {
@@ -973,6 +974,37 @@ async function verifyViaSupabase(token, env) {
     if (pRes.ok) {
       const profs = await pRes.json();
       if (profs && profs.length > 0) role = profs[0].role || "viewer";
+    }
+  }
+  // If still viewer, check the users table (platform-level roles stored during registration)
+  if (role === "viewer") {
+    try {
+      // Try auth_id first (primary key link), then fall back to email match
+      let uRes = await fetch(
+        `${env.SUPABASE_URL}/rest/v1/users?auth_id=eq.${user.id}&select=role`,
+        {
+          headers: {
+            apikey: env.SUPABASE_SERVICE_KEY,
+            Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
+          },
+        },
+      );
+      let users = uRes.ok ? await uRes.json() : [];
+      if (!users.length && user.email) {
+        uRes = await fetch(
+          `${env.SUPABASE_URL}/rest/v1/users?email=eq.${encodeURIComponent(user.email)}&select=role`,
+          {
+            headers: {
+              apikey: env.SUPABASE_SERVICE_KEY,
+              Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
+            },
+          },
+        );
+        users = uRes.ok ? await uRes.json() : [];
+      }
+      if (users.length > 0 && users[0].role) role = users[0].role;
+    } catch (e) {
+      console.warn("[Auth] users table role lookup failed:", e.message);
     }
   }
   return { sub: user.id, email: user.email, role };
@@ -1222,10 +1254,10 @@ route("POST", "/attendance/clock-out", handleClockOut);
 route("GET", "/attendance/records", handleListAttendance);
 route("GET", "/attendance/summary", handleAttendanceSummary);
 
-// ── Billing & Subscriptions ──
+// ── Billing & Subscriptions (Razorpay) ──
 route("POST", "/billing/create-order", handleCreateOrder);
 route("POST", "/billing/verify-payment", handleVerifyPayment);
-route("POST", "/billing/paddle-webhook", handlePaddleWebhook);
+route("POST", "/billing/razorpay-webhook", handleRazorpayWebhook);
 route("GET", "/billing/subscription", handleGetSubscription);
 route("POST", "/billing/cancel", handleCancelSubscription);
 route("GET", "/billing/transactions", handleListTransactions);
@@ -5059,7 +5091,7 @@ function generateICS({ summary, description, location, date, startTime, endTime,
     'END:VALARM',
     'END:VEVENT',
     'END:VCALENDAR',
-  ].filter(Boolean).join('\r\n');
+  ].filter(Boolean).join('\n');
 }
 
 // POST /calendar/ics — Generate and return a .ics file download
@@ -6520,7 +6552,7 @@ async function handleAttendanceSummary(request, env, ctx) {
 }
 
 // ===============================================================
-// § BILLING — Cashfree (Domestic) + Paddle (International)
+// § BILLING — Razorpay (Unified Gateway)
 // ===============================================================
 
 const PLAN_PRICING = {
@@ -6539,8 +6571,9 @@ const PLAN_PRICING = {
 };
 
 /**
- * POST /billing/create-order — Create a Cashfree payment order (domestic INR).
+ * POST /billing/create-order — Create a Razorpay payment order.
  * Body: { plan, billing_cycle, customer_name, customer_email, customer_phone }
+ * Env vars: RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET
  */
 async function handleCreateOrder(request, env, ctx) {
   requireAuth(ctx);
@@ -6554,113 +6587,99 @@ async function handleCreateOrder(request, env, ctx) {
   if (!pricing || !pricing.inr) throw new ValidationError("Invalid billing cycle or plan");
 
   const companyId = ctx.tenantId;
-  const orderId = `SIMP_${plan.toUpperCase()}_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+  const internalOrderId = `SIMP_${plan.toUpperCase()}_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
 
-  const cfApiBase = env.CASHFREE_ENV === "production"
-    ? "https://api.cashfree.com/pg"
-    : "https://sandbox.cashfree.com/pg";
-
-  // Create Cashfree Order
-  const cfRes = await fetch(`${cfApiBase}/orders`, {
+  // Create Razorpay Order via Orders API
+  const rzpAuth = btoa(`${env.RAZORPAY_KEY_ID}:${env.RAZORPAY_KEY_SECRET}`);
+  const rzpRes = await fetch("https://api.razorpay.com/v1/orders", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "x-client-id": env.CASHFREE_APP_ID,
-      "x-client-secret": env.CASHFREE_SECRET_KEY,
-      "x-api-version": "2023-08-01",
+      "Authorization": `Basic ${rzpAuth}`,
     },
     body: JSON.stringify({
-      order_id: orderId,
-      order_amount: pricing.inr,
-      order_currency: "INR",
-      customer_details: {
-        customer_id: companyId,
-        customer_name: customer_name || ctx.actorEmail,
-        customer_email: customer_email,
-        customer_phone: customer_phone || "9999999999",
-      },
-      order_meta: {
-        return_url: `${env.FRONTEND_URL || "https://simpaticohr.github.io"}/platform/payment-success.html?order_id={order_id}`,
-        notify_url: `${env.WORKER_URL || "https://simpatico-hr-ats.simpaticohrconsultancy.workers.dev"}/billing/verify-payment`,
-      },
-      order_note: `SimpaticoHR ${plan} plan (${billing_cycle})`,
-      order_tags: {
+      amount: pricing.inr * 100, // Razorpay expects paise
+      currency: "INR",
+      receipt: internalOrderId,
+      notes: {
         plan: plan,
         billing_cycle: billing_cycle,
         company_id: companyId,
+        customer_email: customer_email,
       },
     }),
   });
 
-  const cfData = await cfRes.json();
-  if (!cfRes.ok) {
-    console.error("[Cashfree] Order creation failed:", JSON.stringify(cfData));
-    throw new AppError(`Cashfree order failed: ${cfData.message || "Unknown error"}`, 502, "CASHFREE_ERROR");
+  const rzpData = await rzpRes.json();
+  if (!rzpRes.ok) {
+    console.error("[Razorpay] Order creation failed:", JSON.stringify(rzpData));
+    throw new AppError(`Razorpay order failed: ${rzpData.error?.description || "Unknown error"}`, 502, "RAZORPAY_ERROR");
   }
 
   // Record the pending transaction
   await sbFetch(env, "POST", "/rest/v1/payment_transactions", {
     company_id: companyId,
-    gateway: "cashfree",
-    gateway_order_id: orderId,
+    gateway: "razorpay",
+    gateway_order_id: rzpData.id,
     amount: pricing.inr,
     currency: "INR",
     status: "pending",
     plan: plan,
     billing_cycle: billing_cycle,
-    metadata: { cashfree_order: cfData },
+    metadata: { razorpay_order: rzpData, internal_order_id: internalOrderId },
   }, false, companyId);
 
-  await audit(env, ctx, "billing.order_created", "payment_transactions", orderId, {
+  await audit(env, ctx, "billing.order_created", "payment_transactions", internalOrderId, {
     plan, billing_cycle, amount: pricing.inr,
   });
 
   return apiResponse({
-    order_id: orderId,
-    payment_session_id: cfData.payment_session_id,
-    cf_order_id: cfData.cf_order_id,
+    order_id: internalOrderId,
+    razorpay_order_id: rzpData.id,
     order_amount: pricing.inr,
     order_currency: "INR",
-    gateway: "cashfree",
-    environment: env.CASHFREE_ENV || "sandbox",
+    gateway: "razorpay",
   });
 }
 
 /**
- * POST /billing/verify-payment — Verify Cashfree payment and activate subscription.
- * Body: { order_id }
+ * POST /billing/verify-payment — Verify Razorpay payment signature and activate subscription.
+ * Body: { order_id, razorpay_order_id, razorpay_payment_id, razorpay_signature }
  */
 async function handleVerifyPayment(request, env, ctx) {
   const body = await safeJson(request);
-  const { order_id } = body;
-  if (!order_id) throw new ValidationError("order_id required");
-
-  const cfApiBase = env.CASHFREE_ENV === "production"
-    ? "https://api.cashfree.com/pg"
-    : "https://sandbox.cashfree.com/pg";
-
-  // Verify payment with Cashfree
-  const cfRes = await fetch(`${cfApiBase}/orders/${order_id}`, {
-    headers: {
-      "x-client-id": env.CASHFREE_APP_ID,
-      "x-client-secret": env.CASHFREE_SECRET_KEY,
-      "x-api-version": "2023-08-01",
-    },
-  });
-
-  const cfOrder = await cfRes.json();
-  if (!cfRes.ok) {
-    throw new AppError("Failed to verify order with Cashfree", 502, "CASHFREE_VERIFY_ERROR");
+  const { order_id, razorpay_order_id, razorpay_payment_id, razorpay_signature } = body;
+  if (!order_id || !razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
+    throw new ValidationError("order_id, razorpay_order_id, razorpay_payment_id and razorpay_signature required");
   }
 
-  const isPaid = cfOrder.order_status === "PAID";
-  const plan = cfOrder.order_tags?.plan || "starter";
-  const billingCycle = cfOrder.order_tags?.billing_cycle || "monthly";
-  const companyId = cfOrder.order_tags?.company_id || cfOrder.customer_details?.customer_id;
+  // Verify HMAC-SHA256 signature: sha256_hmac(razorpay_order_id + "|" + razorpay_payment_id, key_secret)
+  const signPayload = `${razorpay_order_id}|${razorpay_payment_id}`;
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(env.RAZORPAY_KEY_SECRET),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const sig = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(signPayload));
+  const computedSignature = Array.from(new Uint8Array(sig)).map(b => b.toString(16).padStart(2, "0")).join("");
+
+  const isPaid = computedSignature === razorpay_signature;
+
+  // Fetch order notes from Razorpay to get plan info
+  const rzpAuth = btoa(`${env.RAZORPAY_KEY_ID}:${env.RAZORPAY_KEY_SECRET}`);
+  const rzpRes = await fetch(`https://api.razorpay.com/v1/orders/${razorpay_order_id}`, {
+    headers: { "Authorization": `Basic ${rzpAuth}` },
+  });
+  const rzpOrder = await rzpRes.json();
+  const plan = rzpOrder.notes?.plan || "starter";
+  const billingCycle = rzpOrder.notes?.billing_cycle || "monthly";
+  const companyId = rzpOrder.notes?.company_id || (ctx.tenantId || "");
 
   // Update transaction record
   await fetch(
-    `${env.SUPABASE_URL}/rest/v1/payment_transactions?gateway_order_id=eq.${order_id}`,
+    `${env.SUPABASE_URL}/rest/v1/payment_transactions?gateway_order_id=eq.${razorpay_order_id}`,
     {
       method: "PATCH",
       headers: {
@@ -6671,9 +6690,9 @@ async function handleVerifyPayment(request, env, ctx) {
       },
       body: JSON.stringify({
         status: isPaid ? "paid" : "failed",
-        gateway_payment_id: cfOrder.cf_order_id,
-        payment_method: cfOrder.payment_method || "cashfree",
-        metadata: { cashfree_response: cfOrder },
+        gateway_payment_id: razorpay_payment_id,
+        payment_method: "razorpay",
+        metadata: { razorpay_order_id, razorpay_payment_id, razorpay_signature, verified: isPaid },
       }),
     },
   );
@@ -6708,9 +6727,9 @@ async function handleVerifyPayment(request, env, ctx) {
         company_id: companyId,
         plan: plan,
         status: "active",
-        gateway: "cashfree",
-        gateway_subscription_id: cfOrder.cf_order_id,
-        amount: cfOrder.order_amount,
+        gateway: "razorpay",
+        gateway_subscription_id: razorpay_order_id,
+        amount: rzpOrder.amount / 100,
         currency: "INR",
         billing_cycle: billingCycle,
         current_period_start: now.toISOString(),
@@ -6736,7 +6755,7 @@ async function handleVerifyPayment(request, env, ctx) {
 
   if (ctx.actorEmail || ctx.actorId) {
     await audit(env, ctx, isPaid ? "billing.payment_success" : "billing.payment_failed", "payment_transactions", order_id, {
-      plan, amount: cfOrder.order_amount, status: cfOrder.order_status,
+      plan, amount: rzpOrder.amount / 100, verified: isPaid,
     });
   }
 
@@ -6744,39 +6763,33 @@ async function handleVerifyPayment(request, env, ctx) {
     verified: true,
     paid: isPaid,
     plan: isPaid ? plan : null,
-    order_status: cfOrder.order_status,
   });
 }
 
 /**
- * POST /billing/paddle-webhook — Handle Paddle webhook events (international).
- * Paddle sends: subscription.created, subscription.updated, transaction.completed, etc.
+ * POST /billing/razorpay-webhook — Handle Razorpay webhook events.
+ * Razorpay sends: payment.authorized, payment.captured, payment.failed, etc.
+ * Env vars: RAZORPAY_WEBHOOK_SECRET
  */
-async function handlePaddleWebhook(request, env, ctx) {
+async function handleRazorpayWebhook(request, env, ctx) {
   const rawBody = await request.text();
 
-  // Verify Paddle webhook signature (if secret is set)
-  if (env.PADDLE_WEBHOOK_SECRET) {
-    const signature = request.headers.get("Paddle-Signature") || "";
-    const ts = signature.match(/ts=(\d+)/)?.[1];
-    const h1 = signature.match(/h1=([a-f0-9]+)/)?.[1];
+  // Verify Razorpay webhook signature (if secret is set)
+  if (env.RAZORPAY_WEBHOOK_SECRET) {
+    const signature = request.headers.get("X-Razorpay-Signature") || "";
+    const key = await crypto.subtle.importKey(
+      "raw",
+      new TextEncoder().encode(env.RAZORPAY_WEBHOOK_SECRET),
+      { name: "HMAC", hash: "SHA-256" },
+      false,
+      ["sign"],
+    );
+    const sig = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(rawBody));
+    const computed = Array.from(new Uint8Array(sig)).map(b => b.toString(16).padStart(2, "0")).join("");
 
-    if (ts && h1) {
-      const signedPayload = `${ts}:${rawBody}`;
-      const key = await crypto.subtle.importKey(
-        "raw",
-        new TextEncoder().encode(env.PADDLE_WEBHOOK_SECRET),
-        { name: "HMAC", hash: "SHA-256" },
-        false,
-        ["sign"],
-      );
-      const sig = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(signedPayload));
-      const computed = Array.from(new Uint8Array(sig)).map(b => b.toString(16).padStart(2, "0")).join("");
-
-      if (computed !== h1) {
-        console.error("[Paddle] Webhook signature mismatch");
-        return new Response("Invalid signature", { status: 401 });
-      }
+    if (computed !== signature) {
+      console.error("[Razorpay] Webhook signature mismatch");
+      return new Response("Invalid signature", { status: 401 });
     }
   }
 
@@ -6787,85 +6800,40 @@ async function handlePaddleWebhook(request, env, ctx) {
     return new Response("Invalid JSON", { status: 400 });
   }
 
-  const eventType = event.event_type;
-  const data = event.data;
-  console.log(`[Paddle] Webhook: ${eventType}`, JSON.stringify(data).substring(0, 500));
+  const eventType = event.event;
+  const payment = event.payload?.payment?.entity;
+  console.log(`[Razorpay] Webhook: ${eventType}`, JSON.stringify(payment || {}).substring(0, 500));
 
-  if (eventType === "transaction.completed") {
-    const companyId = data.custom_data?.company_id;
-    const plan = data.custom_data?.plan || "professional";
-    const billingCycle = data.custom_data?.billing_cycle || "monthly";
+  if (eventType === "payment.captured" && payment) {
+    const companyId = payment.notes?.company_id;
 
     if (companyId) {
-      // Record transaction
-      await fetch(`${env.SUPABASE_URL}/rest/v1/payment_transactions`, {
-        method: "POST",
-        headers: {
-          apikey: env.SUPABASE_SERVICE_KEY,
-          Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
-          "Content-Type": "application/json",
-          Prefer: "return=minimal",
+      // Update transaction status
+      await fetch(
+        `${env.SUPABASE_URL}/rest/v1/payment_transactions?gateway_order_id=eq.${payment.order_id}`,
+        {
+          method: "PATCH",
+          headers: {
+            apikey: env.SUPABASE_SERVICE_KEY,
+            Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
+            "Content-Type": "application/json",
+            Prefer: "return=minimal",
+          },
+          body: JSON.stringify({
+            status: "paid",
+            gateway_payment_id: payment.id,
+            payment_method: payment.method || "razorpay",
+            metadata: { razorpay_webhook_event: event },
+          }),
         },
-        body: JSON.stringify({
-          company_id: companyId,
-          gateway: "paddle",
-          gateway_order_id: data.id,
-          gateway_payment_id: data.checkout?.id || data.id,
-          amount: parseFloat(data.details?.totals?.total || 0) / 100,
-          currency: data.currency_code || "USD",
-          status: "paid",
-          plan: plan,
-          billing_cycle: billingCycle,
-          payment_method: "paddle",
-          metadata: { paddle_event: event },
-        }),
-      });
+      );
     }
   }
 
-  if (eventType === "subscription.created" || eventType === "subscription.updated") {
-    const companyId = data.custom_data?.company_id;
-    const plan = data.custom_data?.plan || "professional";
-
-    if (companyId) {
-      const paddleStatus = data.status; // active, paused, canceled
-      const mappedStatus = paddleStatus === "active" ? "active" :
-                           paddleStatus === "paused" ? "paused" :
-                           paddleStatus === "canceled" ? "cancelled" : "active";
-
-      // Upsert subscription
-      await fetch(`${env.SUPABASE_URL}/rest/v1/subscriptions?company_id=eq.${companyId}`, {
-        method: "DELETE",
-        headers: {
-          apikey: env.SUPABASE_SERVICE_KEY,
-          Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
-        },
-      });
-
-      await fetch(`${env.SUPABASE_URL}/rest/v1/subscriptions`, {
-        method: "POST",
-        headers: {
-          apikey: env.SUPABASE_SERVICE_KEY,
-          Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
-          "Content-Type": "application/json",
-          Prefer: "return=minimal",
-        },
-        body: JSON.stringify({
-          company_id: companyId,
-          plan: plan,
-          status: mappedStatus,
-          gateway: "paddle",
-          gateway_subscription_id: data.id,
-          gateway_customer_id: data.customer_id,
-          currency: data.currency_code || "USD",
-          billing_cycle: data.billing_cycle?.interval === "year" ? "annual" : "monthly",
-          current_period_start: data.current_billing_period?.starts_at,
-          current_period_end: data.current_billing_period?.ends_at,
-        }),
-      });
-
-      // Update company plan
-      await fetch(`${env.SUPABASE_URL}/rest/v1/companies?id=eq.${companyId}`, {
+  if (eventType === "payment.failed" && payment) {
+    await fetch(
+      `${env.SUPABASE_URL}/rest/v1/payment_transactions?gateway_order_id=eq.${payment.order_id}`,
+      {
         method: "PATCH",
         headers: {
           apikey: env.SUPABASE_SERVICE_KEY,
@@ -6873,25 +6841,12 @@ async function handlePaddleWebhook(request, env, ctx) {
           "Content-Type": "application/json",
           Prefer: "return=minimal",
         },
-        body: JSON.stringify({ subscription_plan: plan }),
-      });
-    }
-  }
-
-  if (eventType === "subscription.canceled") {
-    const companyId = data.custom_data?.company_id;
-    if (companyId) {
-      await fetch(`${env.SUPABASE_URL}/rest/v1/subscriptions?company_id=eq.${companyId}`, {
-        method: "PATCH",
-        headers: {
-          apikey: env.SUPABASE_SERVICE_KEY,
-          Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
-          "Content-Type": "application/json",
-          Prefer: "return=minimal",
-        },
-        body: JSON.stringify({ status: "cancelled", cancelled_at: new Date().toISOString() }),
-      });
-    }
+        body: JSON.stringify({
+          status: "failed",
+          metadata: { razorpay_webhook_event: event },
+        }),
+      },
+    );
   }
 
   return new Response(JSON.stringify({ received: true }), {
@@ -6996,6 +6951,7 @@ async function handleListTransactions(request, env, ctx) {
   const data = await res.json();
   return apiResponse(data);
 }
+
 
 /**
  * GET /ai/byok-test — Diagnostic endpoint to verify BYOK AI configuration.

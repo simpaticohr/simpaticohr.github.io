@@ -29,18 +29,9 @@ window.SIMPATICO_CONFIG = {
   },
   appVersion: '5.0.0-Industrial',
 
-  // 5. PAYMENT GATEWAYS
-  // Cashfree config is server-side only (env secrets in worker)
-  // Paddle client-side config:
-  paddleClientToken: '',            // Set your Paddle client-side token here
-  paddleEnv: 'sandbox',             // 'sandbox' or 'production'
-  paddlePriceIds: {
-    // Map plan+cycle to Paddle Price IDs from your Paddle dashboard
-    // starter_monthly:      'pri_XXXXXXXXXXXXXXX',
-    // starter_annual:       'pri_XXXXXXXXXXXXXXX',
-    // professional_monthly: 'pri_XXXXXXXXXXXXXXX',
-    // professional_annual:  'pri_XXXXXXXXXXXXXXX',
-  },
+  // 5. PAYMENT GATEWAY — Razorpay (Test Mode)
+  razorpayKeyId: 'rzp_test_yourtestkeyhere',   // Replace with your Razorpay Test Key ID
+  razorpayEnv: 'test',                          // 'test' or 'live'
   
   // Helper to generate Trace IDs for debugging (crypto-safe)
   generateTraceId: () => {
