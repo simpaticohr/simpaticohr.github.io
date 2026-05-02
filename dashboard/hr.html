@@ -1844,36 +1844,32 @@
                             ai_model: provider === 'cloudflare' ? document.getElementById('cfModelSelect').value : document.getElementById('aiModel').value
                         };
 
-                        const db = (typeof getSupabaseClient === 'function' ? getSupabaseClient() : null) || window.SimpaticoDB || window._supabaseClient;
-                        if (!db) throw new Error('Database connection not available');
-
-                        const res = await db.from('companies').update(updates).eq('id', compId);
-                        if (res.error) {
-                            if (res.error.message.includes('schema cache') || res.error.message.includes('column') || res.error.code === 'PGRST204') {
-                                console.warn('Supabase schema cache is stale or columns missing. Saving to local cache only.', res.error);
-                            } else {
-                                throw new Error(res.error.message);
-                            }
-                        }
-                        
-                        // Update local cache with Multi-Tenant Isolation
                         const tenantId = window.SIMPATICO_CONFIG?.tenantId || compId;
+                        const workerUrl = window.SIMPATICO_CONFIG?.workerUrl || '';
+                        const authToken = typeof getAuthToken === 'function' ? getAuthToken() : '';
+
+                        // Save via backend worker (uses service key to bypass RLS)
+                        const headers = { 'Content-Type': 'application/json', 'X-Tenant-ID': tenantId };
+                        if (authToken) headers['Authorization'] = 'Bearer ' + authToken;
+
+                        const saveRes = await fetch(workerUrl + '/ai/byok-config', {
+                            method: 'POST',
+                            headers,
+                            body: JSON.stringify(updates),
+                        });
+
+                        if (!saveRes.ok) {
+                            const errJson = await saveRes.json().catch(() => ({}));
+                            throw new Error(errJson.error?.message || `Server error ${saveRes.status}`);
+                        }
+
+                        const saveData = await saveRes.json();
+                        console.log('[BYOK] Config saved via backend:', saveData);
+
+                        // Also update local cache for UI state
                         localStorage.setItem('simpatico_ai_settings_' + tenantId, JSON.stringify(updates));
-                        
                         Object.assign(compData, updates);
                         localStorage.setItem('simpatico_company', JSON.stringify(compData));
-
-                        // Invalidate server-side BYOK config cache so changes take effect immediately
-                        try {
-                            const workerUrl = window.SIMPATICO_CONFIG?.workerUrl || '';
-                            const authToken = typeof getAuthToken === 'function' ? getAuthToken() : '';
-                            const cacheHeaders = { 'Content-Type': 'application/json', 'X-Tenant-ID': tenantId };
-                            if (authToken) cacheHeaders['Authorization'] = 'Bearer ' + authToken;
-                            await fetch(workerUrl + '/ai/byok-cache-clear', { method: 'POST', headers: cacheHeaders });
-                            console.log('[BYOK] Server-side cache cleared');
-                        } catch (cacheErr) {
-                            console.warn('[BYOK] Cache clear failed (non-critical):', cacheErr.message);
-                        }
 
                         if (typeof showToast === 'function') {
                             let modelLabel;
@@ -1883,10 +1879,10 @@
                             } else {
                                 modelLabel = updates.ai_model || provider;
                             }
-                            showToast('AI Config saved — Active: ' + modelLabel);
+                            showToast('AI Config saved — Active: ' + modelLabel + (saveData?.data?.rows_updated ? ' ✓ DB updated' : ''));
                         }
                     } catch (err) {
-                        console.error(err);
+                        console.error('[BYOK] Save failed:', err);
                         alert("Failed to save AI settings: " + err.message);
                     } finally {
                         btn.innerHTML = '<i class="fas fa-save"></i> Save AI Config';
