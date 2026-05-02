@@ -2580,6 +2580,13 @@ ${Object.entries(this.skillsCovered).map(([s, d]) => `- ${s}: Score ${d.score}/1
                     if (state.meta.interview.interview_language) {
                         state.interviewLanguage = state.meta.interview.interview_language;
                         console.log('[Lang] Interview language set to:', state.interviewLanguage);
+                        // Re-load voices to match the interview language
+                        loadVoices();
+                        // Update STT recognition language if already initialized
+                        if (state.voice.recognition) {
+                            state.voice.recognition.lang = state.interviewLanguage;
+                            console.log('[STT] Updated recognition lang to:', state.interviewLanguage);
+                        }
                     }
                 }
             } catch (e) {
@@ -2684,15 +2691,36 @@ ${Object.entries(this.skillsCovered).map(([s, d]) => `- ${s}: Score ${d.score}/1
         function loadVoices() {
             const voices = state.voice.synth.getVoices();
             const lang = state.interviewLanguage || 'en-IN';
-            const langBase = lang.split('-')[0]; // e.g. 'hi', 'ta', 'en'
+            const langBase = lang.split('-')[0]; // e.g. 'hi', 'ta', 'ml', 'en'
+
+            console.log(`[Voice] Looking for voice: lang=${lang}, base=${langBase}, available=${voices.length} voices`);
 
             // For non-English languages, find a matching voice first
             if (langBase !== 'en') {
+                // Log all matching voices for debugging
+                const matchingVoices = voices.filter(v => v.lang.startsWith(langBase));
+                console.log(`[Voice] Found ${matchingVoices.length} voices for '${langBase}':`, matchingVoices.map(v => `${v.name} (${v.lang})`));
+
+                // Prefer Google voices (usually higher quality for Indian languages)
+                const googleMatch = matchingVoices.find(v => v.name.toLowerCase().includes('google'));
+                if (googleMatch) {
+                    state.voice.preferredVoice = googleMatch;
+                    console.log(`[Voice] ✓ Selected Google voice: ${googleMatch.name} (${googleMatch.lang})`);
+                    return;
+                }
                 const exactMatch = voices.find(v => v.lang === lang);
-                if (exactMatch) { state.voice.preferredVoice = exactMatch; return; }
+                if (exactMatch) {
+                    state.voice.preferredVoice = exactMatch;
+                    console.log(`[Voice] ✓ Selected exact match: ${exactMatch.name} (${exactMatch.lang})`);
+                    return;
+                }
                 const baseMatch = voices.find(v => v.lang.startsWith(langBase));
-                if (baseMatch) { state.voice.preferredVoice = baseMatch; return; }
-                console.warn(`[Voice] No voice found for ${lang}, falling back to English`);
+                if (baseMatch) {
+                    state.voice.preferredVoice = baseMatch;
+                    console.log(`[Voice] ✓ Selected base match: ${baseMatch.name} (${baseMatch.lang})`);
+                    return;
+                }
+                console.warn(`[Voice] ⚠️ No voice found for ${lang}! Malayalam/other Indic TTS requires Chrome. Falling back to English.`);
             }
 
             // English preferred voices
@@ -3005,6 +3033,8 @@ ${Object.entries(this.skillsCovered).map(([s, d]) => `- ${s}: Score ${d.score}/1
                     const u = new SpeechSynthesisUtterance(chunks[idx]);
                     state.voice.keepAlive.push(u);
 
+                    // Set the language on the utterance so the browser picks the correct voice
+                    u.lang = state.interviewLanguage || 'en-IN';
                     if (state.voice.preferredVoice) u.voice = state.voice.preferredVoice;
                     u.rate = 0.92;
                     u.pitch = 1.0;
