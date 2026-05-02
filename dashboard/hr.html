@@ -4862,35 +4862,43 @@ async function handleScheduleInterview(e) {
 
     if (sendWhatsApp && candidatePhone) {
         const intWithLink = { ...localPayload, interviewLink, token };
-        setTimeout(async () => {
-            const result = await sendWhatsAppNotification(intWithLink);
-            DataStore.update(data => {
-                const stored = data.interviews.find(i => i.id === localPayload.id);
-                if (stored) {
-                    stored.notificationLog = stored.notificationLog || [];
-                    stored.notificationLog.push({ type: 'whatsapp', success: result.success, method: result.method, timestamp: Date.now() });
-                    data.activities.unshift({
-                        type: 'whatsapp',
-                        title: `WhatsApp Sent: ${candidateName}`,
-                        description: `Interview invite sent via WhatsApp · ${result.success ? '✅ Sent' : '❌ Failed'}`,
-                        timestamp: Date.now()
-                    });
-                }
-            });
-            appData = DataStore.get();
-            renderInterviewTable();
-            renderDashboardActivities();
+        // Build wa.me URL immediately (synchronous, in user-click context — avoids popup blocker)
+        const waMessage = buildWhatsAppMessage(intWithLink);
+        const cleanPhone = candidatePhone.replace(/\D/g, '');
+        const waUrl = `https://wa.me/${cleanPhone}?text=${encodeURIComponent(waMessage)}`;
 
-            if (result.success) {
-                if (result.method === 'fallback_wame') {
-                    showToast('📱 WhatsApp opened — please confirm message was sent');
-                } else {
-                    showToast('📱 WhatsApp notification sent successfully!');
-                }
-            } else {
-                showToast(`⚠️ WhatsApp: ${result.reason}`, 'warning');
+        // Open WhatsApp IMMEDIATELY — must be in synchronous user-gesture context
+        const waWindow = window.open(waUrl, '_blank');
+
+        // Log the result
+        const waSuccess = !!waWindow;
+        if (!waSuccess) {
+            // Popup was blocked — provide a clickable fallback link
+            showToast('⚠️ Popup blocked! Click the WhatsApp link below to send manually.', 'warning');
+            const fallbackEl = document.createElement('div');
+            fallbackEl.innerHTML = `<div style="position:fixed;bottom:80px;right:20px;z-index:99999;background:#25d366;color:white;padding:12px 20px;border-radius:12px;box-shadow:0 4px 20px rgba(0,0,0,0.3);cursor:pointer;font-size:0.9rem;" onclick="window.open('${waUrl}','_blank');this.remove()"><i class="fab fa-whatsapp"></i> <strong>Click to open WhatsApp</strong></div>`;
+            document.body.appendChild(fallbackEl);
+            setTimeout(() => fallbackEl.remove(), 15000);
+        } else {
+            showToast('📱 WhatsApp opened — please send the message');
+        }
+
+        DataStore.update(data => {
+            const stored = data.interviews.find(i => i.id === localPayload.id);
+            if (stored) {
+                stored.notificationLog = stored.notificationLog || [];
+                stored.notificationLog.push({ type: 'whatsapp', success: waSuccess, method: 'wame_direct', timestamp: Date.now() });
+                data.activities.unshift({
+                    type: 'whatsapp',
+                    title: `WhatsApp Sent: ${candidateName}`,
+                    description: `Interview invite via WhatsApp · ${waSuccess ? '✅ Opened' : '⚠️ Popup blocked'}`,
+                    timestamp: Date.now()
+                });
             }
-        }, 1000);
+        });
+        appData = DataStore.get();
+        renderInterviewTable();
+        renderDashboardActivities();
     }
     } catch (err) {
         showToast('Error scheduling interview: ' + err.message, 'error');
@@ -5069,21 +5077,31 @@ async function executeSendNotification(id) {
     }
 
     if (sendWAChecked && int.candidatePhone) {
-        const result = await sendWhatsAppNotification(intWithLink);
+        const waMessage = buildWhatsAppMessage(intWithLink);
+        const cleanPhone = int.candidatePhone.replace(/\D/g, '');
+        const waUrl = `https://wa.me/${cleanPhone}?text=${encodeURIComponent(waMessage)}`;
+        const waWindow = window.open(waUrl, '_blank');
+
+        const waSuccess = !!waWindow;
+        if (!waSuccess) {
+            showToast('⚠️ Popup blocked! Click the green button to open WhatsApp.', 'warning');
+            const fallbackEl = document.createElement('div');
+            fallbackEl.innerHTML = `<div style="position:fixed;bottom:80px;right:20px;z-index:99999;background:#25d366;color:white;padding:12px 20px;border-radius:12px;box-shadow:0 4px 20px rgba(0,0,0,0.3);cursor:pointer;font-size:0.9rem;" onclick="window.open('${waUrl}','_blank');this.remove()"><i class="fab fa-whatsapp"></i> <strong>Click to open WhatsApp</strong></div>`;
+            document.body.appendChild(fallbackEl);
+            setTimeout(() => fallbackEl.remove(), 15000);
+        } else {
+            showToast('📱 WhatsApp opened — please send the message');
+        }
+
         DataStore.update(data => {
             const stored = data.interviews.find(i => i.id === id);
             if (stored) {
                 stored.notificationLog = stored.notificationLog || [];
-                stored.notificationLog.push({ type: 'whatsapp', success: result.success, method: result.method, timestamp: Date.now() });
+                stored.notificationLog.push({ type: 'whatsapp', success: waSuccess, method: 'wame_direct', timestamp: Date.now() });
             }
         });
         appData = DataStore.get();
         renderInterviewTable();
-        if (result.success) {
-            showToast(result.method === 'fallback_wame' ? '📱 WhatsApp opened — confirm send' : '📱 WhatsApp sent!');
-        } else {
-            showToast(`⚠️ WhatsApp: ${result.reason}`, 'warning');
-        }
     } else if (sendWAChecked && !int.candidatePhone) {
         showToast('⚠️ No phone number on file for this candidate', 'warning');
     }
