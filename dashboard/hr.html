@@ -1863,6 +1863,18 @@
                         Object.assign(compData, updates);
                         localStorage.setItem('simpatico_company', JSON.stringify(compData));
 
+                        // Invalidate server-side BYOK config cache so changes take effect immediately
+                        try {
+                            const workerUrl = window.SIMPATICO_CONFIG?.workerUrl || '';
+                            const authToken = typeof getAuthToken === 'function' ? getAuthToken() : '';
+                            const cacheHeaders = { 'Content-Type': 'application/json', 'X-Tenant-ID': tenantId };
+                            if (authToken) cacheHeaders['Authorization'] = 'Bearer ' + authToken;
+                            await fetch(workerUrl + '/ai/byok-cache-clear', { method: 'POST', headers: cacheHeaders });
+                            console.log('[BYOK] Server-side cache cleared');
+                        } catch (cacheErr) {
+                            console.warn('[BYOK] Cache clear failed (non-critical):', cacheErr.message);
+                        }
+
                         if (typeof showToast === 'function') {
                             let modelLabel;
                             if (provider === 'cloudflare') {

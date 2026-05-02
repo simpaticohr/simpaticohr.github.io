@@ -2305,15 +2305,26 @@ ${Object.entries(this.skillsCovered).map(([s, d]) => `- ${s}: Score ${d.score}/1
                 ];
 
                 try {
+                    // Resolve tenant ID from interview metadata for BYOK routing
+                    const tenantId = state.meta.interview?.company_id || state.meta.interview?.client_id || '';
+                    const reqHeaders = { 'Content-Type': 'application/json' };
+                    if (tenantId) reqHeaders['X-Tenant-ID'] = tenantId;
+
                     const res = await fetch(`${API}/ai/interview-question`, {
                         method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
+                        headers: reqHeaders,
                         body: JSON.stringify({ messages, token: token })
                     });
 
                     if (!res.ok) throw new Error(`API Error ${res.status}`);
 
                     const data = await res.json();
+                    // Log which AI model was actually used (BYOK debug info)
+                    const debug = data?.data?._debug || data?._debug;
+                    if (debug) {
+                        console.log(`[BYOK] Model used: ${debug.model}, tenant: ${debug.tenant}, fallback: ${debug.fallback}`);
+                        if (debug.fallback) console.warn('[BYOK] ⚠️ BYOK provider failed — fell back to platform default!');
+                    }
                     let question = data?.data?.response || data?.response || '';
 
                     // Clean up artifacts
