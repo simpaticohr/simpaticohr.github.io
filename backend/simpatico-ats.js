@@ -7251,18 +7251,45 @@ async function handleBYOKValidate(request, env, ctx) {
         });
       }
       const data = await res.json();
+      // Only include models that work with the OpenAI-compatible chat endpoint
+      // Exclude: gemma (local models), embedding, AQA, imagen, preview/experimental builds
+      const GEMINI_CHAT_VERIFIED = [
+        "gemini-2.5-flash", "gemini-2.5-pro",
+        "gemini-2.0-flash", "gemini-2.0-flash-lite",
+        "gemini-1.5-flash", "gemini-1.5-pro",
+      ];
       models = (data.models || [])
-        .filter(m => m.supportedGenerationMethods && m.supportedGenerationMethods.includes("generateContent"))
+        .filter(m => {
+          if (!m.supportedGenerationMethods || !m.supportedGenerationMethods.includes("generateContent")) return false;
+          const mid = m.name ? m.name.replace("models/", "") : "";
+          // Must start with "gemini-" (exclude gemma, embedding, imagen, etc.)
+          if (!mid.startsWith("gemini-")) return false;
+          // Exclude preview/experimental builds (contain "-preview-" or end with "-preview")
+          if (mid.includes("-preview")) return false;
+          // Exclude numbered snapshot builds (e.g. gemini-2.0-flash-001)
+          if (/\d{3}$/.test(mid)) return false;
+          // Exclude "-latest" aliases (redundant with the base model)
+          if (mid.endsWith("-latest")) return false;
+          return true;
+        })
         .map(m => {
           const mid = m.name ? m.name.replace("models/", "") : m.name;
+          const isVerified = GEMINI_CHAT_VERIFIED.includes(mid);
           return {
-            id: mid, name: m.displayName || mid,
+            id: mid,
+            name: m.displayName || mid,
             context_window: m.inputTokenLimit || null,
             output_limit: m.outputTokenLimit || null,
             recommended: (RECOMMENDED.gemini || []).includes(mid),
+            verified: isVerified,
           };
         })
-        .sort((a, b) => (b.recommended ? 1 : 0) - (a.recommended ? 1 : 0));
+        .sort((a, b) => {
+          // Sort: recommended first, then verified, then alphabetical
+          if (a.recommended !== b.recommended) return b.recommended ? 1 : -1;
+          if (a.verified !== b.verified) return b.verified ? 1 : -1;
+          return a.id.localeCompare(b.id);
+        });
 
     } else if (provider === "openai") {
       const oaiUrl = (base_url || "https://api.openai.com/v1") + "/models";
