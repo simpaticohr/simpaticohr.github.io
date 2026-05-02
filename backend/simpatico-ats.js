@@ -1290,6 +1290,7 @@ route("GET", "/ai/byok-test", handleBYOKTest);
 route("POST", "/ai/byok-cache-clear", handleBYOKCacheClear);
 route("POST", "/ai/byok-config", handleBYOKConfigSave);
 route("GET", "/ai/byok-config", handleBYOKConfigGet);
+route("POST", "/ai/byok-validate", handleBYOKValidate);
 
 // ===============================================================
 // § 13.  MAIN ENTRY POINT
@@ -7209,4 +7210,148 @@ async function handleBYOKConfigGet(request, env, ctx) {
     base_url: row.ai_base_url || "(provider default)",
     has_api_key: true, // Don't expose the key itself
   });
+}
+
+/**
+ * POST /ai/byok-validate — Validate an API key and return available models.
+ * Body: { provider, api_key, base_url? }
+ * Returns: { connected, provider, models: [{ id, name, context_window?, recommended? }], error? }
+ */
+async function handleBYOKValidate(request, env, ctx) {
+  requireAuth(ctx);
+  const body = await safeJson(request);
+  const { provider, api_key, base_url } = body;
+
+  if (!provider || !api_key) {
+    throw new ValidationError("provider and api_key are required");
+  }
+
+  console.log(`[BYOK-Validate] Testing connection: provider=${provider}, keyPrefix=${api_key.substring(0, 8)}...`);
+
+  const RECOMMENDED = {
+    openai: ["gpt-4o", "gpt-4o-mini", "gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano", "o4-mini"],
+    gemini: ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.0-flash"],
+    anthropic: ["claude-sonnet-4-20250514", "claude-3-5-sonnet-20241022", "claude-3-haiku-20240307"],
+    deepseek: ["deepseek-chat", "deepseek-reasoner"],
+    kimi: ["kimi-k2-0520", "moonshot-v1-128k", "moonshot-v1-32k"],
+  };
+
+  try {
+    let models = [];
+
+    if (provider === "gemini" || provider === "google") {
+      const geminiUrl = (base_url || "https://generativelanguage.googleapis.com") + "/v1beta/models?key=" + api_key;
+      const res = await fetch(geminiUrl);
+      if (!res.ok) {
+        const errText = await res.text().catch(() => "");
+        console.error(`[BYOK-Validate] Gemini FAILED: ${res.status} ${errText.substring(0, 200)}`);
+        return apiResponse({
+          connected: false, provider: "gemini",
+          error: res.status === 400 || res.status === 403 ? "Invalid API key" : `API error ${res.status}: ${errText.substring(0, 100)}`,
+        });
+      }
+      const data = await res.json();
+      models = (data.models || [])
+        .filter(m => m.supportedGenerationMethods && m.supportedGenerationMethods.includes("generateContent"))
+        .map(m => {
+          const mid = m.name ? m.name.replace("models/", "") : m.name;
+          return {
+            id: mid, name: m.displayName || mid,
+            context_window: m.inputTokenLimit || null,
+            output_limit: m.outputTokenLimit || null,
+            recommended: (RECOMMENDED.gemini || []).includes(mid),
+          };
+        })
+        .sort((a, b) => (b.recommended ? 1 : 0) - (a.recommended ? 1 : 0));
+
+    } else if (provider === "openai") {
+      const oaiUrl = (base_url || "https://api.openai.com/v1") + "/models";
+      const res = await fetch(oaiUrl, { headers: { Authorization: `Bearer ${api_key}` } });
+      if (!res.ok) {
+        const errText = await res.text().catch(() => "");
+        return apiResponse({
+          connected: false, provider: "openai",
+          error: res.status === 401 ? "Invalid API key" : `API error ${res.status}: ${errText.substring(0, 100)}`,
+        });
+      }
+      const data = await res.json();
+      models = (data.data || [])
+        .filter(m => m.id && (m.id.includes("gpt") || m.id.includes("o1") || m.id.includes("o3") || m.id.includes("o4") || m.id.includes("chatgpt")))
+        .map(m => ({ id: m.id, name: m.id, recommended: (RECOMMENDED.openai || []).includes(m.id) }))
+        .sort((a, b) => (b.recommended ? 1 : 0) - (a.recommended ? 1 : 0));
+
+    } else if (provider === "anthropic") {
+      const antUrl = (base_url || "https://api.anthropic.com/v1") + "/messages";
+      const res = await fetch(antUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-api-key": api_key, "anthropic-version": "2023-06-01" },
+        body: JSON.stringify({ model: "claude-3-haiku-20240307", max_tokens: 1, messages: [{ role: "user", content: "hi" }] }),
+      });
+      if (!res.ok) {
+        const errText = await res.text().catch(() => "");
+        if (res.status === 401 || errText.includes("invalid x-api-key")) {
+          return apiResponse({ connected: false, provider: "anthropic", error: "Invalid API key" });
+        }
+      }
+      models = [
+        { id: "claude-sonnet-4-20250514", name: "Claude Sonnet 4 (Latest)", recommended: true },
+        { id: "claude-3-7-sonnet-20250219", name: "Claude 3.7 Sonnet", recommended: true },
+        { id: "claude-3-5-sonnet-20241022", name: "Claude 3.5 Sonnet", recommended: true },
+        { id: "claude-3-haiku-20240307", name: "Claude 3 Haiku (Fast)", recommended: true },
+        { id: "claude-3-opus-20240229", name: "Claude 3 Opus (Powerful)", recommended: false },
+      ];
+
+    } else if (provider === "deepseek") {
+      const dsUrl = (base_url || "https://api.deepseek.com/v1") + "/models";
+      const res = await fetch(dsUrl, { headers: { Authorization: `Bearer ${api_key}` } });
+      if (!res.ok) {
+        const errText = await res.text().catch(() => "");
+        return apiResponse({
+          connected: false, provider: "deepseek",
+          error: res.status === 401 ? "Invalid API key" : `API error ${res.status}: ${errText.substring(0, 100)}`,
+        });
+      }
+      const data = await res.json();
+      models = (data.data || []).map(m => ({
+        id: m.id, name: m.id, recommended: (RECOMMENDED.deepseek || []).includes(m.id),
+      }));
+
+    } else if (provider === "kimi") {
+      const kimiUrl = (base_url || "https://api.moonshot.cn/v1") + "/models";
+      const res = await fetch(kimiUrl, { headers: { Authorization: `Bearer ${api_key}` } });
+      if (!res.ok) {
+        const errText = await res.text().catch(() => "");
+        return apiResponse({
+          connected: false, provider: "kimi",
+          error: res.status === 401 ? "Invalid API key" : `API error ${res.status}: ${errText.substring(0, 100)}`,
+        });
+      }
+      const data = await res.json();
+      models = (data.data || []).map(m => ({
+        id: m.id, name: m.id, recommended: (RECOMMENDED.kimi || []).includes(m.id),
+      }));
+
+    } else {
+      const customUrl = (base_url || "").replace(/\/$/, "") + "/models";
+      try {
+        const res = await fetch(customUrl, { headers: { Authorization: `Bearer ${api_key}` } });
+        if (res.ok) {
+          const data = await res.json();
+          models = (data.data || []).map(m => ({ id: m.id || m.name, name: m.id || m.name, recommended: false }));
+        }
+      } catch (e) {
+        console.warn(`[BYOK-Validate] Custom model listing failed: ${e.message}`);
+      }
+      if (models.length === 0) {
+        return apiResponse({ connected: true, provider, models: [], message: "Connected but model listing not supported. Enter model name manually." });
+      }
+    }
+
+    console.log(`[BYOK-Validate] SUCCESS: provider=${provider}, models_found=${models.length}`);
+    return apiResponse({ connected: true, provider, models, total: models.length });
+
+  } catch (err) {
+    console.error(`[BYOK-Validate] Error: ${err.message}`);
+    return apiResponse({ connected: false, provider, error: `Connection failed: ${err.message}` });
+  }
 }

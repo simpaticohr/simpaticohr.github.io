@@ -1665,17 +1665,32 @@
                     <div id="customAiFields" style="display:none; margin-top:15px; padding:15px; background:#f9fafb; border-radius:8px; border:1px solid #e5e7eb;">
                         <div class="form-group" style="margin-bottom:15px;">
                             <label>API Key <span style="font-weight:normal;color:#6b7280;">(Stored securely)</span></label>
-                            <input type="password" class="form-control-custom" id="aiApiKey" placeholder="sk-...">
+                            <div style="display:flex; gap:8px; align-items:center;">
+                                <input type="password" class="form-control-custom" id="aiApiKey" placeholder="sk-... or AIza..." style="flex:1;">
+                                <button type="button" class="btn-primary-custom" id="btnTestConnection" onclick="testBYOKConnection()" style="white-space:nowrap; padding:8px 16px; font-size:13px; min-width:160px;">
+                                    <i class="fas fa-plug"></i> Test Connection
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Connection Status Badge -->
+                        <div id="byokConnectionStatus" style="display:none; margin-bottom:15px; padding:10px 14px; border-radius:8px; font-size:13px; font-weight:600; display:none; align-items:center; gap:8px;">
                         </div>
                         
                         <div class="form-group" style="margin-bottom:15px;">
-                            <label>Base URL <span style="font-weight:normal;color:#6b7280;">(For custom proxies/endpoints)</span></label>
-                            <input type="text" class="form-control-custom" id="aiBaseUrl" placeholder="https://api.openai.com/v1">
+                            <label>Base URL <span style="font-weight:normal;color:#6b7280;">(For custom proxies/endpoints — leave blank for default)</span></label>
+                            <input type="text" class="form-control-custom" id="aiBaseUrl" placeholder="Leave blank to use provider's default URL">
                         </div>
 
-                        <div class="form-group">
-                            <label>Model Name</label>
+                        <!-- Dynamic Model Selector (populated after test) -->
+                        <div class="form-group" id="aiModelGroup">
+                            <label>Model <span style="font-weight:normal;color:#6b7280;" id="aiModelHint">(Test connection to see available models)</span></label>
+                            <select class="form-control-custom" id="aiModelSelect" style="display:none; font-size:13px;"></select>
                             <input type="text" class="form-control-custom" id="aiModel" placeholder="gpt-4o-mini">
+                        </div>
+
+                        <!-- Model Info Panel (shown after selection) -->
+                        <div id="byokModelInfo" style="display:none; margin-top:10px; padding:10px 14px; background:#f0fdf4; border:1px solid #bbf7d0; border-radius:8px; font-size:12px; color:#166534;">
                         </div>
                     </div>
 
@@ -1814,15 +1829,146 @@
                             if(!baseUrlInput.value) baseUrlInput.value = 'https://api.moonshot.cn/v1';
                             if(!modelInput.value) modelInput.value = 'kimi-k2-0520';
                         } else if (provider === 'gemini') {
-                            if(!baseUrlInput.value) baseUrlInput.value = 'https://generativelanguage.googleapis.com/v1beta/openai';
+                            if(!baseUrlInput.value) baseUrlInput.value = '';
                             if(!modelInput.value) modelInput.value = 'gemini-2.5-flash';
                         } else if (provider === 'deepseek') {
-                            if(!baseUrlInput.value) baseUrlInput.value = 'https://api.deepseek.com/v1';
+                            if(!baseUrlInput.value) baseUrlInput.value = '';
                             if(!modelInput.value) modelInput.value = 'deepseek-chat';
                         } else if (provider === 'other') {
                             if(!baseUrlInput.value) baseUrlInput.value = '';
                             if(!modelInput.value) modelInput.value = '';
                         }
+                        // Reset model selector state when switching providers
+                        document.getElementById('aiModelSelect').style.display = 'none';
+                        document.getElementById('aiModelSelect').innerHTML = '';
+                        document.getElementById('aiModel').style.display = '';
+                        document.getElementById('byokConnectionStatus').style.display = 'none';
+                        document.getElementById('byokModelInfo').style.display = 'none';
+                        document.getElementById('aiModelHint').textContent = '(Test connection to see available models)';
+                    }
+                }
+
+                // ── BYOK Connection Test & Model Discovery ──
+                let _byokModels = [];
+
+                async function testBYOKConnection() {
+                    const btn = document.getElementById('btnTestConnection');
+                    const statusDiv = document.getElementById('byokConnectionStatus');
+                    const provider = document.getElementById('aiProvider').value;
+                    const apiKey = document.getElementById('aiApiKey').value.trim();
+                    const baseUrl = document.getElementById('aiBaseUrl').value.trim();
+
+                    if (!apiKey) {
+                        statusDiv.style.display = 'flex';
+                        statusDiv.style.background = '#fef2f2';
+                        statusDiv.style.border = '1px solid #fecaca';
+                        statusDiv.style.color = '#991b1b';
+                        statusDiv.innerHTML = '<i class="fas fa-exclamation-circle"></i> Please enter an API key first';
+                        return;
+                    }
+
+                    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Testing...';
+                    btn.disabled = true;
+                    statusDiv.style.display = 'flex';
+                    statusDiv.style.background = '#fefce8';
+                    statusDiv.style.border = '1px solid #fde68a';
+                    statusDiv.style.color = '#92400e';
+                    statusDiv.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Connecting to ' + provider + '...';
+
+                    try {
+                        const workerUrl = window.SIMPATICO_CONFIG?.workerUrl || '';
+                        const compData = JSON.parse(localStorage.getItem('simpatico_company') || '{}');
+                        const tenantId = window.SIMPATICO_CONFIG?.tenantId || compData.id || '';
+                        const authToken = typeof getAuthToken === 'function' ? getAuthToken() : '';
+
+                        const headers = { 'Content-Type': 'application/json', 'X-Tenant-ID': tenantId };
+                        if (authToken) headers['Authorization'] = 'Bearer ' + authToken;
+
+                        const res = await fetch(workerUrl + '/ai/byok-validate', {
+                            method: 'POST',
+                            headers,
+                            body: JSON.stringify({ provider, api_key: apiKey, base_url: baseUrl || undefined }),
+                        });
+
+                        const result = await res.json();
+                        const data = result.data || result;
+
+                        if (data.connected) {
+                            // SUCCESS — show green badge
+                            statusDiv.style.background = '#f0fdf4';
+                            statusDiv.style.border = '1px solid #bbf7d0';
+                            statusDiv.style.color = '#166534';
+                            const modelCount = data.models?.length || 0;
+                            statusDiv.innerHTML = '<i class="fas fa-check-circle" style="font-size:16px;"></i> <span>Connected! ' + modelCount + ' model' + (modelCount !== 1 ? 's' : '') + ' available</span>';
+
+                            // Populate model dropdown
+                            _byokModels = data.models || [];
+                            if (_byokModels.length > 0) {
+                                const select = document.getElementById('aiModelSelect');
+                                const textInput = document.getElementById('aiModel');
+                                const hint = document.getElementById('aiModelHint');
+
+                                select.innerHTML = '';
+                                _byokModels.forEach(m => {
+                                    const opt = document.createElement('option');
+                                    opt.value = m.id;
+                                    let label = m.recommended ? '⭐ ' : '   ';
+                                    label += m.name || m.id;
+                                    if (m.context_window) label += ' (' + (m.context_window / 1000).toFixed(0) + 'k ctx)';
+                                    opt.textContent = label;
+                                    if (m.id === textInput.value) opt.selected = true;
+                                    select.appendChild(opt);
+                                });
+
+                                // If nothing was pre-selected, pick first recommended
+                                if (!select.value || select.selectedIndex < 0) {
+                                    const rec = _byokModels.find(m => m.recommended);
+                                    if (rec) select.value = rec.id;
+                                }
+
+                                // Show dropdown, hide text input
+                                select.style.display = '';
+                                textInput.style.display = 'none';
+                                textInput.value = select.value;
+                                hint.textContent = '(' + _byokModels.filter(m => m.recommended).length + ' recommended for interviews)';
+
+                                // Sync text input when dropdown changes
+                                select.onchange = function() {
+                                    textInput.value = this.value;
+                                    const model = _byokModels.find(m => m.id === this.value);
+                                    const info = document.getElementById('byokModelInfo');
+                                    if (model && (model.context_window || model.output_limit)) {
+                                        info.style.display = 'block';
+                                        let html = '<strong>' + (model.name || model.id) + '</strong>';
+                                        if (model.context_window) html += ' — Context: ' + (model.context_window / 1000).toFixed(0) + 'k tokens';
+                                        if (model.output_limit) html += ' — Output: ' + (model.output_limit / 1000).toFixed(0) + 'k tokens';
+                                        if (model.recommended) html += ' — <span style="color:#15803d;">✓ Recommended for interviews</span>';
+                                        info.innerHTML = html;
+                                    } else {
+                                        info.style.display = 'none';
+                                    }
+                                };
+                                select.onchange(); // trigger initial info
+                            }
+
+                            if (data.message) {
+                                statusDiv.innerHTML += '<br><span style="font-weight:400;font-size:12px;">' + data.message + '</span>';
+                            }
+                        } else {
+                            // FAILED — show red badge
+                            statusDiv.style.background = '#fef2f2';
+                            statusDiv.style.border = '1px solid #fecaca';
+                            statusDiv.style.color = '#991b1b';
+                            statusDiv.innerHTML = '<i class="fas fa-times-circle" style="font-size:16px;"></i> <span>Connection Failed: ' + (data.error || 'Unknown error') + '</span>';
+                        }
+                    } catch (err) {
+                        statusDiv.style.background = '#fef2f2';
+                        statusDiv.style.border = '1px solid #fecaca';
+                        statusDiv.style.color = '#991b1b';
+                        statusDiv.innerHTML = '<i class="fas fa-times-circle"></i> Network error: ' + err.message;
+                    } finally {
+                        btn.innerHTML = '<i class="fas fa-plug"></i> Test Connection';
+                        btn.disabled = false;
                     }
                 }
 
@@ -1837,11 +1983,18 @@
                         if (!compId) throw new Error("Company ID not found");
 
                         const provider = document.getElementById('aiProvider').value;
+                        // Read model from dropdown if visible, otherwise from text input
+                        const modelSelect = document.getElementById('aiModelSelect');
+                        const modelText = document.getElementById('aiModel');
+                        const selectedModel = provider === 'cloudflare'
+                            ? document.getElementById('cfModelSelect').value
+                            : (modelSelect.style.display !== 'none' && modelSelect.value ? modelSelect.value : modelText.value);
+
                         const updates = {
                             ai_provider: provider,
                             ai_api_key: provider === 'cloudflare' ? null : document.getElementById('aiApiKey').value,
                             ai_base_url: provider === 'cloudflare' ? null : document.getElementById('aiBaseUrl').value,
-                            ai_model: provider === 'cloudflare' ? document.getElementById('cfModelSelect').value : document.getElementById('aiModel').value
+                            ai_model: selectedModel
                         };
 
                         const tenantId = window.SIMPATICO_CONFIG?.tenantId || compId;
