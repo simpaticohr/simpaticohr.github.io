@@ -628,6 +628,8 @@ async function callExternalLLM(cfg, messages, maxTokens, stream = false) {
     );
   }
 
+  console.log(`[BYOK-LLM] Calling provider=${cfg.provider}, model=${model}, url=${baseUrl}, keyPrefix=${cfg.apiKey?.substring(0, 8)}...`);
+
   const isAnthropic = cfg.provider === "anthropic" && baseUrl.includes("anthropic.com");
 
   if (isAnthropic) {
@@ -643,7 +645,10 @@ async function callExternalLLM(cfg, messages, maxTokens, stream = false) {
       ...(stream ? { stream: true } : {}),
     };
 
-    const res = await fetch(`${baseUrl}/messages`, {
+    const anthropicUrl = `${baseUrl}/messages`;
+    console.log(`[BYOK-LLM] Anthropic request: ${anthropicUrl}`);
+
+    const res = await fetch(anthropicUrl, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -655,6 +660,7 @@ async function callExternalLLM(cfg, messages, maxTokens, stream = false) {
 
     if (!res.ok) {
       const errText = await res.text().catch(() => "Unknown error");
+      console.error(`[BYOK-LLM] Anthropic FAILED: status=${res.status}, body=${errText.substring(0, 300)}`);
       throw new AppError(
         `Anthropic API error (${res.status}): ${errText.substring(0, 200)}`,
         HTTP.UNAVAILABLE,
@@ -665,13 +671,16 @@ async function callExternalLLM(cfg, messages, maxTokens, stream = false) {
     if (stream) return res.body;
 
     const data = await res.json();
+    console.log(`[BYOK-LLM] Anthropic SUCCESS: response_length=${data.content?.[0]?.text?.length || 0}`);
     return {
       response: data.content?.[0]?.text || "",
       usage: data.usage || null,
+      _provider: "anthropic",
+      _model: model,
     };
   }
 
-  // OpenAI-compatible endpoint (OpenAI, vLLM, custom, other)
+  // OpenAI-compatible endpoint (OpenAI, Gemini, DeepSeek, Kimi, vLLM, custom, other)
   const chatUrl = baseUrl.replace(/\/$/, "") + "/chat/completions";
   const body = {
     model,
@@ -680,17 +689,27 @@ async function callExternalLLM(cfg, messages, maxTokens, stream = false) {
     ...(stream ? { stream: true } : {}),
   };
 
+  // Build auth headers — Gemini uses x-goog-api-key, others use Bearer
+  const headers = { "Content-Type": "application/json" };
+  const isGemini = cfg.provider === "gemini" || baseUrl.includes("googleapis.com");
+  if (isGemini) {
+    // Gemini OpenAI-compatible endpoint accepts both, but x-goog-api-key is more reliable
+    headers["x-goog-api-key"] = cfg.apiKey;
+  } else {
+    headers["Authorization"] = `Bearer ${cfg.apiKey}`;
+  }
+
+  console.log(`[BYOK-LLM] Request: POST ${chatUrl}, model=${model}, isGemini=${isGemini}`);
+
   const res = await fetch(chatUrl, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${cfg.apiKey}`,
-    },
+    headers,
     body: JSON.stringify(body),
   });
 
   if (!res.ok) {
     const errText = await res.text().catch(() => "Unknown error");
+    console.error(`[BYOK-LLM] FAILED: status=${res.status}, url=${chatUrl}, body=${errText.substring(0, 300)}`);
     throw new AppError(
       `Custom AI API error (${res.status}): ${errText.substring(0, 200)}`,
       HTTP.UNAVAILABLE,
@@ -701,9 +720,13 @@ async function callExternalLLM(cfg, messages, maxTokens, stream = false) {
   if (stream) return res.body;
 
   const data = await res.json();
+  const responseText = data.choices?.[0]?.message?.content || "";
+  console.log(`[BYOK-LLM] SUCCESS: provider=${cfg.provider}, model=${model}, response_length=${responseText.length}`);
   return {
-    response: data.choices?.[0]?.message?.content || "",
+    response: responseText,
     usage: data.usage || null,
+    _provider: cfg.provider,
+    _model: model,
   };
 }
 
@@ -1262,8 +1285,11 @@ route("GET", "/billing/subscription", handleGetSubscription);
 route("POST", "/billing/cancel", handleCancelSubscription);
 route("GET", "/billing/transactions", handleListTransactions);
 
-// ── BYOK AI Diagnostics ──
+// ── BYOK AI Diagnostics & Config ──
 route("GET", "/ai/byok-test", handleBYOKTest);
+route("POST", "/ai/byok-cache-clear", handleBYOKCacheClear);
+route("POST", "/ai/byok-config", handleBYOKConfigSave);
+route("GET", "/ai/byok-config", handleBYOKConfigGet);
 
 // ===============================================================
 // § 13.  MAIN ENTRY POINT
@@ -4000,26 +4026,75 @@ async function handleInterviewQuestion(request, env, ctx) {
   let tenantId = ctx.tenantId;
   if ((!tenantId || tenantId === "default") && token && env.SUPABASE_URL) {
     try {
-      const ivRes = await sbFetch(env, "GET",
-        `/rest/v1/interviews?token=eq.${encodeURIComponent(token)}&select=company_id&limit=1`,
-        null, false, "default");
+      // Direct Supabase REST call (bypasses tenant-scoped sbFetch) to resolve company_id from token
+      const url = `${env.SUPABASE_URL}/rest/v1/interviews?token=eq.${encodeURIComponent(token)}&select=company_id&limit=1`;
+      const ivRes = await fetch(url, {
+        headers: {
+          apikey: env.SUPABASE_SERVICE_KEY,
+          Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
+        },
+      });
       if (ivRes.ok) {
         const rows = await ivRes.json();
-        if (rows?.[0]?.company_id) tenantId = rows[0].company_id;
+        if (rows?.[0]?.company_id) {
+          tenantId = rows[0].company_id;
+          console.log(`[interview] Resolved tenant from token: ${tenantId}`);
+        }
       }
     } catch (e) { console.warn("[interview] tenant lookup failed:", e.message); }
   }
 
+  console.log(`[interview] Generating question: tenantId=${tenantId}, token_hint=${token?.slice(0, 8) || 'none'}`);
+
   // Use tenant's custom AI if configured (BYOK), otherwise use platform default (70B)
   // This enables enterprise customers to use GPT-4o, Claude, Gemini etc. for interviews
   const maxTok = Math.min(Math.max(parseInt(max_tokens) || 600, 100), 2048);
-  const result = await runLLM(env, tenantId, messages, maxTok);
+
+  let result;
+  let modelUsed = "platform-default";
+  let fallbackUsed = false;
+
+  try {
+    result = await runLLM(env, tenantId, messages, maxTok);
+    modelUsed = result?._model || result?._provider || "byok";
+  } catch (aiErr) {
+    console.error(`[interview] LLM call FAILED (tenant=${tenantId}): ${aiErr.message}`);
+    // If BYOK fails, attempt fallback to platform default so interview isn't broken
+    if (tenantId && tenantId !== "default") {
+      console.warn(`[interview] BYOK failed (${aiErr.message}), falling back to platform default model`);
+      fallbackUsed = true;
+      try {
+        result = await runLLM(env, "default", messages, maxTok);
+        modelUsed = "platform-fallback";
+      } catch (fallbackErr) {
+        console.error("[interview] Fallback LLM also failed:", fallbackErr.message);
+        throw new AppError(
+          `AI interview engine temporarily unavailable: ${aiErr.message}`,
+          HTTP.UNAVAILABLE,
+          "AI_UNAVAILABLE",
+        );
+      }
+    } else {
+      throw new AppError(
+        `AI interview engine temporarily unavailable: ${aiErr.message}`,
+        HTTP.UNAVAILABLE,
+        "AI_UNAVAILABLE",
+      );
+    }
+  }
+
+  console.log(`[interview] Question generated: model=${modelUsed}, fallback=${fallbackUsed}, tenant=${tenantId}`);
 
   await audit(env, ctx, "interview.ai_question", "interviews", null, {
     token_hint: token?.slice(0, 8),
     tenant_resolved: tenantId,
+    model_used: modelUsed,
+    fallback_used: fallbackUsed,
   });
-  return apiResponse({ response: result.response });
+  return apiResponse({
+    response: result.response,
+    _debug: { model: modelUsed, tenant: tenantId, fallback: fallbackUsed },
+  });
 }
 
 async function handleExpenseOCR(request, env, ctx) {
@@ -6961,7 +7036,8 @@ async function handleBYOKTest(request, env, ctx) {
   requireAuth(ctx);
   const tenantId = ctx.tenantId;
 
-  // 1. Fetch AI config
+  // 1. Clear cache and re-fetch to ensure we test the latest saved config
+  delete _aiConfigCache[tenantId];
   const aiConfig = await getCompanyAIConfig(env, tenantId);
 
   if (!aiConfig) {
@@ -7019,4 +7095,118 @@ async function handleBYOKTest(request, env, ctx) {
       message: `Custom AI (${aiConfig.provider}) failed: ${err.message}`,
     }, HTTP.OK); // Return 200 with error details for diagnostic visibility
   }
+}
+
+/**
+ * POST /ai/byok-cache-clear — Invalidate cached BYOK config for the tenant.
+ * Call this after saving AI settings so the next AI request uses fresh config.
+ */
+async function handleBYOKCacheClear(request, env, ctx) {
+  requireAuth(ctx);
+  const tenantId = ctx.tenantId;
+  if (tenantId && _aiConfigCache[tenantId]) {
+    delete _aiConfigCache[tenantId];
+    console.log(`[BYOK] Cache cleared for tenant=${tenantId}`);
+  }
+  return apiResponse({ cleared: true, tenant: tenantId });
+}
+
+/**
+ * POST /ai/byok-config — Save BYOK AI configuration.
+ * Uses service key to bypass RLS (dashboard direct save may be blocked by RLS).
+ * Body: { ai_provider, ai_api_key, ai_base_url, ai_model }
+ */
+async function handleBYOKConfigSave(request, env, ctx) {
+  requireAuth(ctx);
+  const tenantId = ctx.tenantId;
+  if (!tenantId || tenantId === "default") {
+    throw new ValidationError("Tenant ID required to save AI config");
+  }
+
+  const body = await safeJson(request);
+  const updates = {
+    ai_provider: body.ai_provider || null,
+    ai_api_key: body.ai_api_key || null,
+    ai_base_url: body.ai_base_url || null,
+    ai_model: body.ai_model || null,
+  };
+
+  console.log(`[BYOK-Save] Saving config for tenant=${tenantId}: provider=${updates.ai_provider}, model=${updates.ai_model}`);
+
+  // Use service key to bypass RLS
+  const url = `${env.SUPABASE_URL}/rest/v1/companies?id=eq.${tenantId}`;
+  const res = await fetch(url, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+      apikey: env.SUPABASE_SERVICE_KEY,
+      Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
+      Prefer: "return=representation",
+    },
+    body: JSON.stringify(updates),
+  });
+
+  if (!res.ok) {
+    const errText = await res.text().catch(() => "Unknown error");
+    console.error(`[BYOK-Save] FAILED: status=${res.status}, body=${errText}`);
+    throw new AppError(`Failed to save AI config: ${errText.substring(0, 200)}`, res.status, "DB_ERROR");
+  }
+
+  const rows = await res.json();
+  console.log(`[BYOK-Save] SUCCESS: updated ${rows?.length || 0} row(s) for tenant=${tenantId}`);
+
+  // Clear the in-memory cache so next request uses fresh config
+  delete _aiConfigCache[tenantId];
+
+  await audit(env, ctx, "byok.config_saved", "companies", tenantId, {
+    provider: updates.ai_provider,
+    model: updates.ai_model,
+  });
+
+  return apiResponse({
+    saved: true,
+    tenant: tenantId,
+    provider: updates.ai_provider,
+    model: updates.ai_model,
+    rows_updated: rows?.length || 0,
+  });
+}
+
+/**
+ * GET /ai/byok-config — Read current BYOK AI configuration for the tenant.
+ * Uses service key to bypass RLS.
+ */
+async function handleBYOKConfigGet(request, env, ctx) {
+  requireAuth(ctx);
+  const tenantId = ctx.tenantId;
+  if (!tenantId || tenantId === "default") {
+    return apiResponse({ configured: false, message: "No tenant ID" });
+  }
+
+  const url = `${env.SUPABASE_URL}/rest/v1/companies?id=eq.${tenantId}&select=ai_provider,ai_base_url,ai_model&limit=1`;
+  const res = await fetch(url, {
+    headers: {
+      apikey: env.SUPABASE_SERVICE_KEY,
+      Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
+    },
+  });
+
+  if (!res.ok) {
+    console.error(`[BYOK-Get] Failed to read config: ${res.status}`);
+    return apiResponse({ configured: false, error: "Failed to read config" });
+  }
+
+  const rows = await res.json();
+  const row = rows?.[0];
+  if (!row || !row.ai_provider) {
+    return apiResponse({ configured: false, provider: "cloudflare", model: "platform-default" });
+  }
+
+  return apiResponse({
+    configured: true,
+    provider: row.ai_provider,
+    model: row.ai_model || "(default)",
+    base_url: row.ai_base_url || "(provider default)",
+    has_api_key: true, // Don't expose the key itself
+  });
 }
