@@ -6,6 +6,8 @@
     <title>Candidate Registration - SimpaticoHR</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+    <!-- Cloudflare Turnstile (free bot protection) -->
+    <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: 'Inter', sans-serif; min-height: 100vh; display: flex; background: #F3F4F6; }
@@ -259,6 +261,17 @@
                     <span id="submitText">Create Account</span>
                 </button>
 
+                <!-- Cloudflare Turnstile Widget -->
+                <div id="turnstileWrapper" style="margin-top: 12px; display: flex; justify-content: center;">
+                    <div class="cf-turnstile" 
+                         data-sitekey="0x4AAAAAADJk9RJYysWokfpc"
+                         data-callback="onTurnstileSuccess"
+                         data-theme="light"
+                         data-size="normal">
+                    </div>
+                </div>
+                <p style="text-align:center;font-size:0.72rem;color:#9CA3AF;margin-top:8px;"><i class="fas fa-shield-halved"></i> Protected by Cloudflare Turnstile</p>
+
             </form>
 
             <div class="auth-links">
@@ -276,6 +289,36 @@
 <script src="../js/supabase-client.js"></script>
 <script>
     const WORKER_URL = window.SIMPATICO_CONFIG?.workerUrl || 'https://simpatico-hr-ats.simpaticohrconsultancy.workers.dev';
+
+    let turnstileToken = null;
+
+    // Cloudflare Turnstile callback
+    function onTurnstileSuccess(token) {
+        turnstileToken = token;
+        console.log('[Turnstile] Verified successfully');
+    }
+
+    // ── Disposable Email Blocklist (client-side fast check) ──
+    const DISPOSABLE_DOMAINS = new Set([
+        'mailinator.com','guerrillamail.com','tempmail.com','temp-mail.org',
+        '10minutemail.com','throwaway.email','yopmail.com','yopmail.fr',
+        'dispostable.com','maildrop.cc','mailnesia.com','getairmail.com',
+        'fakeinbox.com','trashmail.com','trashmail.de','trashmail.me',
+        'trashmail.net','emailondeck.com','mohmal.com','getnada.com',
+        'burnermail.io','tempmailo.com','emailfake.com','crazymailing.com',
+        'sharklasers.com','guerrillamail.de','mailtemp.info','discard.email',
+        'discardmail.com','grr.la','guerrillamail.net','mailexpire.com',
+        'mailcatch.com','mailsac.com','spamgourmet.com','mytemp.email',
+        'inboxbear.com','tempmailaddress.com','nada.email','pokemail.net',
+        'spam4.me','temp-mail.io','tempail.com','disposable-email.ml',
+        'mintemail.com','tempinbox.com','mailnull.com','spambox.us',
+        'trashymail.com','oneoffemail.com','meltmail.com'
+    ]);
+
+    function isDisposableEmail(email) {
+        const domain = email.split('@')[1]?.toLowerCase();
+        return domain ? DISPOSABLE_DOMAINS.has(domain) : false;
+    }
 
     function getDB() {
         return window.SimpaticoDB || (typeof getSupabaseClient === 'function' ? getSupabaseClient() : null);
@@ -298,6 +341,12 @@
         if (!fullName || !email || !phone) { toast('Please fill in all required fields', 'error'); return; }
         if (password.length < 8) { toast('Password must be at least 8 characters', 'error'); return; }
         if (password !== confirm) { toast('Passwords do not match', 'error'); return; }
+
+        // ── Anti-Abuse: Disposable email check ──
+        if (isDisposableEmail(email)) {
+            toast('Please use a valid email. Temporary/disposable emails are not allowed.', 'error');
+            return;
+        }
 
         const db = getDB();
         if (!db) { toast('System not ready — please refresh', 'error'); return; }

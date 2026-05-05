@@ -1258,9 +1258,10 @@ route("GET", "/analytics/report", handleAnalyticsReport);
 route("GET", "/analytics/headcount-trend", handleHeadcountTrend);
 route("GET", "/analytics/attrition", handleAttritionReport);
 
-// Registration & Welcome
+// Registration & Welcome (with anti-abuse protection)
 route("POST", "/companies/register", handleCompanyRegister);
 route("POST", "/email/welcome", handleWelcomeEmail);
+route("POST", "/auth/verify-turnstile", handleVerifyTurnstile);
 
 // ── Super Admin (Role-Protected) ──
 route("GET", "/admin/verify", handleAdminVerify);
@@ -5386,6 +5387,164 @@ async function handleWhatsAppNotification(request, env, ctx) {
 }
 
 // ==========================================================================================================================================
+// § 16b.  ANTI-ABUSE UTILITIES (Turnstile, Disposable Email, Rate Limiting)
+// ==========================================================================================================================================
+
+// ── Cloudflare Turnstile Server-Side Verification ──
+async function verifyTurnstileToken(token, ip, env) {
+  if (!token || !env.TURNSTILE_SECRET) return true; // Skip if not configured
+  try {
+    const res = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        secret: env.TURNSTILE_SECRET,
+        response: token,
+        remoteip: ip,
+      }),
+    });
+    const result = await res.json();
+    console.log("[Turnstile] Verification result:", result.success, result["error-codes"]);
+    return result.success === true;
+  } catch (e) {
+    console.error("[Turnstile] Verification error:", e.message);
+    return true; // Fail-open: don't block users if Turnstile API is down
+  }
+}
+
+// ── Turnstile Verification Endpoint (for frontend pre-check) ──
+async function handleVerifyTurnstile(request, env, ctx) {
+  const { token } = await safeJson(request);
+  if (!token) throw new ValidationError("token is required");
+  const success = await verifyTurnstileToken(token, ctx.ip, env);
+  return apiResponse({ success, ip: ctx.ip });
+}
+
+// ── Disposable Email Domain Blocklist ──
+// Comprehensive list of known throwaway/temp email providers
+const DISPOSABLE_EMAIL_DOMAINS = new Set([
+  // Major disposable services
+  "mailinator.com", "guerrillamail.com", "guerrillamail.de", "guerrillamail.net",
+  "guerrillamail.org", "guerrilla.ml", "grr.la", "sharklasers.com",
+  "guerrillamailblock.com", "pokemail.net", "spam4.me",
+  "tempmail.com", "temp-mail.org", "temp-mail.io", "tempail.com",
+  "10minutemail.com", "10minutemail.net", "10minutemail.org",
+  "throwaway.email", "throwaway.me",
+  "yopmail.com", "yopmail.fr", "yopmail.net", "yopmail.gq",
+  "dispostable.com", "disposable-email.ml",
+  "maildrop.cc", "mailnesia.com", "mailtemp.info",
+  "getairmail.com", "fakeinbox.com", "mailexpire.com",
+  "discard.email", "discardmail.com", "discardmail.de",
+  "trashmail.com", "trashmail.de", "trashmail.me", "trashmail.net",
+  "trashmail.org", "trashinbox.net",
+  "emailondeck.com", "mintemail.com", "tempinbox.com",
+  "mohmal.com", "mohmal.in", "mohmal.tech",
+  // Indian-popular disposable services
+  "mailnator.com", "spamgourmet.com", "mytemp.email",
+  "tempmailaddress.com", "burnermail.io", "inboxbear.com",
+  "tempmailo.com", "emailfake.com", "crazymailing.com",
+  // Additional common ones
+  "getnada.com", "nada.email", "nada.ltd",
+  "harakirimail.com", "binkmail.com", "bobmail.info",
+  "chammy.info", "devnullmail.com", "dingbone.com",
+  "fudgerub.com", "lookugly.com", "mailinater.com",
+  "mailinator.net", "mailinator2.com", "mailincubator.com",
+  "mailismagic.com", "mailnull.com", "mailshell.com",
+  "mailzilla.com", "nomail.xl.cx", "nowmymail.com",
+  "pookmail.com", "shieldedmail.com", "sogetthis.com",
+  "soodonims.com", "spamfree24.org", "spamherelots.com",
+  "tempomail.fr", "thankyou2010.com", "veryreallyfakeaddress.com",
+  "wetrainbayarea.com", "wetrainbayarea.org", "wh4f.org",
+  "whyspam.me", "wuzup.net", "wuzupmail.net",
+  "jetable.org", "jourrapide.com", "kasmail.com",
+  "link2mail.net", "litedrop.com", "lol.ovpn.to",
+  "lovemeleaveme.com", "lr78.com", "mailbucket.org",
+  "mailcatch.com", "maileater.com", "mailforspam.com",
+  "mailhazard.com", "mailhazard.us", "mailhz.me",
+  "mailimate.com", "mailin8r.com", "mailinator.us",
+  "mailmate.com", "mailmoat.com", "mailms.com",
+  "mailquack.com", "mailsac.com", "mailscrap.com",
+  "mailseal.de", "mailsiphon.com", "mailslite.com",
+  "mailtemporaire.com", "mailtemporaire.fr",
+  "mailzi.ru", "mailzilla.com", "mailzilla.org",
+  "meltmail.com", "mfsa.ru", "mfsa.info",
+  "mt2015.com", "mytempemail.com",
+  "nobulk.com", "noclickemail.com", "nogmailspam.info",
+  "nomail.pw", "nomail.xl.cx",
+  "objectmail.com", "obobbo.com", "odaymail.com",
+  "one-time.email", "oneoffemail.com", "onewaymail.com",
+  "otherinbox.com", "owlpic.com",
+  "proxymail.eu", "punkass.com", "putthisinyouremail.com",
+  "reallymymail.com", "recode.me", "recursor.net",
+  "regbypass.com", "rhyta.com",
+  "s0ny.net", "safe-mail.net",
+  "safersignup.de", "safetymail.info",
+  "sandelf.de", "saynotospams.com",
+  "scatmail.com", "selfdestructingmail.com",
+  "shiftmail.com", "shortmail.net",
+  "sibmail.com", "skeefmail.com", "slaskpost.se",
+  "slipry.net", "slopsbox.com", "smashmail.de",
+  "spamavert.com", "spambob.com", "spambob.net",
+  "spambob.org", "spambog.com", "spambog.de",
+  "spambog.ru", "spambox.us", "spamcannon.com",
+  "spamcannon.net", "spamcero.com", "spamcon.org",
+  "spamcorptastic.com", "spamcowboy.com",
+  "spamcowboy.net", "spamcowboy.org",
+  "spamday.com", "spamex.com", "spamfighter.cf",
+  "spamfighter.ga", "spamfighter.gq", "spamfighter.ml",
+  "spamfighter.tk",
+  "spamfree.eu", "spamfree24.com", "spamfree24.de",
+  "spamfree24.eu", "spamfree24.info", "spamfree24.net",
+  "spamgoes.in", "spamherelots.com",
+  "spamhereplease.com", "spamhole.com",
+  "spamify.com", "spaminator.de",
+  "spamkill.info", "spaml.com", "spaml.de",
+  "spammotel.com", "spamobox.com",
+  "spamoff.de", "spamslicer.com",
+  "spamspot.com", "spamstack.net",
+  "spamthis.co.uk", "spamthisplease.com",
+  "spamtrail.com", "spamtrap.ro",
+  "tempr.email", "tempsky.com",
+  "thankyou2010.com", "thisisnotmyrealemail.com",
+  "trash-amil.com", "trash-mail.at",
+  "trash-mail.com", "trash-mail.de",
+  "trash2009.com", "trashemail.de",
+  "trashymail.com", "trashymail.net",
+  "trickmail.net", "trillianpro.com",
+  "turual.com", "twinmail.de",
+  "tyldd.com", "uggsrock.com",
+  "umail.net", "upliftnow.com",
+  "venompen.com", "veryreallyfakeaddress.com",
+  "viditag.com", "viewcastmedia.com",
+  "viewcastmedia.net", "viewcastmedia.org",
+  "wegwerfadresse.de", "wegwerfmail.de",
+  "wegwerfmail.net", "wegwerfmail.org",
+  "wetrainbayarea.com", "wetrainbayarea.org",
+  "wh4f.org", "whatiaas.com",
+  "whatpaas.com", "whyspam.me",
+  "wikidocuslice.com", "willhackforfood.biz",
+  "willselfdestruct.com", "winemaven.info",
+  "wronghead.com", "wuzup.net",
+  "wuzupmail.net", "wwwnew.eu",
+  "xagloo.com", "xemaps.com",
+  "xents.com", "xjoi.com",
+  "xmaily.com", "xoxy.net",
+  "yapped.net", "yep.it",
+  "yogamaven.com", "yopmail.com",
+  "yopmail.fr", "yuurok.com",
+  "zehnminuten.de", "zehnminutenmail.de",
+  "zippymail.info", "zoaxe.com",
+  "zoemail.org",
+]);
+
+function isDisposableEmail(email) {
+  if (!email) return false;
+  const domain = email.split("@")[1]?.toLowerCase();
+  if (!domain) return false;
+  return DISPOSABLE_EMAIL_DOMAINS.has(domain);
+}
+
+// ==========================================================================================================================================
 // § 17.  UTILITY FUNCTIONS
 // ==========================================================================================================================================
 
@@ -5717,9 +5876,42 @@ async function handleCompanyRegister(request, env, ctx) {
     admin_name,
     admin_phone,
     slug,
+    turnstile_token,
   } = body;
 
   if (!name || !email) throw new ValidationError("name and email are required");
+
+  // ── Anti-Abuse Layer 1: Turnstile Bot Protection ──
+  if (turnstile_token && env.TURNSTILE_SECRET) {
+    const turnstileOk = await verifyTurnstileToken(turnstile_token, ctx.ip, env);
+    if (!turnstileOk) {
+      throw new AppError("Bot verification failed. Please try again.", 403, "TURNSTILE_FAILED");
+    }
+  }
+
+  // ── Anti-Abuse Layer 2: Block Disposable Emails ──
+  if (isDisposableEmail(email)) {
+    throw new AppError(
+      "Please use a valid business or personal email. Temporary/disposable emails are not allowed.",
+      400,
+      "DISPOSABLE_EMAIL"
+    );
+  }
+
+  // ── Anti-Abuse Layer 3: IP-based Signup Rate Limiting ──
+  if (env.HR_KV) {
+    const signupKey = `signup_limit:${ctx.ip}`;
+    const existingCount = parseInt(await env.HR_KV.get(signupKey) || "0");
+    if (existingCount >= 3) {
+      throw new AppError(
+        "Too many registrations from this location. Please try again later or contact support.",
+        429,
+        "SIGNUP_RATE_LIMITED"
+      );
+    }
+    // Increment after validation passes (will be committed after successful registration)
+    await env.HR_KV.put(signupKey, String(existingCount + 1), { expirationTtl: 86400 });
+  }
 
   // Insert company using service_role key (bypasses RLS)
   const compRes = await sbFetch(
