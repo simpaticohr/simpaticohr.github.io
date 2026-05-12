@@ -2921,32 +2921,31 @@ ${Object.entries(this.skillsCovered).map(([s, d]) => `- ${s}: Score ${d.score}/1
         // ══════════════════════════════════════════════════════════════
         // Track whether TTS has been unlocked by a user gesture
         let _ttsUnlocked = false;
-
-        // Unlock TTS with a real utterance (empty strings are silently ignored by Chrome)
-        function unlockTTS() {
-            try {
-                state.voice.synth.cancel(); // clear any stale queue
-                const warmup = new SpeechSynthesisUtterance('.');
-                warmup.volume = 0.01;  // near-silent but non-zero (volume 0 may not init audio pipeline)
-                warmup.rate = 10;      // fastest possible
-                warmup.pitch = 0.01;
-                if (state.voice.preferredVoice) warmup.voice = state.voice.preferredVoice;
-                warmup.lang = state.interviewLanguage || 'en-IN';
-                warmup.onend = () => { _ttsUnlocked = true; console.log('[TTS] ✓ Engine unlocked via warmup'); };
-                warmup.onerror = () => { console.warn('[TTS] Warmup utterance error — will retry'); };
-                state.voice.synth.speak(warmup);
-                console.log('[TTS] Warmup utterance dispatched (text=".", vol=0.01)');
-            } catch (e) {
-                console.warn('[TTS] Warmup failed:', e);
-            }
-        }
-
         async function startSession() {
-            // ── CRITICAL: Warm up TTS engine on user gesture ──
-            // Chrome's autoplay policy requires the FIRST speechSynthesis.speak()
-            // to happen during a user gesture callback. Must use NON-EMPTY text
-            // (empty strings are silently ignored) with non-zero volume.
-            unlockTTS();
+            // STEP 1: UNLOCK TTS ENGINE ON USER GESTURE (synchronous)
+            // Chrome requires speak() during a click handler callback.
+            // CRITICAL: NO synth.cancel() before speak() - it kills the engine
+            try {
+                const synth = state.voice.synth;
+                const voices = synth.getVoices();
+                console.log('[TTS-Init] Voices:', voices.length,
+                    'preferred:', state.voice.preferredVoice?.name || 'NONE',
+                    'synth:', synth.speaking, synth.pending, synth.paused);
+
+                const warmup = new SpeechSynthesisUtterance('test');
+                warmup.volume = 0.01;
+                warmup.rate = 10;
+                warmup.pitch = 0.01;
+                // Intentionally NOT setting voice/lang on warmup
+                warmup.onstart = () => { console.log('[TTS-Init] Warmup STARTED'); };
+                warmup.onend = () => { _ttsUnlocked = true; console.log('[TTS-Init] Warmup ENDED - unlocked'); };
+                warmup.onerror = (e) => { console.warn('[TTS-Init] Warmup error:', e.error); _ttsUnlocked = true; };
+                synth.speak(warmup);
+                console.log('[TTS-Init] Warmup dispatched');
+            } catch (e) {
+                console.error('[TTS-Init] Exception:', e);
+                _ttsUnlocked = true;
+            }
 
             // Request screen share
             if (!state.media.screen) {
@@ -2973,11 +2972,6 @@ ${Object.entries(this.skillsCovered).map(([s, d]) => `- ${s}: Score ${d.score}/1
                 }
             }
 
-            // Re-unlock TTS after getDisplayMedia (the system dialog breaks gesture context)
-            if (!_ttsUnlocked) {
-                console.log('[TTS] Re-unlocking after screen share dialog...');
-                unlockTTS();
-            }
 
             document.getElementById('setupOverlay').style.display = 'none';
             document.getElementById('interviewApp').style.display = 'flex';
@@ -3006,10 +3000,17 @@ ${Object.entries(this.skillsCovered).map(([s, d]) => `- ${s}: Score ${d.score}/1
             // Wait for TTS warmup to actually complete (onend sets _ttsUnlocked)
             // The '.' utterance at rate=10 finishes in ~50ms, but we wait up to 2s as safety
             const ttsWaitStart = Date.now();
-            while (!_ttsUnlocked && (Date.now() - ttsWaitStart) < 2000) {
+            while (!_ttsUnlocked && (Date.now() - ttsWaitStart) < 3000) {
                 await sleep(50);
             }
-            console.log('[TTS] Warmup wait done, unlocked=', _ttsUnlocked, 'waited=', Date.now() - ttsWaitStart, 'ms');
+            console.log('[TTS-Init] Ready to speak. unlocked=', _ttsUnlocked,
+                'waited=', Date.now() - ttsWaitStart, 'ms',
+                'synth.speaking=', state.voice.synth.speaking,
+                'voices=', state.voice.synth.getVoices().length);
+
+            if (!_ttsUnlocked) {
+                console.warn('[TTS-Init] WARNING: warmup never completed. Speaking anyway...');
+            }
 
             await aiSpeak(introQuestion);
         }
