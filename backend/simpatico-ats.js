@@ -736,6 +736,7 @@ async function callExternalLLM(cfg, messages, maxTokens, stream = false) {
  * Returns { response: string, usage?: object }
  */
 const CF_DEFAULT_MODEL = "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
+const CF_FAST_MODEL    = "@cf/zhipu/glm-4.7-flash";        // 100+ languages, 131K ctx, much faster for multilingual
 const CF_LIGHT_MODEL   = "@cf/meta/llama-3.1-8b-instruct";
 
 async function runLLM(env, tenantId, messages, maxTokens = 1024) {
@@ -4100,34 +4101,80 @@ async function handleInterviewQuestion(request, env, ctx) {
   });
 }
 
-// ── TTS via Cloudflare Workers AI (Deepgram Aura) ──────────────────────────
+// ── TTS via Cloudflare Workers AI ──────────────────────────────────────────
+// Selects the best TTS model based on language:
+//   English  → Deepgram Aura 2 (upgraded, context-aware)
+//   Spanish  → Deepgram Aura 2 ES
+//   French, Japanese, Korean, Chinese → MeloTTS (multi-lingual)
+//   Other    → Deepgram Aura 2 EN fallback (text should be English)
+const TTS_MODEL_MAP = {
+  en: { model: "@cf/deepgram/aura-2-en", type: "deepgram" },
+  es: { model: "@cf/deepgram/aura-2-es", type: "deepgram" },
+  fr: { model: "@cf/myshell-ai/melotts",  type: "melotts" },
+  ja: { model: "@cf/myshell-ai/melotts",  type: "melotts" },
+  ko: { model: "@cf/myshell-ai/melotts",  type: "melotts" },
+  zh: { model: "@cf/myshell-ai/melotts",  type: "melotts" },
+};
+const TTS_DEFAULT = { model: "@cf/deepgram/aura-2-en", type: "deepgram" };
+
 async function handleTTS(request, env, ctx) {
-  const { text } = await safeJson(request);
+  const body = await safeJson(request);
+  const { text, lang } = body;
   if (!text || typeof text !== 'string' || text.trim().length === 0) {
     throw new ValidationError("text is required");
   }
 
   if (!env.AI) throw new ServiceUnavailableError("AI");
 
-  // Limit text to prevent abuse
   const cleanText = text.trim().slice(0, 5000);
-  console.log(`[TTS] Generating speech: ${cleanText.length} chars`);
+  const langBase = (lang || 'en').split('-')[0].toLowerCase();
+  const ttsConfig = TTS_MODEL_MAP[langBase] || TTS_DEFAULT;
+
+  console.log(`[TTS] Generating speech: ${cleanText.length} chars, lang=${langBase}, model=${ttsConfig.model}`);
 
   try {
-    const audioResponse = await env.AI.run("@cf/deepgram/aura-1", {
-      text: cleanText,
-    });
+    if (ttsConfig.type === "melotts") {
+      // MeloTTS returns { audio: base64_string }
+      const result = await env.AI.run(ttsConfig.model, {
+        prompt: cleanText,
+        lang: langBase,
+      });
 
-    // audioResponse is an ArrayBuffer or ReadableStream
-    const headers = {
-      ...CORS_HEADERS,
-      "Content-Type": "audio/mpeg",
-      "Cache-Control": "public, max-age=3600",
-    };
-
-    return new Response(audioResponse, { status: 200, headers });
+      if (result && result.audio) {
+        const binaryString = atob(result.audio);
+        const bytes = new Uint8Array(binaryString.length);
+        for (let i = 0; i < binaryString.length; i++) {
+          bytes[i] = binaryString.charCodeAt(i);
+        }
+        return new Response(bytes.buffer, {
+          status: 200,
+          headers: { ...CORS_HEADERS, "Content-Type": "audio/mpeg", "Cache-Control": "public, max-age=3600" },
+        });
+      }
+      throw new Error("MeloTTS returned no audio");
+    } else {
+      // Deepgram Aura 2 — returns audio stream directly
+      const audioResponse = await env.AI.run(ttsConfig.model, { text: cleanText });
+      return new Response(audioResponse, {
+        status: 200,
+        headers: { ...CORS_HEADERS, "Content-Type": "audio/mpeg", "Cache-Control": "public, max-age=3600" },
+      });
+    }
   } catch (err) {
-    console.error(`[TTS] AI.run error: ${err.message}`);
+    console.error(`[TTS] AI.run error (${ttsConfig.model}): ${err.message}`);
+    // Fallback: try Aura 2 EN if a language-specific model failed
+    if (ttsConfig.model !== TTS_DEFAULT.model) {
+      console.log(`[TTS] Retrying with fallback model: ${TTS_DEFAULT.model}`);
+      try {
+        const fallback = await env.AI.run(TTS_DEFAULT.model, { text: cleanText });
+        return new Response(fallback, {
+          status: 200,
+          headers: { ...CORS_HEADERS, "Content-Type": "audio/mpeg", "Cache-Control": "public, max-age=3600" },
+        });
+      } catch (e2) {
+        console.error(`[TTS] Fallback also failed: ${e2.message}`);
+      }
+    }
     throw new AppError(`TTS generation failed: ${err.message}`, 500, "TTS_ERROR");
   }
 }
