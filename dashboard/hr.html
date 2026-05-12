@@ -1891,6 +1891,25 @@
                         });
 
                         const result = await res.json();
+
+                        // Handle HTTP-level errors (auth, validation, server errors)
+                        if (!res.ok) {
+                            // Worker returns { success: false, error: { code, message } }
+                            const errMsg = result?.error?.message || result?.error || `Server error (${res.status})`;
+                            const errCode = result?.error?.code || '';
+                            statusDiv.style.background = '#fef2f2';
+                            statusDiv.style.border = '1px solid #fecaca';
+                            statusDiv.style.color = '#991b1b';
+                            if (res.status === 401 || errCode === 'AUTH_ERROR') {
+                                statusDiv.innerHTML = '<i class="fas fa-lock" style="font-size:16px;"></i> <span>Authentication required — please log in again</span>';
+                            } else if (res.status === 403) {
+                                statusDiv.innerHTML = '<i class="fas fa-ban" style="font-size:16px;"></i> <span>Permission denied — admin access required</span>';
+                            } else {
+                                statusDiv.innerHTML = '<i class="fas fa-times-circle" style="font-size:16px;"></i> <span>' + (typeof errMsg === 'string' ? errMsg : JSON.stringify(errMsg)) + '</span>';
+                            }
+                            return;
+                        }
+
                         const data = result.data || result;
 
                         if (data.connected) {
@@ -1967,11 +1986,12 @@
                                 statusDiv.innerHTML += '<br><span style="font-weight:400;font-size:12px;">' + data.message + '</span>';
                             }
                         } else {
-                            // FAILED — show red badge
+                            // FAILED — show red badge with proper error extraction
+                            const errDetail = typeof data.error === 'object' ? (data.error.message || JSON.stringify(data.error)) : (data.error || 'Unknown error');
                             statusDiv.style.background = '#fef2f2';
                             statusDiv.style.border = '1px solid #fecaca';
                             statusDiv.style.color = '#991b1b';
-                            statusDiv.innerHTML = '<i class="fas fa-times-circle" style="font-size:16px;"></i> <span>Connection Failed: ' + (data.error || 'Unknown error') + '</span>';
+                            statusDiv.innerHTML = '<i class="fas fa-times-circle" style="font-size:16px;"></i> <span>Connection Failed: ' + errDetail + '</span>';
                         }
                     } catch (err) {
                         statusDiv.style.background = '#fef2f2';

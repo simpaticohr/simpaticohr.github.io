@@ -7570,7 +7570,10 @@ async function handleBYOKValidate(request, env, ctx) {
     return apiResponse({ connected: true, provider, models, total: models.length });
 
   } catch (err) {
-    console.error(`[BYOK-Validate] Error: ${err.message}`);
-    return apiResponse({ connected: false, provider, error: `Connection failed: ${err.message}` });
+    console.error(`[BYOK-Validate] Error: ${err.name}: ${err.message}`, err.stack?.substring(0, 300));
+    const errMsg = err.message && err.message !== 'error'
+      ? err.message
+      : `Could not reach ${body?.provider || 'provider'} API — check your API key and network`;
+    return apiResponse({ connected: false, provider: body?.provider, error: `Connection failed: ${errMsg}` });
   }
 }
