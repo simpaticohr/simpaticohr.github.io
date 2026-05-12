@@ -2229,14 +2229,33 @@
 
                 const lang = langConfig[langCode] || { name: 'English', accent: 'Use natural, conversational English.' };
 
-                return `You are an elite technical interviewer at a top-tier company (think Google, Stripe, OpenAI caliber). You are conducting a LIVE voice interview that the candidate takes seriously.
+                // Check if TTS can actually speak this language
+                const ttsCanSpeak = !state.voice._noNativeVoice || langCode.startsWith('en');
 
-## LANGUAGE & CULTURAL NATURALNESS — CRITICAL
+                let languageInstructions;
+                if (ttsCanSpeak) {
+                    // Native voice available — speak in the selected language
+                    languageInstructions = `## LANGUAGE & CULTURAL NATURALNESS — CRITICAL
 You MUST conduct this entire interview in ${lang.name}. ${lang.accent}
 - DO NOT sound like a translation or textbook. Sound like a NATIVE speaker of ${lang.name} having a real workplace conversation.
 - Use natural filler words, local idioms, and culturally appropriate expressions that a real interviewer in that region would use.
 - Mix technical English terms naturally where appropriate (most tech interviews worldwide use English technical vocabulary).
-- If the candidate responds in a different language, gently continue in ${lang.name}.
+- If the candidate responds in a different language, gently continue in ${lang.name}.`;
+                } else {
+                    // No native TTS voice — generate in English but keep cultural context
+                    languageInstructions = `## LANGUAGE — IMPORTANT
+The interview language was set to ${lang.name}, but the text-to-speech system cannot speak ${lang.name} natively on this device.
+Therefore, you MUST speak in ENGLISH only — do NOT use ${lang.name} script.
+- Use clear, natural English that is easy to understand when spoken aloud.
+- You may use common ${lang.name} greetings or cultural references in romanized form (e.g., "Namaskaram" not "നമസ്കാരം").
+- Keep your tone warm and culturally appropriate for a ${lang.name}-speaking candidate.
+- The candidate may respond in ${lang.name} — that is fine, but YOU must respond in English.`;
+                    console.warn(`[LLM] No ${lang.name} TTS voice — forcing English output`);
+                }
+
+                return `You are an elite technical interviewer at a top-tier company (think Google, Stripe, OpenAI caliber). You are conducting a LIVE voice interview that the candidate takes seriously.
+
+${languageInstructions}
 
 ## YOUR PERSONA
 - Warm, conversational, intellectually curious
@@ -2702,6 +2721,7 @@ ${Object.entries(this.skillsCovered).map(([s, d]) => `- ${s}: Score ${d.score}/1
 
             console.log(`[Voice] Looking for voice: lang=${lang}, base=${langBase}, available=${voices.length} voices`);
             console.log(`[Voice] All voices:`, voices.map(v => `${v.name} (${v.lang})`).join(', '));
+            state.voice._noNativeVoice = false; // Reset — will be set to true if no matching voice found
 
             // For non-English languages, find a matching voice first
             if (langBase !== 'en') {
@@ -2727,7 +2747,12 @@ ${Object.entries(this.skillsCovered).map(([s, d]) => `- ${s}: Score ${d.score}/1
                     return;
                 }
                 console.warn(`[Voice] ⚠️ No voice found for ${lang}! Falling back to neutral English.`);
+                // Flag: TTS cannot speak this language natively — LLM must generate in English
+                state.voice._noNativeVoice = true;
+                console.warn(`[Voice] TTS has no ${lang} voice — will request LLM to respond in English`);
             }
+            // Clear the flag if we found a matching voice above (early return cases)
+            // This line only runs if we fell through, meaning no voice was found
 
             // ── NEUTRAL ENGLISH voice selection ──
             // Priority: Clean US/UK/AU accents. Explicitly avoid Indian-accented voices
@@ -3257,11 +3282,12 @@ ${Object.entries(this.skillsCovered).map(([s, d]) => `- ${s}: Score ${d.score}/1
                     state.voice.keepAlive.push(u);
 
                     // Use the correct language for speech synthesis:
-                    // - Non-English interview: use interview language for proper accent
-                    // - English interview: use the preferred voice's lang (en-US/en-GB) for clean accent
+                    // - Non-English interview with native voice: use interview language
+                    // - Non-English interview WITHOUT native voice: use English (LLM was told to respond in English)
+                    // - English interview: use preferred voice's lang for clean accent
                     u.lang = _isEnglishInterview
                         ? (state.voice.preferredVoice?.lang || 'en-US')
-                        : (state.interviewLanguage || 'en-US');
+                        : (state.voice._noNativeVoice ? 'en-US' : (state.interviewLanguage || 'en-US'));
                     if (state.voice.preferredVoice) u.voice = state.voice.preferredVoice;
                     u.rate = 0.92;
                     u.pitch = 1.0;
