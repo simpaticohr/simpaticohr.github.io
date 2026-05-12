@@ -2919,24 +2919,34 @@ ${Object.entries(this.skillsCovered).map(([s, d]) => `- ${s}: Score ${d.score}/1
         // ══════════════════════════════════════════════════════════════
         // START SESSION
         // ══════════════════════════════════════════════════════════════
-        async function startSession() {
-            // ── CRITICAL: Warm up TTS engine on user gesture ──
-            // Chrome's autoplay policy requires the FIRST speechSynthesis.speak()
-            // to happen during a user gesture callback. Since we do async work
-            // (API fetch) before speaking, the gesture context expires and Chrome
-            // silently drops all subsequent speak() calls. This empty utterance
-            // "unlocks" the TTS engine while we still have gesture context.
+        // Track whether TTS has been unlocked by a user gesture
+        let _ttsUnlocked = false;
+
+        // Unlock TTS with a real utterance (empty strings are silently ignored by Chrome)
+        function unlockTTS() {
             try {
-                const warmup = new SpeechSynthesisUtterance('');
-                warmup.volume = 0;
-                warmup.rate = 10; // fastest possible
+                state.voice.synth.cancel(); // clear any stale queue
+                const warmup = new SpeechSynthesisUtterance('.');
+                warmup.volume = 0.01;  // near-silent but non-zero (volume 0 may not init audio pipeline)
+                warmup.rate = 10;      // fastest possible
+                warmup.pitch = 0.01;
                 if (state.voice.preferredVoice) warmup.voice = state.voice.preferredVoice;
                 warmup.lang = state.interviewLanguage || 'en-IN';
+                warmup.onend = () => { _ttsUnlocked = true; console.log('[TTS] ✓ Engine unlocked via warmup'); };
+                warmup.onerror = () => { console.warn('[TTS] Warmup utterance error — will retry'); };
                 state.voice.synth.speak(warmup);
-                console.log('[TTS] Engine warmed up on user gesture');
+                console.log('[TTS] Warmup utterance dispatched (text=".", vol=0.01)');
             } catch (e) {
                 console.warn('[TTS] Warmup failed:', e);
             }
+        }
+
+        async function startSession() {
+            // ── CRITICAL: Warm up TTS engine on user gesture ──
+            // Chrome's autoplay policy requires the FIRST speechSynthesis.speak()
+            // to happen during a user gesture callback. Must use NON-EMPTY text
+            // (empty strings are silently ignored) with non-zero volume.
+            unlockTTS();
 
             // Request screen share
             if (!state.media.screen) {
@@ -2963,6 +2973,12 @@ ${Object.entries(this.skillsCovered).map(([s, d]) => `- ${s}: Score ${d.score}/1
                 }
             }
 
+            // Re-unlock TTS after getDisplayMedia (the system dialog breaks gesture context)
+            if (!_ttsUnlocked) {
+                console.log('[TTS] Re-unlocking after screen share dialog...');
+                unlockTTS();
+            }
+
             document.getElementById('setupOverlay').style.display = 'none';
             document.getElementById('interviewApp').style.display = 'flex';
             document.getElementById('selfVid').srcObject = state.media.stream;
@@ -2987,8 +3003,13 @@ ${Object.entries(this.skillsCovered).map(([s, d]) => `- ${s}: Score ${d.score}/1
             setOrbState('thinking');
             const introQuestion = await engine.generateNextQuestion(null, null);
 
-            // Small delay to let warmup utterance finish naturally
-            await sleep(200);
+            // Wait for TTS warmup to actually complete (onend sets _ttsUnlocked)
+            // The '.' utterance at rate=10 finishes in ~50ms, but we wait up to 2s as safety
+            const ttsWaitStart = Date.now();
+            while (!_ttsUnlocked && (Date.now() - ttsWaitStart) < 2000) {
+                await sleep(50);
+            }
+            console.log('[TTS] Warmup wait done, unlocked=', _ttsUnlocked, 'waited=', Date.now() - ttsWaitStart, 'ms');
 
             await aiSpeak(introQuestion);
         }
@@ -3034,11 +3055,11 @@ ${Object.entries(this.skillsCovered).map(([s, d]) => `- ${s}: Score ${d.score}/1
                 const listenVizEl = document.getElementById('listenViz');
                 if (listenVizEl) listenVizEl.classList.remove('active');
 
-                // Only cancel if something is actually playing (avoids Chrome bug
-                // where cancel() right before speak() kills the engine)
-                if (state.voice.synth.speaking || state.voice.synth.pending) {
-                    state.voice.synth.cancel();
-                }
+                // ── DO NOT call synth.cancel() here ──
+                // Chrome bug: cancel() right before speak() kills the internal audio
+                // pipeline, causing all subsequent speak() calls to produce no sound.
+                // The queue is already clean because we cancel in startSession after
+                // warmup, and each chunk completes naturally via onend/onerror.
 
                 // If no voices are available, try reloading them
                 if (!state.voice.preferredVoice) {
@@ -3148,19 +3169,54 @@ ${Object.entries(this.skillsCovered).map(([s, d]) => `- ${s}: Score ${d.score}/1
                     };
 
                     try {
+                        u.onstart = () => {
+                            console.log('[TTS] ▶ Chunk', idx, 'started playing, text:', chunkText.substring(0, 40) + '...');
+                        };
                         state.voice.synth.speak(u);
                         startTTSKeepAlive();
 
-                        // Extra safety: if synth is not speaking after 500ms, it failed silently
+                        // Extra safety: if synth is not speaking after 800ms, try re-speaking
                         setTimeout(() => {
                             if (!resolved && !state.voice.synth.speaking && !state.voice.synth.pending) {
-                                console.warn('[TTS] Speech did not start, skipping chunk', idx);
-                                resolved = true;
-                                clearTimeout(watchdog);
-                                idx++;
-                                speakNext();
+                                console.warn('[TTS] Speech did not start after 800ms, chunk', idx,
+                                    'synth.paused=', state.voice.synth.paused,
+                                    'voices=', state.voice.synth.getVoices().length,
+                                    'voice=', state.voice.preferredVoice?.name || 'NONE');
+                                // Try one more time — sometimes Chrome needs a retry
+                                try {
+                                    const retry = new SpeechSynthesisUtterance(chunkText);
+                                    retry.lang = u.lang;
+                                    if (state.voice.preferredVoice) retry.voice = state.voice.preferredVoice;
+                                    retry.rate = u.rate;
+                                    retry.pitch = u.pitch;
+                                    retry.volume = u.volume;
+                                    retry.onend = () => {
+                                        if (!resolved && state.voice.isSpeaking) {
+                                            resolved = true;
+                                            clearTimeout(watchdog);
+                                            idx++;
+                                            speakNext();
+                                        }
+                                    };
+                                    retry.onerror = () => {
+                                        if (!resolved && state.voice.isSpeaking) {
+                                            resolved = true;
+                                            clearTimeout(watchdog);
+                                            idx++;
+                                            speakNext();
+                                        }
+                                    };
+                                    state.voice.synth.speak(retry);
+                                    console.log('[TTS] Retry speak for chunk', idx);
+                                } catch (retryErr) {
+                                    console.warn('[TTS] Retry also failed:', retryErr);
+                                    resolved = true;
+                                    clearTimeout(watchdog);
+                                    idx++;
+                                    speakNext();
+                                }
                             }
-                        }, 500);
+                        }, 800);
                     } catch (ttsErr) {
                         console.error('[TTS] speak() threw:', ttsErr);
                         resolved = true;
