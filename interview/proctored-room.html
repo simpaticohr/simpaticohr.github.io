@@ -2412,7 +2412,7 @@ ${Object.entries(this.skillsCovered).map(([s, d]) => `- ${s}: Score ${d.score}/1
                         const praise = strongSkills.length > 0
                             ? `Mention you were impressed by their depth in ${strongSkills.slice(0, 2).join(' and ')}.`
                             : 'Acknowledge their thoughtful responses.';
-                        return `Wrap up naturally. ${praise} Say "This was a great conversation" and briefly explain next steps. Say "Before we wrap, is there anything about the role you'd like to know?" Keep it SHORT — 2 sentences max.`;
+                        return `Wrap up naturally. ${praise} Say "This was a great conversation" and briefly explain that the team will review and be in touch soon. Do NOT ask if they have any questions. Keep it SHORT — 2 sentences max.`;
                     default:
                         return `Continue naturally based on their last answer. Pick up on something specific and dig deeper.`;
                 }
@@ -2424,7 +2424,7 @@ ${Object.entries(this.skillsCovered).map(([s, d]) => `- ${s}: Score ${d.score}/1
                     return `Let's talk about ${uncovered[0]}. Can you walk me through a specific project where you used it and what you learned?`;
                 }
                 if (this.phase === 'closing') {
-                    return `Thank you so much for your time — you gave some really thoughtful answers. Our team will review everything and reach out within a few business days. Is there anything about the role you'd like to know?`;
+                    return `Thank you so much for your time — you gave some really thoughtful answers. Our team will review everything and reach out within a few business days. It was great speaking with you!`;
                 }
                 return `Can you tell me about a challenging technical problem you've solved recently? What was your approach and what was the outcome?`;
             },
@@ -2920,6 +2920,24 @@ ${Object.entries(this.skillsCovered).map(([s, d]) => `- ${s}: Score ${d.score}/1
         // START SESSION
         // ══════════════════════════════════════════════════════════════
         async function startSession() {
+            // ── CRITICAL: Warm up TTS engine on user gesture ──
+            // Chrome's autoplay policy requires the FIRST speechSynthesis.speak()
+            // to happen during a user gesture callback. Since we do async work
+            // (API fetch) before speaking, the gesture context expires and Chrome
+            // silently drops all subsequent speak() calls. This empty utterance
+            // "unlocks" the TTS engine while we still have gesture context.
+            try {
+                const warmup = new SpeechSynthesisUtterance('');
+                warmup.volume = 0;
+                warmup.rate = 10; // fastest possible
+                if (state.voice.preferredVoice) warmup.voice = state.voice.preferredVoice;
+                warmup.lang = state.interviewLanguage || 'en-IN';
+                state.voice.synth.speak(warmup);
+                console.log('[TTS] Engine warmed up on user gesture');
+            } catch (e) {
+                console.warn('[TTS] Warmup failed:', e);
+            }
+
             // Request screen share
             if (!state.media.screen) {
                 try {
@@ -2968,19 +2986,40 @@ ${Object.entries(this.skillsCovered).map(([s, d]) => `- ${s}: Score ${d.score}/1
 
             setOrbState('thinking');
             const introQuestion = await engine.generateNextQuestion(null, null);
+
+            // Small delay to let warmup utterance finish naturally
+            await sleep(200);
+
             await aiSpeak(introQuestion);
         }
 
         // ══════════════════════════════════════════════════════════════
-        // TTS — Robust with Chrome GC workaround
+        // TTS — Robust with Chrome GC workaround + onend fix
         // ══════════════════════════════════════════════════════════════
+
+        // Chrome bug workaround: speechSynthesis pauses after ~15s.
+        // This interval calls resume() periodically to keep it alive.
+        let _ttsKeepAliveInt = null;
+        function startTTSKeepAlive() {
+            stopTTSKeepAlive();
+            _ttsKeepAliveInt = setInterval(() => {
+                if (state.voice.synth.speaking && !state.voice.synth.paused) {
+                    state.voice.synth.pause();
+                    state.voice.synth.resume();
+                }
+            }, 10000);
+        }
+        function stopTTSKeepAlive() {
+            if (_ttsKeepAliveInt) { clearInterval(_ttsKeepAliveInt); _ttsKeepAliveInt = null; }
+        }
+
         function aiSpeak(text) {
             return new Promise((resolve) => {
                 state.voice.isSpeaking = true;
                 state.voice.activeResolve = resolve;
 
-                // Allow barge-in: keep recognition running
-                if (!state.voice.isListening && !state.voice.isProcessing && state.voice.recognition) {
+                // Allow barge-in: keep recognition running (but NOT during closing phase)
+                if (engine.phase !== 'closing' && !state.voice.isListening && !state.voice.isProcessing && state.voice.recognition) {
                     try { state.voice.recognition.start(); } catch (e) { }
                     state.voice.isListening = true;
                     startSilenceDetection();
@@ -2995,7 +3034,20 @@ ${Object.entries(this.skillsCovered).map(([s, d]) => `- ${s}: Score ${d.score}/1
                 const listenVizEl = document.getElementById('listenViz');
                 if (listenVizEl) listenVizEl.classList.remove('active');
 
-                state.voice.synth.cancel();
+                // Only cancel if something is actually playing (avoids Chrome bug
+                // where cancel() right before speak() kills the engine)
+                if (state.voice.synth.speaking || state.voice.synth.pending) {
+                    state.voice.synth.cancel();
+                }
+
+                // If no voices are available, try reloading them
+                if (!state.voice.preferredVoice) {
+                    loadVoices();
+                    // If still no voice after reload, wait briefly for async voice load
+                    if (!state.voice.preferredVoice && state.voice.synth.getVoices().length === 0) {
+                        console.warn('[TTS] No voices available — waiting for async load...');
+                    }
+                }
 
                 // Chunk long text
                 const sentences = cleanText.match(/[^.!?]+[.!?]+/g) || [cleanText];
@@ -3012,32 +3064,43 @@ ${Object.entries(this.skillsCovered).map(([s, d]) => `- ${s}: Score ${d.score}/1
                 let idx = 0;
                 state.voice.keepAlive = [];
 
+                function finishSpeaking() {
+                    stopTTSKeepAlive();
+                    state.voice.isSpeaking = false;
+                    if (subtitle) subtitle.classList.remove('show');
+
+                    if (state.voice.activeResolve) {
+                        state.voice.activeResolve();
+                        state.voice.activeResolve = null;
+                    }
+
+                    if (engine.phase === 'closing') {
+                        // Closing phase: stop all recognition, then endSession
+                        state.voice.isListening = false;
+                        clearTimeout(state.voice.silenceTimer);
+                        try { if (state.voice.recognition) state.voice.recognition.stop(); } catch (e) { }
+                    } else {
+                        setTimeout(() => {
+                            if (!state.voice.isProcessing && !state.voice.isListening) {
+                                state.voice.finalTranscript = '';
+                                state.voice.currentTranscript = '';
+                                state.voice.lastSpeechTime = 0;
+                                startListening();
+                            }
+                        }, 800);
+                    }
+                }
+
                 function speakNext() {
                     if (!state.voice.isSpeaking) return;
 
                     if (idx >= chunks.length) {
-                        state.voice.isSpeaking = false;
-                        if (subtitle) subtitle.classList.remove('show');
-
-                        if (state.voice.activeResolve) {
-                            state.voice.activeResolve();
-                            state.voice.activeResolve = null;
-                        }
-
-                        if (engine.phase !== 'closing') {
-                            setTimeout(() => {
-                                if (!state.voice.isProcessing && !state.voice.isListening) {
-                                    state.voice.finalTranscript = '';
-                                    state.voice.currentTranscript = '';
-                                    state.voice.lastSpeechTime = 0;
-                                    startListening();
-                                }
-                            }, 800);
-                        }
+                        finishSpeaking();
                         return;
                     }
 
-                    const u = new SpeechSynthesisUtterance(chunks[idx]);
+                    const chunkText = chunks[idx];
+                    const u = new SpeechSynthesisUtterance(chunkText);
                     state.voice.keepAlive.push(u);
 
                     // Set the language on the utterance so the browser picks the correct voice
@@ -3047,12 +3110,64 @@ ${Object.entries(this.skillsCovered).map(([s, d]) => `- ${s}: Score ${d.score}/1
                     u.pitch = 1.0;
                     u.volume = 1.0;
 
-                    if (subtitle) subtitle.textContent = chunks[idx];
+                    if (subtitle) subtitle.textContent = chunkText;
 
-                    u.onend = () => { if (state.voice.isSpeaking) { idx++; speakNext(); } };
-                    u.onerror = (e) => { console.warn('TTS Error:', e); if (state.voice.isSpeaking) { idx++; speakNext(); } };
+                    // Chrome bug: onend sometimes never fires.
+                    // Use a watchdog timer based on estimated speech duration.
+                    // Average speaking rate ~150 words/min at rate 0.92 ≈ ~138 wpm
+                    // = ~2.3 words/sec. Add generous buffer.
+                    const wordCount = chunkText.split(/\s+/).length;
+                    const estimatedMs = Math.max(2000, (wordCount / 2.3) * 1000 + 1500);
+                    let resolved = false;
 
-                    state.voice.synth.speak(u);
+                    const watchdog = setTimeout(() => {
+                        if (!resolved && state.voice.isSpeaking) {
+                            console.warn('[TTS] Watchdog: onend did not fire, advancing chunk', idx);
+                            resolved = true;
+                            idx++;
+                            speakNext();
+                        }
+                    }, estimatedMs);
+
+                    u.onend = () => {
+                        if (!resolved && state.voice.isSpeaking) {
+                            resolved = true;
+                            clearTimeout(watchdog);
+                            idx++;
+                            speakNext();
+                        }
+                    };
+                    u.onerror = (e) => {
+                        console.warn('[TTS] Utterance error:', e.error || e);
+                        if (!resolved && state.voice.isSpeaking) {
+                            resolved = true;
+                            clearTimeout(watchdog);
+                            idx++;
+                            speakNext();
+                        }
+                    };
+
+                    try {
+                        state.voice.synth.speak(u);
+                        startTTSKeepAlive();
+
+                        // Extra safety: if synth is not speaking after 500ms, it failed silently
+                        setTimeout(() => {
+                            if (!resolved && !state.voice.synth.speaking && !state.voice.synth.pending) {
+                                console.warn('[TTS] Speech did not start, skipping chunk', idx);
+                                resolved = true;
+                                clearTimeout(watchdog);
+                                idx++;
+                                speakNext();
+                            }
+                        }, 500);
+                    } catch (ttsErr) {
+                        console.error('[TTS] speak() threw:', ttsErr);
+                        resolved = true;
+                        clearTimeout(watchdog);
+                        idx++;
+                        speakNext();
+                    }
                 }
 
                 speakNext();
@@ -3176,6 +3291,8 @@ ${Object.entries(this.skillsCovered).map(([s, d]) => `- ${s}: Score ${d.score}/1
             clearTimeout(state.voice.silenceTimer);
             function check() {
                 if (!state.voice.isListening || state.voice.isProcessing) return;
+                // Never process answers during closing phase
+                if (engine.phase === 'closing') return;
 
                 if (!state.voice.isSpeaking) {
                     const fullText = (state.voice.finalTranscript + state.voice.currentTranscript).trim();
@@ -3239,10 +3356,18 @@ ${Object.entries(this.skillsCovered).map(([s, d]) => `- ${s}: Score ${d.score}/1
 
             await sleep(500);
             const nextQuestion = await engine.generateNextQuestion(text, analysis);
-            state.voice.isProcessing = false;
 
-            await aiSpeak(nextQuestion);
-            if (engine.phase === 'closing') setTimeout(() => endSession(), 3000);
+            if (engine.phase === 'closing') {
+                // Closing phase: speak farewell, then end cleanly
+                state.voice.isProcessing = true; // Keep processing flag to block silence detection
+                await aiSpeak(nextQuestion);
+                // Give a brief pause after the farewell, then end
+                await sleep(2000);
+                endSession();
+            } else {
+                state.voice.isProcessing = false;
+                await aiSpeak(nextQuestion);
+            }
         }
 
         // ══════════════════════════════════════════════════════════════
@@ -3751,6 +3876,7 @@ ${Object.entries(this.skillsCovered).map(([s, d]) => `- ${s}: Score ${d.score}/1
             state.voice.isListening = false;
 
             try { state.voice.synth.cancel(); } catch (e) { }
+            stopTTSKeepAlive();
             clearTimeout(state.voice.silenceTimer);
             clearInterval(state.session.timerInt);
             clearInterval(state.session.faceCheckInt);
