@@ -4121,7 +4121,7 @@ async function handleTTS(request, env, ctx) {
     // audioResponse is an ArrayBuffer or ReadableStream
     const headers = {
       ...CORS_HEADERS,
-      "Content-Type": "audio/wav",
+      "Content-Type": "audio/mpeg",
       "Cache-Control": "public, max-age=3600",
     };
 
