@@ -7343,7 +7343,7 @@ async function handleBYOKCacheClear(request, env, ctx) {
  * Body: { ai_provider, ai_api_key, ai_base_url, ai_model }
  */
 async function handleBYOKConfigSave(request, env, ctx) {
-  requireAuth(ctx);
+  requireRole(ctx, "admin", "superadmin", "company_admin", "hr_manager", "employer");
   const tenantId = ctx.tenantId;
   if (!tenantId || tenantId === "default") {
     throw new ValidationError("Tenant ID required to save AI config");

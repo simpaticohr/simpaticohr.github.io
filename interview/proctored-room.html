@@ -2701,14 +2701,13 @@ ${Object.entries(this.skillsCovered).map(([s, d]) => `- ${s}: Score ${d.score}/1
             const langBase = lang.split('-')[0]; // e.g. 'hi', 'ta', 'ml', 'en'
 
             console.log(`[Voice] Looking for voice: lang=${lang}, base=${langBase}, available=${voices.length} voices`);
+            console.log(`[Voice] All voices:`, voices.map(v => `${v.name} (${v.lang})`).join(', '));
 
             // For non-English languages, find a matching voice first
             if (langBase !== 'en') {
-                // Log all matching voices for debugging
                 const matchingVoices = voices.filter(v => v.lang.startsWith(langBase));
                 console.log(`[Voice] Found ${matchingVoices.length} voices for '${langBase}':`, matchingVoices.map(v => `${v.name} (${v.lang})`));
 
-                // Prefer Google voices (usually higher quality for Indian languages)
                 const googleMatch = matchingVoices.find(v => v.name.toLowerCase().includes('google'));
                 if (googleMatch) {
                     state.voice.preferredVoice = googleMatch;
@@ -2727,20 +2726,64 @@ ${Object.entries(this.skillsCovered).map(([s, d]) => `- ${s}: Score ${d.score}/1
                     console.log(`[Voice] ✓ Selected base match: ${baseMatch.name} (${baseMatch.lang})`);
                     return;
                 }
-                console.warn(`[Voice] ⚠️ No voice found for ${lang}! Malayalam/other Indic TTS requires Chrome. Falling back to English.`);
+                console.warn(`[Voice] ⚠️ No voice found for ${lang}! Falling back to neutral English.`);
             }
 
-            // English preferred voices
-            const preferred = [
-                'Google UK English Female', 'Google US English', 'Samantha',
-                'Microsoft Zira', 'Karen', 'Moira', 'Fiona',
-                'Google UK English Male', 'Microsoft David', 'Daniel'
+            // ── NEUTRAL ENGLISH voice selection ──
+            // Priority: Clean US/UK/AU accents. Explicitly avoid Indian-accented voices
+            // which sound unprofessional in interviews.
+            const BLOCKED_VOICES = [
+                'ravi', 'hemant', 'heera', 'kalpana', 'prabhat',  // Microsoft Indian English
+                'google हिन्दी', 'google മലയാളം', 'google தமிழ்',  // Google Indic
             ];
-            for (const name of preferred) {
+
+            // Tier 1: Premium quality voices (natural sounding)
+            const tier1 = [
+                'Google UK English Female', 'Google US English',
+                'Microsoft Aria', 'Microsoft Jenny', 'Microsoft Guy',
+                'Samantha', 'Karen', 'Moira', 'Tessa',
+            ];
+            // Tier 2: Good quality voices
+            const tier2 = [
+                'Google UK English Male', 'Microsoft Zira', 'Microsoft David',
+                'Daniel', 'Fiona', 'Alex', 'Victoria', 'Ava',
+                'Microsoft Mark', 'Microsoft Catherine',
+            ];
+
+            for (const name of [...tier1, ...tier2]) {
                 const v = voices.find(v => v.name.includes(name));
-                if (v) { state.voice.preferredVoice = v; return; }
+                if (v) {
+                    state.voice.preferredVoice = v;
+                    console.log(`[Voice] ✓ Selected preferred: ${v.name} (${v.lang})`);
+                    return;
+                }
             }
+
+            // Tier 3: Any en-US or en-GB voice that isn't blocked
+            const neutralEN = voices.find(v =>
+                (v.lang === 'en-US' || v.lang === 'en-GB' || v.lang === 'en-AU') &&
+                !BLOCKED_VOICES.some(b => v.name.toLowerCase().includes(b))
+            );
+            if (neutralEN) {
+                state.voice.preferredVoice = neutralEN;
+                console.log(`[Voice] ✓ Selected neutral EN: ${neutralEN.name} (${neutralEN.lang})`);
+                return;
+            }
+
+            // Tier 4: Any English voice at all (except blocked)
+            const anyEN = voices.find(v =>
+                v.lang.startsWith('en') &&
+                !BLOCKED_VOICES.some(b => v.name.toLowerCase().includes(b))
+            );
+            if (anyEN) {
+                state.voice.preferredVoice = anyEN;
+                console.log(`[Voice] ✓ Selected fallback EN: ${anyEN.name} (${anyEN.lang})`);
+                return;
+            }
+
+            // Last resort: any English voice
             state.voice.preferredVoice = voices.find(v => v.lang.startsWith('en')) || voices[0] || null;
+            console.log(`[Voice] ✓ Last resort: ${state.voice.preferredVoice?.name || 'NONE'}`);
         }
 
         // ══════════════════════════════════════════════════════════════
@@ -3039,6 +3082,7 @@ ${Object.entries(this.skillsCovered).map(([s, d]) => `- ${s}: Score ${d.score}/1
         // Uses Cloudflare Workers AI @cf/deepgram/aura-1 to generate audio
         // Falls back to browser speechSynthesis if cloud TTS fails
         let _cloudTTSAvailable = null; // null = untested, true/false = tested
+        let _cloudTTSFailCount = 0;    // Track consecutive failures (retry after 3 questions)
 
         async function aiSpeakCloud(text) {
             const cleanText = text.replace(/\*\*/g, '').replace(/\n/g, ' ').replace(/\s+/g, ' ').trim();
@@ -3146,18 +3190,35 @@ ${Object.entries(this.skillsCovered).map(([s, d]) => `- ${s}: Score ${d.score}/1
                     }
                 }
 
-                // â”€â”€ PRIMARY: Try Cloud TTS â”€â”€
-                if (_cloudTTSAvailable !== false) {
+                // -- PRIMARY: Try Cloud TTS --
+                // Deepgram Aura is ENGLISH-ONLY. For Malayalam, Hindi, French, German, etc.
+                // skip cloud TTS and use browser speechSynthesis which has native voices.
+                const _ttsLangBase = (state.interviewLanguage || 'en').split('-')[0];
+                const _isEnglishInterview = (_ttsLangBase === 'en');
+
+                if (!_isEnglishInterview) {
+                    console.log('[TTS] Non-English interview (' + state.interviewLanguage + '), skipping Cloud TTS -> using browser voices');
+                }
+
+                if (_isEnglishInterview && _cloudTTSAvailable !== false) {
                     try {
                         console.log('[TTS] Trying Cloud TTS...');
                         await aiSpeakCloud(cleanText);
                         _cloudTTSAvailable = true;
+                        _cloudTTSFailCount = 0;
                         console.log('[TTS] Cloud TTS succeeded');
                         finishSpeaking();
                         return;
                     } catch (cloudErr) {
                         console.warn('[TTS] Cloud TTS failed, falling back to browser:', cloudErr.message);
-                        _cloudTTSAvailable = false;
+                        _cloudTTSFailCount++;
+                        // Don't permanently disable — retry after 3 consecutive failures
+                        if (_cloudTTSFailCount >= 3) {
+                            _cloudTTSAvailable = false;
+                            console.warn('[TTS] Cloud TTS disabled after 3 failures. Will retry periodically.');
+                            // Re-enable after 60 seconds to try again
+                            setTimeout(() => { _cloudTTSAvailable = null; _cloudTTSFailCount = 0; }, 60000);
+                        }
                     }
                 }
 
@@ -3195,7 +3256,12 @@ ${Object.entries(this.skillsCovered).map(([s, d]) => `- ${s}: Score ${d.score}/1
                     const u = new SpeechSynthesisUtterance(chunkText);
                     state.voice.keepAlive.push(u);
 
-                    u.lang = state.interviewLanguage || 'en-IN';
+                    // Use the correct language for speech synthesis:
+                    // - Non-English interview: use interview language for proper accent
+                    // - English interview: use the preferred voice's lang (en-US/en-GB) for clean accent
+                    u.lang = _isEnglishInterview
+                        ? (state.voice.preferredVoice?.lang || 'en-US')
+                        : (state.interviewLanguage || 'en-US');
                     if (state.voice.preferredVoice) u.voice = state.voice.preferredVoice;
                     u.rate = 0.92;
                     u.pitch = 1.0;
