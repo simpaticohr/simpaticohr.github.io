@@ -1231,6 +1231,7 @@ route("POST", "/ai/chat/stream", handleAIChatStream);
 route("POST", "/ai/employee-insight", handleEmployeeInsight);
 route("POST", "/ai/sentiment", handleSentimentAnalysis);
 route("POST", "/ai/interview-question", handleInterviewQuestion);
+route("POST", "/ai/tts", handleTTS);
 route("POST", "/ai/ats-generator", handleATSGenerator);
 route("POST", "/ai/hr-automation-generator", handleHRAutomationGenerator);
 route("POST", "/ai/generate-assessment", handleGenerateAssessment);
@@ -4097,6 +4098,38 @@ async function handleInterviewQuestion(request, env, ctx) {
     response: result.response,
     _debug: { model: modelUsed, tenant: tenantId, fallback: fallbackUsed },
   });
+}
+
+// ── TTS via Cloudflare Workers AI (Deepgram Aura) ──────────────────────────
+async function handleTTS(request, env, ctx) {
+  const { text } = await safeJson(request);
+  if (!text || typeof text !== 'string' || text.trim().length === 0) {
+    throw new ValidationError("text is required");
+  }
+
+  if (!env.AI) throw new ServiceUnavailableError("AI");
+
+  // Limit text to prevent abuse
+  const cleanText = text.trim().slice(0, 5000);
+  console.log(`[TTS] Generating speech: ${cleanText.length} chars`);
+
+  try {
+    const audioResponse = await env.AI.run("@cf/deepgram/aura-1", {
+      text: cleanText,
+    });
+
+    // audioResponse is an ArrayBuffer or ReadableStream
+    const headers = {
+      ...CORS_HEADERS,
+      "Content-Type": "audio/wav",
+      "Cache-Control": "public, max-age=3600",
+    };
+
+    return new Response(audioResponse, { status: 200, headers });
+  } catch (err) {
+    console.error(`[TTS] AI.run error: ${err.message}`);
+    throw new AppError(`TTS generation failed: ${err.message}`, 500, "TTS_ERROR");
+  }
 }
 
 async function handleExpenseOCR(request, env, ctx) {

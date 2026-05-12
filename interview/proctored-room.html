@@ -3035,8 +3035,72 @@ ${Object.entries(this.skillsCovered).map(([s, d]) => `- ${s}: Score ${d.score}/1
             if (_ttsKeepAliveInt) { clearInterval(_ttsKeepAliveInt); _ttsKeepAliveInt = null; }
         }
 
+        // â”€â”€ Cloud TTS (primary) with speechSynthesis fallback â”€â”€
+        // Uses Cloudflare Workers AI @cf/deepgram/aura-1 to generate audio
+        // Falls back to browser speechSynthesis if cloud TTS fails
+        let _cloudTTSAvailable = null; // null = untested, true/false = tested
+
+        async function aiSpeakCloud(text) {
+            const cleanText = text.replace(/\*\*/g, '').replace(/\n/g, ' ').replace(/\s+/g, ' ').trim();
+            console.log('[CloudTTS] Requesting speech:', cleanText.substring(0, 60) + '...');
+
+            try {
+                const res = await fetch(`${API}/ai/tts`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ text: cleanText })
+                });
+
+                if (!res.ok) {
+                    const errText = await res.text().catch(() => 'unknown');
+                    throw new Error(`HTTP ${res.status}: ${errText.substring(0, 200)}`);
+                }
+
+                const audioBlob = await res.blob();
+                if (audioBlob.size < 100) {
+                    throw new Error('Audio response too small');
+                }
+
+                const audioUrl = URL.createObjectURL(audioBlob);
+                const audio = new Audio(audioUrl);
+                audio.volume = 1.0;
+
+                return new Promise((resolve, reject) => {
+                    audio.onended = () => {
+                        URL.revokeObjectURL(audioUrl);
+                        console.log('[CloudTTS] Playback complete');
+                        resolve(true);
+                    };
+                    audio.onerror = (e) => {
+                        URL.revokeObjectURL(audioUrl);
+                        console.warn('[CloudTTS] Playback error:', e);
+                        reject(new Error('Audio playback failed'));
+                    };
+                    // Timeout safety: if audio doesn't end in 60s, resolve anyway
+                    const timeout = setTimeout(() => {
+                        URL.revokeObjectURL(audioUrl);
+                        resolve(true);
+                    }, 60000);
+                    audio.onended = () => {
+                        clearTimeout(timeout);
+                        URL.revokeObjectURL(audioUrl);
+                        console.log('[CloudTTS] Playback complete');
+                        resolve(true);
+                    };
+                    audio.play().catch(err => {
+                        clearTimeout(timeout);
+                        URL.revokeObjectURL(audioUrl);
+                        reject(err);
+                    });
+                });
+            } catch (err) {
+                console.warn('[CloudTTS] Failed:', err.message);
+                throw err;
+            }
+        }
+
         function aiSpeak(text) {
-            return new Promise((resolve) => {
+            return new Promise(async (resolve) => {
                 state.voice.isSpeaking = true;
                 state.voice.activeResolve = resolve;
 
@@ -3056,36 +3120,6 @@ ${Object.entries(this.skillsCovered).map(([s, d]) => `- ${s}: Score ${d.score}/1
                 const listenVizEl = document.getElementById('listenViz');
                 if (listenVizEl) listenVizEl.classList.remove('active');
 
-                // ── DO NOT call synth.cancel() here ──
-                // Chrome bug: cancel() right before speak() kills the internal audio
-                // pipeline, causing all subsequent speak() calls to produce no sound.
-                // The queue is already clean because we cancel in startSession after
-                // warmup, and each chunk completes naturally via onend/onerror.
-
-                // If no voices are available, try reloading them
-                if (!state.voice.preferredVoice) {
-                    loadVoices();
-                    // If still no voice after reload, wait briefly for async voice load
-                    if (!state.voice.preferredVoice && state.voice.synth.getVoices().length === 0) {
-                        console.warn('[TTS] No voices available — waiting for async load...');
-                    }
-                }
-
-                // Chunk long text
-                const sentences = cleanText.match(/[^.!?]+[.!?]+/g) || [cleanText];
-                const chunks = [];
-                let current = '';
-                for (const s of sentences) {
-                    if ((current + s).length > 160) {
-                        if (current) chunks.push(current.trim());
-                        current = s;
-                    } else { current += s; }
-                }
-                if (current.trim()) chunks.push(current.trim());
-
-                let idx = 0;
-                state.voice.keepAlive = [];
-
                 function finishSpeaking() {
                     stopTTSKeepAlive();
                     state.voice.isSpeaking = false;
@@ -3097,7 +3131,6 @@ ${Object.entries(this.skillsCovered).map(([s, d]) => `- ${s}: Score ${d.score}/1
                     }
 
                     if (engine.phase === 'closing') {
-                        // Closing phase: stop all recognition, then endSession
                         state.voice.isListening = false;
                         clearTimeout(state.voice.silenceTimer);
                         try { if (state.voice.recognition) state.voice.recognition.stop(); } catch (e) { }
@@ -3113,6 +3146,43 @@ ${Object.entries(this.skillsCovered).map(([s, d]) => `- ${s}: Score ${d.score}/1
                     }
                 }
 
+                // â”€â”€ PRIMARY: Try Cloud TTS â”€â”€
+                if (_cloudTTSAvailable !== false) {
+                    try {
+                        console.log('[TTS] Trying Cloud TTS...');
+                        await aiSpeakCloud(cleanText);
+                        _cloudTTSAvailable = true;
+                        console.log('[TTS] Cloud TTS succeeded');
+                        finishSpeaking();
+                        return;
+                    } catch (cloudErr) {
+                        console.warn('[TTS] Cloud TTS failed, falling back to browser:', cloudErr.message);
+                        _cloudTTSAvailable = false;
+                    }
+                }
+
+                // â”€â”€ FALLBACK: Browser speechSynthesis â”€â”€
+                console.log('[TTS] Using browser speechSynthesis fallback');
+
+                if (!state.voice.preferredVoice) {
+                    loadVoices();
+                }
+
+                // Chunk long text for speechSynthesis (has length limits)
+                const sentences = cleanText.match(/[^.!?]+[.!?]+/g) || [cleanText];
+                const chunks = [];
+                let current = '';
+                for (const s of sentences) {
+                    if ((current + s).length > 160) {
+                        if (current) chunks.push(current.trim());
+                        current = s;
+                    } else { current += s; }
+                }
+                if (current.trim()) chunks.push(current.trim());
+
+                let idx = 0;
+                state.voice.keepAlive = [];
+
                 function speakNext() {
                     if (!state.voice.isSpeaking) return;
 
@@ -3125,7 +3195,6 @@ ${Object.entries(this.skillsCovered).map(([s, d]) => `- ${s}: Score ${d.score}/1
                     const u = new SpeechSynthesisUtterance(chunkText);
                     state.voice.keepAlive.push(u);
 
-                    // Set the language on the utterance so the browser picks the correct voice
                     u.lang = state.interviewLanguage || 'en-IN';
                     if (state.voice.preferredVoice) u.voice = state.voice.preferredVoice;
                     u.rate = 0.92;
@@ -3134,17 +3203,13 @@ ${Object.entries(this.skillsCovered).map(([s, d]) => `- ${s}: Score ${d.score}/1
 
                     if (subtitle) subtitle.textContent = chunkText;
 
-                    // Chrome bug: onend sometimes never fires.
-                    // Use a watchdog timer based on estimated speech duration.
-                    // Average speaking rate ~150 words/min at rate 0.92 ≈ ~138 wpm
-                    // = ~2.3 words/sec. Add generous buffer.
                     const wordCount = chunkText.split(/\s+/).length;
                     const estimatedMs = Math.max(2000, (wordCount / 2.3) * 1000 + 1500);
                     let resolved = false;
 
                     const watchdog = setTimeout(() => {
                         if (!resolved && state.voice.isSpeaking) {
-                            console.warn('[TTS] Watchdog: onend did not fire, advancing chunk', idx);
+                            console.warn('[TTS-Browser] Watchdog: advancing chunk', idx);
                             resolved = true;
                             idx++;
                             speakNext();
@@ -3160,7 +3225,7 @@ ${Object.entries(this.skillsCovered).map(([s, d]) => `- ${s}: Score ${d.score}/1
                         }
                     };
                     u.onerror = (e) => {
-                        console.warn('[TTS] Utterance error:', e.error || e);
+                        console.warn('[TTS-Browser] Utterance error:', e.error || e);
                         if (!resolved && state.voice.isSpeaking) {
                             resolved = true;
                             clearTimeout(watchdog);
@@ -3171,55 +3236,12 @@ ${Object.entries(this.skillsCovered).map(([s, d]) => `- ${s}: Score ${d.score}/1
 
                     try {
                         u.onstart = () => {
-                            console.log('[TTS] ▶ Chunk', idx, 'started playing, text:', chunkText.substring(0, 40) + '...');
+                            console.log('[TTS-Browser] Chunk', idx, 'started');
                         };
                         state.voice.synth.speak(u);
                         startTTSKeepAlive();
-
-                        // Extra safety: if synth is not speaking after 800ms, try re-speaking
-                        setTimeout(() => {
-                            if (!resolved && !state.voice.synth.speaking && !state.voice.synth.pending) {
-                                console.warn('[TTS] Speech did not start after 800ms, chunk', idx,
-                                    'synth.paused=', state.voice.synth.paused,
-                                    'voices=', state.voice.synth.getVoices().length,
-                                    'voice=', state.voice.preferredVoice?.name || 'NONE');
-                                // Try one more time — sometimes Chrome needs a retry
-                                try {
-                                    const retry = new SpeechSynthesisUtterance(chunkText);
-                                    retry.lang = u.lang;
-                                    if (state.voice.preferredVoice) retry.voice = state.voice.preferredVoice;
-                                    retry.rate = u.rate;
-                                    retry.pitch = u.pitch;
-                                    retry.volume = u.volume;
-                                    retry.onend = () => {
-                                        if (!resolved && state.voice.isSpeaking) {
-                                            resolved = true;
-                                            clearTimeout(watchdog);
-                                            idx++;
-                                            speakNext();
-                                        }
-                                    };
-                                    retry.onerror = () => {
-                                        if (!resolved && state.voice.isSpeaking) {
-                                            resolved = true;
-                                            clearTimeout(watchdog);
-                                            idx++;
-                                            speakNext();
-                                        }
-                                    };
-                                    state.voice.synth.speak(retry);
-                                    console.log('[TTS] Retry speak for chunk', idx);
-                                } catch (retryErr) {
-                                    console.warn('[TTS] Retry also failed:', retryErr);
-                                    resolved = true;
-                                    clearTimeout(watchdog);
-                                    idx++;
-                                    speakNext();
-                                }
-                            }
-                        }, 800);
                     } catch (ttsErr) {
-                        console.error('[TTS] speak() threw:', ttsErr);
+                        console.error('[TTS-Browser] speak() threw:', ttsErr);
                         resolved = true;
                         clearTimeout(watchdog);
                         idx++;
