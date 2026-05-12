@@ -607,6 +607,12 @@ function resolveProviderDefaults(cfg) {
   } else if (p === "deepseek") {
     baseUrl = baseUrl || "https://api.deepseek.com/v1";
     model = model || "deepseek-chat";
+  } else if (p === "nvidia") {
+    baseUrl = baseUrl || "https://integrate.api.nvidia.com/v1";
+    model = model || "meta/llama-3.1-405b-instruct";
+  } else if (p === "huggingface") {
+    baseUrl = baseUrl || "https://router.huggingface.co/v1";
+    model = model || "meta-llama/Llama-3.1-70B-Instruct";
   }
   // custom / other: user must supply both
 
@@ -7477,6 +7483,8 @@ async function handleBYOKValidate(request, env, ctx) {
     anthropic: ["claude-sonnet-4-20250514", "claude-3-5-sonnet-20241022", "claude-3-haiku-20240307"],
     deepseek: ["deepseek-chat", "deepseek-reasoner"],
     kimi: ["kimi-k2-0520", "moonshot-v1-128k", "moonshot-v1-32k"],
+    nvidia: ["meta/llama-3.1-405b-instruct", "meta/llama-3.3-70b-instruct", "mistralai/mixtral-8x22b-instruct-v0.1"],
+    huggingface: ["meta-llama/Llama-3.1-70B-Instruct", "Qwen/Qwen2.5-72B-Instruct", "mistralai/Mistral-7B-Instruct-v0.3"],
   };
 
   try {
@@ -7600,6 +7608,44 @@ async function handleBYOKValidate(request, env, ctx) {
       models = (data.data || []).map(m => ({
         id: m.id, name: m.id, recommended: (RECOMMENDED.kimi || []).includes(m.id),
       }));
+
+    } else if (provider === "nvidia") {
+      // NVIDIA NIM — OpenAI-compatible, free tier 40 RPM
+      const nimUrl = (base_url || "https://integrate.api.nvidia.com/v1") + "/models";
+      const res = await fetch(nimUrl, { headers: { Authorization: `Bearer ${api_key}` } });
+      if (!res.ok) {
+        const errText = await res.text().catch(() => "");
+        return apiResponse({
+          connected: false, provider: "nvidia",
+          error: res.status === 401 || res.status === 403 ? "Invalid API key — get one at build.nvidia.com" : `API error ${res.status}: ${errText.substring(0, 100)}`,
+        });
+      }
+      const data = await res.json();
+      models = (data.data || [])
+        .filter(m => m.id && (m.id.includes("llama") || m.id.includes("mistral") || m.id.includes("mixtral") || m.id.includes("qwen") || m.id.includes("gemma") || m.id.includes("deepseek")))
+        .map(m => ({ id: m.id, name: m.id, recommended: (RECOMMENDED.nvidia || []).includes(m.id) }))
+        .sort((a, b) => (b.recommended ? 1 : 0) - (a.recommended ? 1 : 0));
+
+    } else if (provider === "huggingface") {
+      // Hugging Face — OpenAI-compatible router, free tier ~few hundred req/hr
+      const hfUrl = (base_url || "https://router.huggingface.co/v1") + "/models";
+      const res = await fetch(hfUrl, { headers: { Authorization: `Bearer ${api_key}` } });
+      if (!res.ok) {
+        const errText = await res.text().catch(() => "");
+        return apiResponse({
+          connected: false, provider: "huggingface",
+          error: res.status === 401 ? "Invalid token — get one at huggingface.co/settings/tokens" : `API error ${res.status}: ${errText.substring(0, 100)}`,
+        });
+      }
+      const data = await res.json();
+      models = (data.data || [])
+        .filter(m => m.id)
+        .map(m => ({ id: m.id, name: m.id, recommended: (RECOMMENDED.huggingface || []).includes(m.id) }))
+        .sort((a, b) => (b.recommended ? 1 : 0) - (a.recommended ? 1 : 0));
+      // If model listing fails (HF may not support /models), provide curated list
+      if (models.length === 0) {
+        models = (RECOMMENDED.huggingface || []).map(id => ({ id, name: id, recommended: true }));
+      }
 
     } else {
       const customUrl = (base_url || "").replace(/\/$/, "") + "/models";
