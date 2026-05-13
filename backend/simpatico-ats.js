@@ -3553,8 +3553,11 @@ Return ONLY valid JSON in format: {"match_score": 85, "reason": "Brief 1-sentenc
   // Configurable rejection threshold — jobs can set auto_reject_threshold (default: 40)
   const rejectThreshold = job?.auto_reject_threshold ?? 40;
 
+  // Configurable shortlist threshold — jobs can set auto_shortlist_threshold (default: 70)
+  const shortlistThreshold = job?.auto_shortlist_threshold ?? 70;
+
   if (autoEnabled && match_score !== null) {
-    if (match_score >= 70) {
+    if (match_score >= shortlistThreshold) {
       // HIGH SCORE &rarr; Auto-shortlist to interview stage
       status = "interview";
       autoInterview = true;
@@ -3616,7 +3619,7 @@ Return ONLY valid JSON in format: {"match_score": 85, "reason": "Brief 1-sentenc
       token_type: "single",
       interview_type: "ai_voice",
       interview_role: job.title,
-      interview_level: "auto",
+      interview_level: "Screening Call",
       status: "pending",
       company_id: ctx.tenantId,
       question_count: 5,

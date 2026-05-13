@@ -2171,6 +2171,7 @@
             questionCount: 0,
             maxQuestions: 8,
             phase: 'intro',
+            interviewRound: '', // e.g. 'HR Round', 'Technical Round 1', 'Screening Call', etc.
             skillsToProbe: [],
             skillsCovered: {},
             overallScores: {},
@@ -2180,6 +2181,37 @@
             weakAreas: [],
             level: 'mid',
             jobTitle: '',
+
+            // Determine the interview style based on round
+            getRoundStyle() {
+                const r = (this.interviewRound || '').toLowerCase();
+                // Non-tech rounds first (more specific matches before generic)
+                if (r.includes('hr') || r.includes('behavioral') || r.includes('culture') ||
+                    r.includes('competency') || r.includes('role play') || r.includes('simulation') ||
+                    r.includes('domain knowledge') || r.includes('client interaction') ||
+                    r.includes('communication'))
+                    return 'hr_behavioral';
+                if (r.includes('case study'))
+                    return 'final_round'; // case studies are strategic/analytical
+                if (r.includes('coding') || r.includes('dsa'))
+                    return 'coding';
+                if (r.includes('system design') || r.includes('architecture'))
+                    return 'system_design';
+                if (r.includes('technical'))
+                    return 'technical';
+                if (r.includes('screening') || r.includes('screen'))
+                    return 'screening';
+                if (r.includes('portfolio') || r.includes('design review'))
+                    return 'portfolio';
+                if (r.includes('final') || r.includes('managerial') || r.includes('leadership'))
+                    return 'final_round';
+                // Default: infer from job title
+                const jt = (this.jobTitle || '').toLowerCase();
+                const nonTechRoles = ['sales', 'marketing', 'receptionist', 'hr', 'admin', 'support', 'customer', 'manager', 'executive', 'coordinator', 'assistant', 'analyst', 'consultant', 'finance', 'accounting', 'operations', 'logistics', 'procurement', 'legal', 'compliance', 'content', 'writer', 'editor', 'teacher', 'nurse', 'driver', 'clerk'];
+                if (nonTechRoles.some(nr => jt.includes(nr)))
+                    return 'hr_behavioral';
+                return 'technical'; // default for engineering roles
+            },
 
             buildSystemPrompt() {
                 const langCode = state.interviewLanguage || 'en-IN';
@@ -2253,42 +2285,83 @@ Therefore, you MUST speak in ENGLISH only — do NOT use ${lang.name} script.
                     console.warn(`[LLM] No ${lang.name} TTS voice — forcing English output`);
                 }
 
-                return `You are an elite technical interviewer at a top-tier company (think Google, Stripe, OpenAI caliber). You are conducting a LIVE voice interview that the candidate takes seriously.
+                const roundStyle = this.getRoundStyle();
+
+                // Build round-specific persona and rules
+                const roundConfig = {
+                    hr_behavioral: {
+                        persona: `You are an experienced HR interviewer and talent assessor. You are conducting a LIVE voice interview focused on cultural fit, behavioral competencies, communication skills, and work values.`,
+                        personaTraits: `- Warm, empathetic, and approachable\n- Focused on understanding motivation, teamwork, conflict resolution, and soft skills\n- You assess cultural fit, leadership potential, and communication clarity\n- Your goal: understand WHO this person is, how they work, and if they fit the role`,
+                        skillsFallback: 'Communication, teamwork, problem-solving, adaptability, customer orientation, work ethic, and cultural fit',
+                        rules: `1. ONE question at a time. NEVER ask multiple questions in one turn.\n2. Keep responses to 1-3 sentences — this is SPOKEN via TTS.\n3. Focus on BEHAVIORAL questions — past experiences, real situations, how they handled challenges.\n4. Use STAR method probes naturally: Situation, Task, Action, Result.\n5. Ask about motivation, career goals, teamwork, handling pressure, conflict resolution.\n6. If they give vague answers, probe: "Can you walk me through a specific example?"\n7. Assess communication clarity — are they articulate, organized, and engaging?\n8. Do NOT ask coding or technical algorithm questions.\n9. Ban generic openers like "Thank you for sharing" — just transition naturally.\n10. For non-tech roles (Sales, Marketing, Support, etc.): ask DOMAIN-SPECIFIC behavioral questions relevant to the role.`
+                    },
+                    screening: {
+                        persona: `You are a friendly recruiter conducting an initial screening call. Your goal is to quickly assess if this candidate is a potential fit for the role before advancing them.`,
+                        personaTraits: `- Friendly, efficient, and informative\n- Focused on verifying basic qualifications and interest\n- Your goal: determine if this candidate should proceed to the next round`,
+                        skillsFallback: 'Relevant experience, role understanding, communication, motivation, salary expectations, availability',
+                        rules: `1. ONE question at a time. Keep it conversational and light.\n2. Keep responses SHORT — 1-2 sentences max.\n3. Cover: why they're interested, relevant experience, role expectations, availability/timeline.\n4. For non-tech roles: focus on their understanding of the role, relevant past work, and motivation.\n5. Do NOT deep-dive into technical details — that's for later rounds.\n6. Be warm and encouraging — this is their first impression of the company.\n7. Ban generic openers — transition naturally between topics.`
+                    },
+                    technical: {
+                        persona: `You are an elite technical interviewer at a top-tier company (think Google, Stripe, OpenAI caliber). You are conducting a LIVE voice interview.`,
+                        personaTraits: `- Warm, conversational, intellectually curious\n- Highly observant — you notice details in answers and probe them\n- Never robotic — you sound like a senior engineer having a real conversation\n- Your goal: accurately assess this candidate's actual technical capability`,
+                        skillsFallback: 'General technical and problem-solving skills',
+                        rules: `1. ONE question at a time. NEVER ask multiple questions in one turn.\n2. Keep responses to 1-3 sentences — this is SPOKEN via TTS.\n3. Listen carefully: reference SPECIFIC words/phrases from their last answer.\n4. Never repeat a question already answered.\n5. Weak answer (score<40): ask a SIMPLER follow-up on the same topic.\n6. Strong answer (score>70): go DEEPER — architecture, trade-offs, scale, failure modes.\n7. Use STAR method probes for behavioral.\n8. Ban generic openers like "Thank you for sharing" or "Great answer" — just transition naturally.\n9. If they give a buzzword answer without substance, probe: "Can you give me a concrete example?"`
+                    },
+                    coding: {
+                        persona: `You are a senior engineer conducting a coding assessment interview. You will present algorithmic and data-structure problems and evaluate the candidate's problem-solving approach.`,
+                        personaTraits: `- Analytical, precise, and supportive\n- You guide without giving away answers\n- Focus on thought process, not just final answers\n- Your goal: assess algorithmic thinking, code quality instincts, and problem decomposition`,
+                        skillsFallback: 'Data structures, algorithms, problem-solving, time/space complexity, code quality',
+                        rules: `1. ONE problem at a time.\n2. Present problems VERBALLY — keep descriptions clear and concise.\n3. Ask them to EXPLAIN their approach before "coding".\n4. Probe time/space complexity, edge cases, optimization.\n5. If stuck, give progressive hints — don't just give the answer.\n6. Assess: problem decomposition, algorithm choice, edge-case awareness.\n7. Keep it conversational — this is a voice interview, not a whiteboard.`
+                    },
+                    system_design: {
+                        persona: `You are a principal engineer conducting a system design interview. You'll assess the candidate's ability to architect scalable, reliable systems.`,
+                        personaTraits: `- Thoughtful, collaborative, and probing\n- You think in terms of trade-offs and scale\n- Your goal: assess architectural thinking and real-world engineering judgment`,
+                        skillsFallback: 'System architecture, scalability, reliability, database design, API design, trade-off analysis',
+                        rules: `1. Present a system design scenario relevant to the role.\n2. Let them drive — observe how they structure their thinking.\n3. Probe: scalability, failure modes, data modeling, caching, load balancing.\n4. Ask about trade-offs: "Why this over that?"\n5. Adjust complexity to their experience level.\n6. Keep it conversational — this is voice, not a whiteboard.`
+                    },
+                    portfolio: {
+                        persona: `You are a design lead reviewing the candidate's portfolio and past work. Focus on their design process, creative thinking, and craft quality.`,
+                        personaTraits: `- Creative, detail-oriented, and appreciative\n- You care about process as much as output\n- Your goal: understand their design thinking and creative problem-solving`,
+                        skillsFallback: 'Design thinking, UX process, visual craft, user research, prototyping, presentation skills',
+                        rules: `1. Ask about specific projects from their background.\n2. Probe the WHY behind design decisions.\n3. Ask about user research, iteration, and feedback incorporation.\n4. Assess presentation and communication of design rationale.\n5. Keep it conversational and encouraging.`
+                    },
+                    final_round: {
+                        persona: `You are a senior leader conducting a final-round interview. You're assessing leadership, strategic thinking, cultural fit, and overall readiness for the role.`,
+                        personaTraits: `- Executive-level, thoughtful, and strategic\n- You assess big-picture thinking and leadership qualities\n- Your goal: determine if this person will thrive in the role long-term`,
+                        skillsFallback: 'Leadership, strategic thinking, communication, cultural fit, growth potential, decision-making',
+                        rules: `1. ONE question at a time. Mix behavioral and strategic.\n2. Ask about leadership philosophy, team dynamics, career vision.\n3. Probe decision-making: "Walk me through a tough call you've made."\n4. Assess cultural alignment with the company values.\n5. Keep it senior-level — avoid junior-level technical trivia.\n6. This is the final impression — be warm but evaluative.`
+                    },
+                };
+
+                const config = roundConfig[roundStyle] || roundConfig.technical;
+                const roundLabel = this.interviewRound ? `\n## INTERVIEW ROUND\n${this.interviewRound}` : '';
+
+                return `${config.persona} You are conducting a LIVE voice interview that the candidate takes seriously.
 
 ${languageInstructions}
 
 ## YOUR PERSONA
-- Warm, conversational, intellectually curious
-- Highly observant — you notice details in answers and probe them
-- Never robotic — you sound like a senior engineer having a real conversation
-- Your goal: accurately assess this candidate's actual capability
+${config.personaTraits}
 
 ## POSITION
 Role: "${this.jobTitle}"
 Level: ${this.level}
+${roundLabel}
 
 ## JOB DESCRIPTION
-${this.jobContext || 'Assess general technical and behavioral competencies.'}
+${this.jobContext || 'Assess competencies relevant to this role.'}
 
 ## CANDIDATE BACKGROUND
 ${this.resumeContext || 'Discover their background through conversation.'}
 
 ## KEY SKILLS TO ASSESS
-${this.skillsToProbe.length ? this.skillsToProbe.map((s, i) => `${i + 1}. ${s}`).join('\n') : 'General technical and problem-solving skills'}
+${this.skillsToProbe.length ? this.skillsToProbe.map((s, i) => `${i + 1}. ${s}`).join('\n') : config.skillsFallback}
 
 ## SKILLS ALREADY COVERED
 ${Object.entries(this.skillsCovered).map(([s, d]) => `- ${s}: Score ${d.score}/100, Depth ${d.depth}`).join('\n') || 'None yet'}
 
 ## INTERVIEW RULES
-1. ONE question at a time. NEVER ask multiple questions in one turn.
-2. Keep responses to 1-3 sentences — this is SPOKEN via TTS.
-3. Listen carefully: reference SPECIFIC words/phrases from their last answer.
-4. Never repeat a question already answered.
-5. Weak answer (score<40): ask a SIMPLER follow-up on the same topic.
-6. Strong answer (score>70): go DEEPER — architecture, trade-offs, scale, failure modes.
-7. Use STAR method probes for behavioral.
-8. Ban generic openers like "Thank you for sharing" or "Great answer" — just transition naturally.
-9. If they give a buzzword answer without substance, probe: "Can you give me a concrete example?"
+${config.rules}
 
 ## CURRENT STATE
 - Questions asked: ${this.questionCount}/${this.maxQuestions}
@@ -2392,13 +2465,10 @@ ${Object.entries(this.skillsCovered).map(([s, d]) => `- ${s}: Score ${d.score}/1
 
                 const pill = document.getElementById('phasePill');
                 if (pill) {
-                    const labels = {
-                        intro: 'INTRODUCTION',
-                        skill_probe: 'TECHNICAL DEEP-DIVE',
-                        scenario: 'PROBLEM SOLVING',
-                        behavioral: 'BEHAVIORAL',
-                        closing: 'WRAPPING UP'
-                    };
+                    const roundStyle = this.getRoundStyle();
+                    const labels = roundStyle === 'hr_behavioral' || roundStyle === 'screening' || roundStyle === 'final_round'
+                        ? { intro: 'INTRODUCTION', skill_probe: 'COMPETENCY ASSESSMENT', scenario: 'SITUATIONAL', behavioral: 'BEHAVIORAL', closing: 'WRAPPING UP' }
+                        : { intro: 'INTRODUCTION', skill_probe: 'TECHNICAL DEEP-DIVE', scenario: 'PROBLEM SOLVING', behavioral: 'BEHAVIORAL', closing: 'WRAPPING UP' };
                     pill.textContent = labels[this.phase] || this.phase.toUpperCase();
                 }
             },
@@ -2409,27 +2479,50 @@ ${Object.entries(this.skillsCovered).map(([s, d]) => `- ${s}: Score ${d.score}/1
                 const strongSkills = Object.entries(this.skillsCovered).filter(([, v]) => v.score >= 70).map(([k]) => k);
                 const lastAnswer = this.history.filter(h => h.role === 'user').slice(-1)[0]?.content || '';
 
+                const roundStyle = this.getRoundStyle();
+                const isNonTech = ['hr_behavioral', 'screening', 'final_round', 'portfolio'].includes(roundStyle);
+
                 switch (this.phase) {
                     case 'intro':
+                        if (isNonTech) {
+                            return `Welcome naturally (warm, not robotic). Ask them about their journey — what drew them to ${this.jobTitle || 'this field'}, what motivates them professionally. DO NOT say "Tell me about yourself".`;
+                        }
                         return `Welcome naturally (warm, not robotic). Ask them to walk through their journey — what brought them to ${this.jobTitle}, what they're passionate about technically. DO NOT say "Tell me about yourself".`;
                     case 'skill_probe':
-                        const nextSkill = uncovered[0] || this.skillsToProbe[0] || 'core technical skills';
+                        const nextSkill = uncovered[0] || this.skillsToProbe[0] || (isNonTech ? 'core competencies for this role' : 'core technical skills');
                         if (weakSkills.length > 0 && Math.random() > 0.5) {
-                            return `Candidate was weak on "${weakSkills[0]}". Ask a SIMPLER, concrete question — maybe walk through a basic use case. Frame as "I'd love to understand your approach to..."`;
+                            return `Candidate was weak on "${weakSkills[0]}". Ask a SIMPLER, concrete question — maybe walk through a real example. Frame as "I'd love to understand your approach to..."`;
                         }
                         if (strongSkills.length > 0 && Math.random() > 0.6) {
-                            return `Strong on "${strongSkills[0]}". Push harder — edge cases, scaling challenges, trade-offs, what they'd do differently. Peer-level discussion.`;
+                            return `Strong on "${strongSkills[0]}". Go deeper — ask about challenges they faced, how they handled difficult situations, or what they'd improve. Peer-level discussion.`;
+                        }
+                        if (isNonTech) {
+                            return `Transition naturally from their last answer and explore "${nextSkill}". Ask a situation-based question: "Can you walk me through a time when you had to..." Make it relevant to ${this.jobTitle || 'the role'}.`;
                         }
                         return `Transition naturally from their last answer and probe "${nextSkill}". Connect it: "You mentioned X, that makes me curious about ${nextSkill}..." Ask something SPECIFIC to ${this.level} level.`;
                     case 'scenario':
+                        if (isNonTech) {
+                            const scenarios = {
+                                'hr_behavioral': `Give a realistic workplace scenario. E.g. "Imagine a customer is upset about a delay — how would you handle the situation?" or "A coworker isn't pulling their weight on a team project — what do you do?" Make it relevant to ${this.jobTitle || 'the role'}.`,
+                                'screening': `Ask a simple hypothetical relevant to their role. Keep it light — this is a screening round.`,
+                                'final_round': `Present a strategic scenario relevant to ${this.jobTitle}. Assess their decision-making and leadership instincts.`,
+                                'portfolio': `Ask them to walk through their most challenging project and what they learned from it.`,
+                            };
+                            return scenarios[roundStyle] || scenarios.hr_behavioral;
+                        }
                         return `Give a realistic scenario from the ${this.jobTitle} domain. E.g. "Imagine on day one, the main API is hitting 5-second response times. Walk me through how you'd diagnose and fix this." NEVER ask generic "describe a challenge" questions.`;
                     case 'behavioral':
-                        const behaviors = ['handling a production incident under pressure', 'disagreeing with a senior engineer', 'mentoring a struggling junior', 'shipping with known technical debt', 'navigating unclear requirements'];
+                        let behaviors;
+                        if (isNonTech) {
+                            behaviors = ['handling a difficult customer or stakeholder', 'managing competing priorities under a tight deadline', 'resolving a conflict with a colleague', 'adapting to a sudden change in plans', 'going above and beyond for a customer or team', 'dealing with a mistake you made at work'];
+                        } else {
+                            behaviors = ['handling a production incident under pressure', 'disagreeing with a senior engineer', 'mentoring a struggling junior', 'shipping with known technical debt', 'navigating unclear requirements'];
+                        }
                         const pick = behaviors[Math.floor(Math.random() * behaviors.length)];
                         return `Ask about: "${pick}". Frame as "I'm curious — have you ever been in a situation where [scenario]?" Do NOT say "Tell me about a time when...".`;
                     case 'closing':
                         const praise = strongSkills.length > 0
-                            ? `Mention you were impressed by their depth in ${strongSkills.slice(0, 2).join(' and ')}.`
+                            ? `Mention you were impressed by their ${isNonTech ? 'insights on' : 'depth in'} ${strongSkills.slice(0, 2).join(' and ')}.`
                             : 'Acknowledge their thoughtful responses.';
                         return `Wrap up naturally. ${praise} Say "This was a great conversation" and briefly explain that the team will review and be in touch soon. Do NOT ask if they have any questions. Keep it SHORT — 2 sentences max.`;
                     default:
@@ -2660,12 +2753,22 @@ ${Object.entries(this.skillsCovered).map(([s, d]) => `- ${s}: Score ${d.score}/1
                 engine.jobTitle = state.meta.job.title || '';
                 engine.jobContext = `Title: ${state.meta.job.title}\nDepartment: ${state.meta.job.department || ''}\nDescription: ${state.meta.job.description || ''}\nSkills: ${(state.meta.job.skills_required || state.meta.job.skills || []).join(', ')}\nExperience: ${state.meta.job.experience_min || 0}-${state.meta.job.experience_max || '?'} years`;
 
-                const avgExp = ((state.meta.job.experience_min || 0) + (state.meta.job.experience_max || 5)) / 2;
-                if (avgExp <= 1) engine.level = 'fresher/entry-level';
-                else if (avgExp <= 3) engine.level = 'junior (1-3 years)';
-                else if (avgExp <= 6) engine.level = 'mid-level (3-6 years)';
-                else if (avgExp <= 10) engine.level = 'senior (6-10 years)';
-                else engine.level = 'staff/lead (10+ years)';
+                // Set interview round from DB record
+                engine.interviewRound = state.meta.interview?.interview_level || '';
+                console.log('[Engine] Interview round:', engine.interviewRound, '→ style:', engine.getRoundStyle());
+
+                // Set experience level from DB or calculate from job
+                if (state.meta.interview?.experience_level) {
+                    const expMap = { fresher: 'fresher/entry-level', junior: 'junior (1-3 years)', mid: 'mid-level (3-6 years)', senior: 'senior (6-10 years)', lead: 'staff/lead (10+ years)', executive: 'executive/director' };
+                    engine.level = expMap[state.meta.interview.experience_level] || state.meta.interview.experience_level;
+                } else {
+                    const avgExp = ((state.meta.job.experience_min || 0) + (state.meta.job.experience_max || 5)) / 2;
+                    if (avgExp <= 1) engine.level = 'fresher/entry-level';
+                    else if (avgExp <= 3) engine.level = 'junior (1-3 years)';
+                    else if (avgExp <= 6) engine.level = 'mid-level (3-6 years)';
+                    else if (avgExp <= 10) engine.level = 'senior (6-10 years)';
+                    else engine.level = 'staff/lead (10+ years)';
+                }
 
                 // Use configured question_count from dashboard, or calculate from skills
                 const configuredCount = state.meta.interview?.question_count;
@@ -2910,12 +3013,25 @@ ${Object.entries(this.skillsCovered).map(([s, d]) => `- ${s}: Score ${d.score}/1
 
                 state.voice.recognition.onresult = handleSpeechResult;
                 state.voice.recognition.onerror = (e) => {
-                    console.warn('Speech error:', e.error);
-                    if (['no-speech', 'audio-capture', 'aborted'].includes(e.error)) restartListening();
+                    console.warn('[STT] Speech error:', e.error);
+                    // Restart on any recoverable error — not just the original 3
+                    const fatal = ['not-allowed', 'service-not-allowed', 'language-not-supported'];
+                    if (!fatal.includes(e.error) && state.voice.isListening && !state.voice.isProcessing) {
+                        restartListening();
+                    }
                 };
                 state.voice.recognition.onend = () => {
-                    if (state.voice.isListening && !state.voice.isSpeaking && !state.voice.isProcessing) {
-                        setTimeout(() => { try { state.voice.recognition.start(); } catch (e) { } }, 150);
+                    console.log('[STT] recognition.onend — isListening=' + state.voice.isListening +
+                        ' isSpeaking=' + state.voice.isSpeaking + ' isProcessing=' + state.voice.isProcessing);
+                    // Restart recognition if we SHOULD be listening and aren't processing
+                    if (state.voice.isListening && !state.voice.isProcessing) {
+                        setTimeout(() => {
+                            if (state.voice.isListening && !state.voice.isProcessing) {
+                                try { state.voice.recognition.start(); } catch (e) {
+                                    console.warn('[STT] Failed to restart recognition:', e.message);
+                                }
+                            }
+                        }, 200);
                     }
                 };
             } else {
@@ -3173,12 +3289,8 @@ ${Object.entries(this.skillsCovered).map(([s, d]) => `- ${s}: Score ${d.score}/1
                 state.voice.isSpeaking = true;
                 state.voice.activeResolve = resolve;
 
-                // Allow barge-in: keep recognition running (but NOT during closing phase)
-                if (engine.phase !== 'closing' && !state.voice.isListening && !state.voice.isProcessing && state.voice.recognition) {
-                    try { state.voice.recognition.start(); } catch (e) { }
-                    state.voice.isListening = true;
-                    startSilenceDetection();
-                }
+                // Clear any stale silence detection timer from previous cycle
+                clearTimeout(state.voice.silenceTimer);
 
                 setOrbState('speaking');
 
@@ -3192,6 +3304,7 @@ ${Object.entries(this.skillsCovered).map(([s, d]) => `- ${s}: Score ${d.score}/1
                 function finishSpeaking() {
                     stopTTSKeepAlive();
                     state.voice.isSpeaking = false;
+                    clearTimeout(state.voice.silenceTimer); // Kill any stale silence detection
                     if (subtitle) subtitle.classList.remove('show');
 
                     if (state.voice.activeResolve) {
@@ -3201,23 +3314,26 @@ ${Object.entries(this.skillsCovered).map(([s, d]) => `- ${s}: Score ${d.score}/1
 
                     if (engine.phase === 'closing') {
                         state.voice.isListening = false;
-                        clearTimeout(state.voice.silenceTimer);
                         try { if (state.voice.recognition) state.voice.recognition.stop(); } catch (e) { }
+                        console.log('[TTS] finishSpeaking → closing phase, no listener restart');
                     } else {
+                        // Force-stop any stale recognition immediately
+                        try { if (state.voice.recognition) state.voice.recognition.stop(); } catch (e) { }
+                        state.voice.isListening = false;
+                        state.voice.finalTranscript = '';
+                        state.voice.currentTranscript = '';
+                        state.voice.lastSpeechTime = 0;
+
+                        console.log('[TTS] finishSpeaking → scheduling listener restart in 500ms');
                         setTimeout(() => {
-                            if (!state.voice.isProcessing) {
-                                // Force-stop any stale recognition before restarting
-                                try { if (state.voice.recognition) state.voice.recognition.stop(); } catch (e) { }
-                                state.voice.isListening = false;
-                                state.voice.finalTranscript = '';
-                                state.voice.currentTranscript = '';
-                                state.voice.lastSpeechTime = 0;
-                                console.log('[TTS] finishSpeaking → restarting listener (isProcessing=' + state.voice.isProcessing + ')');
-                                setTimeout(() => startListening(), 200);
+                            if (!state.voice.isProcessing && !state.session.ended) {
+                                console.log('[TTS] finishSpeaking → calling startListening()');
+                                startListening();
                             } else {
-                                console.log('[TTS] finishSpeaking → skipped listener restart (isProcessing=true)');
+                                console.log('[TTS] finishSpeaking → skipped listener restart' +
+                                    ' (isProcessing=' + state.voice.isProcessing + ', ended=' + state.session.ended + ')');
                             }
-                        }, 800);
+                        }, 500);
                     }
                 }
 
@@ -3368,8 +3484,15 @@ ${Object.entries(this.skillsCovered).map(([s, d]) => `- ${s}: Score ${d.score}/1
         // SPEECH RECOGNITION
         // ══════════════════════════════════════════════════════════════
         function startListening() {
-            if (!state.voice.recognition || state.voice.isProcessing) return;
+            if (!state.voice.recognition || state.voice.isProcessing) {
+                console.log('[Listen] startListening blocked: recognition=' + !!state.voice.recognition +
+                    ' isProcessing=' + state.voice.isProcessing);
+                return;
+            }
             if (engine.phase === 'closing') return;
+
+            // Stop any residual recognition before fresh start
+            try { state.voice.recognition.stop(); } catch (e) { }
 
             state.voice.isListening = true;
             state.voice.finalTranscript = '';
@@ -3386,13 +3509,43 @@ ${Object.entries(this.skillsCovered).map(([s, d]) => `- ${s}: Score ${d.score}/1
             if (micEl) micEl.classList.add('active-mic');
             if (transEl) { transEl.textContent = ''; transEl.className = 'live-transcript-text'; }
 
-            try { state.voice.recognition.start(); } catch (e) { }
+            // Small delay after stop() before starting again to avoid InvalidStateError
+            setTimeout(() => {
+                if (!state.voice.isListening || state.voice.isProcessing) return;
+                try {
+                    state.voice.recognition.start();
+                    console.log('[Listen] Recognition started successfully');
+                } catch (e) {
+                    console.warn('[Listen] Recognition start failed:', e.message);
+                    // Retry once more after a delay
+                    setTimeout(() => {
+                        if (state.voice.isListening && !state.voice.isProcessing) {
+                            try { state.voice.recognition.start(); } catch (e2) {
+                                console.error('[Listen] Recognition retry also failed:', e2.message);
+                            }
+                        }
+                    }, 500);
+                }
+            }, 150);
+
             startSilenceDetection();
+
+            // Safety watchdog: if no speech at all for 60 seconds, something is wrong
+            // Restart recognition to recover from stuck states
+            clearTimeout(state.voice._noSpeechWatchdog);
+            state.voice._noSpeechWatchdog = setTimeout(() => {
+                if (state.voice.isListening && !state.voice.isProcessing &&
+                    !state.voice.isSpeaking && state.voice.lastSpeechTime === 0) {
+                    console.warn('[Listen] No speech detected for 60s — restarting recognition');
+                    restartListening();
+                }
+            }, 60000);
         }
 
         function stopListening() {
             state.voice.isListening = false;
             clearTimeout(state.voice.silenceTimer);
+            clearTimeout(state.voice._noSpeechWatchdog);
             const vizEl = document.getElementById('listenViz');
             const micEl = document.getElementById('vcMic');
             if (vizEl) vizEl.classList.remove('active');
@@ -3542,8 +3695,11 @@ ${Object.entries(this.skillsCovered).map(([s, d]) => `- ${s}: Score ${d.score}/1
                 await sleep(2000);
                 endSession();
             } else {
-                state.voice.isProcessing = false;
+                // IMPORTANT: Keep isProcessing=true during aiSpeak to prevent
+                // barge-in recognition from starting silence detection during TTS.
+                // finishSpeaking() will restart the listener after speaking ends.
                 await aiSpeak(nextQuestion);
+                state.voice.isProcessing = false;
             }
         }
 
