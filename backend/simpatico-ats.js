@@ -1278,6 +1278,9 @@ route("GET", "/admin/users", handleAdminListUsers);
 route("GET", "/admin/jobs", handleAdminListJobs);
 route("GET", "/admin/audit-logs", handleAdminAuditLogs);
 route("POST", "/admin/test-email", handleAdminTestEmail);
+route("GET", "/admin/interview-stats", handleAdminInterviewStats);
+route("PATCH", "/admin/companies/:id/block", handleAdminToggleCompanyBlock);
+route("PATCH", "/admin/companies/:id/interview-block", handleAdminToggleInterviewBlock);
 
 // ── Attendance ──
 route("POST", "/attendance/clock-in", handleClockIn);
@@ -6385,6 +6388,36 @@ async function handleCreateInterview(request, env, ctx) {
     throw new ValidationError("candidate_name and candidate_email are required");
   }
 
+  // ── Enforce company-level blocks ──
+  const companyId = body.company_id || ctx.tenantId;
+  if (companyId && companyId !== "default") {
+    try {
+      const compRes = await fetch(
+        `${env.SUPABASE_URL}/rest/v1/companies?id=eq.${companyId}&select=is_blocked,interviews_blocked`,
+        {
+          headers: {
+            apikey: env.SUPABASE_SERVICE_KEY,
+            Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
+          },
+        },
+      );
+      if (compRes.ok) {
+        const companies = await compRes.json();
+        if (companies.length > 0) {
+          if (companies[0].is_blocked) {
+            throw new ForbiddenError("This company account has been blocked by the platform administrator.");
+          }
+          if (companies[0].interviews_blocked) {
+            throw new ForbiddenError("Interview access has been restricted for this company. Please contact the platform administrator.");
+          }
+        }
+      }
+    } catch (e) {
+      if (e instanceof ForbiddenError) throw e;
+      console.warn("[Interview] Company block check failed:", e.message);
+    }
+  }
+
   const token = body.token || Array.from(crypto.getRandomValues(new Uint8Array(24)))
     .map(b => b.toString(36).padStart(2, "0")).join("").slice(0, 32);
 
@@ -6712,6 +6745,154 @@ async function handleAdminTestEmail(request, env, ctx) {
 
   await audit(env, ctx, "admin.test_email", "admin", null, { to });
   return apiResponse({ sent: true, to });
+}
+
+/**
+ * GET /admin/interview-stats — Per-company interview usage stats (super_admin only).
+ * Returns each company's total interviews, completed, pending, and date of last interview.
+ */
+async function handleAdminInterviewStats(request, env, ctx) {
+  requireRole(ctx, "super_admin", "superadmin");
+
+  // Fetch all companies
+  const compRes = await fetch(
+    `${env.SUPABASE_URL}/rest/v1/companies?select=id,name,is_blocked,interviews_blocked`,
+    {
+      headers: {
+        apikey: env.SUPABASE_SERVICE_KEY,
+        Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
+      },
+    },
+  );
+  const companies = compRes.ok ? await compRes.json() : [];
+
+  // Fetch all interviews with company_id
+  const intRes = await fetch(
+    `${env.SUPABASE_URL}/rest/v1/interviews?select=id,company_id,status,created_at&order=created_at.desc`,
+    {
+      headers: {
+        apikey: env.SUPABASE_SERVICE_KEY,
+        Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
+      },
+    },
+  );
+  const interviews = intRes.ok ? await intRes.json() : [];
+
+  // Build per-company stats
+  const statsMap = {};
+  for (const c of companies) {
+    statsMap[c.id] = {
+      company_id: c.id,
+      company_name: c.name,
+      is_blocked: c.is_blocked || false,
+      interviews_blocked: c.interviews_blocked || false,
+      total_interviews: 0,
+      completed: 0,
+      pending: 0,
+      scheduled: 0,
+      expired: 0,
+      last_interview_at: null,
+    };
+  }
+
+  for (const iv of interviews) {
+    const cid = iv.company_id;
+    if (!statsMap[cid]) {
+      statsMap[cid] = {
+        company_id: cid,
+        company_name: "Unknown",
+        is_blocked: false,
+        interviews_blocked: false,
+        total_interviews: 0,
+        completed: 0,
+        pending: 0,
+        scheduled: 0,
+        expired: 0,
+        last_interview_at: null,
+      };
+    }
+    statsMap[cid].total_interviews++;
+    if (iv.status === "completed") statsMap[cid].completed++;
+    else if (iv.status === "pending") statsMap[cid].pending++;
+    else if (iv.status === "scheduled") statsMap[cid].scheduled++;
+    else if (iv.status === "expired") statsMap[cid].expired++;
+    if (!statsMap[cid].last_interview_at) {
+      statsMap[cid].last_interview_at = iv.created_at;
+    }
+  }
+
+  const stats = Object.values(statsMap).sort((a, b) => b.total_interviews - a.total_interviews);
+  return apiResponse({
+    stats,
+    total_interviews: interviews.length,
+    total_companies: companies.length,
+  });
+}
+
+/**
+ * PATCH /admin/companies/:id/block — Toggle company blocked status (super_admin only).
+ */
+async function handleAdminToggleCompanyBlock(request, env, ctx, [companyId]) {
+  requireRole(ctx, "super_admin", "superadmin");
+
+  const body = await safeJson(request);
+  const blocked = !!body.blocked;
+
+  const res = await fetch(
+    `${env.SUPABASE_URL}/rest/v1/companies?id=eq.${companyId}`,
+    {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        apikey: env.SUPABASE_SERVICE_KEY,
+        Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
+        Prefer: "return=representation",
+      },
+      body: JSON.stringify({ is_blocked: blocked }),
+    },
+  );
+
+  if (!res.ok) throw new AppError("Failed to update company", res.status);
+  const updated = await res.json();
+
+  await audit(env, ctx, blocked ? "admin.company_blocked" : "admin.company_unblocked", "companies", companyId, {
+    blocked,
+  });
+
+  return apiResponse({ company: updated[0] || { id: companyId, is_blocked: blocked } });
+}
+
+/**
+ * PATCH /admin/companies/:id/interview-block — Toggle interview access for a company (super_admin only).
+ */
+async function handleAdminToggleInterviewBlock(request, env, ctx, [companyId]) {
+  requireRole(ctx, "super_admin", "superadmin");
+
+  const body = await safeJson(request);
+  const blocked = !!body.blocked;
+
+  const res = await fetch(
+    `${env.SUPABASE_URL}/rest/v1/companies?id=eq.${companyId}`,
+    {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        apikey: env.SUPABASE_SERVICE_KEY,
+        Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
+        Prefer: "return=representation",
+      },
+      body: JSON.stringify({ interviews_blocked: blocked }),
+    },
+  );
+
+  if (!res.ok) throw new AppError("Failed to update company interview access", res.status);
+  const updated = await res.json();
+
+  await audit(env, ctx, blocked ? "admin.interviews_blocked" : "admin.interviews_unblocked", "companies", companyId, {
+    interviews_blocked: blocked,
+  });
+
+  return apiResponse({ company: updated[0] || { id: companyId, interviews_blocked: blocked } });
 }
 
 // ===============================================================
