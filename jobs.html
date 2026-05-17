@@ -255,14 +255,14 @@
 <div class="toast" id="toast"></div>
 
 <div class="footer">
-  © 2025 <a href="/">Simpatico HR Consultancy</a>  AI-Powered Recruitment
+  © 2025 <a href="/">Simpatico HR Consultancy</a> • AI-Powered Recruitment
 </div>
 
 <script>
 // ---------------------------------------------------------------
-// CONFIG  NO EXPOSED CREDENTIALS
+// CONFIG — MULTI-TENANT SAFE
 // ---------------------------------------------------------------
-const WORKER_URL = "https://evalis-ai.simpaticohrconsultancy.workers.dev";
+const WORKER_URL = window.SIMPATICO_CONFIG?.workerUrl || "https://evalis-ai.simpaticohrconsultancy.workers.dev";
 
 let allJobs = [];
 let currentFilter = 'all';
@@ -270,8 +270,16 @@ let isAdmin = false;
 let HR_TOKEN = null;
 let HR_USER = null;
 
+// Get the current tenant/company ID from the logged-in user context
+function getCurrentCompanyId() {
+  try {
+    const user = HR_USER || JSON.parse(localStorage.getItem('simpatico_user') || '{}');
+    return user?.company_id || user?.tenant_id || null;
+  } catch { return null; }
+}
+
 // ---------------------------------------------------------------
-// API HELPER  All calls go through the worker
+// API HELPER — All calls go through the worker (tenant-isolated)
 // ---------------------------------------------------------------
 async function api(method, path, body = null, auth = false) {
   const opts = {
@@ -281,11 +289,14 @@ async function api(method, path, body = null, auth = false) {
   if (auth && HR_TOKEN) {
     opts.headers['Authorization'] = 'Bearer ' + HR_TOKEN;
   }
+  // Always send tenant context header for backend isolation
+  const cid = getCurrentCompanyId();
+  if (cid) opts.headers['X-Tenant-ID'] = cid;
   if (body) opts.body = JSON.stringify(body);
 
   const res = await fetch(WORKER_URL + path, opts);
   const data = await res.json();
-  if (!res.ok) throw new Error(data.error || 'HTTP ' + res.status);
+  if (!res.ok) throw new Error(data.error?.message || data.error || 'HTTP ' + res.status);
   return data;
 }
 
@@ -297,32 +308,49 @@ function showToast(msg, type = "success") {
   t.textContent = msg;
   t.className = `toast ${type} show`;
   setTimeout(() => t.classList.remove('show'), 3000);
-}// ---------------------------------------------------------------
-// LOAD JOBS — Public endpoint GET /jobs
+}
+// ---------------------------------------------------------------
+// LOAD JOBS — Tenant-Isolated via Worker API
 // ---------------------------------------------------------------
 async function loadJobs() {
   const el = document.getElementById("jobsList");
   try {
-    const params = new URLSearchParams();
     const search = document.getElementById('searchInput')?.value?.trim();
-    
-    const SUPABASE_URL = window.SIMPATICO_CONFIG?.supabaseUrl;
-    const SUPABASE_ANON_KEY = window.SIMPATICO_CONFIG?.supabaseAnonKey;
-    
-    // Default query for open job postings
-    let sbUrl = `${SUPABASE_URL}/rest/v1/jobs?status=eq.open&select=*,job_applications(count)&order=created_at.desc`;
-    
-    if (search) sbUrl += '&title=ilike.*' + encodeURIComponent(search) + '*';
-    if (currentFilter && currentFilter !== 'all') sbUrl += '&type=eq.' + currentFilter;
-    
-    const res = await fetch(sbUrl, { 
-      headers: { 
-        apikey: SUPABASE_ANON_KEY, 
-        Authorization: 'Bearer ' + SUPABASE_ANON_KEY 
-      } 
-    });
-    
-    const jobs = (await res.json()) || [];
+    const companyId = getCurrentCompanyId();
+    let jobs = [];
+
+    if (isAdmin && HR_TOKEN && companyId) {
+      // ADMIN MODE: Fetch only this company's jobs via authenticated Worker endpoint
+      const statusParam = (currentFilter && currentFilter !== 'all') ? currentFilter : 'open';
+      const data = await api('GET', `/recruitment/jobs?status=${statusParam}`, null, true);
+      jobs = data.jobs || data || [];
+    } else if (companyId) {
+      // LOGGED-IN USER: Fetch own company jobs via public endpoint
+      const data = await api('GET', `/recruitment/public/jobs?company_id=${companyId}`);
+      jobs = data.jobs || data || [];
+    } else {
+      // PUBLIC VIEW (no company context): Show Simpatico HR's own jobs only
+      // Use the configured default tenant ID as fallback
+      const defaultTenant = window.SIMPATICO_CONFIG?.tenantId || 'SIMP_PRO_MAIN';
+      const data = await api('GET', `/recruitment/public/jobs?company_id=${defaultTenant}`);
+      jobs = data.jobs || data || [];
+    }
+
+    // Client-side search filter
+    if (search) {
+      const q = search.toLowerCase();
+      jobs = jobs.filter(j => 
+        (j.title || '').toLowerCase().includes(q) ||
+        (j.department || '').toLowerCase().includes(q) ||
+        (j.location || '').toLowerCase().includes(q) ||
+        (j.description || '').toLowerCase().includes(q)
+      );
+    }
+
+    // Client-side type filter (only for public/non-admin mode)
+    if (!isAdmin && currentFilter && currentFilter !== 'all') {
+      jobs = jobs.filter(j => (j.job_type || j.employment_type || '') === currentFilter);
+    }
 
     if (!jobs.length) {
       el.innerHTML = `<div class="empty">
@@ -573,12 +601,21 @@ async function saveEdit() {
   };
 
   try {
-    await api('POST', '/db', {
-      action: 'update',
-      table: 'jobs',
-      data: updateData,
-      filters: { id: jobId }
-    }, true);
+    // ★ TENANT-ISOLATED: Use authenticated Worker endpoint with job ID
+    // Backend enforces tenant_id check via sbFetch to prevent cross-tenant edits
+    const res = await fetch(WORKER_URL + `/recruitment/jobs/${jobId}`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + HR_TOKEN,
+        'X-Tenant-ID': getCurrentCompanyId() || ''
+      },
+      body: JSON.stringify(updateData)
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error?.message || err.error || 'Update failed');
+    }
 
     showToast("✅ Job updated!", "success");
     closeEditModal();
@@ -605,9 +642,20 @@ async function confirmDelete() {
   btn.disabled = true; btn.textContent = '⏳...';
 
   try {
-    await api('POST', '/db', {
-      action: 'delete', table: 'jobs', filters: { id: jobId }
-    }, true);
+    // ★ TENANT-ISOLATED: Use authenticated Worker endpoint
+    // Backend enforces tenant_id check via sbFetch to prevent cross-tenant deletes
+    const res = await fetch(WORKER_URL + `/recruitment/jobs/${jobId}`, {
+      method: 'DELETE',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + HR_TOKEN,
+        'X-Tenant-ID': getCurrentCompanyId() || ''
+      }
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error?.message || err.error || 'Delete failed');
+    }
 
     showToast("🗑️ Job deleted", "success");
     closeDeleteModal();

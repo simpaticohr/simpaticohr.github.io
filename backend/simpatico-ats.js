@@ -1213,6 +1213,8 @@ route("GET", "/payroll/payslips/:employeeId", handleGetPayslips);
 // Recruitment / ATS
 route("POST", "/recruitment/jobs", handleCreateJob);
 route("GET", "/recruitment/jobs", handleListJobs);
+route("PATCH", "/recruitment/jobs/:id", handleUpdateJob);
+route("DELETE", "/recruitment/jobs/:id", handleDeleteJob);
 route("GET", "/recruitment/public/jobs", handlePublicJobs);
 route("POST", "/recruitment/applications", handleCreateApplication);
 route("POST", "/interviews/schedule", handleScheduleInterviewEmail);
@@ -3405,6 +3407,62 @@ async function handleListJobs(request, env, ctx, _, url) {
   return apiResponse({ jobs: await res.json() });
 }
 
+/**
+ * PATCH /recruitment/jobs/:id — Update a job (tenant-isolated).
+ */
+async function handleUpdateJob(request, env, ctx, [jobId]) {
+  requireRole(ctx, "hr", "admin", "superadmin", "client_admin");
+  const body = await safeJson(request);
+
+  // Only allow safe fields to be updated
+  const allowed = ["title", "description", "department", "location", "job_type", "employment_type",
+    "skills", "salary_min", "salary_max", "status", "level", "experience_required"];
+  const update = {};
+  for (const key of allowed) {
+    if (body[key] !== undefined) update[key] = body[key];
+  }
+
+  if (Object.keys(update).length === 0) {
+    throw new ValidationError("No valid fields to update");
+  }
+
+  // sbFetch enforces tenant_id filter → prevents cross-tenant edits
+  const res = await sbFetch(
+    env,
+    "PATCH",
+    `/rest/v1/jobs?id=eq.${jobId}`,
+    update,
+    false,
+    ctx.tenantId,
+  );
+  const [job] = await res.json();
+
+  await audit(env, ctx, "job.updated", "jobs", jobId, { fields: Object.keys(update) });
+  await invalidateCache(env, `analytics:summary:${ctx.tenantId}`);
+  return apiResponse({ job });
+}
+
+/**
+ * DELETE /recruitment/jobs/:id — Delete a job (tenant-isolated).
+ */
+async function handleDeleteJob(request, env, ctx, [jobId]) {
+  requireRole(ctx, "hr", "admin", "superadmin", "client_admin");
+
+  // sbFetch enforces tenant_id filter → prevents cross-tenant deletes
+  const res = await sbFetch(
+    env,
+    "DELETE",
+    `/rest/v1/jobs?id=eq.${jobId}`,
+    null,
+    false,
+    ctx.tenantId,
+  );
+
+  await audit(env, ctx, "job.deleted", "jobs", jobId, {});
+  await invalidateCache(env, `analytics:summary:${ctx.tenantId}`);
+  return apiResponse({ deleted: true, id: jobId });
+}
+
 async function handlePublicJobs(request, env, ctx, _, url) {
   // Unauthenticated endpoint for embeddable Careers Widget
   const company_id = url.searchParams.get("company_id");
@@ -3412,6 +3470,27 @@ async function handlePublicJobs(request, env, ctx, _, url) {
     throw new ValidationError(
       "company_id parameter is required for public job listings",
     );
+
+  // ── Check if company is blocked before serving public jobs ──
+  try {
+    const compRes = await fetch(
+      `${env.SUPABASE_URL}/rest/v1/companies?id=eq.${company_id}&select=is_blocked`,
+      {
+        headers: {
+          apikey: env.SUPABASE_SERVICE_KEY,
+          Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
+        },
+      },
+    );
+    if (compRes.ok) {
+      const companies = await compRes.json();
+      if (companies.length > 0 && companies[0].is_blocked) {
+        return apiResponse({ jobs: [] }); // Blocked company — return no jobs
+      }
+    }
+  } catch (e) {
+    console.warn("[PublicJobs] Company block check failed:", e.message);
+  }
 
   // Pass company_id as the tenant parameter to sbFetch to auto-filter and isolate tenant records securely
   const res = await sbFetch(
