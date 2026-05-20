@@ -634,7 +634,7 @@ async function callExternalLLM(cfg, messages, maxTokens, stream = false) {
     );
   }
 
-  console.log(`[BYOK-LLM] Calling provider=${cfg.provider}, model=${model}, url=${baseUrl}, keyPrefix=${cfg.apiKey?.substring(0, 8)}...`);
+  console.log(`[BYOK-LLM] Calling provider=${cfg.provider}, model=${model}, url=${baseUrl}, keyPrefix=${cfg.apiKey?.substring(0, 4)}****`);
 
   const isAnthropic = cfg.provider === "anthropic" && baseUrl.includes("anthropic.com");
 
@@ -843,7 +843,12 @@ async function dispatchWebhook(env, tenantId, event, payload) {
     payload,
     timestamp: new Date().toISOString(),
   });
-  const signature = await hmacSign(env.WEBHOOK_SECRET || "default", body);
+  const secret = env.WEBHOOK_SECRET;
+  if (!secret) {
+    console.error('WEBHOOK_SECRET not configured - skipping webhook signing');
+    return null;
+  }
+  const signature = await hmacSign(secret, body);
 
   for (const ep of endpoints) {
     if (!ep.events.includes(event) && !ep.events.includes("*")) continue;
@@ -933,7 +938,7 @@ async function dispatchSlack(env, tenantId, message, channel) {
 async function buildContext(request, env) {
   const url = new URL(request.url);
   const requestId = request.headers.get("X-Request-ID") || crypto.randomUUID();
-  const tenantId = request.headers.get("X-Tenant-ID") || "default";
+  const headerTenantId = request.headers.get("X-Tenant-ID") || "default";
   const ip = request.headers.get("CF-Connecting-IP") || "unknown";
   const authHeader = request.headers.get("Authorization") || "";
 
@@ -965,6 +970,28 @@ async function buildContext(request, env) {
     }
   }
 
+  // ── Tenant ID Validation ──
+  // The server-side actor.company_id (from DB) is the source of truth.
+  // The client-supplied X-Tenant-ID header is only trusted if it matches,
+  // OR the actor is a superadmin (who may operate on any tenant).
+  let tenantId = headerTenantId;
+  const actorRole = (actor?.role || "viewer").toLowerCase().replace(/_/g, "");
+  const isSuperAdmin = actorRole === "superadmin";
+
+  if (actor && actor.company_id) {
+    if (headerTenantId === "default" || !headerTenantId) {
+      // No tenant header provided — auto-resolve from the actor's company
+      tenantId = actor.company_id;
+    } else if (headerTenantId !== actor.company_id && !isSuperAdmin) {
+      // Cross-tenant attempt by a non-superadmin — override to their own company
+      console.warn(
+        `[Auth] Tenant mismatch: header=${headerTenantId}, actor_company=${actor.company_id}, actor=${actor.email} — overriding to actor's company`,
+      );
+      tenantId = actor.company_id;
+    }
+    // Superadmins: trust the header (they can operate on any tenant)
+  }
+
   return {
     url,
     requestId,
@@ -973,6 +1000,7 @@ async function buildContext(request, env) {
     actorId: actor?.sub || null,
     actorEmail: actor?.email || null,
     actorRole: actor?.role || "viewer",
+    actorCompanyId: actor?.company_id || null,
     actor,
   };
 }
@@ -989,10 +1017,14 @@ async function verifyViaSupabase(token, env) {
   if (!res.ok) throw new AuthError("Invalid or expired remote token");
   const user = await res.json();
   let role = user.app_metadata?.role || user.user_metadata?.role || "viewer";
+  // Resolve company_id from JWT claims or database lookup
+  let company_id = user.app_metadata?.tenant_id || user.app_metadata?.company_id
+    || user.user_metadata?.tenant_id || user.user_metadata?.company_id || null;
+
   if (role === "viewer") {
-    // Try employees table first
+    // Try employees table first — also fetch company_id/tenant_id for tenant validation
     const pRes = await fetch(
-      `${env.SUPABASE_URL}/rest/v1/employees?auth_id=eq.${user.id}&select=role`,
+      `${env.SUPABASE_URL}/rest/v1/employees?auth_id=eq.${user.id}&select=role,company_id,tenant_id`,
       {
         headers: {
           apikey: env.SUPABASE_SERVICE_KEY,
@@ -1002,15 +1034,18 @@ async function verifyViaSupabase(token, env) {
     );
     if (pRes.ok) {
       const profs = await pRes.json();
-      if (profs && profs.length > 0) role = profs[0].role || "viewer";
+      if (profs && profs.length > 0) {
+        role = profs[0].role || "viewer";
+        if (!company_id) company_id = profs[0].company_id || profs[0].tenant_id || null;
+      }
     }
   }
   // If still viewer, check the users table (platform-level roles stored during registration)
-  if (role === "viewer") {
+  if (role === "viewer" || !company_id) {
     try {
       // Try auth_id first (primary key link), then fall back to email match
       let uRes = await fetch(
-        `${env.SUPABASE_URL}/rest/v1/users?auth_id=eq.${user.id}&select=role`,
+        `${env.SUPABASE_URL}/rest/v1/users?auth_id=eq.${user.id}&select=role,company_id`,
         {
           headers: {
             apikey: env.SUPABASE_SERVICE_KEY,
@@ -1021,7 +1056,7 @@ async function verifyViaSupabase(token, env) {
       let users = uRes.ok ? await uRes.json() : [];
       if (!users.length && user.email) {
         uRes = await fetch(
-          `${env.SUPABASE_URL}/rest/v1/users?email=eq.${encodeURIComponent(user.email)}&select=role`,
+          `${env.SUPABASE_URL}/rest/v1/users?email=eq.${encodeURIComponent(user.email)}&select=role,company_id`,
           {
             headers: {
               apikey: env.SUPABASE_SERVICE_KEY,
@@ -1031,12 +1066,15 @@ async function verifyViaSupabase(token, env) {
         );
         users = uRes.ok ? await uRes.json() : [];
       }
-      if (users.length > 0 && users[0].role) role = users[0].role;
+      if (users.length > 0) {
+        if (users[0].role && role === "viewer") role = users[0].role;
+        if (!company_id && users[0].company_id) company_id = users[0].company_id;
+      }
     } catch (e) {
       console.warn("[Auth] users table role lookup failed:", e.message);
     }
   }
-  return { sub: user.id, email: user.email, role };
+  return { sub: user.id, email: user.email, role, company_id };
 }
 
 function requireAuth(ctx) {
@@ -1049,18 +1087,9 @@ function requireRole(ctx, ...roles) {
   // e.g. "super_admin" matches "superadmin", "company_admin" matches "companyadmin"
   const normalize = (r) => (r || "").toLowerCase().replace(/_/g, "");
   const normalizedActor = normalize(ctx.actorRole);
-  // Superadmin, employer, and companyadmin always have full tenant access
-  if (
-    [
-      "superadmin",
-      "employer",
-      "companyadmin",
-      "hradmin",
-      "recruiter",
-      "interviewer",
-    ].includes(normalizedActor)
-  )
-    return;
+  // Only superadmin and companyadmin universally bypass role checks
+  const universalBypass = ['superadmin', 'companyadmin'];
+  if (universalBypass.includes(normalizedActor)) return;
   const allowed = roles.map(normalize);
   if (!allowed.includes(normalizedActor))
     throw new ForbiddenError(`Required roles: ${roles.join(", ")}`);
@@ -1283,6 +1312,7 @@ route("POST", "/admin/test-email", handleAdminTestEmail);
 route("GET", "/admin/interview-stats", handleAdminInterviewStats);
 route("PATCH", "/admin/companies/:id/block", handleAdminToggleCompanyBlock);
 route("PATCH", "/admin/companies/:id/interview-block", handleAdminToggleInterviewBlock);
+route("GET", "/admin/billing", handleAdminBilling);
 
 // ── Attendance ──
 route("POST", "/attendance/clock-in", handleClockIn);
@@ -1290,10 +1320,13 @@ route("POST", "/attendance/clock-out", handleClockOut);
 route("GET", "/attendance/records", handleListAttendance);
 route("GET", "/attendance/summary", handleAttendanceSummary);
 
-// ── Billing & Subscriptions (Razorpay) ──
-route("POST", "/billing/create-order", handleCreateOrder);
-route("POST", "/billing/verify-payment", handleVerifyPayment);
-route("POST", "/billing/razorpay-webhook", handleRazorpayWebhook);
+// ── Billing & Subscriptions (CCAvenue Domestic + Wise International) ──
+route("POST", "/billing/ccavenue/create-order", handleCCAvCreateOrder);
+route("POST", "/billing/ccavenue/response", handleCCAvResponse);
+route("POST", "/billing/ccavenue/webhook", handleCCAvWebhook);
+route("POST", "/billing/wise/create-order", handleWiseCreateOrder);
+route("POST", "/billing/wise/confirm", handleWiseConfirmPayment);
+route("GET", "/billing/wise/account-details", handleWiseAccountDetails);
 route("GET", "/billing/subscription", handleGetSubscription);
 route("POST", "/billing/cancel", handleCancelSubscription);
 route("GET", "/billing/transactions", handleListTransactions);
@@ -1572,6 +1605,40 @@ export default {
       }
 
       console.log(`[CRON] Complete. Processed: ${processed}, Failed: ${failed}, Skipped: ${rules.length - processed - failed}`);
+
+      // ==========================================
+      // 2. Subscription Expiry Reminders (3 days)
+      // ==========================================
+      try {
+        const in3Days = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000);
+        const startOf3rdDay = new Date(in3Days.setUTCHours(0,0,0,0)).toISOString();
+        const endOf3rdDay = new Date(in3Days.setUTCHours(23,59,59,999)).toISOString();
+
+        const subsRes = await fetch(
+          `${env.SUPABASE_URL}/rest/v1/companies?status=eq.active&subscription_ends_at=gte.${startOf3rdDay}&subscription_ends_at=lte.${endOf3rdDay}&select=id,name,admin_email`,
+          { headers: { apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}` } }
+        );
+        
+        if (subsRes.ok) {
+          const expiringCompanies = await subsRes.json();
+          for (const company of expiringCompanies) {
+            if (company.admin_email) {
+              await sendEmail(env, {
+                to: company.admin_email,
+                subject: `Your Simpatico HR Subscription expires in 3 days`,
+                html: `<p>Hi ${company.name},</p>
+                       <p>This is a quick reminder that your Simpatico HR subscription will expire in exactly <strong>3 days</strong>.</p>
+                       <p>To avoid any interruption to your ATS and HR features, please log in to your dashboard and initiate a payment transfer to renew your subscription for another month.</p>
+                       <p>Thank you,<br>The Simpatico HR Team</p>`
+              });
+              console.log(`[CRON] Sent 3-day expiry warning to ${company.admin_email}`);
+            }
+          }
+        }
+      } catch(e) {
+        console.error("[CRON] Failed to send subscription expiry reminders:", e.message);
+      }
+
     } catch (err) {
       console.error("[CRON] Scheduled handler error:", err.stack || err.message);
     }
@@ -1614,6 +1681,19 @@ async function handleVersion() {
 }
 
 // ── Webhook Registration ───────────────────────────────────────────────────────
+
+/**
+ * GET /admin/billing — Fetch payment transactions for super admin.
+ */
+async function handleAdminBilling(request, env, ctx) {
+  requireRole(ctx, "super_admin", "superadmin");
+  const res = await fetch(`${env.SUPABASE_URL}/rest/v1/payment_transactions?order=created_at.desc.nullslast`, {
+    headers: { apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}` },
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.message || "Failed to fetch transactions");
+  return apiResponse(data);
+}
 
 async function handleRegisterWebhook(request, env, ctx) {
   requireAuth(ctx);
@@ -5220,6 +5300,23 @@ async function sbFetch(
     }
   }
 
+  // Auto-inject tenant_id for POST on tenant-aware tables
+  if (method === 'POST' && tenantId && tenantId !== 'default') {
+    const table = (path.match(/\/rest\/v1\/([a-z_]+)/) || [])[1];
+    if (table && TENANT_AWARE_TABLES.includes(table)) {
+      try {
+        const parsedBody = body || {};
+        if (Array.isArray(parsedBody)) {
+          // Bulk insert - inject into each record
+          parsedBody.forEach(record => { if (!record.tenant_id) record.tenant_id = tenantId; });
+        } else {
+          if (!parsedBody.tenant_id) parsedBody.tenant_id = tenantId;
+        }
+        body = parsedBody;
+      } catch(e) { /* body isn't valid, skip */ }
+    }
+  }
+
   const url = `${env.SUPABASE_URL}${finalPath}`;
   const headers = {
     apikey: env.SUPABASE_SERVICE_KEY,
@@ -6472,7 +6569,7 @@ async function handleCreateInterview(request, env, ctx) {
   if (companyId && companyId !== "default") {
     try {
       const compRes = await fetch(
-        `${env.SUPABASE_URL}/rest/v1/companies?id=eq.${companyId}&select=is_blocked,interviews_blocked`,
+        `${env.SUPABASE_URL}/rest/v1/companies?id=eq.${companyId}&select=is_blocked,interviews_blocked,ai_provider`,
         {
           headers: {
             apikey: env.SUPABASE_SERVICE_KEY,
@@ -6488,6 +6585,25 @@ async function handleCreateInterview(request, env, ctx) {
           }
           if (companies[0].interviews_blocked) {
             throw new ForbiddenError("Interview access has been restricted for this company. Please contact the platform administrator.");
+          }
+          
+          // --- AI Free Tier Limit Enforcement ---
+          const iType = body.interview_type || "human_live";
+          const isAiMode = iType.startsWith("ai_");
+          const aiProvider = companies[0].ai_provider;
+          
+          if (isAiMode && (!aiProvider || aiProvider === "cloudflare")) {
+            // Count total AI interviews created by this company
+            const countRes = await fetch(
+              `${env.SUPABASE_URL}/rest/v1/interviews?company_id=eq.${companyId}&interview_type=like.ai_*&select=id`,
+              { headers: { apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}` } }
+            );
+            if (countRes.ok) {
+              const aiInterviews = await countRes.json();
+              if (aiInterviews.length >= 5) {
+                 throw new ForbiddenError("Free Trial Limit Reached: You have completed your 5 free AI interviews. Please go to Settings > AI Models and configure your own API key (BYOK) to schedule more.");
+              }
+            }
           }
         }
       }
@@ -7140,17 +7256,17 @@ async function handleAttendanceSummary(request, env, ctx) {
 }
 
 // ===============================================================
-// § BILLING — Razorpay (Unified Gateway)
+// § BILLING — CCAvenue (Domestic INR) + Wise (International USD)
 // ===============================================================
 
 const PLAN_PRICING = {
   starter: {
-    monthly: { inr: 4999, usd: 59 },
-    annual:  { inr: 49990, usd: 590 },
+    monthly: { inr: 1999, usd: 29 },
+    annual:  { inr: 19990, usd: 290 },
   },
   professional: {
-    monthly: { inr: 14999, usd: 179 },
-    annual:  { inr: 149990, usd: 1790 },
+    monthly: { inr: 3999, usd: 49 },
+    annual:  { inr: 39990, usd: 490 },
   },
   enterprise: {
     monthly: { inr: 0, usd: 0 }, // custom
@@ -7159,289 +7275,344 @@ const PLAN_PRICING = {
 };
 
 /**
- * POST /billing/create-order — Create a Razorpay payment order.
- * Body: { plan, billing_cycle, customer_name, customer_email, customer_phone }
- * Env vars: RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET
+ * AES-128-CBC encrypt/decrypt helpers for CCAvenue.
+ * CCAvenue uses md5(workingKey) as key, first 16 bytes as IV.
  */
-async function handleCreateOrder(request, env, ctx) {
+async function ccavEncrypt(plainText, workingKey) {
+  const md5Key = await cryptoMD5(workingKey);
+  const keyBytes = hexToBytes(md5Key);
+  const iv = keyBytes.slice(0, 16);
+  const key = await crypto.subtle.importKey("raw", keyBytes, "AES-CBC", false, ["encrypt"]);
+  const encoded = new TextEncoder().encode(plainText);
+  const padded = pkcs7Pad(encoded, 16);
+  const encrypted = await crypto.subtle.encrypt({ name: "AES-CBC", iv }, key, padded);
+  return bytesToHex(new Uint8Array(encrypted));
+}
+
+async function ccavDecrypt(encText, workingKey) {
+  const md5Key = await cryptoMD5(workingKey);
+  const keyBytes = hexToBytes(md5Key);
+  const iv = keyBytes.slice(0, 16);
+  const key = await crypto.subtle.importKey("raw", keyBytes, "AES-CBC", false, ["decrypt"]);
+  const encBytes = hexToBytes(encText);
+  const decrypted = await crypto.subtle.decrypt({ name: "AES-CBC", iv }, key, encBytes);
+  return new TextDecoder().decode(pkcs7Unpad(new Uint8Array(decrypted)));
+}
+
+async function cryptoMD5(str) {
+  const data = new TextEncoder().encode(str);
+  const hash = await crypto.subtle.digest("MD5", data);
+  return bytesToHex(new Uint8Array(hash));
+}
+
+function hexToBytes(hex) {
+  const bytes = new Uint8Array(hex.length / 2);
+  for (let i = 0; i < hex.length; i += 2) bytes[i / 2] = parseInt(hex.substr(i, 2), 16);
+  return bytes;
+}
+
+function bytesToHex(bytes) {
+  return Array.from(bytes).map(b => b.toString(16).padStart(2, "0")).join("");
+}
+
+function pkcs7Pad(data, blockSize) {
+  const padLen = blockSize - (data.length % blockSize);
+  const padded = new Uint8Array(data.length + padLen);
+  padded.set(data);
+  padded.fill(padLen, data.length);
+  return padded;
+}
+
+function pkcs7Unpad(data) {
+  const padLen = data[data.length - 1];
+  return data.slice(0, data.length - padLen);
+}
+
+/**
+ * POST /billing/ccavenue/create-order — Create CCAvenue encrypted order.
+ * Returns { redirect_url, encrypted_request } for frontend form POST.
+ */
+async function handleCCAvCreateOrder(request, env, ctx) {
   requireAuth(ctx);
   const body = await safeJson(request);
   const { plan, billing_cycle = "monthly", customer_name, customer_email, customer_phone } = body;
 
   if (!plan || !PLAN_PRICING[plan]) throw new ValidationError("Invalid plan");
   if (!customer_email) throw new ValidationError("customer_email required");
+  if (!env.CCAVENUE_MERCHANT_ID || !env.CCAVENUE_ACCESS_CODE || !env.CCAVENUE_WORKING_KEY) {
+    throw new AppError("CCAvenue not configured", 503, "GATEWAY_NOT_CONFIGURED");
+  }
 
   const pricing = PLAN_PRICING[plan][billing_cycle];
   if (!pricing || !pricing.inr) throw new ValidationError("Invalid billing cycle or plan");
 
   const companyId = ctx.tenantId;
-  const internalOrderId = `SIMP_${plan.toUpperCase()}_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+  const orderId = `SIMP_${plan.toUpperCase()}_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+  const frontendUrl = env.FRONTEND_URL || "https://simpaticohrconsultancy.com";
+  const workerUrl = env.WORKER_URL || "https://simpatico-hr-ats.simpaticohrconsultancy.workers.dev";
 
-  // Create Razorpay Order via Orders API
-  const rzpAuth = btoa(`${env.RAZORPAY_KEY_ID}:${env.RAZORPAY_KEY_SECRET}`);
-  const rzpRes = await fetch("https://api.razorpay.com/v1/orders", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Authorization": `Basic ${rzpAuth}`,
-    },
-    body: JSON.stringify({
-      amount: pricing.inr * 100, // Razorpay expects paise
-      currency: "INR",
-      receipt: internalOrderId,
-      notes: {
-        plan: plan,
-        billing_cycle: billing_cycle,
-        company_id: companyId,
-        customer_email: customer_email,
-      },
-    }),
-  });
+  const params = [
+    `merchant_id=${env.CCAVENUE_MERCHANT_ID}`,
+    `order_id=${orderId}`,
+    `amount=${pricing.inr}`,
+    `currency=INR`,
+    `redirect_url=${workerUrl}/billing/ccavenue/response`,
+    `cancel_url=${frontendUrl}/platform/pricing.html?payment=cancelled`,
+    `language=EN`,
+    `billing_name=${encodeURIComponent(customer_name || "")}`,
+    `billing_email=${encodeURIComponent(customer_email)}`,
+    `billing_tel=${encodeURIComponent(customer_phone || "")}`,
+    `merchant_param1=${plan}`,
+    `merchant_param2=${billing_cycle}`,
+    `merchant_param3=${companyId}`,
+  ].join("&");
 
-  const rzpData = await rzpRes.json();
-  if (!rzpRes.ok) {
-    console.error("[Razorpay] Order creation failed:", JSON.stringify(rzpData));
-    throw new AppError(`Razorpay order failed: ${rzpData.error?.description || "Unknown error"}`, 502, "RAZORPAY_ERROR");
-  }
+  const encRequest = await ccavEncrypt(params, env.CCAVENUE_WORKING_KEY);
+  const ccavEnv = env.CCAVENUE_ENV === "production" ? "secure" : "test";
+  const ccavUrl = `https://${ccavEnv}.ccavenue.com/transaction/transaction.do?command=initiateTransaction`;
 
-  // Record the pending transaction
+  // Record pending transaction
   await sbFetch(env, "POST", "/rest/v1/payment_transactions", {
-    company_id: companyId,
-    gateway: "razorpay",
-    gateway_order_id: rzpData.id,
-    amount: pricing.inr,
-    currency: "INR",
-    status: "pending",
-    plan: plan,
-    billing_cycle: billing_cycle,
-    metadata: { razorpay_order: rzpData, internal_order_id: internalOrderId },
+    company_id: companyId, gateway: "ccavenue", gateway_order_id: orderId,
+    amount: pricing.inr, currency: "INR", status: "pending", plan, billing_cycle,
+    customer_email, customer_name, is_international: false,
+    metadata: { internal_order_id: orderId },
   }, false, companyId);
 
-  await audit(env, ctx, "billing.order_created", "payment_transactions", internalOrderId, {
-    plan, billing_cycle, amount: pricing.inr,
-  });
+  await audit(env, ctx, "billing.ccav_order_created", "payment_transactions", orderId, { plan, billing_cycle, amount: pricing.inr });
 
   return apiResponse({
-    order_id: internalOrderId,
-    razorpay_order_id: rzpData.id,
-    order_amount: pricing.inr,
-    order_currency: "INR",
-    gateway: "razorpay",
+    order_id: orderId, gateway: "ccavenue", redirect_url: ccavUrl,
+    enc_request: encRequest, access_code: env.CCAVENUE_ACCESS_CODE,
+    amount: pricing.inr, currency: "INR",
   });
 }
 
 /**
- * POST /billing/verify-payment — Verify Razorpay payment signature and activate subscription.
- * Body: { order_id, razorpay_order_id, razorpay_payment_id, razorpay_signature }
+ * POST /billing/ccavenue/response — CCAvenue redirect handler.
+ * CCAvenue POSTs encrypted response to this URL after payment.
  */
-async function handleVerifyPayment(request, env, ctx) {
-  const body = await safeJson(request);
-  const { order_id, razorpay_order_id, razorpay_payment_id, razorpay_signature } = body;
-  if (!order_id || !razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
-    throw new ValidationError("order_id, razorpay_order_id, razorpay_payment_id and razorpay_signature required");
+async function handleCCAvResponse(request, env, ctx) {
+  if (!env.CCAVENUE_WORKING_KEY) return new Response("Gateway not configured", { status: 503 });
+
+  const formData = await request.formData();
+  const encResp = formData.get("encResp");
+  if (!encResp) return new Response("Missing encResp", { status: 400 });
+
+  let decrypted;
+  try {
+    decrypted = await ccavDecrypt(encResp, env.CCAVENUE_WORKING_KEY);
+  } catch (e) {
+    console.error("[CCAvenue] Decryption failed:", e.message);
+    return new Response("Decryption error", { status: 400 });
   }
 
-  // Verify HMAC-SHA256 signature: sha256_hmac(razorpay_order_id + "|" + razorpay_payment_id, key_secret)
-  const signPayload = `${razorpay_order_id}|${razorpay_payment_id}`;
-  const key = await crypto.subtle.importKey(
-    "raw",
-    new TextEncoder().encode(env.RAZORPAY_KEY_SECRET),
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["sign"],
-  );
-  const sig = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(signPayload));
-  const computedSignature = Array.from(new Uint8Array(sig)).map(b => b.toString(16).padStart(2, "0")).join("");
+  const params = Object.fromEntries(decrypted.split("&").map(p => { const [k, ...v] = p.split("="); return [k, v.join("=")]; }));
+  const { order_id, order_status, tracking_id, payment_mode, merchant_param1: plan, merchant_param2: billingCycle, merchant_param3: companyId } = params;
+  const isPaid = order_status === "Success";
+  const frontendUrl = env.FRONTEND_URL || "https://simpaticohrconsultancy.com";
 
-  const isPaid = computedSignature === razorpay_signature;
+  console.log(`[CCAvenue] Response: order=${order_id}, status=${order_status}, tracking=${tracking_id}`);
 
-  // Fetch order notes from Razorpay to get plan info
-  const rzpAuth = btoa(`${env.RAZORPAY_KEY_ID}:${env.RAZORPAY_KEY_SECRET}`);
-  const rzpRes = await fetch(`https://api.razorpay.com/v1/orders/${razorpay_order_id}`, {
-    headers: { "Authorization": `Basic ${rzpAuth}` },
-  });
-  const rzpOrder = await rzpRes.json();
-  const plan = rzpOrder.notes?.plan || "starter";
-  const billingCycle = rzpOrder.notes?.billing_cycle || "monthly";
-  const companyId = rzpOrder.notes?.company_id || (ctx.tenantId || "");
-
-  // Update transaction record
-  await fetch(
-    `${env.SUPABASE_URL}/rest/v1/payment_transactions?gateway_order_id=eq.${razorpay_order_id}`,
-    {
-      method: "PATCH",
-      headers: {
-        apikey: env.SUPABASE_SERVICE_KEY,
-        Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
-        "Content-Type": "application/json",
-        Prefer: "return=minimal",
-      },
-      body: JSON.stringify({
-        status: isPaid ? "paid" : "failed",
-        gateway_payment_id: razorpay_payment_id,
-        payment_method: "razorpay",
-        metadata: { razorpay_order_id, razorpay_payment_id, razorpay_signature, verified: isPaid },
-      }),
+  // Update transaction
+  await fetch(`${env.SUPABASE_URL}/rest/v1/payment_transactions?gateway_order_id=eq.${order_id}`, {
+    method: "PATCH", headers: {
+      apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
+      "Content-Type": "application/json", Prefer: "return=minimal",
     },
-  );
+    body: JSON.stringify({
+      status: isPaid ? "paid" : (order_status === "Aborted" ? "cancelled" : "failed"),
+      gateway_payment_id: tracking_id, payment_method: payment_mode || "ccavenue",
+      gateway_response: params,
+    }),
+  });
 
-  if (isPaid) {
-    // Activate subscription
+  if (isPaid && companyId) {
     const now = new Date();
     const periodEnd = new Date(now);
     periodEnd.setMonth(periodEnd.getMonth() + (billingCycle === "annual" ? 12 : 1));
 
-    // Upsert subscription
-    await fetch(
-      `${env.SUPABASE_URL}/rest/v1/subscriptions?company_id=eq.${companyId}`,
-      {
-        method: "DELETE",
-        headers: {
-          apikey: env.SUPABASE_SERVICE_KEY,
-          Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
-        },
-      },
-    );
+    await fetch(`${env.SUPABASE_URL}/rest/v1/subscriptions?company_id=eq.${companyId}`, {
+      method: "DELETE", headers: { apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}` },
+    });
 
     await fetch(`${env.SUPABASE_URL}/rest/v1/subscriptions`, {
-      method: "POST",
-      headers: {
-        apikey: env.SUPABASE_SERVICE_KEY,
-        Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
-        "Content-Type": "application/json",
-        Prefer: "return=minimal",
+      method: "POST", headers: {
+        apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
+        "Content-Type": "application/json", Prefer: "return=minimal",
       },
       body: JSON.stringify({
-        company_id: companyId,
-        plan: plan,
-        status: "active",
-        gateway: "razorpay",
-        gateway_subscription_id: razorpay_order_id,
-        amount: rzpOrder.amount / 100,
-        currency: "INR",
-        billing_cycle: billingCycle,
-        current_period_start: now.toISOString(),
-        current_period_end: periodEnd.toISOString(),
+        company_id: companyId, plan: plan || "starter", status: "active", gateway: "ccavenue",
+        gateway_subscription_id: tracking_id, currency: "INR", billing_cycle: billingCycle || "monthly",
+        current_period_start: now.toISOString(), current_period_end: periodEnd.toISOString(),
       }),
     });
 
-    // Update company plan
-    await fetch(
-      `${env.SUPABASE_URL}/rest/v1/companies?id=eq.${companyId}`,
-      {
-        method: "PATCH",
-        headers: {
-          apikey: env.SUPABASE_SERVICE_KEY,
-          Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
-          "Content-Type": "application/json",
-          Prefer: "return=minimal",
-        },
-        body: JSON.stringify({ subscription_plan: plan }),
+    await fetch(`${env.SUPABASE_URL}/rest/v1/companies?id=eq.${companyId}`, {
+      method: "PATCH", headers: {
+        apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
+        "Content-Type": "application/json", Prefer: "return=minimal",
       },
-    );
-  }
-
-  if (ctx.actorEmail || ctx.actorId) {
-    await audit(env, ctx, isPaid ? "billing.payment_success" : "billing.payment_failed", "payment_transactions", order_id, {
-      plan, amount: rzpOrder.amount / 100, verified: isPaid,
+      body: JSON.stringify({ subscription_plan: plan || "starter" }),
     });
   }
 
+  // Redirect user to success/failure page
+  const redirectUrl = isPaid
+    ? `${frontendUrl}/platform/payment-success.html?plan=${plan}&gateway=ccavenue&order=${order_id}`
+    : `${frontendUrl}/platform/pricing.html?payment=failed&reason=${order_status}`;
+
+  return Response.redirect(redirectUrl, 302);
+}
+
+/**
+ * POST /billing/ccavenue/webhook — CCAvenue server-to-server status notification.
+ */
+async function handleCCAvWebhook(request, env, ctx) {
+  if (!env.CCAVENUE_WORKING_KEY) return new Response("Not configured", { status: 503 });
+  const formData = await request.formData();
+  const encResp = formData.get("encResp");
+  if (!encResp) return new Response("Missing encResp", { status: 400 });
+
+  let decrypted;
+  try { decrypted = await ccavDecrypt(encResp, env.CCAVENUE_WORKING_KEY); } catch { return new Response("Decryption error", { status: 400 }); }
+
+  const params = Object.fromEntries(decrypted.split("&").map(p => { const [k, ...v] = p.split("="); return [k, v.join("=")]; }));
+  console.log(`[CCAvenue] Webhook: order=${params.order_id}, status=${params.order_status}`);
+
+  if (params.order_id) {
+    await fetch(`${env.SUPABASE_URL}/rest/v1/payment_transactions?gateway_order_id=eq.${params.order_id}`, {
+      method: "PATCH", headers: {
+        apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
+        "Content-Type": "application/json", Prefer: "return=minimal",
+      },
+      body: JSON.stringify({ status: params.order_status === "Success" ? "paid" : "failed", gateway_response: params }),
+    });
+  }
+
+  return new Response(JSON.stringify({ received: true }), { status: 200, headers: { "Content-Type": "application/json" } });
+}
+
+/**
+ * POST /billing/wise/create-order — Create a pending Wise international payment order.
+ * Returns order details + Wise account info for bank transfer.
+ */
+async function handleWiseCreateOrder(request, env, ctx) {
+  requireAuth(ctx);
+  const body = await safeJson(request);
+  const { plan, billing_cycle = "monthly", customer_name, customer_email } = body;
+
+  if (!plan || !PLAN_PRICING[plan]) throw new ValidationError("Invalid plan");
+  if (!customer_email) throw new ValidationError("customer_email required");
+
+  const pricing = PLAN_PRICING[plan][billing_cycle];
+  if (!pricing || !pricing.usd) throw new ValidationError("Invalid billing cycle or plan");
+
+  const companyId = ctx.tenantId;
+  const orderId = `WISE_${plan.toUpperCase()}_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+
+  await sbFetch(env, "POST", "/rest/v1/payment_transactions", {
+    company_id: companyId, gateway: "wise", gateway_order_id: orderId,
+    amount: pricing.usd, currency: "USD", status: "awaiting_transfer", plan, billing_cycle,
+    customer_email, customer_name, is_international: true,
+    metadata: { internal_order_id: orderId, instructions: "Bank transfer via Wise" },
+  }, false, companyId);
+
+  await audit(env, ctx, "billing.wise_order_created", "payment_transactions", orderId, { plan, billing_cycle, amount: pricing.usd });
+
   return apiResponse({
-    verified: true,
-    paid: isPaid,
-    plan: isPaid ? plan : null,
+    order_id: orderId, gateway: "wise", amount: pricing.usd, currency: "USD",
+    plan, billing_cycle,
+    wise_details: {
+      recipient_name: "Simpatico HR Consultancy",
+      email: "simpaticohrconsultancy@gmail.com",
+      reference: orderId,
+      note: `Please include order reference "${orderId}" in your transfer note.`,
+    },
   });
 }
 
 /**
- * POST /billing/razorpay-webhook — Handle Razorpay webhook events.
- * Razorpay sends: payment.authorized, payment.captured, payment.failed, etc.
- * Env vars: RAZORPAY_WEBHOOK_SECRET
+ * POST /billing/wise/confirm — Admin confirms Wise bank transfer received.
+ * Body: { order_id, transaction_reference }
  */
-async function handleRazorpayWebhook(request, env, ctx) {
-  const rawBody = await request.text();
+async function handleWiseConfirmPayment(request, env, ctx) {
+  requireRole(ctx, "company_admin", "companyadmin", "super_admin", "superadmin");
+  const body = await safeJson(request);
+  const { order_id, transaction_reference } = body;
+  if (!order_id) throw new ValidationError("order_id required");
 
-  // Verify Razorpay webhook signature (if secret is set)
-  if (env.RAZORPAY_WEBHOOK_SECRET) {
-    const signature = request.headers.get("X-Razorpay-Signature") || "";
-    const key = await crypto.subtle.importKey(
-      "raw",
-      new TextEncoder().encode(env.RAZORPAY_WEBHOOK_SECRET),
-      { name: "HMAC", hash: "SHA-256" },
-      false,
-      ["sign"],
-    );
-    const sig = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(rawBody));
-    const computed = Array.from(new Uint8Array(sig)).map(b => b.toString(16).padStart(2, "0")).join("");
+  // Fetch the pending transaction
+  const txRes = await fetch(`${env.SUPABASE_URL}/rest/v1/payment_transactions?gateway_order_id=eq.${order_id}&select=*&limit=1`, {
+    headers: { apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}` },
+  });
+  const txns = await txRes.json();
+  if (!txns?.length) throw new NotFoundError("Transaction");
+  const tx = txns[0];
 
-    if (computed !== signature) {
-      console.error("[Razorpay] Webhook signature mismatch");
-      return new Response("Invalid signature", { status: 401 });
-    }
-  }
+  // Mark as paid
+  await fetch(`${env.SUPABASE_URL}/rest/v1/payment_transactions?gateway_order_id=eq.${order_id}`, {
+    method: "PATCH", headers: {
+      apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
+      "Content-Type": "application/json", Prefer: "return=minimal",
+    },
+    body: JSON.stringify({
+      status: "paid", gateway_payment_id: transaction_reference || "manual_confirm",
+      payment_method: "bank_transfer",
+      metadata: { ...tx.metadata, confirmed_by: ctx.actorEmail, confirmed_at: new Date().toISOString(), transaction_reference },
+    }),
+  });
 
-  let event;
-  try {
-    event = JSON.parse(rawBody);
-  } catch {
-    return new Response("Invalid JSON", { status: 400 });
-  }
+  // Activate subscription
+  const companyId = tx.company_id;
+  const now = new Date();
+  const periodEnd = new Date(now);
+  periodEnd.setMonth(periodEnd.getMonth() + (tx.billing_cycle === "annual" ? 12 : 1));
 
-  const eventType = event.event;
-  const payment = event.payload?.payment?.entity;
-  console.log(`[Razorpay] Webhook: ${eventType}`, JSON.stringify(payment || {}).substring(0, 500));
+  await fetch(`${env.SUPABASE_URL}/rest/v1/subscriptions?company_id=eq.${companyId}`, {
+    method: "DELETE", headers: { apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}` },
+  });
 
-  if (eventType === "payment.captured" && payment) {
-    const companyId = payment.notes?.company_id;
+  await fetch(`${env.SUPABASE_URL}/rest/v1/subscriptions`, {
+    method: "POST", headers: {
+      apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
+      "Content-Type": "application/json", Prefer: "return=minimal",
+    },
+    body: JSON.stringify({
+      company_id: companyId, plan: tx.plan || "starter", status: "active", gateway: "wise",
+      gateway_subscription_id: order_id, amount: tx.amount, currency: "USD",
+      billing_cycle: tx.billing_cycle || "monthly",
+      current_period_start: now.toISOString(), current_period_end: periodEnd.toISOString(),
+    }),
+  });
 
-    if (companyId) {
-      // Update transaction status
-      await fetch(
-        `${env.SUPABASE_URL}/rest/v1/payment_transactions?gateway_order_id=eq.${payment.order_id}`,
-        {
-          method: "PATCH",
-          headers: {
-            apikey: env.SUPABASE_SERVICE_KEY,
-            Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
-            "Content-Type": "application/json",
-            Prefer: "return=minimal",
-          },
-          body: JSON.stringify({
-            status: "paid",
-            gateway_payment_id: payment.id,
-            payment_method: payment.method || "razorpay",
-            metadata: { razorpay_webhook_event: event },
-          }),
-        },
-      );
-    }
-  }
+  await fetch(`${env.SUPABASE_URL}/rest/v1/companies?id=eq.${companyId}`, {
+    method: "PATCH", headers: {
+      apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
+      "Content-Type": "application/json", Prefer: "return=minimal",
+    },
+    body: JSON.stringify({ subscription_plan: tx.plan || "starter" }),
+  });
 
-  if (eventType === "payment.failed" && payment) {
-    await fetch(
-      `${env.SUPABASE_URL}/rest/v1/payment_transactions?gateway_order_id=eq.${payment.order_id}`,
-      {
-        method: "PATCH",
-        headers: {
-          apikey: env.SUPABASE_SERVICE_KEY,
-          Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
-          "Content-Type": "application/json",
-          Prefer: "return=minimal",
-        },
-        body: JSON.stringify({
-          status: "failed",
-          metadata: { razorpay_webhook_event: event },
-        }),
-      },
-    );
-  }
+  await audit(env, ctx, "billing.wise_payment_confirmed", "payment_transactions", order_id, { plan: tx.plan, amount: tx.amount });
 
-  return new Response(JSON.stringify({ received: true }), {
-    status: 200,
-    headers: { "Content-Type": "application/json", ...getCorsHeaders(request) },
+  return apiResponse({ confirmed: true, plan: tx.plan, order_id });
+}
+
+/**
+ * GET /billing/wise/account-details — Return Wise account details for bank transfer.
+ */
+async function handleWiseAccountDetails(request, env, ctx) {
+  requireAuth(ctx);
+  return apiResponse({
+    recipient_name: "Simpatico HR Consultancy",
+    email: "simpaticohrconsultancy@gmail.com",
+    bank: "Wise (TransferWise)",
+    note: "Include your order reference in the transfer note for faster activation.",
   });
 }
+
+
 
 /**
  * GET /billing/subscription — Get current subscription status.
@@ -7491,21 +7662,8 @@ async function handleCancelSubscription(request, env, ctx) {
 
   const sub = subs[0];
 
-  // If Paddle subscription, cancel via Paddle API
-  if (sub.gateway === "paddle" && sub.gateway_subscription_id && env.PADDLE_API_KEY) {
-    const paddleBase = env.PADDLE_ENV === "production"
-      ? "https://api.paddle.com"
-      : "https://sandbox-api.paddle.com";
-
-    await fetch(`${paddleBase}/subscriptions/${sub.gateway_subscription_id}/cancel`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${env.PADDLE_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ effective_from: "next_billing_period" }),
-    });
-  }
+  // CCAvenue and Wise are one-time payment gateways (no recurring subscription to cancel externally).
+  // We only update the local subscription status below.
 
   // Update local subscription
   await sbFetch(
@@ -7690,7 +7848,7 @@ async function handleBYOKConfigSave(request, env, ctx) {
  * Uses service key to bypass RLS.
  */
 async function handleBYOKConfigGet(request, env, ctx) {
-  requireAuth(ctx);
+  requireRole(ctx, "admin", "superadmin", "company_admin", "hr_manager", "employer");
   const tenantId = ctx.tenantId;
   if (!tenantId || tenantId === "default") {
     return apiResponse({ configured: false, message: "No tenant ID" });
@@ -7730,7 +7888,7 @@ async function handleBYOKConfigGet(request, env, ctx) {
  * Returns: { connected, provider, models: [{ id, name, context_window?, recommended? }], error? }
  */
 async function handleBYOKValidate(request, env, ctx) {
-  requireAuth(ctx);
+  requireRole(ctx, "admin", "superadmin", "company_admin", "hr_manager", "employer");
   const body = await safeJson(request);
   const { provider, api_key, base_url } = body;
 
@@ -7738,7 +7896,7 @@ async function handleBYOKValidate(request, env, ctx) {
     throw new ValidationError("provider and api_key are required");
   }
 
-  console.log(`[BYOK-Validate] Testing connection: provider=${provider}, keyPrefix=${api_key.substring(0, 8)}...`);
+  console.log(`[BYOK-Validate] Testing connection: provider=${provider}, keyPrefix=${api_key.substring(0, 4)}****`);
 
   const RECOMMENDED = {
     openai: ["gpt-4o", "gpt-4o-mini", "gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano", "o4-mini"],

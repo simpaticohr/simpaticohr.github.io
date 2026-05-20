@@ -29,9 +29,9 @@ window.SIMPATICO_CONFIG = {
   },
   appVersion: '5.0.0-Industrial',
 
-  // 5. PAYMENT GATEWAY — Razorpay (Test Mode)
-  razorpayKeyId: 'rzp_test_yourtestkeyhere',   // Replace with your Razorpay Test Key ID
-  razorpayEnv: 'test',                          // 'test' or 'live'
+  // 5. PAYMENT GATEWAYS — CCAvenue (Domestic) + Wise (International)
+  ccavenueMerchantId: '',                       // Set your CCAvenue Merchant ID
+  ccavenueEnv: 'test',                          // 'test' or 'production'
   
   // Helper to generate Trace IDs for debugging (crypto-safe)
   generateTraceId: () => {
