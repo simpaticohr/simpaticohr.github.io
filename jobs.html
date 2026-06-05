@@ -149,7 +149,7 @@
 <div class="container">
   <div class="page-header">
     <h1>Current Openings</h1>
-    <p>Find your next opportunity. Apply and get AI-screened instantly.</p>
+    <p>Browse opportunities across all companies on our platform. Apply and get AI-screened instantly.</p>
   </div>
 
   <div class="stats-bar">
@@ -310,7 +310,7 @@ function showToast(msg, type = "success") {
   setTimeout(() => t.classList.remove('show'), 3000);
 }
 // ---------------------------------------------------------------
-// LOAD JOBS — Tenant-Isolated via Worker API
+// LOAD JOBS — Aggregated Job Marketplace (all companies)
 // ---------------------------------------------------------------
 async function loadJobs() {
   const el = document.getElementById("jobsList");
@@ -324,16 +324,16 @@ async function loadJobs() {
       const statusParam = (currentFilter && currentFilter !== 'all') ? currentFilter : 'open';
       const data = await api('GET', `/recruitment/jobs?status=${statusParam}`, null, true);
       jobs = data.jobs || data || [];
-    } else if (companyId) {
-      // LOGGED-IN USER: Fetch own company jobs via public endpoint
-      const data = await api('GET', `/recruitment/public/jobs?company_id=${companyId}`);
-      jobs = data.jobs || data || [];
     } else {
-      // PUBLIC VIEW (no company context): Show Simpatico HR's own jobs only
-      // Use the configured default tenant ID as fallback
-      const defaultTenant = window.SIMPATICO_CONFIG?.tenantId || 'SIMP_PRO_MAIN';
-      const data = await api('GET', `/recruitment/public/jobs?company_id=${defaultTenant}`);
-      jobs = data.jobs || data || [];
+      // PUBLIC JOB BOARD: Fetch ALL jobs from ALL companies (aggregator mode)
+      const SB_URL = window.SIMPATICO_CONFIG?.supabaseUrl || 'https://cvkxtsvgnynxexmemfuy.supabase.co';
+      const SB_KEY = window.SIMPATICO_CONFIG?.supabaseAnonKey;
+      const res = await fetch(
+        `${SB_URL}/rest/v1/jobs?is_active=eq.true&status=in.(open,active)&select=id,title,company_id,company_name,department,location,employment_type,level,description,skills,skills_required,salary_min,salary_max,created_at&order=created_at.desc&limit=100`,
+        { headers: { 'apikey': SB_KEY, 'Authorization': 'Bearer ' + SB_KEY } }
+      );
+      if (!res.ok) throw new Error('Failed to load jobs');
+      jobs = await res.json();
     }
 
     // Client-side search filter
@@ -343,6 +343,7 @@ async function loadJobs() {
         (j.title || '').toLowerCase().includes(q) ||
         (j.department || '').toLowerCase().includes(q) ||
         (j.location || '').toLowerCase().includes(q) ||
+        (j.company_name || '').toLowerCase().includes(q) ||
         (j.description || '').toLowerCase().includes(q)
       );
     }
@@ -405,17 +406,18 @@ function renderJobs(jobs) {
     const levelClass = levelMap[job.level] || 'level-mid';
 
     let skills = [];
-    if (Array.isArray(job.skills)) {
-      skills = job.skills;
-    } else if (typeof job.skills === 'string' && job.skills) {
+    const rawSkills = job.skills || job.skills_required;
+    if (Array.isArray(rawSkills)) {
+      skills = rawSkills;
+    } else if (typeof rawSkills === 'string' && rawSkills) {
       // Handle Postgres array string formatting if necessary
-      const cleanSkills = job.skills.replace(/^\["?|"?\]$/g, '').replace(/","/g, ',');
+      const cleanSkills = rawSkills.replace(/^\["?|"?\]$/g, '').replace(/","/g, ',');
       skills = cleanSkills.split(',').map(s => s.trim()).filter(Boolean);
     }
 
     const company = job.company_name || job.department || 'Simpatico HR';
     const location = job.location || 'Remote';
-    const jobType = job.job_type || 'full-time';
+    const jobType = job.job_type || job.employment_type || 'full-time';
     const level = job.level || 'Mid-Level';
     const desc = job.description || 'Details shared during interview.';
     const salary = job.salary_max ? (job.salary_min ? `?${(job.salary_min/100000).toFixed(0)}${(job.salary_max/100000).toFixed(0)} LPA` : `Up to ?${(job.salary_max/100000).toFixed(0)} LPA`) : '';
