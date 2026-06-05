@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Job Sitemap Generator | Simpatico HR</title>
+  <script src="js/hr-config.js"></script>
+  <style>
+    body{font-family:monospace;background:#0a0f1e;color:#e2e8f0;padding:40px}
+    h1{margin-bottom:20px;color:#818cf8}
+    pre{background:#111a33;padding:20px;border-radius:12px;overflow-x:auto;font-size:13px;line-height:1.6;border:1px solid rgba(255,255,255,.06)}
+    .btn{background:#6366f1;color:#fff;border:none;padding:10px 24px;border-radius:10px;cursor:pointer;font-size:14px;font-weight:600;margin:10px 4px}
+    .btn:hover{opacity:.9}
+    .stats{color:#64748b;margin-bottom:16px}
+    a{color:#818cf8}
+  </style>
+</head>
+<body>
+  <h1>🗺️ Job Sitemap Generator</h1>
+  <p class="stats" id="stats">Loading jobs...</p>
+  <button class="btn" onclick="copyXml()">📋 Copy XML</button>
+  <button class="btn" onclick="downloadXml()">⬇️ Download sitemap-jobs.xml</button>
+  <pre id="output">Loading...</pre>
+
+  <script>
+    const SB_URL = window.SIMPATICO_CONFIG?.supabaseUrl || 'https://cvkxtsvgnynxexmemfuy.supabase.co';
+    const SB_KEY = window.SIMPATICO_CONFIG?.supabaseAnonKey;
+    const BASE = 'https://simpaticohr.in';
+    let xmlContent = '';
+
+    function slugify(t) { return (t||'').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,''); }
+
+    async function generateSitemap() {
+      try {
+        const res = await fetch(
+          `${SB_URL}/rest/v1/jobs?is_active=eq.true&status=in.(open,active)&select=id,title,location,created_at,company_id,company_name&order=created_at.desc`,
+          { headers: { 'apikey': SB_KEY, 'Authorization': 'Bearer ' + SB_KEY } }
+        );
+        const jobs = await res.json();
+
+        // Unique companies
+        const companies = [...new Set(jobs.map(j => j.company_id).filter(Boolean))];
+
+        let urls = [];
+
+        // Static pages
+        urls.push({ loc: `${BASE}/`, priority: '1.0', freq: 'daily' });
+        urls.push({ loc: `${BASE}/jobs.html`, priority: '0.9', freq: 'daily' });
+        urls.push({ loc: `${BASE}/careers.html`, priority: '0.8', freq: 'daily' });
+
+        // Company pages
+        companies.forEach(cid => {
+          const companyJobs = jobs.filter(j => j.company_id === cid);
+          const name = companyJobs[0]?.company_name || 'company';
+          urls.push({
+            loc: `${BASE}/company/${slugify(name)}-${cid}`,
+            priority: '0.7',
+            freq: 'daily'
+          });
+        });
+
+        // Job detail pages
+        jobs.forEach(job => {
+          urls.push({
+            loc: `${BASE}/job/${slugify(job.title)}-${job.id}`,
+            lastmod: job.created_at ? new Date(job.created_at).toISOString().split('T')[0] : '',
+            priority: '0.8',
+            freq: 'daily'
+          });
+        });
+
+        xmlContent = `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+${urls.map(u => `  <url>
+    <loc>${u.loc}</loc>
+    ${u.lastmod ? `<lastmod>${u.lastmod}</lastmod>` : ''}
+    <changefreq>${u.freq}</changefreq>
+    <priority>${u.priority}</priority>
+  </url>`).join('\n')}
+</urlset>`;
+
+        document.getElementById('output').textContent = xmlContent;
+        document.getElementById('stats').textContent = `✅ Generated sitemap with ${urls.length} URLs (${jobs.length} jobs, ${companies.length} companies, 3 static pages)`;
+
+      } catch (err) {
+        document.getElementById('output').textContent = 'Error: ' + err.message;
+        document.getElementById('stats').textContent = '❌ Failed to generate';
+      }
+    }
+
+    function copyXml() {
+      navigator.clipboard.writeText(xmlContent);
+      alert('Copied to clipboard!');
+    }
+
+    function downloadXml() {
+      const blob = new Blob([xmlContent], { type: 'application/xml' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'sitemap-jobs.xml';
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+
+    generateSitemap();
+  </script>
+</body>
+</html>

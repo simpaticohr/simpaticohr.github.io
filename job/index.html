@@ -400,11 +400,38 @@ async function loadRelatedJobs(currentJob) {
 // ---------------------------------------------------------------
 // SEO
 // ---------------------------------------------------------------
+const LOCATION_COUNTRY_MAP = {
+  'india':'IN','kochi':'IN','mumbai':'IN','bangalore':'IN','bengaluru':'IN','hyderabad':'IN',
+  'chennai':'IN','delhi':'IN','pune':'IN','kolkata':'IN','ahmedabad':'IN','jaipur':'IN',
+  'noida':'IN','gurgaon':'IN','gurugram':'IN','perinthalmanna':'IN','kerala':'IN',
+  'usa':'US','new york':'US','san francisco':'US','california':'US','texas':'US','chicago':'US',
+  'uk':'GB','london':'GB','manchester':'GB','birmingham':'GB',
+  'uae':'AE','dubai':'AE','abu dhabi':'AE','sharjah':'AE',
+  'singapore':'SG','canada':'CA','toronto':'CA','australia':'AU','sydney':'AU','melbourne':'AU',
+  'germany':'DE','berlin':'DE','france':'FR','paris':'FR','japan':'JP','tokyo':'JP',
+  'saudi arabia':'SA','riyadh':'SA','qatar':'QA','doha':'QA','oman':'OM','bahrain':'BH','kuwait':'KW',
+};
+
+function detectCountry(location) {
+  if (!location) return 'IN';
+  const loc = location.toLowerCase().trim();
+  for (const [key, code] of Object.entries(LOCATION_COUNTRY_MAP)) {
+    if (loc.includes(key)) return code;
+  }
+  return 'IN'; // Default
+}
+
+function isRemoteJob(location) {
+  return (location || '').toLowerCase().includes('remote');
+}
+
 function injectSEO(job) {
   const company = job.company_name || job.department || 'Simpatico HR';
-  const title = `${job.title} at ${company} | Simpatico HR`;
-  const desc = (job.description || '').substring(0, 160).replace(/[*#_\n]/g, '') + '...';
+  const location = job.location || 'Remote';
+  const title = `${job.title} at ${company} — ${location} | Simpatico HR`;
+  const desc = (job.description || '').substring(0, 160).replace(/[*#_\n]/g, '').replace(/<!--[\s\S]*?-->/g, '') + '...';
   const url = window.location.origin + getCleanJobUrl(job);
+  const country = detectCountry(location);
 
   document.title = title;
   document.getElementById('pageTitle').textContent = title;
@@ -415,37 +442,88 @@ function injectSEO(job) {
   document.getElementById('twTitle')?.setAttribute('content', title);
   document.getElementById('twDesc')?.setAttribute('content', desc);
   document.getElementById('canonical')?.setAttribute('href', url);
+
+  // Geo meta tags for global SEO
+  const geoMeta = [
+    { name: 'geo.region', content: country },
+    { name: 'geo.placename', content: location },
+    { name: 'ICBM', content: '' }, // Would need lat/lng
+    { name: 'og:locale', content: country === 'IN' ? 'en_IN' : country === 'US' ? 'en_US' : country === 'GB' ? 'en_GB' : country === 'AE' ? 'en_AE' : 'en' }
+  ];
+  geoMeta.forEach(m => {
+    if (!m.content) return;
+    const el = document.createElement('meta');
+    el.setAttribute(m.name.startsWith('og:') ? 'property' : 'name', m.name);
+    el.setAttribute('content', m.content);
+    document.head.appendChild(el);
+  });
 }
 
 function injectJsonLD(job) {
   const company = job.company_name || job.department || 'Simpatico HR';
+  const location = job.location || 'Remote';
+  const country = detectCountry(location);
+  const remote = isRemoteJob(location);
+
+  // validThrough: 60 days from posting, or 90 days from now
+  const posted = job.created_at ? new Date(job.created_at) : new Date();
+  const validThrough = new Date(posted.getTime() + 60 * 86400000).toISOString();
+
   const schema = {
     "@context": "https://schema.org/",
     "@type": "JobPosting",
     "title": job.title,
     "description": (job.description || '').replace(/<!--[\s\S]*?-->/g, ''),
     "datePosted": job.created_at,
+    "validThrough": validThrough,
     "employmentType": (job.employment_type || 'FULL_TIME').toUpperCase().replace(/[- ]/g, '_'),
     "hiringOrganization": {
       "@type": "Organization",
       "name": company,
-      "sameAs": window.location.origin
+      "sameAs": window.location.origin,
+      "logo": window.location.origin + '/favicon-96x96.png'
     },
     "jobLocation": {
       "@type": "Place",
       "address": {
         "@type": "PostalAddress",
-        "addressLocality": job.location || 'Remote',
-        "addressCountry": "IN"
+        "addressLocality": remote ? '' : location,
+        "addressRegion": remote ? '' : location,
+        "addressCountry": country
       }
     },
     "directApply": true,
     "url": window.location.origin + getCleanJobUrl(job)
   };
+
+  // Remote job requirements (Google for Jobs requires this)
+  if (remote) {
+    schema.jobLocationType = "TELECOMMUTE";
+    schema.applicantLocationRequirements = {
+      "@type": "Country",
+      "name": country
+    };
+  }
+
+  // Industry from department
+  if (job.department) {
+    schema.industry = job.department;
+  }
+
+  // Experience level mapping
+  if (job.level) {
+    const expMap = {
+      'Fresher': 'ENTRY_LEVEL', 'Junior': 'ENTRY_LEVEL',
+      'Mid-Level': 'MID_LEVEL', 'Senior': 'SENIOR', 'Lead': 'DIRECTOR'
+    };
+    schema.experienceRequirements = expMap[job.level] || 'MID_LEVEL';
+  }
+
+  // Salary (Google requires currency)
   if (job.salary_min || job.salary_max) {
     schema.baseSalary = {
       "@type": "MonetaryAmount",
-      "currency": "INR",
+      "currency": country === 'US' ? 'USD' : country === 'GB' ? 'GBP' : country === 'AE' ? 'AED' : country === 'SG' ? 'SGD' : country === 'AU' ? 'AUD' : country === 'CA' ? 'CAD' : 'INR',
       "value": {
         "@type": "QuantitativeValue",
         "minValue": job.salary_min || 0,
@@ -454,6 +532,13 @@ function injectJsonLD(job) {
       }
     };
   }
+
+  // Skills as qualifications
+  const skills = job.skills || job.skills_required || [];
+  if (skills.length) {
+    schema.skills = Array.isArray(skills) ? skills.join(', ') : skills;
+  }
+
   const el = document.createElement('script');
   el.type = 'application/ld+json';
   el.textContent = JSON.stringify(schema);
