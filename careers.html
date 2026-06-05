@@ -530,13 +530,14 @@
 
         async function loadJobs() {
             try {
-                const res = await fetch(`${API_URL}/recruitment/public/jobs?company_id=${companyId}`);
+                const SB_URL = window.SIMPATICO_CONFIG?.supabaseUrl || 'https://cvkxtsvgnynxexmemfuy.supabase.co';
+                const SB_KEY = window.SIMPATICO_CONFIG?.supabaseAnonKey;
+                const res = await fetch(
+                    `${SB_URL}/rest/v1/jobs?company_id=eq.${companyId}&is_active=eq.true&status=in.(open,active)&select=id,title,department,location,employment_type,level,description,skills,skills_required,salary_min,salary_max,company_name,created_at&order=created_at.desc`,
+                    { headers: { 'apikey': SB_KEY, 'Authorization': 'Bearer ' + SB_KEY } }
+                );
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
-                const data = await res.json();
-
-                if (!data.success || !data.data?.jobs) throw new Error('Invalid response');
-
-                allJobs = data.data.jobs;
+                allJobs = await res.json();
 
                 // Try to load company name
                 loadCompanyBranding();
@@ -569,15 +570,19 @@
 
         async function loadCompanyBranding() {
             try {
-                const res = await fetch(`${API_URL}/company/public?company_id=${companyId}`);
+                const SB_URL = window.SIMPATICO_CONFIG?.supabaseUrl || 'https://cvkxtsvgnynxexmemfuy.supabase.co';
+                const SB_KEY = window.SIMPATICO_CONFIG?.supabaseAnonKey;
+                const res = await fetch(
+                    `${SB_URL}/rest/v1/companies?id=eq.${companyId}&select=name,logo_url,description`,
+                    { headers: { 'apikey': SB_KEY, 'Authorization': 'Bearer ' + SB_KEY } }
+                );
                 if (res.ok) {
-                    const data = await res.json();
-                    const company = data.data || data;
+                    const companies = await res.json();
+                    const company = companies[0] || {};
                     if (company.name) {
                         companyName = company.name;
                         document.getElementById('heroTitle').textContent = `Join ${company.name}`;
                         document.title = `Careers at ${company.name}`;
-                        // Update social sharing meta tags
                         const ogTitle = `Careers at ${company.name} — ${allJobs.length} Open Positions`;
                         const ogDesc = `Browse ${allJobs.length} open positions at ${company.name}. Apply directly and join the team.`;
                         document.getElementById('ogTitle')?.setAttribute('content', ogTitle);
