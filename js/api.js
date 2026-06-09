@@ -127,7 +127,7 @@ const API = (() => {
         get client() { return _client; },
         get token() { return _token; },
 
-        get isSuperAdmin() { return _user?.role === 'superadmin'; },
+        get isSuperAdmin() { return _user?.role === 'superadmin' || _user?.role === 'super_admin'; },
         get isClientAdmin() { return _user?.role === 'client_admin'; },
         get isHR() { return _user?.role === 'hr'; },
         get isStaff() { return ['client_admin', 'hr'].includes(_user?.role); },
