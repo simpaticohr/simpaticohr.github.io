@@ -1434,30 +1434,32 @@ function speak(text) {
 }
 
 // ─────────────────────────────────────────────
-// ★ FIX: AI CALL — removed X-Model header (CORS blocker)
+// AI CALL — Routes through ATS worker /ai/interview-question
+// Supports BYOK via X-Tenant-ID header
 // ─────────────────────────────────────────────
 async function callAI(messages) {
   const ctrl = new AbortController();
   const tm   = setTimeout(() => ctrl.abort(), 50000);
+  const tenantId = window.SIMPATICO_CONFIG?.tenantId || 'SIMP_PRO_MAIN';
   const payload = {
     messages,
-    model:       CFG.groqModel,
-    temperature: 0.7,
-    max_tokens:  1024,
+    token: curToken || null,
+    max_tokens: 1024,
   };
   try {
-    const r = await fetch(W, {
+    const r = await fetch(W + '/ai/interview-question', {
       method:  'POST',
-      // ★ FIX: Removed 'X-Model' header — was blocked by CORS preflight
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Tenant-ID':  tenantId,
+      },
       body:    JSON.stringify(payload),
       signal:  ctrl.signal,
     });
     clearTimeout(tm);
     if (!r.ok) throw new Error('Worker error ' + r.status);
     const d = await r.json();
-    if (!d.response && !d.content) throw new Error('Empty response');
-    return d.response || d.content || d.choices?.[0]?.message?.content || '';
+    return d.data?.response || d.response || d.content || d.choices?.[0]?.message?.content || '';
   } catch (e) {
     clearTimeout(tm);
     if (e.name === 'AbortError') throw new Error('AI request timed out. Check connection.');
