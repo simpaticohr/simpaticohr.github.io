@@ -2307,6 +2307,17 @@ async function startInterview() {
         attempts_used: (interview.attempts_used || 0) + 1,
       }, { token });
       toast('✅ Token verified — starting proctored session…');
+
+      // Notify HR that candidate started
+      try {
+        sendNotificationEmail('started', {
+          email: 'hr@simpaticohrconsultancy.com',
+          candidateName: n,
+          role: interview.interview_role || role || 'Interview',
+          level: interview.interview_level || level || '',
+          subtitle: 'Interview Started',
+        });
+      } catch (e) { console.warn('[Email started]', e); }
     } catch (err) {
       toast('❌ ' + err.message);
       const te = document.getElementById('tokenError');
@@ -3860,6 +3871,17 @@ function _emailTemplate(type, data) {
     </div>`);
   }
 
+  if (type === 'started') {
+    return wrap(`<div style="padding:28px 24px">
+      <h2 style="margin:0 0 8px;color:#1f2937;font-size:18px">🟢 Interview Started</h2>
+      <p style="color:#6b7280;font-size:14px;line-height:1.6;margin:0 0 20px"><strong>${data.candidateName || 'A candidate'}</strong> has just started their interview for <strong>${data.role}</strong>${data.level ? ' (' + data.level + ')' : ''}.</p>
+      <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:12px;padding:16px;text-align:center">
+        <p style="margin:0;font-size:13px;color:#166534">⏱️ Started at: <strong>${new Date().toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })}</strong></p>
+      </div>
+      <a href="${location.origin + location.pathname}" style="display:block;background:#1f2937;color:#fff;padding:12px;border-radius:10px;text-align:center;text-decoration:none;font-weight:700;font-size:14px;margin-top:20px">📊 Open HR Dashboard</a>
+    </div>`);
+  }
+
   return '';
 }
 
@@ -3871,6 +3893,7 @@ async function sendNotificationEmail(type, data) {
     const subjects = {
       invite: `Interview Invitation — ${data.role} at Simpatico HR`,
       completed: `Interview Completed — ${data.candidateName || 'Candidate'} · ${data.score}/100`,
+      started: `🟢 Interview Started — ${data.candidateName || 'Candidate'} · ${data.role || 'Interview'}`,
     };
 
     const resp = await fetch(W + '/email/send', {
