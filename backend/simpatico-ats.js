@@ -1260,6 +1260,7 @@ route("POST", "/interviews/submit", handleSubmitInterview);
 route("GET", "/notifications", handleListNotifications);
 route("PATCH", "/notifications/:id/read", handleMarkNotificationRead);
 route("POST", "/notifications/whatsapp", handleWhatsAppNotification);
+route("POST", "/email/send", handleSendGenericEmail);
 
 // AI Intelligence
 route("POST", "/ai/expense-ocr", handleExpenseOCR);
@@ -5587,6 +5588,38 @@ async function sendEmail(env, { to, subject, html, replyTo, tags, attachments })
     throw new AppError(`Email delivery failed: ${errorText}`, 500, "EMAIL_ERROR");
   }
   return res;
+}
+
+// ==========================================================
+// § 16.3 GENERIC EMAIL SEND — for frontend notifications
+// ==========================================================
+async function handleSendGenericEmail(request, env, ctx) {
+  const body = await safeJson(request);
+  const { to, subject, html, type } = body;
+
+  if (!to || !subject || !html) {
+    throw new ValidationError("Missing required fields: to, subject, html");
+  }
+
+  // Basic email validation
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)) {
+    throw new ValidationError("Invalid email address");
+  }
+
+  // Rate limit: max 10 emails per minute per tenant
+  const emailRateKey = `email:${ctx.tenantId}:${Math.floor(Date.now() / 60000)}`;
+  if (env.HR_KV) {
+    const count = parseInt(await env.HR_KV.get(emailRateKey) || '0');
+    if (count >= 10) {
+      throw new RateLimitError(60);
+    }
+    await env.HR_KV.put(emailRateKey, String(count + 1), { expirationTtl: 120 });
+  }
+
+  const tags = type ? [{ name: 'type', value: type }] : undefined;
+  await sendEmail(env, { to, subject, html, tags });
+
+  return { success: true, message: `Email sent to ${to}`, type };
 }
 
 // ==========================================================
