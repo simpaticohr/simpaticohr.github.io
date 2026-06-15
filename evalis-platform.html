@@ -1007,7 +1007,32 @@
             <select id="diExpiry"><option value="24">24 Hours</option><option value="48">48 Hours</option><option value="72" selected>72 Hours</option><option value="168">7 Days</option></select>
           </div>
           <div><label>Token Type</label>
-            <select id="diTokenType"><option value="single">🔒 Single Use</option><option value="multi">🔄 Multi-Attempt</option></select>
+            <select id="diTokenType" onchange="_toggleCoachOpts()">
+              <option value="single">🔒 Single Use Interview</option>
+              <option value="multi">🔄 Multi-Attempt Interview</option>
+              <option value="coach">🗣️ Coach Only</option>
+            </select>
+          </div>
+        </div>
+        <div id="coachOpts" style="display:none;background:rgba(139,92,246,.06);border:1px solid rgba(139,92,246,.18);border-radius:10px;padding:10px;margin-top:8px">
+          <div style="font-size:.78rem;font-weight:700;color:#c4b5fd;margin-bottom:8px">🗣️ Coach Token Settings</div>
+          <div class="row2">
+            <div><label>Max Sessions</label>
+              <select id="diCoachSessions">
+                <option value="3">3 sessions</option>
+                <option value="5" selected>5 sessions</option>
+                <option value="10">10 sessions</option>
+                <option value="20">20 sessions</option>
+                <option value="50">50 sessions</option>
+              </select>
+            </div>
+            <div><label>Validity</label>
+              <select id="diCoachExpiry">
+                <option value="168">7 Days</option>
+                <option value="336" selected>14 Days</option>
+                <option value="720">30 Days</option>
+              </select>
+            </div>
           </div>
         </div>
         <div style="background:rgba(99,102,241,.05);border:1px solid rgba(99,102,241,.15);border-radius:10px;padding:10px;margin-top:10px">
@@ -1058,6 +1083,7 @@
           <button class="btn" style="padding:5px 10px;font-size:.72rem;background:rgba(59,130,246,.15);color:var(--blue)" onclick="filterTokens('in_progress')">In Progress</button>
           <button class="btn" style="padding:5px 10px;font-size:.72rem;background:rgba(16,185,129,.15);color:var(--green)" onclick="filterTokens('completed')">Completed</button>
           <button class="btn" style="padding:5px 10px;font-size:.72rem;background:rgba(239,68,68,.15);color:var(--red)" onclick="filterTokens('expired')">Expired</button>
+          <button class="btn" style="padding:5px 10px;font-size:.72rem;background:rgba(139,92,246,.15);color:#c4b5fd" onclick="filterTokens('coach')">Coach</button>
         </div>
         <div id="hrTokensList"><span class="loading"></span> Loading…</div>
       </div>
@@ -1726,6 +1752,20 @@ async function checkToken() {
     curToken  = token;
     curAppId  = interview.application_id;
     curJobId  = interview.job_id;
+
+    // Coach-only token → go directly to Coach
+    if (interview.interview_type === 'coach') {
+      window._coachInterview = interview;
+      role  = interview.interview_role  || '';
+      level = interview.interview_level || '';
+      lang  = interview.interview_language || 'en';
+      _nav('coach');
+      toast('✅ Coach token verified — you have ' +
+        ((interview.max_attempts || 5) - (interview.attempts_used || 0)) +
+        ' session(s) remaining.');
+      return;
+    }
+
     mode      = 'real';
     role      = interview.interview_role     || '';
     level     = interview.interview_level    || 'Mid-Level';
@@ -3165,16 +3205,20 @@ async function generateDirectInvite() {
 
   try {
     const token   = crypto.randomUUID ? crypto.randomUUID() : (Date.now().toString(36) + Math.random().toString(36).substring(2, 10));
-    const expires = new Date(Date.now() + hours * 3600000);
+    const tokenType = document.getElementById('diTokenType')?.value || 'single';
+    const isCoach = tokenType === 'coach';
+    const coachSessions = isCoach ? parseInt(document.getElementById('diCoachSessions')?.value) || 5 : 1;
+    const expHours = isCoach ? parseInt(document.getElementById('diCoachExpiry')?.value) || 336 : hours;
+    const expires = new Date(Date.now() + expHours * 3600000);
 
     await db('insert', 'interviews', {
       token, candidate_name: name, candidate_email: email,
       candidate_phone: phone || null, interview_role: role_,
-      interview_level: level_, ai_difficulty: document.getElementById('diDiff')?.value || document.getElementById('diffSel')?.value || 'adaptive', question_count: qCount,
-      interview_language: lang_, interview_type: 'real',
-      token_type: document.getElementById('diTokenType')?.value || 'single',
+      interview_level: level_, ai_difficulty: document.getElementById('diDiff')?.value || document.getElementById('diffSel')?.value || 'adaptive', question_count: isCoach ? 0 : qCount,
+      interview_language: lang_, interview_type: isCoach ? 'coach' : 'real',
+      token_type: tokenType,
       hide_question_text: document.getElementById('diHideQText')?.checked || false,
-      status: 'pending', max_attempts: 1, attempts_used: 0,
+      status: 'pending', max_attempts: isCoach ? coachSessions : 1, attempts_used: 0,
       expires_at: expires.toISOString(), created_at: new Date().toISOString(),
     });
 
@@ -3249,6 +3293,18 @@ function doCopyEmailText() {
 }
 
 // ─────────────────────────────────────────────
+// COACH TOKEN UI TOGGLE
+// ─────────────────────────────────────────────
+function _toggleCoachOpts() {
+  const isCoach = document.getElementById('diTokenType')?.value === 'coach';
+  const coachOpts = document.getElementById('coachOpts');
+  if (coachOpts) coachOpts.style.display = isCoach ? 'block' : 'none';
+  // Hide interview-specific options when coach is selected
+  const intOpts = document.querySelector('#diQCount')?.closest('.row3');
+  if (intOpts) intOpts.style.display = isCoach ? 'none' : 'grid';
+}
+
+// ─────────────────────────────────────────────
 // TOKEN LIST
 // ─────────────────────────────────────────────
 let _tokenFilter = 'all';
@@ -3278,6 +3334,7 @@ function renderTokens(tokens, filter) {
   const filtered = filter === 'all'
     ? tokens
     : tokens.filter(t => {
+        if (filter === 'coach') return t.interview_type === 'coach';
         if (filter === 'expired') return t.expires_at && new Date(t.expires_at) < new Date();
         return t.status === filter;
       });
@@ -3290,11 +3347,13 @@ function renderTokens(tokens, filter) {
   el.innerHTML = filtered.map(t => {
     const expired   = t.expires_at && new Date(t.expires_at) < new Date();
     const effStatus = expired && t.status === 'pending' ? 'expired' : (t.status || 'pending');
-    const sc = { pending:'#f59e0b', in_progress:'#3b82f6', completed:'#10b981', expired:'#ef4444' }[effStatus] || '#94a3b8';
-    const sb = { pending:'rgba(245,158,11,.15)', in_progress:'rgba(59,130,246,.15)', completed:'rgba(16,185,129,.15)', expired:'rgba(239,68,68,.15)' }[effStatus] || 'rgba(255,255,255,.05)';
+    const isCoach   = t.interview_type === 'coach';
+    const sc = isCoach ? '#8b5cf6' : ({ pending:'#f59e0b', in_progress:'#3b82f6', completed:'#10b981', expired:'#ef4444' }[effStatus] || '#94a3b8');
+    const sb = isCoach ? 'rgba(139,92,246,.15)' : ({ pending:'rgba(245,158,11,.15)', in_progress:'rgba(59,130,246,.15)', completed:'rgba(16,185,129,.15)', expired:'rgba(239,68,68,.15)' }[effStatus] || 'rgba(255,255,255,.05)');
     const created = t.created_at ? new Date(t.created_at).toLocaleDateString('en-IN', { day:'2-digit', month:'short', year:'2-digit' }) : '—';
     const url     = location.origin + location.pathname + '?token=' + t.token;
     const name    = (t.candidate_name || t.candidate_email || 'Unknown').replace(/</g,'&lt;');
+    const typeLabel = isCoach ? '🗣️ Coach' : '';
 
     return `<div class="cand-row">
       <div style="flex:1;min-width:140px">
@@ -3306,7 +3365,7 @@ function renderTokens(tokens, filter) {
       </div>
       <div style="display:flex;gap:5px;align-items:center;flex-wrap:wrap">
         <span class="status-pill" style="background:${sb};color:${sc}">
-          ${effStatus==='expired'?'⌛ Expired':effStatus}
+          ${isCoach ? '🗣️ Coach' : effStatus==='expired'?'⌛ Expired':effStatus}
         </span>
         <span style="font-size:.7rem;color:var(--muted)">${t.attempts_used||0}/${t.max_attempts||1} uses</span>
         <button class="btn btn-sm" style="background:rgba(99,102,241,.15);color:var(--accent)"
@@ -3601,6 +3660,21 @@ function toggleCoachRecording() {
 }
 
 function startCoachRecording() {
+  // Check session limits for coach tokens
+  if (window._coachInterview) {
+    const ci = window._coachInterview;
+    const maxS = ci.max_attempts || 5;
+    const usedS = ci.attempts_used || 0;
+    if (usedS >= maxS) {
+      toast('🔒 All ' + maxS + ' coach sessions used. Contact HR for a new token.');
+      return;
+    }
+    // Increment usage in DB
+    ci.attempts_used = usedS + 1;
+    db('update', 'interviews', { attempts_used: ci.attempts_used }, { token: curToken }).catch(e => console.warn('[Coach track]', e));
+    toast('🗣️ Session ' + ci.attempts_used + '/' + maxS + ' started');
+  }
+
   _coachRecording = true;
   _coachTranscript = '';
   _coachSecs = 0;
