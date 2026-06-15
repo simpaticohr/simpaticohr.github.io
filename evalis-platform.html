@@ -696,6 +696,7 @@
             <select id="qCount"><option value="5">5</option><option value="8">8</option><option value="10" selected>10</option><option value="15">15</option></select>
           </div>
         </div>
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-top:10px"><input type="checkbox" id="hideQText" style="width:14px;height:14px"><span style="font-size:.8rem;color:var(--muted)">🙈 Hide question text (voice-only mode — candidate only hears questions)</span></label>
       </div>
 
       <!-- Real interview: candidate info (filled from token) -->
@@ -895,11 +896,12 @@
           </div>
         </div>
         <div style="background:rgba(99,102,241,.05);border:1px solid rgba(99,102,241,.15);border-radius:10px;padding:10px;margin-top:10px">
-          <div style="font-size:.78rem;font-weight:700;color:#a5b4fc;margin-bottom:8px">⚡ Auto Notify After Generation</div>
+          <div style="font-size:.78rem;font-weight:700;color:#a5b4fc;margin-bottom:8px">⚡ Interview Options</div>
           <div class="row2">
             <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin:0"><input type="checkbox" id="diSendEmail" style="width:14px;height:14px" checked><span style="font-size:.8rem;color:var(--muted)">📧 Open Email Client</span></label>
             <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin:0"><input type="checkbox" id="diSendWA" style="width:14px;height:14px" checked><span style="font-size:.8rem;color:var(--muted)">💬 Open WhatsApp</span></label>
           </div>
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin:8px 0 0"><input type="checkbox" id="diHideQText" style="width:14px;height:14px"><span style="font-size:.8rem;color:var(--muted)">🙈 Hide question text (voice-only interview)</span></label>
         </div>
         <button class="btn btn-go" id="diBtn" onclick="generateDirectInvite()" style="margin-top:12px;padding:12px">
           <i class="fas fa-link"></i> Generate &amp; Send Interview Link
@@ -2181,6 +2183,7 @@ async function startInterview() {
       curToken  = token;
       curAppId  = interview.application_id || curAppId;
       curJobId  = interview.job_id         || curJobId;
+      if (interview.hide_question_text) qTextHidden = true;
       await db('update', 'interviews', {
         status:        'in_progress',
         started_at:    new Date().toISOString(),
@@ -2209,7 +2212,7 @@ async function startInterview() {
   btn.disabled    = true;
   btn.textContent = '⏳ Connecting…';
   try {
-    const t = await fetch(W, {
+    const t = await fetch(W + '/ai/interview-question', {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
       body:    JSON.stringify({ messages: [{ role: 'user', content: 'ping' }] }),
@@ -2237,6 +2240,15 @@ async function _actuallyStart() {
     im.style.display = 'flex';
   }
   document.getElementById('screenShareOverlay')?.classList.add('hidden');
+
+  // Apply hide question text setting
+  if (qTextHidden || document.getElementById('hideQText')?.checked) {
+    qTextHidden = true;
+    const box = document.getElementById('questionBox');
+    const btn = document.getElementById('toggleQText');
+    if (box) box.style.display = 'none';
+    if (btn) { btn.innerHTML = '👁 Show Text'; btn.style.background = 'rgba(99,102,241,.2)'; btn.style.color = '#a5b4fc'; }
+  }
 
   const sys = `You are Simpatico AI, an expert AI interviewer conducting a ${level}-level interview for the role: "${role}".
 Language: ${L[lang]?.n || 'English'} only. Be warm, professional, and conversational.
@@ -2952,6 +2964,7 @@ async function generateDirectInvite() {
       interview_level: level_, ai_difficulty: document.getElementById('diDiff')?.value || document.getElementById('diffSel')?.value || 'adaptive', question_count: qCount,
       interview_language: lang_, interview_type: 'real',
       token_type: document.getElementById('diTokenType')?.value || 'single',
+      hide_question_text: document.getElementById('diHideQText')?.checked || false,
       status: 'pending', max_attempts: 1, attempts_used: 0,
       expires_at: expires.toISOString(), created_at: new Date().toISOString(),
     });
