@@ -331,6 +331,7 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);heigh
       <div class="tb-logo">Simpatico<span>HR</span></div>
       <div class="badge badge-rec"><div class="dot dot-r"></div>PROCTORED</div>
       <div class="badge badge-barge"><div class="dot dot-g"></div>BARGE-IN</div>
+      <div class="badge" id="diffBadge" style="display:none;background:rgba(245,158,11,.15);color:#fcd34d;border:1px solid rgba(245,158,11,.3)"><i class="fas fa-brain"></i><span id="diffLabel">ADAPTIVE</span></div>
     </div>
     <div class="tb-center">
       <div class="phase-pill ph-warm" id="phasePill">WARM-UP</div>
@@ -507,6 +508,8 @@ const S={
   phaseTargets:{warmup:1,technical:5,system:2,behavioral:2,closing:1},
   candidateName:'', jobTitle:'', jobLevel:'mid', skills:[],
   pendingBarge:false,
+  // AI Difficulty + Anti-Repeat
+  aiDifficulty:'adaptive', roundNumber:1, pastQuestions:[],
 };
 
 // ----------------------------------------------------------------
@@ -694,6 +697,8 @@ async function init(){
     S.maxQuestions     = d.question_count||12;
     S.jobLevel         = (d.interview_level||'mid').toLowerCase();
     S.jobTitle         = d.interview_role||'';
+    S.aiDifficulty     = (d.ai_difficulty||'adaptive').toLowerCase();
+    S.roundNumber      = d.round_number||1;
 
     if(d.interview_language && LANG[d.interview_language]){
       selectedLang = d.interview_language;
@@ -735,6 +740,27 @@ async function init(){
           sc.innerHTML = skills.slice(0,8).map(s=>`<span class="skill-chip">${s}</span>`).join('');
         }
       } catch{}
+    }
+
+    // Load question history for anti-repeat
+    if(d.candidate_email){
+      try{
+        const qhRows = await sbGet('question_history',{candidate_email:d.candidate_email});
+        S.pastQuestions = qhRows.map(r=>({text:r.question_text,topic:r.topic_fingerprint,round:r.round_number}));
+        console.log('[AntiRepeat] Loaded',S.pastQuestions.length,'past questions for',d.candidate_email);
+      } catch(e){ console.warn('[AntiRepeat]',e.message); }
+    }
+
+    // Show difficulty badge
+    if(S.aiDifficulty && S.aiDifficulty!=='adaptive'){
+      const diffMap={easy:'\u26a1 EASY',medium:'\ud83c\udfaf MEDIUM',hard:'\ud83d\udd25 HARD',expert:'\ud83d\udc80 EXPERT'};
+      const diffEl=document.getElementById('diffBadge');
+      const diffLbl=document.getElementById('diffLabel');
+      if(diffEl){diffEl.style.display='flex';}
+      if(diffLbl){diffLbl.textContent=diffMap[S.aiDifficulty]||S.aiDifficulty.toUpperCase();}
+    } else {
+      const diffEl=document.getElementById('diffBadge');
+      if(diffEl){diffEl.style.display='flex';}
     }
 
   } catch(e){
@@ -1033,7 +1059,10 @@ Probe ONE of:
 � Quantify: "What was the measurable impact of that?"
 � Specifics: "Walk me through the exact implementation of [X they mentioned]."
 � Deeper: "How would you approach that differently today?"
-� Catch vague: "You mentioned [X] � what specifically did that involve?"
+• Quantify: "What was the measurable impact of that?"
+• Specifics: "Walk me through the exact implementation of [X they mentioned]."
+• Deeper: "How would you approach that differently today?"
+• Catch vague: "You mentioned [X] – what specifically did that involve?"
 Be conversational, not interrogative.
 ` : '';
 
@@ -1042,21 +1071,42 @@ Be conversational, not interrogative.
     .join('\n');
 
   const sys = `You are an elite AI technical interviewer for "${S.jobTitle||'Professional Role'}" at ${S.jobLevel} level.
-Language: ${LANG[selectedLang]?.n||'English'} � respond ENTIRELY in this language.
-Phase: ${phase.toUpperCase()} � Q${S.questionCount+1} of ${S.maxQuestions}
+Language: ${LANG[selectedLang]?.n||'English'} — respond ENTIRELY in this language.
+Phase: ${phase.toUpperCase()} — Q${S.questionCount+1} of ${S.maxQuestions}
+
+${(() => {
+  const dg = {
+    easy: 'DIFFICULTY: EASY — Ask foundational, conceptual questions. Focus on "what" and "why" basics. No tricky edge cases. Suitable for freshers or juniors.',
+    medium: 'DIFFICULTY: MEDIUM — Ask practical, applied questions. Focus on "how" with real-world scenarios. Some depth required. Expect working knowledge.',
+    hard: 'DIFFICULTY: HARD — Ask deep technical questions requiring battle-tested experience. Probe edge cases, failure modes, scaling challenges. Challenge vague claims.',
+    expert: 'DIFFICULTY: EXPERT — Ask architect/principal-level questions. Expect system-level thinking, trade-off analysis, cross-cutting concerns. Design-level depth.',
+    adaptive: `DIFFICULTY: ADAPTIVE — Start at ${S.roundNumber > 1 ? 'hard' : 'medium'} difficulty. If candidate answers well, escalate. If they struggle, maintain current level.`
+  };
+  return dg[S.aiDifficulty] || dg.adaptive;
+})()}
+Round: ${S.roundNumber} of the interview process.
 
 ${profileCtx}
 
 ${phaseGuide[phase]||''}
 ${followUpGuide}
 
+${S.pastQuestions.length > 0 ? `
+CRITICAL ANTI-REPEAT RULE:
+This candidate has been interviewed before (${S.pastQuestions.length} past questions across ${Math.max(...S.pastQuestions.map(q=>q.round),0)} rounds).
+You MUST NOT ask questions on these topics or any close variation:
+${S.pastQuestions.slice(-30).map(q => '- [Round ' + q.round + '] ' + q.topic + ': "' + q.text.substring(0,100) + '"').join('\n')}
+Ask about DIFFERENT aspects of their skills that have NOT been explored.
+` : ''}
+
 HARD RULES:
 1. Output EXACTLY ONE question. Max 2 sentences.
 2. NEVER repeat a topic already covered: [${[...S.skillsCovered].join(', ')||'none'}]
 3. NEVER offer feedback, praise, or advice ("Great answer!" is forbidden).
-4. Make it personal � reference their ACTUAL background.
+4. Make it personal — reference their ACTUAL background.
 5. Sound like a thoughtful senior engineer / hiring manager.
 6. No labels, no prefixes, no quotes around output.
+7. Also generate a topic_fingerprint for this question — a snake_case label like "react_virtual_dom" or "leadership_conflict". Put it on a NEW LINE after the question, prefixed with TOPIC_FP:
 
 Recent conversation:
 ${recentHistory||'Interview just starting.'}`;
@@ -1072,16 +1122,56 @@ ${recentHistory||'Interview just starting.'}`;
         }
       ],500);
       if(q&&q.length>10){
+        // Extract topic fingerprint if AI included it
+        let questionText = q.trim();
+        let topicFp = '';
+        const fpMatch = questionText.match(/\nTOPIC_FP:\s*(.+)/i);
+        if(fpMatch){
+          topicFp = fpMatch[1].trim().toLowerCase().replace(/[^a-z0-9_]/g,'_').substring(0,80);
+          questionText = questionText.replace(/\nTOPIC_FP:.*/i,'').trim();
+        }
         const matched = candidateProfile.technologies.find(t=>
-          q.toLowerCase().includes(t.toLowerCase().replace('.',''))
+          questionText.toLowerCase().includes(t.toLowerCase().replace('.',''))
         );
         if(matched) S.skillsCovered.add(matched);
-        return q.trim();
+        // Save to question_history for anti-repeat
+        saveQuestionHistory(questionText, phase, topicFp);
+        return questionText;
       }
     } catch(err){ console.warn('[genQ] retry',retries,err.message); }
     await sleep(600);
   }
   return defaultQuestion(phase, isFollowUp);
+}
+
+// ----------------------------------------------------------------
+//  SAVE QUESTION TO HISTORY (Anti-Repeat)
+// ----------------------------------------------------------------
+async function saveQuestionHistory(questionText, phase, topicFp){
+  if(!interviewMeta?.candidate_email) return;
+  try{
+    // Use provided fingerprint or generate a basic one
+    const fingerprint = topicFp || phase+'_'+questionText.substring(0,40).toLowerCase().replace(/[^a-z0-9]+/g,'_');
+    await fetch(`${SB_URL}/rest/v1/question_history`,{
+      method:'POST',
+      headers:{
+        'apikey':SB_KEY,
+        'Authorization':`Bearer ${SB_KEY}`,
+        'Content-Type':'application/json',
+        'Prefer':'return=minimal'
+      },
+      body:JSON.stringify({
+        candidate_email: interviewMeta.candidate_email,
+        company_id: interviewMeta.company_id||null,
+        interview_id: interviewMeta.id||null,
+        question_text: questionText.substring(0,500),
+        topic_fingerprint: fingerprint.substring(0,80),
+        difficulty_level: S.aiDifficulty,
+        phase: phase,
+        round_number: S.roundNumber
+      })
+    });
+  } catch(e){ console.warn('[SaveQ]',e.message); }
 }
 
 // ----------------------------------------------------------------
