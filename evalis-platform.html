@@ -2341,7 +2341,7 @@ async function startInterview() {
       curToken  = token;
       curAppId  = interview.application_id || curAppId;
       curJobId  = interview.job_id         || curJobId;
-      if (interview.hide_question_text) qTextHidden = true;
+      if (interview.hide_question_text || new URLSearchParams(location.search).get('hideq') === '1') qTextHidden = true;
       await db('update', 'interviews', {
         status:        'in_progress',
         started_at:    new Date().toISOString(),
@@ -3211,18 +3211,26 @@ async function generateDirectInvite() {
     const expHours = isCoach ? parseInt(document.getElementById('diCoachExpiry')?.value) || 336 : hours;
     const expires = new Date(Date.now() + expHours * 3600000);
 
-    await db('insert', 'interviews', {
+    const _hideQ = document.getElementById('diHideQText')?.checked || false;
+    const _basePayload = {
       token, candidate_name: name, candidate_email: email,
       candidate_phone: phone || null, interview_role: role_,
       interview_level: level_, ai_difficulty: document.getElementById('diDiff')?.value || document.getElementById('diffSel')?.value || 'adaptive', question_count: isCoach ? 0 : qCount,
       interview_language: lang_, interview_type: isCoach ? 'coach' : 'real',
       token_type: tokenType,
-      hide_question_text: document.getElementById('diHideQText')?.checked || false,
       status: 'pending', max_attempts: isCoach ? coachSessions : 1, attempts_used: 0,
       expires_at: expires.toISOString(), created_at: new Date().toISOString(),
-    });
+    };
+    try {
+      await db('insert', 'interviews', { ..._basePayload, hide_question_text: _hideQ });
+    } catch (_dbErr) {
+      if (_dbErr.message?.includes('hide_question_text') || _dbErr.message?.includes('schema cache')) {
+        console.warn('[generateDirectInvite] hide_question_text column missing, inserting without it');
+        await db('insert', 'interviews', _basePayload);
+      } else { throw _dbErr; }
+    }
 
-    const url = location.origin + location.pathname + '?token=' + token;
+    const url = location.origin + location.pathname + '?token=' + token + (_hideQ ? '&hideq=1' : '');
     window._lastDIToken = { name, email, phone, role: role_, level: level_, token, url, expires, questions: qCount, lang: lang_ };
 
     const res = document.getElementById('diResult');
