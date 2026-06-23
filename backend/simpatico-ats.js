@@ -7523,6 +7523,27 @@ async function handleManualCreateOrder(request, env, ctx) {
 
   await audit(env, ctx, "billing.manual_order_created", "payment_transactions", orderId, { plan, billing_cycle, amount: pricing.inr });
 
+  // Notify admin about new domestic payment order
+  const adminEmail = env.ADMIN_NOTIFICATION_EMAIL || "simpaticohrconsultancy@gmail.com";
+  sendEmail(env, {
+    to: adminEmail,
+    subject: `💰 New Payment Order: ${plan.charAt(0).toUpperCase() + plan.slice(1)} (${billing_cycle}) — ₹${pricing.inr.toLocaleString()} INR`,
+    html: `<div style="font-family:sans-serif;max-width:600px;margin:auto;padding:24px">
+      <h2 style="color:#F59E0B;margin-bottom:16px">💰 New Domestic Payment Order</h2>
+      <table style="width:100%;border-collapse:collapse;font-size:14px">
+        <tr><td style="padding:8px 12px;font-weight:600;color:#374151;border-bottom:1px solid #E5E7EB">Order ID</td><td style="padding:8px 12px;border-bottom:1px solid #E5E7EB;font-family:monospace;color:#4F46E5">${orderId}</td></tr>
+        <tr><td style="padding:8px 12px;font-weight:600;color:#374151;border-bottom:1px solid #E5E7EB">Gateway</td><td style="padding:8px 12px;border-bottom:1px solid #E5E7EB">Manual (UPI / Bank Transfer)</td></tr>
+        <tr><td style="padding:8px 12px;font-weight:600;color:#374151;border-bottom:1px solid #E5E7EB">Plan</td><td style="padding:8px 12px;border-bottom:1px solid #E5E7EB">${plan.charAt(0).toUpperCase() + plan.slice(1)} (${billing_cycle})</td></tr>
+        <tr><td style="padding:8px 12px;font-weight:600;color:#374151;border-bottom:1px solid #E5E7EB">Amount</td><td style="padding:8px 12px;border-bottom:1px solid #E5E7EB;font-weight:700;color:#059669">₹${pricing.inr.toLocaleString()} INR</td></tr>
+        <tr><td style="padding:8px 12px;font-weight:600;color:#374151;border-bottom:1px solid #E5E7EB">Customer</td><td style="padding:8px 12px;border-bottom:1px solid #E5E7EB">${customer_name || "N/A"}</td></tr>
+        <tr><td style="padding:8px 12px;font-weight:600;color:#374151;border-bottom:1px solid #E5E7EB">Email</td><td style="padding:8px 12px;border-bottom:1px solid #E5E7EB">${customer_email}</td></tr>
+        <tr><td style="padding:8px 12px;font-weight:600;color:#374151">Company ID</td><td style="padding:8px 12px">${companyId}</td></tr>
+      </table>
+      <p style="margin-top:16px;font-size:13px;color:#DC2626;font-weight:600">⏳ Awaiting payment — check your UPI/bank account and confirm once received.</p>
+      <a href="https://simpaticohrconsultancy.com/platform/super-admin.html" style="display:inline-block;margin-top:12px;padding:10px 20px;background:#1E40AF;color:#fff;border-radius:8px;text-decoration:none;font-size:13px">Open Admin Panel →</a>
+    </div>`,
+  }).catch(e => console.warn("[Billing] Admin notification failed for manual order:", e.message));
+
   return apiResponse({
     order_id: orderId, gateway: "manual", amount: pricing.inr, currency: "INR",
     plan, billing_cycle,
@@ -7562,6 +7583,27 @@ async function handleWiseCreateOrder(request, env, ctx) {
   }, false, companyId);
 
   await audit(env, ctx, "billing.wise_order_created", "payment_transactions", orderId, { plan, billing_cycle, amount: pricing.usd });
+
+  // Notify admin about new international Wise payment order
+  const adminEmailWise = env.ADMIN_NOTIFICATION_EMAIL || "simpaticohrconsultancy@gmail.com";
+  sendEmail(env, {
+    to: adminEmailWise,
+    subject: `🌍 International Payment Order: ${plan.charAt(0).toUpperCase() + plan.slice(1)} (${billing_cycle}) — $${pricing.usd} USD via Wise`,
+    html: `<div style="font-family:sans-serif;max-width:600px;margin:auto;padding:24px">
+      <h2 style="color:#4F46E5;margin-bottom:16px">🌍 New International Payment Order (Wise)</h2>
+      <table style="width:100%;border-collapse:collapse;font-size:14px">
+        <tr><td style="padding:8px 12px;font-weight:600;color:#374151;border-bottom:1px solid #E5E7EB">Order ID</td><td style="padding:8px 12px;border-bottom:1px solid #E5E7EB;font-family:monospace;color:#4F46E5">${orderId}</td></tr>
+        <tr><td style="padding:8px 12px;font-weight:600;color:#374151;border-bottom:1px solid #E5E7EB">Gateway</td><td style="padding:8px 12px;border-bottom:1px solid #E5E7EB">Wise (Bank Transfer)</td></tr>
+        <tr><td style="padding:8px 12px;font-weight:600;color:#374151;border-bottom:1px solid #E5E7EB">Plan</td><td style="padding:8px 12px;border-bottom:1px solid #E5E7EB">${plan.charAt(0).toUpperCase() + plan.slice(1)} (${billing_cycle})</td></tr>
+        <tr><td style="padding:8px 12px;font-weight:600;color:#374151;border-bottom:1px solid #E5E7EB">Amount</td><td style="padding:8px 12px;border-bottom:1px solid #E5E7EB;font-weight:700;color:#059669">$${pricing.usd} USD</td></tr>
+        <tr><td style="padding:8px 12px;font-weight:600;color:#374151;border-bottom:1px solid #E5E7EB">Customer</td><td style="padding:8px 12px;border-bottom:1px solid #E5E7EB">${customer_name || "N/A"}</td></tr>
+        <tr><td style="padding:8px 12px;font-weight:600;color:#374151;border-bottom:1px solid #E5E7EB">Email</td><td style="padding:8px 12px;border-bottom:1px solid #E5E7EB">${customer_email}</td></tr>
+        <tr><td style="padding:8px 12px;font-weight:600;color:#374151">Company ID</td><td style="padding:8px 12px">${companyId}</td></tr>
+      </table>
+      <p style="margin-top:16px;font-size:13px;color:#DC2626;font-weight:600">⏳ Awaiting Wise transfer — check your Wise account and confirm once received.</p>
+      <a href="https://simpaticohrconsultancy.com/platform/super-admin.html" style="display:inline-block;margin-top:12px;padding:10px 20px;background:#1E40AF;color:#fff;border-radius:8px;text-decoration:none;font-size:13px">Open Admin Panel →</a>
+    </div>`,
+  }).catch(e => console.warn("[Billing] Admin notification failed for Wise order:", e.message));
 
   return apiResponse({
     order_id: orderId, gateway: "wise", amount: pricing.usd, currency: "USD",
@@ -7657,6 +7699,48 @@ async function handleConfirmPayment(request, env, ctx) {
   if (!compRes.ok) console.error(`[Billing] Failed to update company plan: ${compRes.status}`);
 
   await audit(env, ctx, "billing.payment_confirmed", "payment_transactions", order_id, { plan: tx.plan, amount: tx.amount, gateway: tx.gateway });
+
+  // Notify admin about payment confirmation
+  const adminEmailConfirm = env.ADMIN_NOTIFICATION_EMAIL || "simpaticohrconsultancy@gmail.com";
+  const currencySymbol = tx.currency === "USD" ? "$" : "₹";
+  sendEmail(env, {
+    to: adminEmailConfirm,
+    subject: `✅ Payment Confirmed: ${(tx.plan || "starter").charAt(0).toUpperCase() + (tx.plan || "starter").slice(1)} — ${currencySymbol}${tx.amount} ${tx.currency || "INR"}`,
+    html: `<div style="font-family:sans-serif;max-width:600px;margin:auto;padding:24px">
+      <h2 style="color:#059669;margin-bottom:16px">✅ Payment Confirmed & Subscription Activated</h2>
+      <table style="width:100%;border-collapse:collapse;font-size:14px">
+        <tr><td style="padding:8px 12px;font-weight:600;color:#374151;border-bottom:1px solid #E5E7EB">Order ID</td><td style="padding:8px 12px;border-bottom:1px solid #E5E7EB;font-family:monospace;color:#4F46E5">${order_id}</td></tr>
+        <tr><td style="padding:8px 12px;font-weight:600;color:#374151;border-bottom:1px solid #E5E7EB">Gateway</td><td style="padding:8px 12px;border-bottom:1px solid #E5E7EB">${tx.gateway === "wise" ? "Wise (International)" : "Manual (Domestic)"}</td></tr>
+        <tr><td style="padding:8px 12px;font-weight:600;color:#374151;border-bottom:1px solid #E5E7EB">Plan</td><td style="padding:8px 12px;border-bottom:1px solid #E5E7EB">${(tx.plan || "starter").charAt(0).toUpperCase() + (tx.plan || "starter").slice(1)} (${tx.billing_cycle || "monthly"})</td></tr>
+        <tr><td style="padding:8px 12px;font-weight:600;color:#374151;border-bottom:1px solid #E5E7EB">Amount</td><td style="padding:8px 12px;border-bottom:1px solid #E5E7EB;font-weight:700;color:#059669">${currencySymbol}${tx.amount} ${tx.currency || "INR"}</td></tr>
+        <tr><td style="padding:8px 12px;font-weight:600;color:#374151;border-bottom:1px solid #E5E7EB">Customer</td><td style="padding:8px 12px;border-bottom:1px solid #E5E7EB">${tx.customer_name || "N/A"} (${tx.customer_email || "N/A"})</td></tr>
+        <tr><td style="padding:8px 12px;font-weight:600;color:#374151;border-bottom:1px solid #E5E7EB">Confirmed By</td><td style="padding:8px 12px;border-bottom:1px solid #E5E7EB">${ctx.actorEmail || "Admin"}</td></tr>
+        <tr><td style="padding:8px 12px;font-weight:600;color:#374151">Subscription Until</td><td style="padding:8px 12px;font-weight:700">${periodEnd.toLocaleDateString("en-IN", { year: "numeric", month: "long", day: "numeric" })}</td></tr>
+      </table>
+      <p style="margin-top:16px;font-size:13px;color:#059669;font-weight:600">🎉 Subscription is now active!</p>
+      <a href="https://simpaticohrconsultancy.com/platform/super-admin.html" style="display:inline-block;margin-top:12px;padding:10px 20px;background:#1E40AF;color:#fff;border-radius:8px;text-decoration:none;font-size:13px">View in Admin Panel →</a>
+    </div>`,
+  }).catch(e => console.warn("[Billing] Admin notification failed for payment confirmation:", e.message));
+
+  // Notify the customer that their subscription is active
+  if (tx.customer_email) {
+    sendEmail(env, {
+      to: tx.customer_email,
+      subject: `🎉 Your Simpatico HR Subscription is Active!`,
+      html: `<div style="font-family:sans-serif;max-width:600px;margin:auto;padding:24px">
+        <h2 style="color:#1E40AF;margin-bottom:16px">Your Subscription is Now Active!</h2>
+        <p>Hi ${tx.customer_name || "there"},</p>
+        <p>Your payment has been confirmed and your <strong>${(tx.plan || "starter").charAt(0).toUpperCase() + (tx.plan || "starter").slice(1)}</strong> plan is now active.</p>
+        <table style="width:100%;border-collapse:collapse;font-size:14px;margin:16px 0">
+          <tr><td style="padding:8px 12px;font-weight:600;color:#374151;border-bottom:1px solid #E5E7EB">Plan</td><td style="padding:8px 12px;border-bottom:1px solid #E5E7EB">${(tx.plan || "starter").charAt(0).toUpperCase() + (tx.plan || "starter").slice(1)}</td></tr>
+          <tr><td style="padding:8px 12px;font-weight:600;color:#374151;border-bottom:1px solid #E5E7EB">Billing</td><td style="padding:8px 12px;border-bottom:1px solid #E5E7EB">${tx.billing_cycle || "monthly"}</td></tr>
+          <tr><td style="padding:8px 12px;font-weight:600;color:#374151">Valid Until</td><td style="padding:8px 12px;font-weight:700">${periodEnd.toLocaleDateString("en-IN", { year: "numeric", month: "long", day: "numeric" })}</td></tr>
+        </table>
+        <a href="https://simpaticohrconsultancy.com/dashboard/hr.html" style="display:inline-block;margin-top:12px;padding:12px 24px;background:#1E40AF;color:#fff;border-radius:8px;text-decoration:none;font-weight:600;font-size:14px">Go to Dashboard →</a>
+        <p style="margin-top:20px;font-size:13px;color:#6B7280">Thank you for choosing Simpatico HR! Need help? Reply to this email.</p>
+      </div>`,
+    }).catch(e => console.warn("[Billing] Customer activation email failed:", e.message));
+  }
 
   return apiResponse({ confirmed: true, plan: tx.plan, order_id });
 }
