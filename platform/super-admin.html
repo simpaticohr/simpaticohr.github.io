@@ -450,7 +450,7 @@ async function loadDashboard() {
         const totalRevenue = txns.filter(t => t.status === 'paid' || t.status === 'success').reduce((sum, t) => sum + (parseFloat(t.amount) || 0), 0);
         const now = new Date();
         const thisMonth = txns.filter(t => { const d = new Date(t.created_at); return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear() && (t.status === 'paid' || t.status === 'success'); }).reduce((sum, t) => sum + (parseFloat(t.amount) || 0), 0);
-        const pendingPayments = txns.filter(t => t.status === 'pending').length;
+        const pendingPayments = txns.filter(t => t.status === 'pending' || t.status === 'awaiting_payment' || t.status === 'awaiting_transfer').length;
 
         document.getElementById('mainContent').innerHTML = `
             <div class="stat-grid" style="grid-template-columns:repeat(5,1fr)">
@@ -1553,7 +1553,7 @@ async function loadPayments() {
         const txns = await adminFetch('/admin/billing');
         const items = Array.isArray(txns) ? txns : [];
         const paid = items.filter(t => t.status === 'paid' || t.status === 'success');
-        const pending = items.filter(t => t.status === 'pending');
+        const pending = items.filter(t => t.status === 'pending' || t.status === 'awaiting_payment' || t.status === 'awaiting_transfer');
         const failed = items.filter(t => t.status === 'failed' || t.status === 'cancelled');
         const totalRevenue = paid.reduce((sum, t) => sum + (parseFloat(t.amount) || 0), 0);
         const now = new Date();
@@ -1573,17 +1573,18 @@ async function loadPayments() {
                     <button class="btn-ghost" style="padding:5px 12px;font-size:12px" onclick="exportPaymentsCSV()"><i class="fas fa-download"></i> Export CSV</button>
                 </div>
                 <div class="table-wrap"><table>
-                    <thead><tr><th>Date</th><th>Company</th><th>Plan</th><th>Amount</th><th>Status</th><th>Method</th><th>Transaction ID</th></tr></thead>
+                    <thead><tr><th>Date</th><th>Company</th><th>Plan</th><th>Amount</th><th>Status</th><th>Gateway</th><th>Order ID</th><th>Action</th></tr></thead>
                     <tbody>
                         ${items.length === 0 ? '<tr><td colspan="7" style="text-align:center;color:#9CA3AF;padding:24px">No transactions found</td></tr>' :
                         items.map(t => '<tr>' +
                             '<td>' + formatDate(t.created_at) + '</td>' +
-                            '<td>' + esc(t.company_name || t.tenant_id || '-') + '</td>' +
-                            '<td>' + esc(t.plan_name || t.plan || '-') + '</td>' +
-                            '<td style="font-weight:700">\u20B9' + (parseFloat(t.amount)||0).toLocaleString('en-IN') + '</td>' +
-                            '<td><span class="pay-status ' + (t.status==='paid'||t.status==='success'?'pay-paid':t.status==='pending'?'pay-pending':'pay-failed') + '">' + esc(t.status||'unknown') + '</span></td>' +
-                            '<td>' + esc(t.payment_method || t.gateway || '-') + '</td>' +
-                            '<td style="font-size:11px;font-family:monospace">' + esc(t.transaction_id || t.id || '-') + '</td>' +
+                            '<td>' + esc(t.company_name || t.company_id || '-') + '</td>' +
+                            '<td>' + esc(t.plan || '-') + '</td>' +
+                            '<td style="font-weight:700">' + (t.currency === 'USD' ? '$' : '\u20B9') + (parseFloat(t.amount)||0).toLocaleString('en-IN') + '</td>' +
+                            '<td><span class="pay-status ' + (t.status==='paid'||t.status==='success'?'pay-paid':(t.status==='pending'||t.status==='awaiting_payment'||t.status==='awaiting_transfer')?'pay-pending':'pay-failed') + '">' + esc(t.status||'unknown') + '</span></td>' +
+                            '<td>' + esc(t.gateway || '-') + '</td>' +
+                            '<td style="font-size:11px;font-family:monospace">' + esc(t.gateway_order_id || t.id || '-') + '</td>' +
+                            '<td>' + ((t.status==='pending'||t.status==='awaiting_payment'||t.status==='awaiting_transfer') ? '<button class="btn-save" style="padding:4px 10px;font-size:11px;border-radius:6px" onclick="confirmPayment(\'' + esc(t.gateway_order_id||t.id) + '\')" title="Confirm this payment"><i class="fas fa-check"></i> Confirm</button>' : (t.status==='paid'||t.status==='success') ? '<span style="color:#10B981;font-size:12px"><i class="fas fa-check-circle"></i> Done</span>' : '-') + '</td>' +
                         '</tr>').join('')}
                     </tbody>
                 </table></div>
@@ -1603,6 +1604,28 @@ function exportPaymentsCSV() {
     const blob = new Blob([csv], {type:'text/csv'});
     const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'payments_export.csv'; a.click();
     toast('CSV exported successfully', 'success');
+}
+
+async function confirmPayment(orderId) {
+    if (!orderId) return;
+    const ref = prompt('Enter transaction reference (UPI ref / bank transfer ID):', '');
+    if (ref === null) return; // User cancelled
+    if (!confirm(`Confirm payment for order ${orderId}?\nReference: ${ref || '(none)'}\n\nThis will activate the subscription.`)) return;
+    try {
+        toast('Confirming payment...', 'info');
+        const result = await adminFetch('/billing/manual/confirm', {
+            method: 'POST',
+            body: { order_id: orderId, transaction_reference: ref || 'admin_confirmed' }
+        });
+        if (result.already_confirmed) {
+            toast('ℹ️ Payment was already confirmed', 'info');
+        } else {
+            toast(`✅ Payment confirmed! Plan: ${result.plan}`, 'success');
+        }
+        loadPayments(); // Refresh the list
+    } catch(e) {
+        toast('❌ Confirmation failed: ' + e.message, 'error');
+    }
 }
 
 // ══════════════════════════════════════════

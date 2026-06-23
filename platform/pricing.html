@@ -260,7 +260,7 @@
     <h2>Frequently Asked Questions</h2>
     <div class="faq-item" onclick="this.classList.toggle('open')">
       <div class="faq-q">Which payment methods do you support? <i class="fas fa-chevron-down" style="font-size:12px;color:#94a3b8"></i></div>
-      <div class="faq-a"><strong>India:</strong> UPI, credit/debit cards, netbanking, and wallets via CCAvenue (PCI DSS Level 1). <strong>International:</strong> Bank transfer via Wise for USD payments.</div>
+      <div class="faq-a"><strong>India:</strong> UPI (Google Pay, PhonePe, Paytm), bank transfer, or any payment app. <strong>International:</strong> Bank transfer via Wise for USD payments. All payments are manually verified for maximum security.</div>
     </div>
     <div class="faq-item" onclick="this.classList.toggle('open')">
       <div class="faq-q">How does the 2-day free trial work? <i class="fas fa-chevron-down" style="font-size:12px;color:#94a3b8"></i></div>
@@ -272,26 +272,38 @@
     </div>
     <div class="faq-item" onclick="this.classList.toggle('open')">
       <div class="faq-q">Is my payment data secure? <i class="fas fa-chevron-down" style="font-size:12px;color:#94a3b8"></i></div>
-      <div class="faq-a">Absolutely. We never store your card details. CCAvenue (PCI DSS Level 1) handles all domestic payment processing. International payments go through Wise, a regulated financial institution.</div>
+      <div class="faq-a">Absolutely. We never store your payment details. Domestic payments use direct UPI/bank transfer. International payments go through Wise, a regulated financial institution. All transactions are manually verified by our team.</div>
     </div>
   </div>
-
-  <!-- CCAvenue hidden form (for redirect-based payment) -->
-  <form id="ccavForm" method="POST" style="display:none">
-    <input type="hidden" id="ccavEncRequest" name="encRequest">
-    <input type="hidden" id="ccavAccessCode" name="access_code">
-  </form>
 
   <!-- Payment Processing Overlay -->
   <div class="pay-overlay" id="payOverlay">
     <div class="pay-spinner">
       <div class="spin"></div>
-      <p style="font-size:16px;font-weight:600">Processing payment...</p>
-      <p style="font-size:13px;opacity:0.7;margin-top:4px">Please don't close this window</p>
+      <p style="font-size:16px;font-weight:600">Creating order...</p>
+      <p style="font-size:13px;opacity:0.7;margin-top:4px">Please wait</p>
     </div>
   </div>
 
-  <!-- Wise Transfer Modal -->
+  <!-- Domestic Payment Modal (UPI / Bank Transfer) -->
+  <div class="wise-modal" id="domesticModal">
+    <div class="wise-card">
+      <h2><i class="fas fa-indian-rupee-sign" style="color:#F59E0B;margin-right:8px"></i>Pay via UPI / Bank Transfer</h2>
+      <div class="wise-detail">
+        <div class="row"><span class="label">Pay To</span><span class="value" id="domesticRecipient">Simpatico HR Consultancy</span></div>
+        <div class="row"><span class="label">Amount</span><span class="value" id="domesticAmount">₹3,999</span></div>
+        <div class="row"><span class="label">Plan</span><span class="value" id="domesticPlan">Professional (Monthly)</span></div>
+        <div class="row"><span class="label">UPI ID</span><span class="value" id="domesticUPI" style="cursor:pointer;color:#4F46E5" onclick="navigator.clipboard.writeText(this.textContent);this.style.color='#059669';setTimeout(()=>this.style.color='#4F46E5',1500)">simpaticohrconsultancy@ybl</span></div>
+        <div class="row"><span class="label">Email</span><span class="value">simpaticohrconsultancy@gmail.com</span></div>
+      </div>
+      <p style="font-size:12px;color:#64748B;margin-bottom:8px;text-align:center">Include this reference in your payment note:</p>
+      <div class="wise-ref" id="domesticRef" onclick="navigator.clipboard.writeText(this.textContent);this.style.background='#DCFCE7';setTimeout(()=>this.style.background='#EEF2FF',1500)">—</div>
+      <p class="wise-note">Pay via <strong>Google Pay / PhonePe / Paytm</strong> or bank transfer.<br>Your subscription activates within a few hours after payment verification.</p>
+      <button class="wise-close" onclick="document.getElementById('domesticModal').classList.remove('active')">Got it, I'll pay now</button>
+    </div>
+  </div>
+
+  <!-- Wise Transfer Modal (International) -->
   <div class="wise-modal" id="wiseModal">
     <div class="wise-card">
       <h2><i class="fas fa-globe" style="color:#4F46E5;margin-right:8px"></i>International Payment via Wise</h2>
@@ -362,7 +374,7 @@ function updatePrices() {
   });
   // Update gateway labels
   document.querySelectorAll('.gw-label').forEach(el => {
-    el.textContent = isDomestic ? 'Secured by CCAvenue' : 'Pay via Wise (Bank Transfer)';
+    el.textContent = isDomestic ? 'UPI / Bank Transfer' : 'Pay via Wise (Bank Transfer)';
   });
 }
 
@@ -384,7 +396,7 @@ async function loadCurrentPlan() {
   } catch(e) { console.warn('Could not load subscription:', e.message); }
 }
 
-// ── Subscribe — routes to CCAvenue (domestic) or Wise (international) ──
+// ── Subscribe — routes to Manual Payment (domestic) or Wise (international) ──
 async function subscribe(plan) {
   if (!token) { alert('Please log in first to subscribe.'); window.location.href = '/platform/login.html'; return; }
 
@@ -395,8 +407,8 @@ async function subscribe(plan) {
 
   try {
     if (isDomestic) {
-      // ── CCAvenue flow (redirect-based) ──
-      const res = await fetch(`${WORKER_URL}/billing/ccavenue/create-order`, {
+      // ── Manual payment flow (UPI / Bank Transfer) ──
+      const res = await fetch(`${WORKER_URL}/billing/manual/create-order`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}`, 'X-Tenant-ID': TENANT_ID },
         body: JSON.stringify({
@@ -410,12 +422,15 @@ async function subscribe(plan) {
       if (!res.ok) throw new Error(json?.error?.message || 'Order creation failed');
       const data = json.data || json;
 
-      // Submit hidden form to CCAvenue
-      const form = document.getElementById('ccavForm');
-      form.action = data.redirect_url;
-      document.getElementById('ccavEncRequest').value = data.enc_request;
-      document.getElementById('ccavAccessCode').value = data.access_code;
-      form.submit();
+      // Show domestic payment modal
+      document.getElementById('domesticAmount').textContent = `₹${data.amount.toLocaleString('en-IN')}`;
+      document.getElementById('domesticPlan').textContent = `${plan.charAt(0).toUpperCase() + plan.slice(1)} (${billingCycle})`;
+      document.getElementById('domesticRef').textContent = data.order_id;
+      if (data.payment_details?.upi_id) document.getElementById('domesticUPI').textContent = data.payment_details.upi_id;
+      if (data.payment_details?.account_name) document.getElementById('domesticRecipient').textContent = data.payment_details.account_name;
+      document.getElementById('domesticModal').classList.add('active');
+      btn.innerHTML = origText;
+      btn.disabled = false;
 
     } else {
       // ── Wise flow (show bank details modal) ──

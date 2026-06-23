@@ -1321,12 +1321,11 @@ route("POST", "/attendance/clock-out", handleClockOut);
 route("GET", "/attendance/records", handleListAttendance);
 route("GET", "/attendance/summary", handleAttendanceSummary);
 
-// ── Billing & Subscriptions (CCAvenue Domestic + Wise International) ──
-route("POST", "/billing/ccavenue/create-order", handleCCAvCreateOrder);
-route("POST", "/billing/ccavenue/response", handleCCAvResponse);
-route("POST", "/billing/ccavenue/webhook", handleCCAvWebhook);
+// ── Billing & Subscriptions (Manual Domestic INR + Wise International USD) ──
+route("POST", "/billing/manual/create-order", handleManualCreateOrder);
+route("POST", "/billing/manual/confirm", handleConfirmPayment);
 route("POST", "/billing/wise/create-order", handleWiseCreateOrder);
-route("POST", "/billing/wise/confirm", handleWiseConfirmPayment);
+route("POST", "/billing/wise/confirm", handleConfirmPayment);
 route("GET", "/billing/wise/account-details", handleWiseAccountDetails);
 route("GET", "/billing/subscription", handleGetSubscription);
 route("POST", "/billing/cancel", handleCancelSubscription);
@@ -1688,7 +1687,7 @@ async function handleVersion() {
  */
 async function handleAdminBilling(request, env, ctx) {
   requireRole(ctx, "super_admin", "superadmin");
-  const res = await fetch(`${env.SUPABASE_URL}/rest/v1/payment_transactions?order=created_at.desc.nullslast`, {
+  const res = await fetch(`${env.SUPABASE_URL}/rest/v1/payment_transactions?order=created_at.desc.nullslast&limit=200`, {
     headers: { apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}` },
   });
   const data = await res.json();
@@ -6259,6 +6258,31 @@ async function handleCompanyRegister(request, env, ctx) {
     console.warn("[handleCompanyRegister] Welcome email failed:", e);
   }
 
+  // Notify admin about new registration
+  try {
+    const adminEmail = env.ADMIN_NOTIFICATION_EMAIL || "simpaticohrconsultancy@gmail.com";
+    await sendEmail(env, {
+      to: adminEmail,
+      subject: `🆕 New Company Registered: ${name}`,
+      html: `<div style="font-family:sans-serif;max-width:600px;margin:auto;padding:24px">
+        <h2 style="color:#1E40AF;margin-bottom:16px">New Company Registration</h2>
+        <table style="width:100%;border-collapse:collapse;font-size:14px">
+          <tr><td style="padding:8px 12px;font-weight:600;color:#374151;border-bottom:1px solid #E5E7EB">Company</td><td style="padding:8px 12px;border-bottom:1px solid #E5E7EB">${name}</td></tr>
+          <tr><td style="padding:8px 12px;font-weight:600;color:#374151;border-bottom:1px solid #E5E7EB">Email</td><td style="padding:8px 12px;border-bottom:1px solid #E5E7EB">${email}</td></tr>
+          <tr><td style="padding:8px 12px;font-weight:600;color:#374151;border-bottom:1px solid #E5E7EB">Admin</td><td style="padding:8px 12px;border-bottom:1px solid #E5E7EB">${admin_name || "Not provided"}</td></tr>
+          <tr><td style="padding:8px 12px;font-weight:600;color:#374151;border-bottom:1px solid #E5E7EB">Phone</td><td style="padding:8px 12px;border-bottom:1px solid #E5E7EB">${admin_phone || "Not provided"}</td></tr>
+          <tr><td style="padding:8px 12px;font-weight:600;color:#374151;border-bottom:1px solid #E5E7EB">Industry</td><td style="padding:8px 12px;border-bottom:1px solid #E5E7EB">${industry || "Not specified"}</td></tr>
+          <tr><td style="padding:8px 12px;font-weight:600;color:#374151;border-bottom:1px solid #E5E7EB">Size</td><td style="padding:8px 12px;border-bottom:1px solid #E5E7EB">${company_size || "Not specified"}</td></tr>
+          <tr><td style="padding:8px 12px;font-weight:600;color:#374151">Plan</td><td style="padding:8px 12px">${subscription_plan || "trial"}</td></tr>
+        </table>
+        <p style="margin-top:16px;font-size:13px;color:#6B7280">Registered at ${new Date().toISOString()}</p>
+        <a href="https://simpaticohrconsultancy.com/platform/super-admin.html" style="display:inline-block;margin-top:12px;padding:10px 20px;background:#1E40AF;color:#fff;border-radius:8px;text-decoration:none;font-size:13px">View in Admin Panel →</a>
+      </div>`,
+    });
+  } catch (e) {
+    console.warn("[handleCompanyRegister] Admin notification email failed:", e);
+  }
+
   return apiResponse(
     { company_id: company?.id, company_name: name, status: "active" },
     HTTP.CREATED,
@@ -7295,7 +7319,7 @@ async function handleAttendanceSummary(request, env, ctx) {
 }
 
 // ===============================================================
-// § BILLING — CCAvenue (Domestic INR) + Wise (International USD)
+// § BILLING — Manual Payment (Domestic INR) + Wise (International USD)
 // ===============================================================
 
 const PLAN_PRICING = {
@@ -7314,222 +7338,48 @@ const PLAN_PRICING = {
 };
 
 /**
- * AES-128-CBC encrypt/decrypt helpers for CCAvenue.
- * CCAvenue uses md5(workingKey) as key, first 16 bytes as IV.
+ * POST /billing/manual/create-order — Create a pending manual payment order (UPI / Bank Transfer).
+ * Returns order details + UPI/bank payment instructions for the customer.
  */
-async function ccavEncrypt(plainText, workingKey) {
-  const md5Key = await cryptoMD5(workingKey);
-  const keyBytes = hexToBytes(md5Key);
-  const iv = keyBytes.slice(0, 16);
-  const key = await crypto.subtle.importKey("raw", keyBytes, "AES-CBC", false, ["encrypt"]);
-  const encoded = new TextEncoder().encode(plainText);
-  const padded = pkcs7Pad(encoded, 16);
-  const encrypted = await crypto.subtle.encrypt({ name: "AES-CBC", iv }, key, padded);
-  return bytesToHex(new Uint8Array(encrypted));
-}
-
-async function ccavDecrypt(encText, workingKey) {
-  const md5Key = await cryptoMD5(workingKey);
-  const keyBytes = hexToBytes(md5Key);
-  const iv = keyBytes.slice(0, 16);
-  const key = await crypto.subtle.importKey("raw", keyBytes, "AES-CBC", false, ["decrypt"]);
-  const encBytes = hexToBytes(encText);
-  const decrypted = await crypto.subtle.decrypt({ name: "AES-CBC", iv }, key, encBytes);
-  return new TextDecoder().decode(pkcs7Unpad(new Uint8Array(decrypted)));
-}
-
-async function cryptoMD5(str) {
-  const data = new TextEncoder().encode(str);
-  const hash = await crypto.subtle.digest("MD5", data);
-  return bytesToHex(new Uint8Array(hash));
-}
-
-function hexToBytes(hex) {
-  const bytes = new Uint8Array(hex.length / 2);
-  for (let i = 0; i < hex.length; i += 2) bytes[i / 2] = parseInt(hex.substr(i, 2), 16);
-  return bytes;
-}
-
-function bytesToHex(bytes) {
-  return Array.from(bytes).map(b => b.toString(16).padStart(2, "0")).join("");
-}
-
-function pkcs7Pad(data, blockSize) {
-  const padLen = blockSize - (data.length % blockSize);
-  const padded = new Uint8Array(data.length + padLen);
-  padded.set(data);
-  padded.fill(padLen, data.length);
-  return padded;
-}
-
-function pkcs7Unpad(data) {
-  const padLen = data[data.length - 1];
-  return data.slice(0, data.length - padLen);
-}
-
-/**
- * POST /billing/ccavenue/create-order — Create CCAvenue encrypted order.
- * Returns { redirect_url, encrypted_request } for frontend form POST.
- */
-async function handleCCAvCreateOrder(request, env, ctx) {
+async function handleManualCreateOrder(request, env, ctx) {
   requireAuth(ctx);
   const body = await safeJson(request);
   const { plan, billing_cycle = "monthly", customer_name, customer_email, customer_phone } = body;
 
   if (!plan || !PLAN_PRICING[plan]) throw new ValidationError("Invalid plan");
   if (!customer_email) throw new ValidationError("customer_email required");
-  if (!env.CCAVENUE_MERCHANT_ID || !env.CCAVENUE_ACCESS_CODE || !env.CCAVENUE_WORKING_KEY) {
-    throw new AppError("CCAvenue not configured", 503, "GATEWAY_NOT_CONFIGURED");
-  }
 
   const pricing = PLAN_PRICING[plan][billing_cycle];
   if (!pricing || !pricing.inr) throw new ValidationError("Invalid billing cycle or plan");
 
   const companyId = ctx.tenantId;
-  const orderId = `SIMP_${plan.toUpperCase()}_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
-  const frontendUrl = env.FRONTEND_URL || "https://simpaticohrconsultancy.com";
-  const workerUrl = env.WORKER_URL || "https://simpatico-hr-ats.simpaticohrconsultancy.workers.dev";
+  const orderId = `MANUAL_${plan.toUpperCase()}_${crypto.randomUUID().replace(/-/g, "").substring(0, 12)}`;
 
-  const params = [
-    `merchant_id=${env.CCAVENUE_MERCHANT_ID}`,
-    `order_id=${orderId}`,
-    `amount=${pricing.inr}`,
-    `currency=INR`,
-    `redirect_url=${workerUrl}/billing/ccavenue/response`,
-    `cancel_url=${frontendUrl}/platform/pricing.html?payment=cancelled`,
-    `language=EN`,
-    `billing_name=${encodeURIComponent(customer_name || "")}`,
-    `billing_email=${encodeURIComponent(customer_email)}`,
-    `billing_tel=${encodeURIComponent(customer_phone || "")}`,
-    `merchant_param1=${plan}`,
-    `merchant_param2=${billing_cycle}`,
-    `merchant_param3=${companyId}`,
-  ].join("&");
-
-  const encRequest = await ccavEncrypt(params, env.CCAVENUE_WORKING_KEY);
-  const ccavEnv = env.CCAVENUE_ENV === "production" ? "secure" : "test";
-  const ccavUrl = `https://${ccavEnv}.ccavenue.com/transaction/transaction.do?command=initiateTransaction`;
-
-  // Record pending transaction
-  await sbFetch(env, "POST", "/rest/v1/payment_transactions", {
-    company_id: companyId, gateway: "ccavenue", gateway_order_id: orderId,
-    amount: pricing.inr, currency: "INR", status: "pending", plan, billing_cycle,
+  const txRes = await sbFetch(env, "POST", "/rest/v1/payment_transactions", {
+    company_id: companyId, gateway: "manual", gateway_order_id: orderId,
+    amount: pricing.inr, currency: "INR", status: "awaiting_payment", plan, billing_cycle,
     customer_email, customer_name, is_international: false,
-    metadata: { internal_order_id: orderId },
+    metadata: { internal_order_id: orderId, instructions: "UPI or Bank Transfer" },
   }, false, companyId);
 
-  await audit(env, ctx, "billing.ccav_order_created", "payment_transactions", orderId, { plan, billing_cycle, amount: pricing.inr });
+  if (!txRes.ok) {
+    const errText = await txRes.text().catch(() => "unknown");
+    throw new AppError(`Failed to create order: ${errText}`, txRes.status, "DB_ERROR");
+  }
+
+  await audit(env, ctx, "billing.manual_order_created", "payment_transactions", orderId, { plan, billing_cycle, amount: pricing.inr });
 
   return apiResponse({
-    order_id: orderId, gateway: "ccavenue", redirect_url: ccavUrl,
-    enc_request: encRequest, access_code: env.CCAVENUE_ACCESS_CODE,
-    amount: pricing.inr, currency: "INR",
-  });
-}
-
-/**
- * POST /billing/ccavenue/response — CCAvenue redirect handler.
- * CCAvenue POSTs encrypted response to this URL after payment.
- */
-async function handleCCAvResponse(request, env, ctx) {
-  if (!env.CCAVENUE_WORKING_KEY) return new Response("Gateway not configured", { status: 503 });
-
-  const formData = await request.formData();
-  const encResp = formData.get("encResp");
-  if (!encResp) return new Response("Missing encResp", { status: 400 });
-
-  let decrypted;
-  try {
-    decrypted = await ccavDecrypt(encResp, env.CCAVENUE_WORKING_KEY);
-  } catch (e) {
-    console.error("[CCAvenue] Decryption failed:", e.message);
-    return new Response("Decryption error", { status: 400 });
-  }
-
-  const params = Object.fromEntries(decrypted.split("&").map(p => { const [k, ...v] = p.split("="); return [k, v.join("=")]; }));
-  const { order_id, order_status, tracking_id, payment_mode, merchant_param1: plan, merchant_param2: billingCycle, merchant_param3: companyId } = params;
-  const isPaid = order_status === "Success";
-  const frontendUrl = env.FRONTEND_URL || "https://simpaticohrconsultancy.com";
-
-  console.log(`[CCAvenue] Response: order=${order_id}, status=${order_status}, tracking=${tracking_id}`);
-
-  // Update transaction
-  await fetch(`${env.SUPABASE_URL}/rest/v1/payment_transactions?gateway_order_id=eq.${order_id}`, {
-    method: "PATCH", headers: {
-      apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
-      "Content-Type": "application/json", Prefer: "return=minimal",
+    order_id: orderId, gateway: "manual", amount: pricing.inr, currency: "INR",
+    plan, billing_cycle,
+    payment_details: {
+      upi_id: env.UPI_ID || "simpaticohrconsultancy@ybl",
+      account_name: "Simpatico HR Consultancy",
+      email: "simpaticohrconsultancy@gmail.com",
+      reference: orderId,
+      note: `Please include order reference "${orderId}" in your payment note. Your subscription will activate within a few hours after payment verification.`,
     },
-    body: JSON.stringify({
-      status: isPaid ? "paid" : (order_status === "Aborted" ? "cancelled" : "failed"),
-      gateway_payment_id: tracking_id, payment_method: payment_mode || "ccavenue",
-      gateway_response: params,
-    }),
   });
-
-  if (isPaid && companyId) {
-    const now = new Date();
-    const periodEnd = new Date(now);
-    periodEnd.setMonth(periodEnd.getMonth() + (billingCycle === "annual" ? 12 : 1));
-
-    await fetch(`${env.SUPABASE_URL}/rest/v1/subscriptions?company_id=eq.${companyId}`, {
-      method: "DELETE", headers: { apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}` },
-    });
-
-    await fetch(`${env.SUPABASE_URL}/rest/v1/subscriptions`, {
-      method: "POST", headers: {
-        apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
-        "Content-Type": "application/json", Prefer: "return=minimal",
-      },
-      body: JSON.stringify({
-        company_id: companyId, plan: plan || "starter", status: "active", gateway: "ccavenue",
-        gateway_subscription_id: tracking_id, currency: "INR", billing_cycle: billingCycle || "monthly",
-        current_period_start: now.toISOString(), current_period_end: periodEnd.toISOString(),
-      }),
-    });
-
-    await fetch(`${env.SUPABASE_URL}/rest/v1/companies?id=eq.${companyId}`, {
-      method: "PATCH", headers: {
-        apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
-        "Content-Type": "application/json", Prefer: "return=minimal",
-      },
-      body: JSON.stringify({ subscription_plan: plan || "starter" }),
-    });
-  }
-
-  // Redirect user to success/failure page
-  const redirectUrl = isPaid
-    ? `${frontendUrl}/platform/payment-success.html?plan=${plan}&gateway=ccavenue&order=${order_id}`
-    : `${frontendUrl}/platform/pricing.html?payment=failed&reason=${order_status}`;
-
-  return Response.redirect(redirectUrl, 302);
-}
-
-/**
- * POST /billing/ccavenue/webhook — CCAvenue server-to-server status notification.
- */
-async function handleCCAvWebhook(request, env, ctx) {
-  if (!env.CCAVENUE_WORKING_KEY) return new Response("Not configured", { status: 503 });
-  const formData = await request.formData();
-  const encResp = formData.get("encResp");
-  if (!encResp) return new Response("Missing encResp", { status: 400 });
-
-  let decrypted;
-  try { decrypted = await ccavDecrypt(encResp, env.CCAVENUE_WORKING_KEY); } catch { return new Response("Decryption error", { status: 400 }); }
-
-  const params = Object.fromEntries(decrypted.split("&").map(p => { const [k, ...v] = p.split("="); return [k, v.join("=")]; }));
-  console.log(`[CCAvenue] Webhook: order=${params.order_id}, status=${params.order_status}`);
-
-  if (params.order_id) {
-    await fetch(`${env.SUPABASE_URL}/rest/v1/payment_transactions?gateway_order_id=eq.${params.order_id}`, {
-      method: "PATCH", headers: {
-        apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
-        "Content-Type": "application/json", Prefer: "return=minimal",
-      },
-      body: JSON.stringify({ status: params.order_status === "Success" ? "paid" : "failed", gateway_response: params }),
-    });
-  }
-
-  return new Response(JSON.stringify({ received: true }), { status: 200, headers: { "Content-Type": "application/json" } });
 }
 
 /**
@@ -7548,7 +7398,7 @@ async function handleWiseCreateOrder(request, env, ctx) {
   if (!pricing || !pricing.usd) throw new ValidationError("Invalid billing cycle or plan");
 
   const companyId = ctx.tenantId;
-  const orderId = `WISE_${plan.toUpperCase()}_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+  const orderId = `WISE_${plan.toUpperCase()}_${crypto.randomUUID().replace(/-/g, "").substring(0, 12)}`;
 
   await sbFetch(env, "POST", "/rest/v1/payment_transactions", {
     company_id: companyId, gateway: "wise", gateway_order_id: orderId,
@@ -7572,10 +7422,11 @@ async function handleWiseCreateOrder(request, env, ctx) {
 }
 
 /**
- * POST /billing/wise/confirm — Admin confirms Wise bank transfer received.
+ * POST /billing/manual/confirm or /billing/wise/confirm — Admin confirms payment received.
+ * Works for both manual (domestic INR) and Wise (international USD) payments.
  * Body: { order_id, transaction_reference }
  */
-async function handleWiseConfirmPayment(request, env, ctx) {
+async function handleConfirmPayment(request, env, ctx) {
   requireRole(ctx, "company_admin", "companyadmin", "super_admin", "superadmin");
   const body = await safeJson(request);
   const { order_id, transaction_reference } = body;
@@ -7585,22 +7436,35 @@ async function handleWiseConfirmPayment(request, env, ctx) {
   const txRes = await fetch(`${env.SUPABASE_URL}/rest/v1/payment_transactions?gateway_order_id=eq.${order_id}&select=*&limit=1`, {
     headers: { apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}` },
   });
+  if (!txRes.ok) throw new AppError("Failed to fetch transaction", txRes.status, "DB_ERROR");
   const txns = await txRes.json();
   if (!txns?.length) throw new NotFoundError("Transaction");
   const tx = txns[0];
 
+  // Security: Verify the caller owns this transaction (unless super_admin)
+  const isSuperAdmin = ctx.role === "super_admin" || ctx.role === "superadmin";
+  if (!isSuperAdmin && tx.company_id !== ctx.tenantId) {
+    throw new AppError("Cannot confirm another company's transaction", 403, "FORBIDDEN");
+  }
+
+  // Prevent double-confirmation
+  if (tx.status === "paid") {
+    return apiResponse({ already_confirmed: true, plan: tx.plan, order_id });
+  }
+
   // Mark as paid
-  await fetch(`${env.SUPABASE_URL}/rest/v1/payment_transactions?gateway_order_id=eq.${order_id}`, {
+  const payRes = await fetch(`${env.SUPABASE_URL}/rest/v1/payment_transactions?gateway_order_id=eq.${order_id}`, {
     method: "PATCH", headers: {
       apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
       "Content-Type": "application/json", Prefer: "return=minimal",
     },
     body: JSON.stringify({
       status: "paid", gateway_payment_id: transaction_reference || "manual_confirm",
-      payment_method: "bank_transfer",
+      payment_method: tx.gateway === "wise" ? "bank_transfer" : (tx.gateway || "manual"),
       metadata: { ...tx.metadata, confirmed_by: ctx.actorEmail, confirmed_at: new Date().toISOString(), transaction_reference },
     }),
   });
+  if (!payRes.ok) throw new AppError("Failed to update transaction status", payRes.status, "DB_ERROR");
 
   // Activate subscription
   const companyId = tx.company_id;
@@ -7612,28 +7476,33 @@ async function handleWiseConfirmPayment(request, env, ctx) {
     method: "DELETE", headers: { apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}` },
   });
 
-  await fetch(`${env.SUPABASE_URL}/rest/v1/subscriptions`, {
+  const subRes = await fetch(`${env.SUPABASE_URL}/rest/v1/subscriptions`, {
     method: "POST", headers: {
       apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
       "Content-Type": "application/json", Prefer: "return=minimal",
     },
     body: JSON.stringify({
-      company_id: companyId, plan: tx.plan || "starter", status: "active", gateway: "wise",
-      gateway_subscription_id: order_id, amount: tx.amount, currency: "USD",
+      company_id: companyId, plan: tx.plan || "starter", status: "active", gateway: tx.gateway || "manual",
+      gateway_subscription_id: order_id, amount: tx.amount, currency: tx.currency || "INR",
       billing_cycle: tx.billing_cycle || "monthly",
       current_period_start: now.toISOString(), current_period_end: periodEnd.toISOString(),
     }),
   });
+  if (!subRes.ok) {
+    const errText = await subRes.text().catch(() => "unknown");
+    throw new AppError(`Failed to create subscription: ${errText}`, subRes.status, "DB_ERROR");
+  }
 
-  await fetch(`${env.SUPABASE_URL}/rest/v1/companies?id=eq.${companyId}`, {
+  const compRes = await fetch(`${env.SUPABASE_URL}/rest/v1/companies?id=eq.${companyId}`, {
     method: "PATCH", headers: {
       apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
       "Content-Type": "application/json", Prefer: "return=minimal",
     },
     body: JSON.stringify({ subscription_plan: tx.plan || "starter" }),
   });
+  if (!compRes.ok) console.error(`[Billing] Failed to update company plan: ${compRes.status}`);
 
-  await audit(env, ctx, "billing.wise_payment_confirmed", "payment_transactions", order_id, { plan: tx.plan, amount: tx.amount });
+  await audit(env, ctx, "billing.payment_confirmed", "payment_transactions", order_id, { plan: tx.plan, amount: tx.amount, gateway: tx.gateway });
 
   return apiResponse({ confirmed: true, plan: tx.plan, order_id });
 }
@@ -7701,7 +7570,7 @@ async function handleCancelSubscription(request, env, ctx) {
 
   const sub = subs[0];
 
-  // CCAvenue and Wise are one-time payment gateways (no recurring subscription to cancel externally).
+  // Manual and Wise are one-time payment methods (no recurring subscription to cancel externally).
   // We only update the local subscription status below.
 
   // Update local subscription
