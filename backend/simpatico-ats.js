@@ -1639,6 +1639,160 @@ export default {
         console.error("[CRON] Failed to send subscription expiry reminders:", e.message);
       }
 
+      // ==========================================
+      // 3. Auto-Expire Trial Companies (2-day trial)
+      // ==========================================
+      try {
+        const twoDaysAgo = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString();
+
+        // Find companies still on 'trial' plan that were created more than 2 days ago
+        const trialRes = await fetch(
+          `${env.SUPABASE_URL}/rest/v1/companies?subscription_plan=eq.trial&created_at=lt.${twoDaysAgo}&is_active=eq.true&select=id,name,email,contact_email,created_at`,
+          { headers: { apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}` } }
+        );
+
+        if (trialRes.ok) {
+          const expiredTrials = await trialRes.json();
+          let trialExpired = 0;
+
+          for (const company of expiredTrials) {
+            // Downgrade to expired_trial
+            await fetch(`${env.SUPABASE_URL}/rest/v1/companies?id=eq.${company.id}`, {
+              method: "PATCH",
+              headers: {
+                apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
+                "Content-Type": "application/json", Prefer: "return=minimal",
+              },
+              body: JSON.stringify({ subscription_plan: "expired_trial" }),
+            });
+
+            // Notify the company
+            const contactEmail = company.contact_email || company.email;
+            if (contactEmail) {
+              await sendEmail(env, {
+                to: contactEmail,
+                subject: `Your Simpatico HR Free Trial Has Ended`,
+                html: `<div style="font-family:sans-serif;max-width:600px;margin:auto;padding:24px">
+                  <h2 style="color:#1E40AF">Your Free Trial Has Ended</h2>
+                  <p>Hi ${company.name},</p>
+                  <p>Your <strong>2-day free trial</strong> of Simpatico HR has expired. To continue using premium features like AI interviews, advanced ATS, and HRMS tools, please upgrade to a paid plan.</p>
+                  <p>Your data is safe and will be preserved. You can upgrade anytime to restore full access.</p>
+                  <a href="https://simpaticohrconsultancy.com/platform/pricing.html" style="display:inline-block;margin-top:12px;padding:12px 24px;background:#1E40AF;color:#fff;border-radius:8px;text-decoration:none;font-weight:600">View Plans & Upgrade →</a>
+                  <p style="margin-top:20px;font-size:13px;color:#6B7280">Need help? Reply to this email or reach us at simpaticohrconsultancy@gmail.com</p>
+                </div>`,
+              }).catch(e => console.warn(`[CRON] Trial expiry email failed for ${contactEmail}:`, e.message));
+            }
+
+            trialExpired++;
+            console.log(`[CRON] Trial expired: ${company.name} (${company.id})`);
+          }
+
+          if (trialExpired > 0) {
+            console.log(`[CRON] Auto-expired ${trialExpired} trial(s)`);
+            // Notify admin
+            const adminEmail = env.ADMIN_NOTIFICATION_EMAIL || "simpaticohrconsultancy@gmail.com";
+            await sendEmail(env, {
+              to: adminEmail,
+              subject: `⏰ ${trialExpired} Trial(s) Auto-Expired`,
+              html: `<div style="font-family:sans-serif;padding:20px">
+                <h3 style="color:#DC2626">Trial Expirations Today</h3>
+                <p>${trialExpired} company trial(s) have been auto-expired after the 2-day period:</p>
+                <ul>${expiredTrials.map(c => `<li><strong>${c.name}</strong> — ${c.email} (registered: ${new Date(c.created_at).toLocaleDateString()})</li>`).join("")}</ul>
+                <a href="https://simpaticohrconsultancy.com/platform/super-admin.html" style="display:inline-block;margin-top:8px;padding:8px 16px;background:#1E40AF;color:#fff;border-radius:6px;text-decoration:none;font-size:13px">View in Admin Panel →</a>
+              </div>`,
+            }).catch(e => console.warn("[CRON] Admin trial expiry notification failed:", e.message));
+          }
+        }
+      } catch(e) {
+        console.error("[CRON] Failed to auto-expire trials:", e.message);
+      }
+
+      // ==========================================
+      // 4. Auto-Expire Past-Due Subscriptions
+      // ==========================================
+      try {
+        const now = new Date().toISOString();
+
+        // Find active subscriptions where the billing period has ended
+        const expSubRes = await fetch(
+          `${env.SUPABASE_URL}/rest/v1/subscriptions?status=eq.active&current_period_end=lt.${now}&select=*`,
+          { headers: { apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}` } }
+        );
+
+        if (expSubRes.ok) {
+          const expiredSubs = await expSubRes.json();
+          let subsExpired = 0;
+
+          for (const sub of expiredSubs) {
+            // Mark subscription as expired
+            await fetch(`${env.SUPABASE_URL}/rest/v1/subscriptions?id=eq.${sub.id}`, {
+              method: "PATCH",
+              headers: {
+                apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
+                "Content-Type": "application/json", Prefer: "return=minimal",
+              },
+              body: JSON.stringify({ status: "expired", expired_at: now }),
+            });
+
+            // Downgrade company plan to 'free'
+            await fetch(`${env.SUPABASE_URL}/rest/v1/companies?id=eq.${sub.company_id}`, {
+              method: "PATCH",
+              headers: {
+                apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
+                "Content-Type": "application/json", Prefer: "return=minimal",
+              },
+              body: JSON.stringify({ subscription_plan: "free" }),
+            });
+
+            // Fetch company email for notification
+            const compRes = await fetch(
+              `${env.SUPABASE_URL}/rest/v1/companies?id=eq.${sub.company_id}&select=name,email,contact_email`,
+              { headers: { apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}` } }
+            );
+            if (compRes.ok) {
+              const companies = await compRes.json();
+              const comp = companies[0];
+              if (comp) {
+                const contactEmail = comp.contact_email || comp.email;
+                if (contactEmail) {
+                  await sendEmail(env, {
+                    to: contactEmail,
+                    subject: `Your Simpatico HR Subscription Has Expired`,
+                    html: `<div style="font-family:sans-serif;max-width:600px;margin:auto;padding:24px">
+                      <h2 style="color:#DC2626">Subscription Expired</h2>
+                      <p>Hi ${comp.name},</p>
+                      <p>Your <strong>${sub.plan || "paid"}</strong> subscription (${sub.billing_cycle || "monthly"}) has expired as of <strong>${new Date(sub.current_period_end).toLocaleDateString()}</strong>.</p>
+                      <p>Your account has been downgraded to the free tier. Premium features like AI interviews, advanced analytics, and unlimited job postings are no longer available.</p>
+                      <p>Your data is safe. Renew anytime to restore full access.</p>
+                      <a href="https://simpaticohrconsultancy.com/platform/pricing.html" style="display:inline-block;margin-top:12px;padding:12px 24px;background:#1E40AF;color:#fff;border-radius:8px;text-decoration:none;font-weight:600">Renew Subscription →</a>
+                    </div>`,
+                  }).catch(e => console.warn(`[CRON] Sub expiry email failed for ${contactEmail}:`, e.message));
+                }
+              }
+            }
+
+            subsExpired++;
+            console.log(`[CRON] Subscription expired: company=${sub.company_id}, plan=${sub.plan}`);
+          }
+
+          if (subsExpired > 0) {
+            console.log(`[CRON] Auto-expired ${subsExpired} subscription(s)`);
+            const adminEmail = env.ADMIN_NOTIFICATION_EMAIL || "simpaticohrconsultancy@gmail.com";
+            await sendEmail(env, {
+              to: adminEmail,
+              subject: `⚠️ ${subsExpired} Subscription(s) Auto-Expired`,
+              html: `<div style="font-family:sans-serif;padding:20px">
+                <h3 style="color:#DC2626">Subscription Expirations Today</h3>
+                <p>${subsExpired} paid subscription(s) have expired and been downgraded to free:</p>
+                <ul>${expiredSubs.map(s => `<li>Company: <strong>${s.company_id}</strong> — Plan: ${s.plan} (${s.billing_cycle}), Ended: ${new Date(s.current_period_end).toLocaleDateString()}</li>`).join("")}</ul>
+                <a href="https://simpaticohrconsultancy.com/platform/super-admin.html" style="display:inline-block;margin-top:8px;padding:8px 16px;background:#1E40AF;color:#fff;border-radius:6px;text-decoration:none;font-size:13px">View in Admin Panel →</a>
+              </div>`,
+            }).catch(e => console.warn("[CRON] Admin sub expiry notification failed:", e.message));
+          }
+        }
+      } catch(e) {
+        console.error("[CRON] Failed to auto-expire subscriptions:", e.message);
+      }
     } catch (err) {
       console.error("[CRON] Scheduled handler error:", err.stack || err.message);
     }
