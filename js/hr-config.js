@@ -29,9 +29,8 @@ window.SIMPATICO_CONFIG = {
   },
   appVersion: '5.0.0-Industrial',
 
-  // 5. PAYMENT GATEWAYS — CCAvenue (Domestic) + Wise (International)
-  ccavenueMerchantId: '',                       // Set your CCAvenue Merchant ID
-  ccavenueEnv: 'test',                          // 'test' or 'production'
+  // 5. PAYMENT GATEWAYS — Manual UPI/Bank Transfer (Domestic) + Wise (International)
+  // No client-side gateway config needed — payments are manual verification flow.
   
   // Helper to generate Trace IDs for debugging (crypto-safe)
   generateTraceId: () => {

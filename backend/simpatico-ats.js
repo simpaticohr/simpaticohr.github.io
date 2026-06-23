@@ -56,8 +56,10 @@ const ALLOWED_ORIGINS = [
   "http://localhost:3000",
   "http://localhost:5500",
   "http://localhost:8000",
+  "http://localhost:8080",
   "http://127.0.0.1:5500",
   "http://127.0.0.1:8000",
+  "http://127.0.0.1:8080",
 ];
 
 function getCorsHeaders(request) {
@@ -1330,6 +1332,7 @@ route("GET", "/billing/wise/account-details", handleWiseAccountDetails);
 route("GET", "/billing/subscription", handleGetSubscription);
 route("POST", "/billing/cancel", handleCancelSubscription);
 route("GET", "/billing/transactions", handleListTransactions);
+route("GET", "/billing/detect-currency", handleDetectCurrency);
 
 // ── BYOK AI Diagnostics & Config ──
 route("GET", "/ai/byok-test", handleBYOKTest);
@@ -7478,18 +7481,77 @@ async function handleAttendanceSummary(request, env, ctx) {
 
 const PLAN_PRICING = {
   starter: {
-    monthly: { inr: 1999, usd: 29 },
-    annual:  { inr: 19990, usd: 290 },
+    monthly: { inr: 1999, usd: 29, gbp: 23, eur: 27, aud: 45, aed: 109, cad: 39 },
+    annual:  { inr: 19990, usd: 290, gbp: 230, eur: 270, aud: 450, aed: 1090, cad: 390 },
   },
   professional: {
-    monthly: { inr: 3999, usd: 49 },
-    annual:  { inr: 39990, usd: 490 },
+    monthly: { inr: 3999, usd: 49, gbp: 39, eur: 45, aud: 75, aed: 179, cad: 69 },
+    annual:  { inr: 39990, usd: 490, gbp: 390, eur: 450, aud: 750, aed: 1790, cad: 690 },
   },
   enterprise: {
-    monthly: { inr: 0, usd: 0 }, // custom
-    annual:  { inr: 0, usd: 0 },
+    monthly: { inr: 0, usd: 0, gbp: 0, eur: 0, aud: 0, aed: 0, cad: 0 },
+    annual:  { inr: 0, usd: 0, gbp: 0, eur: 0, aud: 0, aed: 0, cad: 0 },
   },
 };
+
+const WISE_BANK_DETAILS = {
+  USD: {
+    recipient_name: "Faisal",
+    routing_number: "084009519",
+    account_number: "456698023905672",
+    swift_bic: "TRWIUS35XXX",
+    bank_name: "Wise (via Column Bank)",
+    bank_address: "Wise US Inc, 108 W 13th St, Wilmington, DE, 19801, United States",
+    transfer_type: "Wire / ACH Transfer",
+  },
+  GBP: {
+    recipient_name: "Faisal",
+    sort_code: "60-84-64",
+    account_number: "76832092",
+    iban: "GB12 TRWI 6084 6476 8320 92",
+    swift_bic: "TRWIGB2LXXX",
+    bank_name: "Wise Payments Limited",
+    bank_address: "Worship Square, 65 Clifton Street, London, EC2A 4JE, United Kingdom",
+    transfer_type: "UK Bank Transfer / SWIFT",
+  },
+  EUR: {
+    recipient_name: "Faisal",
+    iban: "BE22 9058 3690 0647",
+    swift_bic: "TRWIBEB1XXX",
+    bank_name: "Wise",
+    bank_address: "Rue du Trône 100, 3rd floor, Brussels, 1050, Belgium",
+    transfer_type: "SEPA Transfer / SWIFT",
+  },
+  AUD: {
+    recipient_name: "Faisal",
+    bsb_code: "774-001",
+    account_number: "245166757",
+    swift_bic: "TRWIAUS1XXX",
+    bank_name: "Wise Australia Pty Ltd",
+    bank_address: "Suite 1, Level 11, 66 Goulburn Street, Sydney, NSW, 2000, Australia",
+    transfer_type: "AU Bank Transfer / SWIFT",
+  },
+  AED: {
+    recipient_name: "Faisal",
+    iban: "GB12 TRWI 6084 6476 8320 92",
+    swift_bic: "TRWIGB2LXXX",
+    bank_name: "Wise Payments Limited",
+    bank_address: "Worship Square, 65 Clifton Street, London, EC2A 4JE, United Kingdom",
+    transfer_type: "SWIFT Transfer",
+  },
+  CAD: {
+    recipient_name: "Faisal",
+    institution_number: "621",
+    transit_number: "16001",
+    account_number: "200117737341",
+    swift_bic: "TRWICAW1XXX",
+    bank_name: "Wise Payments Canada Inc.",
+    bank_address: "Wise Payments Canada Inc., 99 Bank Street, Suite 1420, Ottawa, ON, K1P 1H4, Canada",
+    transfer_type: "EFT / Direct Deposit / SWIFT",
+  },
+};
+
+const CURRENCY_SYMBOLS = { INR: "₹", USD: "$", GBP: "£", EUR: "€", AUD: "A$", AED: "AED ", CAD: "C$" };
 
 /**
  * POST /billing/manual/create-order — Create a pending manual payment order (UPI / Bank Transfer).
@@ -7564,52 +7626,61 @@ async function handleManualCreateOrder(request, env, ctx) {
 async function handleWiseCreateOrder(request, env, ctx) {
   requireAuth(ctx);
   const body = await safeJson(request);
-  const { plan, billing_cycle = "monthly", customer_name, customer_email } = body;
+  const { plan, billing_cycle = "monthly", customer_name, customer_email, currency = "usd" } = body;
 
   if (!plan || !PLAN_PRICING[plan]) throw new ValidationError("Invalid plan");
   if (!customer_email) throw new ValidationError("customer_email required");
 
+  const cur = currency.toLowerCase();
+  const validCurrencies = ["usd", "gbp", "eur", "aud", "aed", "cad"];
+  if (!validCurrencies.includes(cur)) throw new ValidationError("Invalid currency. Supported: " + validCurrencies.join(", "));
+
   const pricing = PLAN_PRICING[plan][billing_cycle];
-  if (!pricing || !pricing.usd) throw new ValidationError("Invalid billing cycle or plan");
+  if (!pricing || !pricing[cur]) throw new ValidationError("Invalid billing cycle or plan");
+
+  const amount = pricing[cur];
+  const currencyUpper = cur.toUpperCase();
+  const bankDetails = WISE_BANK_DETAILS[currencyUpper] || WISE_BANK_DETAILS.USD;
+  const symbol = CURRENCY_SYMBOLS[currencyUpper] || "$";
 
   const companyId = ctx.tenantId;
   const orderId = `WISE_${plan.toUpperCase()}_${crypto.randomUUID().replace(/-/g, "").substring(0, 12)}`;
 
   await sbFetch(env, "POST", "/rest/v1/payment_transactions", {
     company_id: companyId, gateway: "wise", gateway_order_id: orderId,
-    amount: pricing.usd, currency: "USD", status: "awaiting_transfer", plan, billing_cycle,
+    amount, currency: currencyUpper, status: "awaiting_transfer", plan, billing_cycle,
     customer_email, customer_name, is_international: true,
-    metadata: { internal_order_id: orderId, instructions: "Bank transfer via Wise" },
+    metadata: { internal_order_id: orderId, instructions: `Bank transfer via Wise (${currencyUpper})` },
   }, false, companyId);
 
-  await audit(env, ctx, "billing.wise_order_created", "payment_transactions", orderId, { plan, billing_cycle, amount: pricing.usd });
+  await audit(env, ctx, "billing.wise_order_created", "payment_transactions", orderId, { plan, billing_cycle, amount, currency: currencyUpper });
 
   // Notify admin about new international Wise payment order
   const adminEmailWise = env.ADMIN_NOTIFICATION_EMAIL || "simpaticohrconsultancy@gmail.com";
   sendEmail(env, {
     to: adminEmailWise,
-    subject: `🌍 International Payment Order: ${plan.charAt(0).toUpperCase() + plan.slice(1)} (${billing_cycle}) — $${pricing.usd} USD via Wise`,
+    subject: `🌍 International Payment Order: ${plan.charAt(0).toUpperCase() + plan.slice(1)} (${billing_cycle}) — ${symbol}${amount} ${currencyUpper} via Wise`,
     html: `<div style="font-family:sans-serif;max-width:600px;margin:auto;padding:24px">
       <h2 style="color:#4F46E5;margin-bottom:16px">🌍 New International Payment Order (Wise)</h2>
       <table style="width:100%;border-collapse:collapse;font-size:14px">
         <tr><td style="padding:8px 12px;font-weight:600;color:#374151;border-bottom:1px solid #E5E7EB">Order ID</td><td style="padding:8px 12px;border-bottom:1px solid #E5E7EB;font-family:monospace;color:#4F46E5">${orderId}</td></tr>
-        <tr><td style="padding:8px 12px;font-weight:600;color:#374151;border-bottom:1px solid #E5E7EB">Gateway</td><td style="padding:8px 12px;border-bottom:1px solid #E5E7EB">Wise (Bank Transfer)</td></tr>
+        <tr><td style="padding:8px 12px;font-weight:600;color:#374151;border-bottom:1px solid #E5E7EB">Gateway</td><td style="padding:8px 12px;border-bottom:1px solid #E5E7EB">Wise (${currencyUpper} Bank Transfer)</td></tr>
         <tr><td style="padding:8px 12px;font-weight:600;color:#374151;border-bottom:1px solid #E5E7EB">Plan</td><td style="padding:8px 12px;border-bottom:1px solid #E5E7EB">${plan.charAt(0).toUpperCase() + plan.slice(1)} (${billing_cycle})</td></tr>
-        <tr><td style="padding:8px 12px;font-weight:600;color:#374151;border-bottom:1px solid #E5E7EB">Amount</td><td style="padding:8px 12px;border-bottom:1px solid #E5E7EB;font-weight:700;color:#059669">$${pricing.usd} USD</td></tr>
+        <tr><td style="padding:8px 12px;font-weight:600;color:#374151;border-bottom:1px solid #E5E7EB">Amount</td><td style="padding:8px 12px;border-bottom:1px solid #E5E7EB;font-weight:700;color:#059669">${symbol}${amount} ${currencyUpper}</td></tr>
         <tr><td style="padding:8px 12px;font-weight:600;color:#374151;border-bottom:1px solid #E5E7EB">Customer</td><td style="padding:8px 12px;border-bottom:1px solid #E5E7EB">${customer_name || "N/A"}</td></tr>
         <tr><td style="padding:8px 12px;font-weight:600;color:#374151;border-bottom:1px solid #E5E7EB">Email</td><td style="padding:8px 12px;border-bottom:1px solid #E5E7EB">${customer_email}</td></tr>
         <tr><td style="padding:8px 12px;font-weight:600;color:#374151">Company ID</td><td style="padding:8px 12px">${companyId}</td></tr>
       </table>
-      <p style="margin-top:16px;font-size:13px;color:#DC2626;font-weight:600">⏳ Awaiting Wise transfer — check your Wise account and confirm once received.</p>
+      <p style="margin-top:16px;font-size:13px;color:#DC2626;font-weight:600">⏳ Awaiting Wise transfer — check your Wise ${currencyUpper} balance and confirm once received.</p>
       <a href="https://simpaticohrconsultancy.com/platform/super-admin.html" style="display:inline-block;margin-top:12px;padding:10px 20px;background:#1E40AF;color:#fff;border-radius:8px;text-decoration:none;font-size:13px">Open Admin Panel →</a>
     </div>`,
   }).catch(e => console.warn("[Billing] Admin notification failed for Wise order:", e.message));
 
   return apiResponse({
-    order_id: orderId, gateway: "wise", amount: pricing.usd, currency: "USD",
+    order_id: orderId, gateway: "wise", amount, currency: currencyUpper,
     plan, billing_cycle,
     wise_details: {
-      recipient_name: "Simpatico HR Consultancy",
+      ...bankDetails,
       email: "simpaticohrconsultancy@gmail.com",
       reference: orderId,
       note: `Please include order reference "${orderId}" in your transfer note.`,
@@ -7746,16 +7817,53 @@ async function handleConfirmPayment(request, env, ctx) {
 }
 
 /**
+ * GET /billing/detect-currency — Detect country and currency based on IP Geolocation.
+ */
+async function handleDetectCurrency(request, env, ctx) {
+  const country = request.cf?.country || "";
+  const countryUpper = country.toUpperCase();
+  
+  let currency = "usd";
+  if (["IN"].includes(countryUpper)) {
+    currency = "inr";
+  } else if (["GB", "IM", "GG", "JE"].includes(countryUpper)) {
+    currency = "gbp";
+  } else if (["AT", "BE", "CY", "EE", "FI", "FR", "DE", "GR", "IE", "IT", "LV", "LT", "LU", "MT", "NL", "PT", "SK", "SI", "ES", "HR"].includes(countryUpper)) {
+    currency = "eur";
+  } else if (["AU", "NZ"].includes(countryUpper)) {
+    currency = "aud";
+  } else if (["AE", "OM", "SA", "QA", "BH", "KW"].includes(countryUpper)) {
+    currency = "aed";
+  } else if (["CA"].includes(countryUpper)) {
+    currency = "cad";
+  }
+  
+  return apiResponse({ country: countryUpper, currency });
+}
+
+/**
  * GET /billing/wise/account-details — Return Wise account details for bank transfer.
  */
 async function handleWiseAccountDetails(request, env, ctx) {
   requireAuth(ctx);
-  return apiResponse({
-    recipient_name: "Simpatico HR Consultancy",
-    email: "simpaticohrconsultancy@gmail.com",
-    bank: "Wise (TransferWise)",
-    note: "Include your order reference in the transfer note for faster activation.",
-  });
+  const url = new URL(request.url);
+  const currency = (url.searchParams.get("currency") || "").toUpperCase();
+
+  // If specific currency requested, return those details
+  if (currency && WISE_BANK_DETAILS[currency]) {
+    return apiResponse({
+      ...WISE_BANK_DETAILS[currency],
+      currency,
+      email: "simpaticohrconsultancy@gmail.com",
+    });
+  }
+
+  // Return all currency details
+  const allDetails = {};
+  for (const [cur, details] of Object.entries(WISE_BANK_DETAILS)) {
+    allDetails[cur] = { ...details, email: "simpaticohrconsultancy@gmail.com" };
+  }
+  return apiResponse({ currencies: allDetails });
 }
 
 
