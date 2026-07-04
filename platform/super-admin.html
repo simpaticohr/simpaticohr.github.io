@@ -283,6 +283,9 @@
         <a class="nav-item" id="navJobs" onclick="showSection('jobs')">
             <i class="fas fa-briefcase"></i> All Jobs
         </a>
+        <a class="nav-item" id="navConsulting" onclick="showSection('consulting')">
+            <i class="fas fa-chart-line" style="color:#8b5cf6"></i> Business Consulting
+        </a>
         <a class="nav-item" id="navMonitor" onclick="showSection('monitor')">
             <i class="fas fa-chart-bar"></i> Client Monitoring
         </a>
@@ -425,11 +428,11 @@ async function sbQuery(table, params = '') {
 
 function showSection(section) {
     document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
-    const navMap = { dashboard:'navDash', companies:'navCompanies', users:'navUsers', jobs:'navJobs', monitor:'navMonitor', activity:'navActivity', payments:'navPayments', analytics:'navAnalytics', billing:'navBilling', settings:'navSettings', email:'navEmail', interview:'navInterview', branding:'navBranding', audit:'navAudit', features:'navFeatures' };
+    const navMap = { dashboard:'navDash', companies:'navCompanies', users:'navUsers', jobs:'navJobs', consulting:'navConsulting', monitor:'navMonitor', activity:'navActivity', payments:'navPayments', analytics:'navAnalytics', billing:'navBilling', settings:'navSettings', email:'navEmail', interview:'navInterview', branding:'navBranding', audit:'navAudit', features:'navFeatures' };
     const el = document.getElementById(navMap[section]);
     if (el) el.classList.add('active');
     document.getElementById('sidebar').classList.remove('open');
-    const actions = { dashboard:loadDashboard, companies:loadCompanies, users:loadUsers, jobs:loadJobs, monitor:loadMonitoring, activity:loadActivity, payments:loadPayments, analytics:loadAnalytics, billing:loadPayments, settings:loadSettings, email:loadEmailSettings, interview:loadInterviewDefaults, branding:loadBranding, audit:loadAuditLogs, features:loadFeatureFlags };
+    const actions = { dashboard:loadDashboard, companies:loadCompanies, users:loadUsers, jobs:loadJobs, consulting:loadConsulting, monitor:loadMonitoring, activity:loadActivity, payments:loadPayments, analytics:loadAnalytics, billing:loadPayments, settings:loadSettings, email:loadEmailSettings, interview:loadInterviewDefaults, branding:loadBranding, audit:loadAuditLogs, features:loadFeatureFlags };
     if (actions[section]) actions[section]();
 }
 
@@ -459,6 +462,7 @@ async function loadDashboard() {
                 <div class="stat-card"><div class="stat-icon" style="background:rgba(245,158,11,.1);color:#F59E0B"><i class="fas fa-briefcase"></i></div><div class="stat-value">${s.jobs||0}</div><div class="stat-label">Jobs</div></div>
                 <div class="stat-card"><div class="stat-icon" style="background:rgba(139,92,246,.1);color:#8B5CF6"><i class="fas fa-file-alt"></i></div><div class="stat-value">${s.applications||0}</div><div class="stat-label">Applications</div></div>
                 <div class="stat-card"><div class="stat-icon" style="background:rgba(236,72,153,.1);color:#EC4899"><i class="fas fa-video"></i></div><div class="stat-value">${s.interviews||0}</div><div class="stat-label">Interviews</div></div>
+                <div class="stat-card" style="border-left:3px solid #8B5CF6"><div class="stat-icon" style="background:rgba(139,92,246,.1);color:#8B5CF6"><i class="fas fa-chart-line"></i></div><div class="stat-value" id="consultingCount">—</div><div class="stat-label">Consulting Clients</div></div>
             </div>
 
             <div class="revenue-grid">
@@ -525,6 +529,7 @@ async function loadDashboard() {
                         <button onclick="showSection('activity')" style="padding:10px 18px;border-radius:10px;border:1.5px solid rgba(255,255,255,.2);background:transparent;color:#fff;font-size:13px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:8px"><i class="fas fa-history"></i> Activity Log</button>
                         <button onclick="showSection('payments')" style="padding:10px 18px;border-radius:10px;border:1.5px solid rgba(255,255,255,.2);background:transparent;color:#fff;font-size:13px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:8px"><i class="fas fa-credit-card"></i> Payments</button>
                         <button onclick="showSection('analytics')" style="padding:10px 18px;border-radius:10px;border:1.5px solid rgba(255,255,255,.2);background:transparent;color:#fff;font-size:13px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:8px"><i class="fas fa-chart-line"></i> Analytics</button>
+                        <button onclick="showSection('consulting')" style="padding:10px 18px;border-radius:10px;border:1.5px solid rgba(139,92,246,.4);background:rgba(139,92,246,.15);color:#c4b5fd;font-size:13px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:8px"><i class="fas fa-chess-queen"></i> Business Consulting</button>
                     </div>
                 </div>
             </div>`;
@@ -545,11 +550,175 @@ async function loadRecentCompanies() {
         cachedCompanies = companies;
         const c = document.getElementById('recentCompanies');
         if (c) renderCompaniesTable(c, Array.isArray(companies) ? companies.slice(0,5) : []);
+        loadConsultingCount();
     } catch(e) {
         const c = document.getElementById('recentCompanies');
         if (c) c.innerHTML = `<p style="text-align:center;color:#EF4444;padding:20px">${e.message}</p>`;
     }
 }
+
+// ═══════════════════════════════════════════════════════════════════
+// BUSINESS CONSULTING — Dashboard Count + Full Section
+// ═══════════════════════════════════════════════════════════════════
+
+async function loadConsultingCount() {
+    try {
+        const companies = cachedCompanies || await adminFetch('/admin/companies');
+        const consulting = Array.isArray(companies) ? companies.filter(c => (c.service_type||'').toLowerCase() === 'consulting' || (c.industry||'').toLowerCase().includes('consult')) : [];
+        const el = document.getElementById('consultingCount');
+        if (el) el.textContent = consulting.length;
+    } catch(e) {
+        const el = document.getElementById('consultingCount');
+        if (el) el.textContent = '0';
+    }
+}
+
+let consultingTab = 'clients';
+
+async function loadConsulting() {
+    document.getElementById('pageTitle').textContent = 'Business Consulting';
+    document.getElementById('mainContent').innerHTML = '<div class="loader"><div class="spin"></div><p>Loading consulting data...</p></div>';
+    if (!(await checkAuth())) return;
+
+    const tabs = [
+        { id:'clients', icon:'fa-building', label:'Clients' },
+        { id:'assessments', icon:'fa-heartbeat', label:'Assessments' },
+        { id:'swot', icon:'fa-th-large', label:'SWOT' },
+        { id:'kpis', icon:'fa-chart-bar', label:'KPIs' },
+        { id:'projects', icon:'fa-tasks', label:'Projects' },
+        { id:'meetings', icon:'fa-calendar-alt', label:'Meetings' },
+        { id:'documents', icon:'fa-folder-open', label:'Documents' },
+        { id:'cactivity', icon:'fa-stream', label:'Activity Log' },
+    ];
+
+    document.getElementById('mainContent').innerHTML = `
+        <div style="margin-bottom:20px;display:flex;gap:6px;flex-wrap:wrap">
+            ${tabs.map(t => `<button onclick="consultingTab='${t.id}';renderConsultingTab()" id="ctab_${t.id}" style="padding:8px 16px;border-radius:8px;border:1.5px solid ${t.id===consultingTab?'#8b5cf6':'#E2E8F0'};background:${t.id===consultingTab?'rgba(139,92,246,.1)':'#fff'};color:${t.id===consultingTab?'#8b5cf6':'#64748B'};font-size:13px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:6px;transition:all .2s"><i class="fas ${t.icon}"></i>${t.label}</button>`).join('')}
+        </div>
+        <div id="consultingContent"><div class="loader"><div class="spin"></div><p>Loading...</p></div></div>`;
+    renderConsultingTab();
+}
+
+async function renderConsultingTab() {
+    document.querySelectorAll('[id^="ctab_"]').forEach(b => {
+        const active = b.id === 'ctab_' + consultingTab;
+        b.style.borderColor = active ? '#8b5cf6' : '#E2E8F0';
+        b.style.background = active ? 'rgba(139,92,246,.1)' : '#fff';
+        b.style.color = active ? '#8b5cf6' : '#64748B';
+    });
+    const container = document.getElementById('consultingContent');
+    container.innerHTML = '<div class="loader"><div class="spin"></div><p>Loading...</p></div>';
+
+    try {
+        switch(consultingTab) {
+            case 'clients': await renderConsultingClients(container); break;
+            case 'assessments': await renderConsultingTable(container, 'consulting_assessments', ['tenant_id','overall_score','created_at'], 'Assessments', 'fa-heartbeat'); break;
+            case 'swot': await renderConsultingTable(container, 'consulting_swot', ['tenant_id','type','content','created_at'], 'SWOT Items', 'fa-th-large'); break;
+            case 'kpis': await renderConsultingTable(container, 'consulting_kpis', ['tenant_id','name','current_value','target_value','unit','created_at'], 'KPIs', 'fa-chart-bar'); break;
+            case 'projects': await renderConsultingTable(container, 'consulting_projects', ['tenant_id','name','type','stage','progress','created_at'], 'Projects', 'fa-tasks'); break;
+            case 'meetings': await renderConsultingTable(container, 'consulting_meetings', ['tenant_id','title','date','time','type','status','created_at'], 'Meetings', 'fa-calendar-alt'); break;
+            case 'documents': await renderConsultingTable(container, 'consulting_documents', ['tenant_id','name','category','doc_type','created_at'], 'Documents', 'fa-folder-open'); break;
+            case 'cactivity': await renderConsultingTable(container, 'consulting_activity', ['tenant_id','user_name','action','entity','detail','created_at'], 'Activity Log', 'fa-stream'); break;
+        }
+    } catch(e) {
+        container.innerHTML = `<div class="panel"><p style="text-align:center;color:#EF4444;padding:30px"><i class="fas fa-exclamation-circle"></i> ${esc(e.message)}</p></div>`;
+    }
+}
+
+async function renderConsultingClients(container) {
+    const companies = cachedCompanies || await adminFetch('/admin/companies');
+    cachedCompanies = companies;
+    const consulting = Array.isArray(companies) ? companies.filter(c => (c.service_type||'').toLowerCase() === 'consulting' || (c.industry||'').toLowerCase().includes('consult')) : [];
+
+    if (consulting.length === 0) {
+        container.innerHTML = `
+            <div class="panel">
+                <div class="panel-header">
+                    <div class="panel-title"><i class="fas fa-chart-line" style="color:#8b5cf6;margin-right:8px"></i>Consulting Clients</div>
+                    <span class="panel-badge" style="background:rgba(139,92,246,.1);color:#8b5cf6">0 clients</span>
+                </div>
+                <p style="text-align:center;color:#9CA3AF;padding:40px"><i class="fas fa-inbox" style="font-size:2rem;display:block;margin-bottom:12px;opacity:.4"></i>No consulting clients registered yet.<br><span style="font-size:12px">Clients who register via the Business Consulting page will appear here.</span></p>
+            </div>`;
+        return;
+    }
+
+    container.innerHTML = `
+        <div class="panel">
+            <div class="panel-header">
+                <div class="panel-title"><i class="fas fa-chart-line" style="color:#8b5cf6;margin-right:8px"></i>Consulting Clients (${consulting.length})</div>
+                <span class="panel-badge" style="background:rgba(139,92,246,.1);color:#8b5cf6">${consulting.length} clients</span>
+            </div>
+            <div class="table-wrap"><table>
+                <thead><tr><th>Company</th><th>Contact</th><th>Industry</th><th>Plan</th><th>Status</th><th>Registered</th></tr></thead>
+                <tbody>${consulting.map(c => {
+                    const blocked = c.is_blocked;
+                    const status = blocked ? '<span class="status-pill pill-blocked"><i class="fas fa-ban"></i> Blocked</span>' : '<span class="status-pill pill-active"><i class="fas fa-check-circle"></i> Active</span>';
+                    return `<tr style="${blocked?'opacity:.6':''}">
+                        <td><strong>${esc(c.name)}</strong></td>
+                        <td style="font-size:12px;color:#6B7280">${esc(c.contact_email||c.admin_email||'-')}</td>
+                        <td>${esc(c.industry||'-')}</td>
+                        <td><span class="badge badge-${getPlanBadge(c.subscription_plan)}">${esc(c.subscription_plan||'trial')}</span></td>
+                        <td>${status}</td>
+                        <td style="font-size:13px;color:#6B7280">${formatDate(c.created_at)}</td>
+                    </tr>`;
+                }).join('')}</tbody>
+            </table></div>
+        </div>`;
+}
+
+async function renderConsultingTable(container, tableName, columns, title, icon) {
+    let data = [];
+    try {
+        data = await sbQuery(tableName, 'order=created_at.desc&limit=100');
+    } catch(e) {
+        data = [];
+    }
+    if (!Array.isArray(data)) data = [];
+
+    if (data.length === 0) {
+        container.innerHTML = `
+            <div class="panel">
+                <div class="panel-header">
+                    <div class="panel-title"><i class="fas ${icon}" style="color:#8b5cf6;margin-right:8px"></i>${title}</div>
+                    <span class="panel-badge" style="background:rgba(139,92,246,.1);color:#8b5cf6">0 records</span>
+                </div>
+                <p style="text-align:center;color:#9CA3AF;padding:40px"><i class="fas fa-inbox" style="font-size:2rem;display:block;margin-bottom:12px;opacity:.4"></i>No ${title.toLowerCase()} found.<br><span style="font-size:12px">Data will appear here when consulting clients use their dashboard.</span></p>
+            </div>`;
+        return;
+    }
+
+    const headerLabels = {
+        tenant_id:'Tenant',overall_score:'Score',created_at:'Date',type:'Type',content:'Content',
+        name:'Name',current_value:'Current',target_value:'Target',unit:'Unit',stage:'Stage',
+        progress:'Progress',milestone:'Milestone',title:'Title',date:'Date',time:'Time',
+        status:'Status',category:'Category',doc_type:'Type',notes:'Notes',user_name:'User',
+        action:'Action',entity:'Entity',detail:'Detail'
+    };
+
+    container.innerHTML = `
+        <div class="panel">
+            <div class="panel-header">
+                <div class="panel-title"><i class="fas ${icon}" style="color:#8b5cf6;margin-right:8px"></i>${title}</div>
+                <span class="panel-badge" style="background:rgba(139,92,246,.1);color:#8b5cf6">${data.length} records</span>
+            </div>
+            <div class="table-wrap"><table>
+                <thead><tr>${columns.map(c => `<th>${headerLabels[c]||c}</th>`).join('')}</tr></thead>
+                <tbody>${data.map(row => `<tr>${columns.map(c => {
+                    let val = row[c] ?? '-';
+                    if (c === 'created_at') val = formatDate(val);
+                    if (c === 'overall_score') val = parseFloat(val).toFixed(1) + '%';
+                    if (c === 'progress') val = val + '%';
+                    if (c === 'type' && tableName === 'consulting_swot') val = '<span style="text-transform:capitalize;font-weight:600;color:' + ({strengths:'#10B981',weaknesses:'#EF4444',opportunities:'#3B82F6',threats:'#F59E0B'}[val]||'#6B7280') + '">' + esc(String(val)) + '</span>';
+                    else if (c === 'stage') val = '<span class="badge badge-info" style="font-size:11px">' + esc(String(val)) + '</span>';
+                    else if (c === 'status') val = '<span class="badge badge-' + (val==='completed'||val==='done'?'success':val==='cancelled'?'danger':'info') + '" style="font-size:11px">' + esc(String(val)) + '</span>';
+                    else if (c === 'content' || c === 'detail' || c === 'notes') val = '<span style="max-width:200px;display:inline-block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + esc(String(row[c]||'')) + '">' + esc(String(val).substring(0,60)) + '</span>';
+                    else val = esc(String(val));
+                    return `<td style="font-size:13px">${val}</td>`;
+                }).join('')}</tr>`).join('')}</tbody>
+            </table></div>
+        </div>`;
+}
+
 
 async function loadCompanies() {
     document.getElementById('pageTitle').textContent = 'All Companies';
