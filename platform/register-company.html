@@ -304,6 +304,38 @@
 
             <form id="registerForm" onsubmit="handleRegister(event)">
                 <div class="form-group">
+                    <label class="form-label">What are you looking for? *</label>
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+                        <label style="display:flex;align-items:center;gap:10px;padding:14px 16px;border:2px solid var(--primary);border-radius:var(--radius);cursor:pointer;background:var(--primary-light);font-weight:600;font-size:.85rem;transition:all .2s;">
+                            <input type="radio" name="serviceType" value="hr" checked style="accent-color:var(--primary);width:16px;height:16px;">
+                            <div><i class="fas fa-building" style="color:var(--primary);margin-right:4px;"></i> HR & Recruitment Platform</div>
+                        </label>
+                        <label style="display:flex;align-items:center;gap:10px;padding:14px 16px;border:2px solid var(--border);border-radius:var(--radius);cursor:pointer;font-weight:600;font-size:.85rem;transition:all .2s;">
+                            <input type="radio" name="serviceType" value="consulting" style="accent-color:#8b5cf6;width:16px;height:16px;">
+                            <div><i class="fas fa-chart-line" style="color:#8b5cf6;margin-right:4px;"></i> Business Consulting</div>
+                        </label>
+                    </div>
+                </div>
+
+                <script>
+                // Highlight selected service card
+                document.querySelectorAll('input[name="serviceType"]').forEach(radio => {
+                    radio.addEventListener('change', function() {
+                        document.querySelectorAll('input[name="serviceType"]').forEach(r => {
+                            const label = r.closest('label');
+                            if (r.checked) {
+                                label.style.borderColor = r.value === 'consulting' ? '#8b5cf6' : 'var(--primary)';
+                                label.style.background = r.value === 'consulting' ? 'rgba(139,92,246,0.08)' : 'var(--primary-light)';
+                            } else {
+                                label.style.borderColor = 'var(--border)';
+                                label.style.background = 'transparent';
+                            }
+                        });
+                    });
+                });
+                </script>
+
+                <div class="form-group">
                     <label class="form-label">Company / Organization Name *</label>
                     <input type="text" class="form-input" id="companyName" placeholder="e.g. Acme Technologies Pvt Ltd" required>
                 </div>
@@ -475,7 +507,8 @@
             name: document.getElementById('fullName').value.trim(),
             email: document.getElementById('email').value.trim(),
             password: document.getElementById('password').value,
-            confirmPassword: document.getElementById('confirmPassword').value
+            confirmPassword: document.getElementById('confirmPassword').value,
+            service_type: document.querySelector('input[name="serviceType"]:checked')?.value || 'hr'
         };
 
         if (!payload.company_name || !payload.industry || !payload.name || !payload.email || !payload.password) {
@@ -504,7 +537,7 @@
             const { data: authData, error: authError } = await db.auth.signUp({
                 email: payload.email,
                 password: payload.password,
-                options: { data: { full_name: payload.name, role: 'company_admin' } }
+                options: { data: { full_name: payload.name, role: payload.service_type === 'consulting' ? 'consulting_admin' : 'company_admin' } }
             });
 
             // Handle "already registered" — recover by signing in
@@ -573,6 +606,7 @@
                             subscription_end: new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
                             admin_user_id: userId,
                             admin_name: payload.name,
+                            service_type: payload.service_type || 'hr',
                             slug: payload.company_name.toLowerCase().replace(/[^a-z0-9]+/g, '-') + '-' + Date.now().toString(36)
                         })
                     });
@@ -589,6 +623,7 @@
                             email: payload.email, contact_email: payload.email,
                             company_size: payload.company_size,
                             subscription_plan: 'trial', is_active: true,
+                            service_type: payload.service_type || 'hr',
                             subscription_start: new Date().toISOString().split('T')[0],
                             subscription_end: new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
                             slug: payload.company_name.toLowerCase().replace(/[^a-z0-9]+/g, '-') + '-' + Date.now().toString(36)
@@ -600,10 +635,11 @@
 
             // Step 4: Upsert user profile
             try {
+                const userRole = payload.service_type === 'consulting' ? 'consulting_admin' : 'company_admin';
                 const { error: profileErr } = await db.from('users').upsert({
                     auth_id: userId, company_id: companyId,
                     email: payload.email, full_name: payload.name,
-                    role: 'company_admin', is_active: true
+                    role: userRole, is_active: true
                 }, { onConflict: 'auth_id' });
                 if (profileErr) console.warn('[registration] Profile upsert:', profileErr.message);
             } catch(e) { console.warn('[registration] User profile upsert:', e); }
@@ -623,14 +659,17 @@
                 localStorage.setItem('simpatico_user', JSON.stringify({
                     id: userId,
                     email: payload.email, full_name: payload.name,
-                    role: 'company_admin', company_id: companyId,
-                    tenant_id: companyId
+                    role: payload.service_type === 'consulting' ? 'consulting_admin' : 'company_admin',
+                    company_id: companyId,
+                    tenant_id: companyId,
+                    service_type: payload.service_type
                 }));
             }
 
             toast('✅ Account created! Redirecting to dashboard...', 'success');
+            const dashTarget = payload.service_type === 'consulting' ? '../dashboard/consulting.html' : '../dashboard/hr.html';
             setTimeout(() => {
-                window.location.href = session ? '../dashboard/hr.html' : 'login.html?verify=1';
+                window.location.href = session ? dashTarget : 'login.html?verify=1';
             }, 1500);
 
         } catch (err) {

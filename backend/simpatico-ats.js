@@ -571,13 +571,13 @@ async function getCompanyAIConfig(env, tenantId) {
  */
 // Deprecated / sunset models → working replacements
 const DEPRECATED_MODELS = {
-  "gemini-1.5-flash":       "gemini-2.5-flash",
-  "gemini-1.5-pro":         "gemini-2.5-pro",
-  "gemini-1.0-pro":         "gemini-2.5-flash",
-  "gemini-pro":             "gemini-2.5-flash",
-  "gpt-4-turbo-preview":    "gpt-4o-mini",
-  "gpt-3.5-turbo":          "gpt-4o-mini",
-  "claude-instant-1.2":     "claude-3-haiku-20240307",
+  "gemini-1.5-flash": "gemini-2.5-flash",
+  "gemini-1.5-pro": "gemini-2.5-pro",
+  "gemini-1.0-pro": "gemini-2.5-flash",
+  "gemini-pro": "gemini-2.5-flash",
+  "gpt-4-turbo-preview": "gpt-4o-mini",
+  "gpt-3.5-turbo": "gpt-4o-mini",
+  "claude-instant-1.2": "claude-3-haiku-20240307",
 };
 
 function resolveProviderDefaults(cfg) {
@@ -744,7 +744,7 @@ async function callExternalLLM(cfg, messages, maxTokens, stream = false) {
  * Returns { response: string, usage?: object }
  */
 const CF_DEFAULT_MODEL = "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
-const CF_LIGHT_MODEL   = "@cf/meta/llama-3.1-8b-instruct";
+const CF_LIGHT_MODEL = "@cf/meta/llama-3.1-8b-instruct";
 
 async function runLLM(env, tenantId, messages, maxTokens = 1024) {
   const aiConfig = await getCompanyAIConfig(env, tenantId);
@@ -1206,7 +1206,7 @@ route("GET", "/api/training_courses", handleListCourses);
 route("POST", "/api/training-courses", handleCreateCourse);
 route("GET", "/api/training-courses", handleListCourses);
 route("POST", "/training/enroll", handleEnrollTraining);
-route("GET",  "/training/enrollments", handleListEnrollments);
+route("GET", "/training/enrollments", handleListEnrollments);
 route("POST", "/training/semantic-search", handleSemanticCourseSearch);
 route("POST", "/training/remind/:id", handleSendReminder);
 
@@ -1614,14 +1614,14 @@ export default {
       // ==========================================
       try {
         const in3Days = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000);
-        const startOf3rdDay = new Date(in3Days.setUTCHours(0,0,0,0)).toISOString();
-        const endOf3rdDay = new Date(in3Days.setUTCHours(23,59,59,999)).toISOString();
+        const startOf3rdDay = new Date(in3Days.setUTCHours(0, 0, 0, 0)).toISOString();
+        const endOf3rdDay = new Date(in3Days.setUTCHours(23, 59, 59, 999)).toISOString();
 
         const subsRes = await fetch(
           `${env.SUPABASE_URL}/rest/v1/companies?status=eq.active&subscription_ends_at=gte.${startOf3rdDay}&subscription_ends_at=lte.${endOf3rdDay}&select=id,name,admin_email`,
           { headers: { apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}` } }
         );
-        
+
         if (subsRes.ok) {
           const expiringCompanies = await subsRes.json();
           for (const company of expiringCompanies) {
@@ -1638,7 +1638,7 @@ export default {
             }
           }
         }
-      } catch(e) {
+      } catch (e) {
         console.error("[CRON] Failed to send subscription expiry reminders:", e.message);
       }
 
@@ -1706,7 +1706,7 @@ export default {
             }).catch(e => console.warn("[CRON] Admin trial expiry notification failed:", e.message));
           }
         }
-      } catch(e) {
+      } catch (e) {
         console.error("[CRON] Failed to auto-expire trials:", e.message);
       }
 
@@ -1793,7 +1793,7 @@ export default {
             }).catch(e => console.warn("[CRON] Admin sub expiry notification failed:", e.message));
           }
         }
-      } catch(e) {
+      } catch (e) {
         console.error("[CRON] Failed to auto-expire subscriptions:", e.message);
       }
     } catch (err) {
@@ -3035,8 +3035,8 @@ async function handleCalculatePayroll(request, env, ctx) {
   const expenses = await expRes.json() || [];
 
   const perfMap = {};
-  reviews.sort((a,b)=>b.id-a.id).forEach(r => {
-    if(!perfMap[r.employee_id] && r.score) perfMap[r.employee_id] = r.score;
+  reviews.sort((a, b) => b.id - a.id).forEach(r => {
+    if (!perfMap[r.employee_id] && r.score) perfMap[r.employee_id] = r.score;
   });
 
   const expenseMap = {};
@@ -3059,11 +3059,11 @@ async function handleCalculatePayroll(request, env, ctx) {
     const empDeds = deductions
       .filter((d) => d.employee_id === s.employee_id)
       .reduce((sum, d) => sum + Number(d.amount), 0);
-      
+
     const unpaidDays = unpaidLeave
       .filter((l) => l.employee_id === s.employee_id)
       .reduce((sum, l) => sum + l.days, 0);
-      
+
     const dailyRate = (base + totalAllowances) / 22;
     const unpaidAdj = dailyRate * unpaidDays;
 
@@ -3100,7 +3100,7 @@ async function handleCalculatePayroll(request, env, ctx) {
 
 async function handleGeneratePayslipPdf(request, env, ctx, [payslipId]) {
   requireAuth(ctx);
-  
+
   // Fetch payslip data with employee details
   const res = await sbFetch(
     env,
@@ -3132,13 +3132,13 @@ async function handleGeneratePayslipPdf(request, env, ctx, [payslipId]) {
   } catch (e) {
     console.warn("Could not fetch company name for payslip");
   }
-  
+
   // Generate PDF
   const pdfDoc = await PDFDocument.create();
   const page = pdfDoc.addPage([600, 800]);
   const helveticaFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
   const helveticaBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
-  
+
   const { width, height } = page.getSize();
   const colorDark = rgb(0.1, 0.1, 0.1);
   const colorGray = rgb(0.4, 0.4, 0.4);
@@ -3160,27 +3160,27 @@ async function handleGeneratePayslipPdf(request, env, ctx, [payslipId]) {
   // Map currency code to symbol for PDF display
   const currencySymbols = { INR: "\u20B9", USD: "$", EUR: "\u20AC", GBP: "\u00A3", AED: "AED ", CAD: "CA$", AUD: "A$", SGD: "S$", NZD: "NZ$" };
   const currencySym = currencySymbols[currencyCode] || (currencyCode + " ");
-  
+
   // Header
   page.drawText(companyName, { x: 50, y: height - 60, size: 24, font: helveticaBold, color: colorBrand });
   page.drawText("PAYSLIP", { x: width - 150, y: height - 60, size: 20, font: helveticaBold, color: colorGray });
-  
+
   page.drawLine({
     start: { x: 50, y: height - 80 },
     end: { x: width - 50, y: height - 80 },
     thickness: 1,
     color: rgb(0.8, 0.8, 0.8),
   });
-  
+
   // Employee Details
   page.drawText(`Employee Name: ${empName}`, { x: 50, y: height - 120, size: 12, font: helveticaBold, color: colorDark });
   page.drawText(`Job Title: ${payslip.employees?.job_title || "N/A"}`, { x: 50, y: height - 140, size: 10, font: helveticaFont, color: colorDark });
   page.drawText(`Department: ${payslip.employees?.departments?.name || "N/A"}`, { x: 50, y: height - 155, size: 10, font: helveticaFont, color: colorDark });
-  
+
   page.drawText(`Pay Period: ${period}`, { x: width - 200, y: height - 120, size: 10, font: helveticaBold, color: colorDark });
   page.drawText(`Pay Date: ${payslip.pay_date || "N/A"}`, { x: width - 200, y: height - 135, size: 10, font: helveticaFont, color: colorDark });
   page.drawText(`Status: ${payslip.status?.toUpperCase() || "GENERATED"}`, { x: width - 200, y: height - 150, size: 10, font: helveticaFont, color: colorDark });
-  
+
   // Earnings & Deductions Table Header
   const tableY = height - 220;
   page.drawRectangle({
@@ -3191,13 +3191,13 @@ async function handleGeneratePayslipPdf(request, env, ctx, [payslipId]) {
   page.drawText("AMOUNT", { x: 200, y: tableY, size: 10, font: helveticaBold, color: colorDark });
   page.drawText("DEDUCTIONS", { x: width / 2 + 10, y: tableY, size: 10, font: helveticaBold, color: colorDark });
   page.drawText("AMOUNT", { x: width - 100, y: tableY, size: 10, font: helveticaBold, color: colorDark });
-  
+
   // Content
-  const formatAmt = (amt) => `${currencySym}${Number(amt).toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2})}`;
-  
+  const formatAmt = (amt) => `${currencySym}${Number(amt).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
   page.drawText("Basic Salary", { x: 60, y: tableY - 30, size: 10, font: helveticaFont, color: colorDark });
   page.drawText(formatAmt(payslip.gross_pay), { x: 200, y: tableY - 30, size: 10, font: helveticaFont, color: colorDark });
-  
+
   let dY = tableY - 30;
   if (payslip.deductions && Array.isArray(payslip.deductions)) {
     payslip.deductions.forEach(d => {
@@ -3209,7 +3209,7 @@ async function handleGeneratePayslipPdf(request, env, ctx, [payslipId]) {
     page.drawText("Total Deductions", { x: width / 2 + 10, y: dY, size: 10, font: helveticaFont, color: colorDark });
     page.drawText(formatAmt(payslip.deductions_total), { x: width - 100, y: dY, size: 10, font: helveticaFont, color: colorDark });
   }
-  
+
   // Totals
   const totalY = dY - 40;
   page.drawLine({
@@ -3218,27 +3218,27 @@ async function handleGeneratePayslipPdf(request, env, ctx, [payslipId]) {
     thickness: 1,
     color: rgb(0.8, 0.8, 0.8),
   });
-  
+
   page.drawText("Gross Earnings:", { x: 60, y: totalY, size: 10, font: helveticaBold, color: colorDark });
   page.drawText(formatAmt(payslip.gross_pay), { x: 200, y: totalY, size: 10, font: helveticaBold, color: colorDark });
-  
+
   page.drawText("Total Deductions:", { x: width / 2 + 10, y: totalY, size: 10, font: helveticaBold, color: colorDark });
   page.drawText(formatAmt(payslip.deductions_total), { x: width - 100, y: totalY, size: 10, font: helveticaBold, color: colorDark });
-  
+
   page.drawRectangle({
     x: 50, y: totalY - 45, width: width - 100, height: 30,
     color: rgb(0.9, 0.95, 0.9),
   });
   page.drawText("NET PAY:", { x: 60, y: totalY - 35, size: 12, font: helveticaBold, color: colorDark });
   page.drawText(formatAmt(payslip.net_pay), { x: width - 150, y: totalY - 35, size: 14, font: helveticaBold, color: rgb(0.1, 0.5, 0.2) });
-  
+
   // Footer
   page.drawText("This is a computer-generated document. No signature is required.", {
     x: 50, y: 50, size: 8, font: helveticaFont, color: colorGray,
   });
-  
+
   const pdfBytes = await pdfDoc.save();
-  
+
   return new Response(pdfBytes, {
     status: 200,
     headers: {
@@ -3616,10 +3616,10 @@ async function handleCreateJob(request, env, ctx) {
           { syndication_status: "failed" },
           false,
           ctx.tenantId,
-        ).catch(() => {});
+        ).catch(() => { });
       }
     })();
-    
+
     // Ensure background tasks finish before Worker terminates
     if (ctx && typeof ctx.waitUntil === 'function') {
       ctx.waitUntil(syndicationPromise);
@@ -3788,11 +3788,11 @@ async function handleCreateApplication(request, env, ctx) {
       for (let i = 0; i < binaryStr.length; i++) {
         fileBytes[i] = binaryStr.charCodeAt(i);
       }
-      
+
       const fileExt = body.resume_filename.split('.').pop() || 'pdf';
       // Isolate by tenant_id and job_id to prevent naming collisions and enforce strict RLS
       secureFileKey = `${ctx.tenantId}/${body.job_id}/${Date.now()}-${crypto.randomUUID()}.${fileExt}`;
-      
+
       const uploadRes = await fetch(`${env.SUPABASE_URL}/storage/v1/object/hr-documents/${secureFileKey}`, {
         method: "POST",
         headers: {
@@ -3803,14 +3803,14 @@ async function handleCreateApplication(request, env, ctx) {
         },
         body: fileBytes
       });
-      
+
       if (uploadRes.ok) {
         // Store as a private storage path reference, NOT a public URL
         body.resume_url = `private://hr-documents/${secureFileKey}`;
       } else {
         console.error("Worker upload error:", await uploadRes.text());
       }
-    } catch(e) {
+    } catch (e) {
       console.error("Worker upload exception:", e);
     }
     delete body.resume_base64;
@@ -3900,18 +3900,18 @@ Return ONLY valid JSON in format: {"match_score": 85, "reason": "Brief 1-sentenc
   // Using ...sanitize(body) caused PGRST204 errors when unknown fields
   // (e.g. client_id, candidate_skills, source) leaked into the INSERT payload.
   const insertPayload = {
-    candidate_name:   (body.candidate_name || '').trim().slice(0, 500),
-    candidate_email:  (body.candidate_email || '').trim().slice(0, 500),
-    job_id:           body.job_id,
+    candidate_name: (body.candidate_name || '').trim().slice(0, 500),
+    candidate_email: (body.candidate_email || '').trim().slice(0, 500),
+    job_id: body.job_id,
     status,
-    match_score:      match_score,
-    ai_summary:       ai_summary || null,
-    resume_text:      storedResumeText,
-    resume_url:       body.resume_url || null,
-    source:           body.source || null,
+    match_score: match_score,
+    ai_summary: ai_summary || null,
+    resume_text: storedResumeText,
+    resume_url: body.resume_url || null,
+    source: body.source || null,
     candidate_skills: body._extracted_skills || body.candidate_skills || null,
-    applied_at:       new Date().toISOString(),
-    tenant_id:        ctx.tenantId,
+    applied_at: new Date().toISOString(),
+    tenant_id: ctx.tenantId,
   };
 
   const res = await sbFetch(
@@ -4040,7 +4040,7 @@ Return ONLY valid JSON in format: {"match_score": 85, "reason": "Brief 1-sentenc
     await audit(env, ctx, "application.auto_rejected", "job_applications", app.id, {
       match_score,
       reject_threshold: rejectThreshold,
-    }).catch(() => {});
+    }).catch(() => { });
   }
 
   // 6. Application Confirmation Email (for mid-score / manual-review candidates)
@@ -4859,13 +4859,13 @@ async function handleGenerateCourse(request, env, ctx) {
   requireAuth(ctx);
   const { title } = await safeJson(request);
   if (!title) throw new ValidationError("title required");
-  
+
   const prompt = `You are an expert Corporate Trainer and LMS AI. Generate a professional course outline for a corporate training course titled "${title}". 
 Return ONLY valid JSON with these fields:
 {"description": "A compelling 2-3 sentence overview of what employees will learn...", "duration_hours": 2.5}`;
-  
+
   const result = await runLLM(env, ctx.tenantId, [{ role: "user", content: prompt }], 300);
-  
+
   const cleaned = result.response.replace(/```json|```/g, "").trim();
   let data;
   try {
@@ -5397,9 +5397,9 @@ async function sbFetch(
   if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_KEY)
     throw new ServiceUnavailableError("Database");
 
-  // ── TENANT ISOLATION: Only inject tenant filter for tables that have tenant_id ──
-  // Tables without tenant_id: job_applications, jobs, interviews, employees (core schema)
-  // We use service_role key which bypasses RLS, so tenant isolation is opt-in per table
+  // ── TENANT ISOLATION: Inject tenant_id filter for ALL tables with a tenant_id column ──
+  // We use service_role key which bypasses RLS, so tenant isolation MUST be enforced here.
+  // IMPORTANT: Every table with a tenant_id column MUST be listed below.
   let finalPath = path;
   const TENANT_AWARE_TABLES = [
     // Core HR
@@ -5408,9 +5408,13 @@ async function sbFetch(
     // Recruitment
     "jobs",
     "job_applications",
+    "job_listings",
     "interviews",
+    "interview_sessions",
+    "applications",
     // Leave & Attendance
     "leave_requests",
+    "leave_balances",
     "attendance_records",
     // Payroll
     "payroll_runs",
@@ -5422,9 +5426,13 @@ async function sbFetch(
     // Training
     "training_courses",
     "training_enrollments",
+    "training_paths",
+    "training_path_courses",
     // Onboarding & Offboarding
     "onboarding_records",
     "onboarding_tasks",
+    "onboarding_templates",
+    "onboarding_template_tasks",
     "offboarding_records",
     "offboarding_tasks",
     // Performance
@@ -5444,6 +5452,7 @@ async function sbFetch(
     "hr_tickets",
     "automation_rules",
     "automation_logs",
+    "org_profiles",
     // Billing
     "subscriptions",
     "payment_transactions",
@@ -5470,7 +5479,7 @@ async function sbFetch(
           if (!parsedBody.tenant_id) parsedBody.tenant_id = tenantId;
         }
         body = parsedBody;
-      } catch(e) { /* body isn't valid, skip */ }
+      } catch (e) { /* body isn't valid, skip */ }
     }
   }
 
@@ -6194,15 +6203,14 @@ async function handleScheduleInterviewEmail(request, env, ctx) {
             </table>
           </div>
 
-          ${
-            mode === "proctored"
-              ? `
+          ${mode === "proctored"
+      ? `
           <div style="background:#ede9fe;border-left:4px solid #7c3aed;padding:14px 16px;border-radius:6px;margin-bottom:20px;font-size:14px;color:#5b21b6;">
             <strong>This is a Proctored Interview.</strong><br>
             Your session will be AI-monitored. Please ensure your camera and microphone are working, and take the interview from a quiet, well-lit location.
           </div>`
-              : ""
-          }
+      : ""
+    }
 
           ${notesSection}
 
@@ -6357,8 +6365,8 @@ async function handleCompanyRegister(request, env, ctx) {
       slug:
         slug ||
         name.toLowerCase().replace(/[^a-z0-9]+/g, "-") +
-          "-" +
-          Date.now().toString(36),
+        "-" +
+        Date.now().toString(36),
       is_active: true,
     },
     false,
@@ -6522,10 +6530,10 @@ function registrationWelcomeHtml(name, companyName, type) {
 // ============================================
 async function handleAssignAssessment(request, env, ctx) {
   requireRole(ctx, 'hr', 'hr_manager', 'company_admin', 'admin', 'superadmin');
-  
+
   const { id: candidateId, assessmentId } = ctx.params;
   const body = await request.json().catch(() => ({}));
-  
+
   if (!candidateId || !assessmentId) {
     return apiResponse({ error: 'candidateId and assessmentId required' }, HTTP.BAD_REQUEST);
   }
@@ -6610,7 +6618,7 @@ async function handleSubmitAssessment(request, env, ctx) {
 // ============================================
 async function handleGetCandidateAssessments(request, env, ctx) {
   const { id: candidateId } = ctx.params;
-  
+
   if (!candidateId) {
     return apiResponse({ error: 'candidateId required' }, HTTP.BAD_REQUEST);
   }
@@ -6640,7 +6648,7 @@ async function handleGetCandidateAssessments(request, env, ctx) {
 // ============================================
 async function handleScoreAssessment(request, env, ctx) {
   requireRole(ctx, 'hr', 'hr_manager', 'company_admin', 'admin', 'superadmin');
-  
+
   const { assessmentId } = ctx.params;
   const body = await request.json().catch(() => ({}));
   const { candidateId, responses } = body;
@@ -6800,12 +6808,12 @@ async function handleCreateInterview(request, env, ctx) {
           if (companies[0].interviews_blocked) {
             throw new ForbiddenError("Interview access has been restricted for this company. Please contact the platform administrator.");
           }
-          
+
           // --- AI Free Tier Limit Enforcement ---
           const iType = body.interview_type || "human_live";
           const isAiMode = iType.startsWith("ai_");
           const aiProvider = companies[0].ai_provider;
-          
+
           if (isAiMode && (!aiProvider || aiProvider === "cloudflare")) {
             // Count total AI interviews created by this company
             const countRes = await fetch(
@@ -6815,7 +6823,7 @@ async function handleCreateInterview(request, env, ctx) {
             if (countRes.ok) {
               const aiInterviews = await countRes.json();
               if (aiInterviews.length >= 5) {
-                 throw new ForbiddenError("Free Trial Limit Reached: You have completed your 5 free AI interviews. Please go to Settings > AI Models and configure your own API key (BYOK) to schedule more.");
+                throw new ForbiddenError("Free Trial Limit Reached: You have completed your 5 free AI interviews. Please go to Settings > AI Models and configure your own API key (BYOK) to schedule more.");
               }
             }
           }
@@ -7482,15 +7490,15 @@ async function handleAttendanceSummary(request, env, ctx) {
 const PLAN_PRICING = {
   starter: {
     monthly: { inr: 1999, usd: 29, gbp: 23, eur: 27, aud: 45, aed: 109, cad: 39 },
-    annual:  { inr: 19990, usd: 290, gbp: 230, eur: 270, aud: 450, aed: 1090, cad: 390 },
+    annual: { inr: 19990, usd: 290, gbp: 230, eur: 270, aud: 450, aed: 1090, cad: 390 },
   },
   professional: {
     monthly: { inr: 3999, usd: 49, gbp: 39, eur: 45, aud: 75, aed: 179, cad: 69 },
-    annual:  { inr: 39990, usd: 490, gbp: 390, eur: 450, aud: 750, aed: 1790, cad: 690 },
+    annual: { inr: 39990, usd: 490, gbp: 390, eur: 450, aud: 750, aed: 1790, cad: 690 },
   },
   enterprise: {
     monthly: { inr: 0, usd: 0, gbp: 0, eur: 0, aud: 0, aed: 0, cad: 0 },
-    annual:  { inr: 0, usd: 0, gbp: 0, eur: 0, aud: 0, aed: 0, cad: 0 },
+    annual: { inr: 0, usd: 0, gbp: 0, eur: 0, aud: 0, aed: 0, cad: 0 },
   },
 };
 
@@ -7822,7 +7830,7 @@ async function handleConfirmPayment(request, env, ctx) {
 async function handleDetectCurrency(request, env, ctx) {
   const country = request.cf?.country || "";
   const countryUpper = country.toUpperCase();
-  
+
   let currency = "usd";
   if (["IN"].includes(countryUpper)) {
     currency = "inr";
@@ -7837,7 +7845,7 @@ async function handleDetectCurrency(request, env, ctx) {
   } else if (["CA"].includes(countryUpper)) {
     currency = "cad";
   }
-  
+
   return apiResponse({ country: countryUpper, currency });
 }
 
