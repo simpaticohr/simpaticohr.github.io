@@ -214,6 +214,8 @@ class AuthManager {
       'company_admin': '/dashboard/hr.html',
       'hr_manager': '/dashboard/hr.html',
       'hr': '/dashboard/hr.html',
+      'consulting_admin': '/dashboard/consulting.html',
+      'consulting_user': '/dashboard/consulting.html',
       'interviewer': '/dashboard/interviewer.html',
       'candidate': '/dashboard/candidate.html'
     };
