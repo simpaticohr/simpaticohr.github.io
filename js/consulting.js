@@ -367,6 +367,48 @@
     // ═══════════════════════════════════════════════════════════
     // § BUSINESS HEALTH ASSESSMENT
     // ═══════════════════════════════════════════════════════════
+    // ═══════════════════════════════════════════════════════════
+    // § BUSINESS HEALTH ASSESSMENT
+    // ═══════════════════════════════════════════════════════════
+    const assessmentQuestionsTranslations = {
+        hi: [
+            { category: 'Strategy', q: 'आपकी कंपनी की 3-5 साल की व्यावसायिक रणनीति कितनी स्पष्ट रूप से परिभाषित है?', opts: ['कोई औपचारिक रणनीति मौजूद नहीं है', 'बुनियादी योजना है लेकिन शायद ही कभी संदर्भित की जाती है', 'दस्तावेज है लेकिन अपडेट करने की आवश्यकता है', 'स्पष्ट रणनीति जिसकी वार्षिक समीक्षा की जाती है', 'तिमाही समीक्षाओं के साथ व्यापक रणनीति'] },
+            { category: 'Strategy', q: 'आपकी टीम आपके प्रतिस्पर्धी लाभ को कितनी अच्छी तरह समझती है?', opts: ['परिभाषित नहीं है', 'अस्पष्ट रूप से समझा गया', 'कुछ हद तक स्पष्ट', 'नेतृत्व द्वारा अच्छी तरह से समझा गया', 'सभी स्तरों पर बिल्कुल स्पष्ट'] },
+            { category: 'Operations', q: 'आपकी मुख्य व्यावसायिक प्रक्रियाएं कितनी कुशल हैं?', opts: ['ज्यादातर मैन्युअल और अव्यवस्थित', 'कुछ प्रक्रियाएं परिभाषित हैं', 'प्रमुख प्रक्रियाएं दस्तावेज में हैं', 'कुछ स्वचालन के साथ अच्छी तरह से अनुकूलित', 'पूरी तरह से अनुकूलित और निरंतर सुधारित'] },
+            { category: 'Operations', q: 'आप अपनी आपूर्ति श्रृंखला या सेवा वितरण को कितने प्रभावी ढंग से प्रबंधित करते हैं?', opts: ['बार-बार व्यवधान', 'बुनियादी प्रबंधन', 'सुधार की गुंजाइश के साथ पर्याप्त', 'KPIs के साथ अच्छी तरह से प्रबंधित', 'वास्तविक समय की निगरानी के साथ सर्वश्रेष्ठ वितरण'] },
+            { category: 'Finance', q: 'आपकी वित्तीय योजना और पूर्वानुमान कितना मजबूत है?', opts: ['कोई औपचारिक वित्तीय योजना नहीं', 'केवल बुनियादी बजट', 'कुछ पूर्वानुमान के साथ वार्षिक बजट', 'तिमाही रूप से अपडेट किए गए विस्तृत वित्तीय मॉडल', 'परिदृश्य योजना के साथ वास्तविक समय वित्तीय डैशबोर्ड'] },
+            { category: 'Finance', q: 'आप निवेश और परियोजनाओं पर आरओआई (ROI) को कितनी अच्छी तरह ट्रैक करते हैं?', opts: ['आरओआई को कभी नहीं मापा जाता है', 'कभी-कभी समीक्षा की जाती है', 'प्रमुख निवेशों के लिए मापा जाता है', 'अधिकांश परियोजनाओं के लिए व्यवस्थित रूप से ट्रैक किया जाता है', 'सभी पहलों के लिए व्यापक आरओआई ढांचा'] },
+            { category: 'Digital Maturity', q: 'आपके डिजिटल परिवर्तन का स्तर क्या है?', opts: ['ज्यादातर कागजी संचालन', 'बुनियादी डिजिटल उपकरण (ईमेल, स्प्रेडशीट)', 'कुछ क्लाउड सॉफ्टवेयर अपनाए गए', 'एकीकृत प्रणालियों के साथ डिजिटल-प्रथम', 'उन्नत विश्लेषण के साथ एआई/स्वचालन संचालित'] },
+            { category: 'Digital Maturity', q: 'आप निर्णय लेने के लिए डेटा का कितने प्रभावी ढंग से उपयोग करते हैं?', opts: ['निर्णय पूरी तरह से अंतर्ज्ञान पर आधारित हैं', 'बुनियादी डेटा एकत्र किया गया लेकिन शायद ही कभी उपयोग किया गया', 'समय-समय पर कुछ रिपोर्ट तैयार की जाती हैं', 'नेतृत्व स्तर पर डेटा-सूचित निर्णय', 'संगठन भर में डेटा-संचालित संस्कृति'] },
+            { category: 'HR & Culture', q: 'आप अपने कर्मचारी जुड़ाव और प्रतिधारण को कैसे रेट करेंगे?', opts: ['उच्च टर्नओवर, कम मनोबल', 'औसत से कम जुड़ाव', 'औसत — कुछ प्रतिधारण चुनौतियां', 'विकास कार्यक्रमों के साथ अच्छा जुड़ाव', 'मजबूत प्रतिधारण के साथ उत्कृष्ट संस्कृति'] },
+            { category: 'HR & Culture', q: 'आपकी प्रतिभा अधिग्रहण और विकास कार्यक्रम कितने सुगठित हैं?', opts: ['कोई औपचारिक एचआर प्रक्रिया नहीं', 'केवल बुनियादी भर्ती प्रक्रिया', 'कुछ प्रशिक्षण कार्यक्रम मौजूद हैं', 'कैरियर विकास पथ के साथ संरचित भर्ती', 'उत्तराधिकार योजना के साथ विश्व स्तरीय प्रतिभा प्रबंधन'] }
+        ],
+        ar: [
+            { category: 'Strategy', q: 'ما مدى وضوح تحديد إستراتيجية عمل شركتك لمدة 3-5 سنوات؟', opts: ['لا توجد إستراتيجية رسمية', 'خطة أساسية ولكن نادراً ما يتم الرجوع إليها', 'موثقة ولكن بحاجة للتحديث', 'إستراتيجية واضحة تتم مراجعتها سنوياً', 'إستراتيجية شاملة مع مراجعات ربع سنوية'] },
+            { category: 'Strategy', q: 'ما مدى فهم فريقك لميزتك التنافسية؟', opts: ['غير محددة', 'مفهومة بشكل غامض', 'واضحة إلى حد ما', 'مفهومة جيداً من قبل القيادة', 'واضحة تماماً على جميع المستويات'] },
+            { category: 'Operations', q: 'ما مدى كفاءة عمليات عملك الأساسية؟', opts: ['يدوية وفوضوية في الغالب', 'تم تحديد بعض العمليات', 'تم توثيق العمليات الرئيسية', 'محسنة جيداً مع بعض الأتمتة', 'محسنة بالكامل ويتم تطويرها باستمرار'] },
+            { category: 'Operations', q: 'ما مدى فعالية إدارتك لسلسلة التوريد أو تقديم الخدمات؟', opts: ['اضطرابات متكررة', 'إدارة أساسية', 'كافية مع وجود مجال للتحسين', 'مدارة جيداً مع مؤشرات أداء رئيسية', 'تقديم خدمات الأفضل في فئتها مع مراقبة في الوقت الفعلي'] },
+            { category: 'Finance', q: 'ما مدى قوة التخطيط المالي والتنبؤ لديك؟', opts: ['لا يوجد تخطيط مالي رسمي', 'ميزانية أساسية فقط', 'ميزانيات سنوية مع بعض التنبؤ', 'نماذج مالية مفصلة يتم تحديثها ربع سنوي', 'لوحات مالية في الوقت الفعلي مع تخطيط السيناريوهات'] },
+            { category: 'Finance', q: 'ما مدى تتبعك لعائد الاستثمار (ROI) على المشاريع؟', opts: ['لا يتم قياس العائد المالي أبداً', 'يتمت مراجعته أحياناً', 'يتم قياسه للاستثمارات الكبرى', 'يتم تتبعه بشكل منهجي لمعظم المشاريع', 'إطار عمل شامل لعائد الاستثمار لجميع المبادرات'] },
+            { category: 'Digital Maturity', q: 'ما هو مستوى التحول الرقمي لديك؟', opts: ['عمليات ورقية في الغالب', 'أدوات رقمية أساسية (البريد الإلكتروني، جداول البيانات)', 'تم اعتماد بعض البرامج السحابية', 'الرقمية أولاً مع أنظمة متكاملة', 'مدفوع بالذكاء الاصطناعي/الأتمتة مع تحليلات متقدمة'] },
+            { category: 'Digital Maturity', q: 'ما مدى فعالية استخدامك للبيانات في اتخاذ القرار؟', opts: ['القرارات تعتمد فقط على الحدس', 'بيانات أساسية مجمعة ولكن نادراً ما تستخدم', 'يتم إنشاء بعض التقارير بشكل دوري', 'قرارات مدروسة بناءً على البيانات على مستوى القيادة', 'ثقافة قائمة على البيانات في جميع أنحاء المنظمة'] },
+            { category: 'HR & Culture', q: 'كيف تقيم ارتباط موظفيك ومعدل الاحتفاظ بهم؟', opts: ['معدل دوران مرتفع، روح معنوية منخفضة', 'ارتباط أقل من المتوسط', 'متوسط — بعض تحديات الاحتفاظ بالموظفين', 'ارتباط جيد مع برامج التطوير', 'ثقافة ممتازة مع احتفاظ قوي بالموظفين'] },
+            { category: 'HR & Culture', q: 'ما مدى هيكلة برامج استقطاب وتطوير المواهب لديك؟', opts: ['لا توجد عمليات موارد بشرية رسمية', 'عملية توظيف أساسية فقط', 'توجد بعض برامج التدريب', 'توظيف منظم مع مسارات تطوير وظيفي', 'إدارة مواهب عالمية المستوى مع تخطيط التعاقب الوظيفي'] }
+        ],
+        ml: [
+            { category: 'Strategy', q: 'നിങ്ങളുടെ കമ്പനിയുടെ 3-5 വർഷത്തെ ബിസിനസ്സ് തന്ത്രം എത്രത്തോളം വ്യക്തമായി നിർവചിക്കപ്പെട്ടിരിക്കുന്നു?', opts: ['ഔപചാരികമായ തന്ത്രങ്ങൾ നിലവിലില്ല', 'അടിസ്ഥാന പ്ലാൻ ഉണ്ട് എന്നാൽ അപൂർവ്വമായി മാത്രമേ ഉപയോഗിക്കാറുള്ളൂ', 'രേഖപ്പെടുത്തപ്പെട്ടിട്ടുണ്ട് എന്നാൽ പുതുക്കേണ്ടതുണ്ട്', 'വർഷം തോറും അവലോകനം ചെയ്യുന്ന വ്യക്തമായ തന്ത്രം', 'ത്രൈമാസ അവലോകനങ്ങളോടെയുള്ള സമഗ്രമായ തന്ത്രം'] },
+            { category: 'Strategy', q: 'നിങ്ങളുടെ മത്സരാധിഷ്ഠിത നേട്ടത്തെക്കുറിച്ച് നിങ്ങളുടെ ടീം എത്രത്തോളം മനസ്സിലാക്കുന്നുണ്ട്?', opts: ['നിർവചിക്കപ്പെട്ടിട്ടില്ല', 'വ്യക്തമല്ലാത്ത ധാരണ', 'ഒരു പരിധി വരെ വ്യക്തമാണ്', 'നേതൃത്വത്തിന് വ്യക്തമായ ധാരണയുണ്ട്', 'എല്ലാ തലങ്ങളിലും തികച്ചും വ്യക്തമാണ്'] },
+            { category: 'Operations', q: 'നിങ്ങളുടെ പ്രധാന ബിസിനസ്സ് പ്രക്രിയകൾ എത്രത്തോളം കാര്യക്ഷമമാണ്?', opts: ['ഭൂരിഭാഗവും മാനുവൽ ആണ്', 'ചില പ്രക്രിയകൾ നിർവചിക്കപ്പെട്ടിട്ടുണ്ട്', 'പ്രധാന പ്രക്രിയകൾ രേഖപ്പെടുത്തപ്പെട്ടിട്ടുണ്ട്', 'ചില ഓട്ടോമേഷനുകളോടെ നന്നായി ക്രമീകരിച്ചിരിക്കുന്നു', 'പൂർണ്ണമായും ഒപ്റ്റിമൈസ് ചെയ്തതും നിരന്തരം മെച്ചപ്പെടുത്തുന്നതുമാണ്'] },
+            { category: 'Operations', q: 'നിങ്ങളുടെ സപ്ലൈ ചെയിൻ അല്ലെങ്കിൽ സേവന വിതരണം എത്രത്തോളം ഫലപ്രദമായി നിങ്ങൾ കൈകാര്യം ചെയ്യുന്നു?', opts: ['പലപ്പോഴും തടസ്സങ്ങൾ ഉണ്ടാകുന്നു', 'അടിസ്ഥാനപരമായ മാനേജ്മെന്റ്', 'മെച്ചപ്പെടുത്താൻ അവസരമുള്ള തരത്തിൽ തൃപ്തികരമാണ്', 'KPI-കൾ ഉപയോഗിച്ച് നന്നായി കൈകാര്യം ചെയ്യുന്നു', 'തത്സമയ നിരീക്ഷണത്തോടെ മികച്ച സേവന വിതരണം'] },
+            { category: 'Finance', q: 'നിങ്ങളുടെ സാമ്പത്തിക ആസൂത്രണവും പ്രവചനവും എത്രത്തോളം ശക്തമാണ്?', opts: ['ഔപചാരികമായ സാമ്പത്തിക ആസൂത്രണം ഇല്ല', 'അടിസ്ഥാന ബജറ്റിംഗ് മാത്രം', 'ചില പ്രവചനങ്ങളോടെയുള്ള വാർഷിക ബജറ്റുകൾ', 'ത്രൈമാസ അടിസ്ഥാനത്തിൽ പുതുക്കുന്ന വിശദമായ സാമ്പത്തിക മോഡലുകൾ', 'തത്സമയ ധനകാര്യ ഡാഷ്‌ബോർഡുകൾ'] },
+            { category: 'Finance', q: 'നിക്ഷേപങ്ങളിലും പ്രോജക്റ്റുകളിലും ലഭിക്കുന്ന ലാഭം (ROI) നിങ്ങൾ എത്രത്തോളം ട്രാക്ക് ചെയ്യുന്നുണ്ട്?', opts: ['ROI ഒരിക്കലും അളക്കാറില്ല', 'അപൂർവ്വമായി അവലോകനം ചെയ്യുന്നു', 'വലിയ നിക്ഷേപങ്ങൾക്ക് മാത്രം അളക്കുന്നു', 'മിക്ക പ്രോജക്റ്റുകൾക്കും വ്യവസ്ഥാപിതമായി ട്രാക്ക് ചെയ്യുന്നു', 'എല്ലാ പദ്ധതികൾക്കും സമഗ്രമായ ROI ചട്ടക്കൂട്'] },
+            { category: 'Digital Maturity', q: 'നിങ്ങളുടെ ഡിജിറ്റൽ പുരോഗതിയുടെ നിലവാരം എത്രയാണ്?', opts: ['ഭൂരിഭാഗവും പേപ്പർ അടിസ്ഥാനമാക്കിയുള്ള പ്രവർത്തനങ്ങൾ', 'അടിസ്ഥാന ഡിജിറ്റൽ ഉപകരണങ്ങൾ (ഇമെയിൽ, സ്പ്രെഡ്ഷീറ്റുകൾ)', 'ചില ക്ലൗഡ് സോഫ്റ്റ്‌വെയറുകൾ ഉപയോഗിക്കുന്നു', 'ഡിജിറ്റൽ മുൻഗണന നൽകുന്ന സംയോജിത സിസ്റ്റങ്ങൾ', 'ആധുനിക അനലിറ്റിക്സോടെയുള്ള AI/ഓട്ടോമേഷൻ അധിഷ്ഠിത പ്രവർത്തനം'] },
+            { category: 'Digital Maturity', q: 'തീരുമാനങ്ങൾ എടുക്കുന്നതിന് നിങ്ങൾ ഡാറ്റ എത്രത്തോളം ഫലപ്രദമായി ഉപയോഗിക്കുന്നു?', opts: ['തീരുമാനങ്ങൾ പൂർണ്ണമായും ഊഹങ്ങളെ അടിസ്ഥാനമാക്കിയുള്ളതാണ്', 'അടിസ്ഥാന ഡാറ്റ ശേഖരിക്കുന്നുണ്ടെങ്കിലും അപൂർവ്വമായി മാത്രമേ ഉപയോഗിക്കുന്നുള്ളൂ', 'ചില റിപ്പോർട്ടുകൾ ഇടയ്ക്കിടെ തയ്യാറാക്കുന്നു', 'നേതൃത്വ തലത്തിൽ ഡാറ്റ അടിസ്ഥാനമാക്കിയുള്ള തീരുമാനങ്ങൾ', 'ഓർഗനൈസേഷനിലുടനീളം ഡാറ്റ അടിസ്ഥാനമാക്കിയുള്ള സംസ്കാരം'] },
+            { category: 'HR & Culture', q: 'നിങ്ങളുടെ ജീവനക്കാരുടെ തൃപ്തിയും നിലനിർത്തലും നിങ്ങൾ എങ്ങനെ വിലയിരുത്തുന്നു?', opts: ['കൂടുതൽ ജീവനക്കാർ ജോലി ഉപേക്ഷിക്കുന്നു, കുറഞ്ഞ തൊഴിൽ സംസ്കാരം', 'ശരാശരിക്ക് താഴെയുള്ള ജീവനക്കാരുടെ തൃപ്തി', 'ശരാശരി നിലവാരം', 'വികസന പരിപാടികളോടെ മികച്ച ജീവനക്കാരുടെ തൃപ്തി', 'മികച്ച തൊഴിൽ സംസ്കാരം'] },
+            { category: 'HR & Culture', q: 'നിങ്ങളുടെ പുതിയ ജീവനക്കാരെ കണ്ടെത്തലും വികസന പരിപാടികളും എത്രത്തോളം ഘടനാപരമാണ്?', opts: ['ഔപചാരികമായ HR പ്രക്രിയകൾ ഇല്ല', 'അടിസ്ഥാനപരമായ നിയമന പ്രക്രിയ മാത്രം', 'ചില പരിശീലന പരിപാടികൾ നിലവിലുണ്ട്', 'വ്യക്തമായ തൊഴിൽ പുരോഗതി പാതയോട് കൂടിയ നിയമന പ്രക്രിയ', 'മികച്ച ടാലന്റ് മാനേജ്‌മെന്റ് സിസ്റ്റം'] }
+        ]
+    };
+
     const assessmentQuestions = [
         { category: 'Strategy', icon: 'fa-chess', q: 'How clearly defined is your company\'s 3-5 year business strategy?', opts: ['No formal strategy exists', 'Basic plan but rarely referenced', 'Documented but needs updating', 'Clear strategy reviewed annually', 'Comprehensive strategy with quarterly reviews'] },
         { category: 'Strategy', icon: 'fa-chess', q: 'How well does your team understand your competitive advantage?', opts: ['Not defined', 'Vaguely understood', 'Somewhat clear', 'Well understood by leadership', 'Crystal clear across all levels'] },
@@ -379,6 +421,19 @@
         { category: 'HR & Culture', icon: 'fa-users', q: 'How would you rate your employee engagement and retention?', opts: ['High turnover, low morale', 'Below average engagement', 'Average — some retention challenges', 'Good engagement with development programs', 'Excellent culture with strong retention'] },
         { category: 'HR & Culture', icon: 'fa-users', q: 'How well-structured are your talent acquisition and development programs?', opts: ['No formal HR processes', 'Basic hiring process only', 'Some training programs exist', 'Structured hiring with career development paths', 'World-class talent management with succession planning'] },
     ];
+
+    function getLocalizedQuestions() {
+        const list = assessmentQuestionsTranslations[LANG] || [];
+        return assessmentQuestions.map((eq, i) => {
+            const lq = list[i] || {};
+            return {
+                category: lq.category || eq.category,
+                icon: eq.icon,
+                q: lq.q || eq.q,
+                opts: lq.opts || eq.opts
+            };
+        });
+    }
 
     let currentQuestion = 0;
     let answers = [];
@@ -411,25 +466,30 @@
     function buildQuestions() {
         const container = document.getElementById('questionsContainer');
         const progress = document.getElementById('assessmentProgress');
+        const questions = getLocalizedQuestions();
 
-        progress.innerHTML = assessmentQuestions.map((_, i) => '<div class="progress-step' + (i === 0 ? ' current' : '') + '" data-step="' + i + '"></div>').join('');
+        if (progress) progress.innerHTML = questions.map((_, i) => '<div class="progress-step' + (i === 0 ? ' current' : '') + '" data-step="' + i + '"></div>').join('');
 
-        container.innerHTML = assessmentQuestions.map((q, i) =>
-            '<div class="assessment-question' + (i === 0 ? ' active' : '') + '" data-q="' + i + '">' +
-            '<div class="assessment-category"><i class="fas ' + q.icon + '"></i> ' + q.category + ' — Question ' + ((i % 2) + 1) + '/2</div>' +
-            '<div class="assessment-q-text">' + q.q + '</div>' +
-            '<div class="assessment-options">' +
-            q.opts.map((opt, oi) =>
-                '<div class="assessment-option" onclick="selectOption(' + i + ',' + (oi + 1) + ',this)">' +
-                '<div class="opt-radio"></div>' +
-                '<span>' + opt + '</span>' +
+        if (container) {
+            container.innerHTML = questions.map((q, i) =>
+                '<div class="assessment-question' + (i === currentQuestion ? ' active' : '') + '" data-q="' + i + '">' +
+                '<div class="assessment-category"><i class="fas ' + q.icon + '"></i> ' + t(q.category) + ' — ' + t('question') + ' ' + ((i % 2) + 1) + '/2</div>' +
+                '<div class="assessment-q-text">' + q.q + '</div>' +
+                '<div class="assessment-options">' +
+                q.opts.map((opt, oi) => {
+                    const isSelected = answers[i] === (oi + 1) ? ' selected' : '';
+                    return '<div class="assessment-option' + isSelected + '" onclick="selectOption(' + i + ',' + (oi + 1) + ',this)">' +
+                    '<div class="opt-radio"></div>' +
+                    '<span>' + opt + '</span>' +
+                    '</div>';
+                }).join('') +
+                '</div>' +
                 '</div>'
-            ).join('') +
-            '</div>' +
-            '</div>'
-        ).join('');
+            ).join('');
+        }
 
-        document.getElementById('assessmentNav').style.display = 'flex';
+        const nav = document.getElementById('assessmentNav');
+        if (nav) nav.style.display = 'flex';
         updateNavButtons();
     }
 
@@ -476,8 +536,11 @@
     function updateNavButtons() {
         const prevBtn = document.getElementById('prevBtn');
         const nextBtn = document.getElementById('nextBtn');
-        if (prevBtn) prevBtn.style.visibility = currentQuestion === 0 ? 'hidden' : 'visible';
-        if (nextBtn) nextBtn.textContent = currentQuestion === assessmentQuestions.length - 1 ? 'Finish Assessment' : 'Next';
+        if (prevBtn) {
+            prevBtn.textContent = t('prev');
+            prevBtn.style.visibility = currentQuestion === 0 ? 'hidden' : 'visible';
+        }
+        if (nextBtn) nextBtn.textContent = currentQuestion === assessmentQuestions.length - 1 ? t('finishAssessment') : t('next');
     }
 
     async function finishAssessment() {
@@ -499,11 +562,11 @@
         const overall = Math.round(Object.values(categoryScores).reduce((a, b) => a + b, 0) / Object.keys(categoryScores).length);
 
         const recommendations = [];
-        if (categoryScores['Strategy'] < 60) recommendations.push('Develop a formal 3-5 year strategic plan with quarterly review cycles.');
-        if (categoryScores['Operations'] < 60) recommendations.push('Document and standardize core processes. Consider lean methodology.');
-        if (categoryScores['Finance'] < 60) recommendations.push('Implement financial dashboards and ROI tracking for all major projects.');
-        if (categoryScores['Digital Maturity'] < 60) recommendations.push('Prioritize digital transformation — start with cloud migration and data analytics.');
-        if (categoryScores['HR & Culture'] < 60) recommendations.push('Invest in employee engagement programs and structured career development paths.');
+        if (categoryScores['Strategy'] < 60) recommendations.push('recStrategy');
+        if (categoryScores['Operations'] < 60) recommendations.push('recOperations');
+        if (categoryScores['Finance'] < 60) recommendations.push('recFinance');
+        if (categoryScores['Digital Maturity'] < 60) recommendations.push('recDigital');
+        if (categoryScores['HR & Culture'] < 60) recommendations.push('recHR');
 
         cachedAssessment = { answers: answers, overall: overall, categories: categoryArr, recommendations: recommendations };
 
@@ -541,7 +604,7 @@
 
         const gradeClass = overall >= 80 ? 'grade-a' : overall >= 60 ? 'grade-b' : overall >= 40 ? 'grade-c' : 'grade-d';
         const gradeLetter = overall >= 80 ? 'A' : overall >= 60 ? 'B' : overall >= 40 ? 'C' : 'D';
-        const gradeLabel = overall >= 80 ? 'Excellent' : overall >= 60 ? 'Good' : overall >= 40 ? 'Needs Improvement' : 'Critical';
+        const gradeLabel = overall >= 80 ? t('excellent') : overall >= 60 ? t('good') : overall >= 40 ? t('needsImprovement') : t('critical');
 
         container.innerHTML =
             '<div class="assessment-results">' +
@@ -552,24 +615,24 @@
             '</div>' +
             '<div class="results-score">' +
             '<div class="score-value">' + overall + '%</div>' +
-            '<div class="score-label">Overall Business Health</div>' +
+            '<div class="score-label">' + t('overallHealth') + '</div>' +
             '</div>' +
             '</div>' +
             '<div class="results-categories">' +
             categories.map(([name, score]) => {
                 const color = score >= 80 ? 'var(--success)' : score >= 60 ? 'var(--primary)' : score >= 40 ? 'var(--warning)' : 'var(--danger)';
                 return '<div class="result-cat">' +
-                    '<div class="result-cat-header"><span>' + name + '</span><span style="color:' + color + ';font-weight:700;">' + score + '%</span></div>' +
+                    '<div class="result-cat-header"><span>' + t(name) + '</span><span style="color:' + color + ';font-weight:700;">' + score + '%</span></div>' +
                     '<div class="kpi-bar"><div class="kpi-fill" style="width:' + score + '%;background:' + color + ';"></div></div>' +
                     '</div>';
             }).join('') +
             '</div>' +
-            (recs.length ? '<div class="results-recs"><div class="results-recs-title"><i class="fas fa-lightbulb"></i> Key Recommendations</div>' +
-                recs.map(r => '<div class="rec-item"><i class="fas fa-arrow-right" style="color:var(--primary);margin-right:8px;font-size:.7rem;"></i>' + r + '</div>').join('') +
+            (recs.length ? '<div class="results-recs"><div class="results-recs-title"><i class="fas fa-lightbulb"></i> ' + t('keyRecommendations') + '</div>' +
+                recs.map(r => '<div class="rec-item"><i class="fas fa-arrow-right" style="color:var(--primary);margin-right:8px;font-size:.7rem;"></i>' + t(r) + '</div>').join('') +
                 '</div>' : '') +
             '<div style="text-align:center;margin-top:20px;display:flex;gap:10px;justify-content:center;flex-wrap:wrap;">' +
-            '<button class="btn btn-secondary" onclick="retakeAssessment()"><i class="fas fa-redo"></i> Retake Assessment</button>' +
-            '<button class="btn btn-primary" onclick="exportAssessmentPDF()"><i class="fas fa-file-pdf"></i> Export PDF Report</button>' +
+            '<button class="btn btn-secondary" onclick="retakeAssessment()"><i class="fas fa-redo"></i> ' + t('retakeAssessment') + '</button>' +
+            '<button class="btn btn-primary" onclick="exportAssessmentPDF()"><i class="fas fa-file-pdf"></i> ' + t('exportPdfReport') + '</button>' +
             '</div>' +
             '</div>';
 
@@ -671,7 +734,7 @@
             const angle = startAngle + i * angleStep;
             const lx = cx + (R + 28) * Math.cos(angle);
             const ly = cy + (R + 28) * Math.sin(angle);
-            ctx.fillText(name, lx, ly + 4);
+            ctx.fillText(t(name), lx, ly + 4);
         });
     }
 
@@ -1232,6 +1295,36 @@
     // ═══════════════════════════════════════════════════════════
     // § AI BUSINESS ADVISOR
     // ═══════════════════════════════════════════════════════════
+    const advisorResponsesTranslations = {
+        hi: {
+            swot: `**SWOT विश्लेषण गाइड:**\n\n**ताकत (Strengths)** — आपकी ताकत क्या है?\n**कमजोरियां (Weaknesses)** — आपकी कमजोरियां क्या हैं?\n**अवसर (Opportunities)** — क्या बाजार के अवसर हैं?\n**खतरे (Threats)** — क्या बाहरी खतरे हैं?\n\n💡 अपनी SWOT देखने के लिए रणनीति स्कोरकार्ड पर जाएं!`,
+            growth: `**विकास रणनीतियाँ (Growth Strategies):**\n\n1. बाजार में प्रवेश करें\n2. नए बाजारों में विस्तार करें (भारत, जीसीसी)\n3. सेवाओं में सुधार करें\n4. रणनीतिक साझेदारी बनाएं`,
+            market_entry: `**जीसीसी बाजार प्रवेश:**\n\n1. स्थानीय बाजार अनुसंधान\n2. व्यापार लाइसेंस और बैंक खाता खोलना\n3. स्थानीय प्रायोजक खोजना\n4. स्थानीय मार्केटिंग`,
+            cost_reduction: `**लागत कम करने के उपाय:**\n\n1. प्रक्रियाओं का स्वचालन\n2. विक्रेताओं का एकीकरण\n3. हाइब्रिड/रिमोट वर्क मॉडल\n4. ऊर्जा दक्षता`,
+            kpi: `**प्रमुख व्यावसायिक KPIs:**\n\n• राजस्व वृद्धि दर\n• लाभ मार्जिन\n• ग्राहक प्रतिधारण दर\n• उत्पादकता दर`,
+            digital: `**डिजिटल परिवर्तन:**\n\n1. प्रौद्योगिकी ऑडिट\n2. क्लाउड सॉफ़्टवेयर उपयोग\n3. एनालिटिक्स डैशबोर्ड\n4. निरंतर नवाचार`,
+            default: `यह एक बढ़िया प्रश्न है! सिम्पैटिको एचआर व्यापार सलाहकार रणनीतिक योजना, बाजार में प्रवेश, और डिजिटल परिवर्तन में आपकी सहायता के लिए तैयार हैं। अधिक जानकारी के लिए +91 954 484 2260 पर संपर्क करें या ईमेल करें: info@simpaticohr.in`
+        },
+        ar: {
+            swot: `**تحليل SWOT:**\n\n**نقاط القوة (Strengths)** — ما هي نقاط قوتك؟\n**نقاط الضعف (Weaknesses)** — ما هي نقاط ضعفك؟\n**الفرص (Opportunities)** — ما هي الفرص المتاحة؟\n**التهديدات (Threats)** — ما هي المخاطر المحتملة؟\n\n💡 انتقل لملء SWOT في بطاقة الإستراتيجية.`,
+            growth: `**إستراتيجيات النمو:**\n\n1. اختراق السوق الحالي\n2. دخول أسواق جديدة (الخليج)\n3. تطوير الخدمات والحلول\n4. شراكات إستراتيجية مجدية`,
+            market_entry: `**دخول أسواق الخليج (GCC):**\n\n1. دراسة السوق المحلى\n2. تأسيس الشركة والتراخيص\n3. البحث عن كفيل محلي\n4. تسويق وتوسيع العمليات`,
+            cost_reduction: `**إطار خفض التكاليف بنسبة 20%:**\n\n1. أتمتة العمليات الأساسية\n2. تفاوض سنوي مع الموردين\n3. العمل عن بعد والمختلط\n4. كفاءة استهلاك الموارد`,
+            kpi: `**مؤشرات الأداء الرئيسية (KPIs):**\n\n• معدل نمو الإيرادات\n• هامش الأرباح الإجمالي\n• معدل الاحتفاظ بالعملاء\n• إنتاجية الموظفين`,
+            digital: `**خارطة طريق التحول الرقمي:**\n\n1. تدقيق الأنظمة الحالية\n2. الانتقال إلى الأنظمة السحابية\n3. لوحات تحليلات البيانات\n4. الابتكار المستمر والتأهيل`,
+            default: `سؤال رائع! مستشارو الأعمال في سيمباتيكو جاهزون لمساعدتكم في التخطيط الإستراتيجي، دخول الأسواق، والتحول الرقمي. لمزيد من المعلومات يرجى التواصل عبر: info@simpaticohr.in`
+        },
+        ml: {
+            swot: `**SWOT വിശകലനം:**\n\n**ശക്തികൾ (Strengths)** — നിങ്ങളുടെ മികച്ച കഴിവുകൾ\n**ബലഹീനതകൾ (Weaknesses)** — മെച്ചപ്പെടുത്തേണ്ട കാര്യങ്ങൾ\n**അവസരങ്ങൾ (Opportunities)** — പുതിയ വിപണി സാധ്യതകൾ\n**ഭീഷണികൾ (Threats)** — ബാഹ്യമായ വെല്ലുവിളികൾ\n\n💡 നിങ്ങളുടെ SWOT പൂർത്തിയാക്കാൻ സ്ട്രാറ്റജി സ്കോർകാർഡ് സന്ദർശിക്കുക.`,
+            growth: `**ബിസിനസ്സ് വളർച്ചാ തന്ത്രങ്ങൾ:**\n\n1. വിപണി വ്യാപിപ്പിക്കുക\n2. പുതിയ വിപണികളിലേക്ക് പ്രവേശിക്കുക (ഇന്ത്യ, ഗൾഫ്)\n3. പുതിയ സേവനങ്ങൾ നൽകുക\n4. തന്ത്രപരമായ പങ്കാളിത്തം`,
+            market_entry: `**ഗൾഫ് വിപണി പ്രവേശന ചെക്ക്‌ലിസ്റ്റ്:**\n\n1. പ്രാദേശിക വിപണി ഗവേഷണം\n2. ബിസിനസ്സ് ലൈസൻസും ബാങ്ക് അക്കൗണ്ടും\n3. ലോക്കൽ സ്പോൺസർ കണ്ടെത്തൽ\n4. പ്രാദേശിക പരസ്യങ്ങൾ`,
+            cost_reduction: `**ചെലവ് കുറയ്ക്കാനുള്ള വഴികൾ:**\n\n1. പ്രവർത്തനങ്ങളുടെ ഓട്ടോമേഷൻ\n2. വെണ്ടർ ഒപ്റ്റിമൈസേഷൻ\n3. റിമോട്ട്/ഹൈബ്രിഡ് ജോലിരീതി\n4. കാര്യക്ഷമമായ വിഭവ വിനിയോഗം`,
+            kpi: `**പ്രധാന ബിസിനസ്സ് KPI-കൾ:**\n\n• വരുമാന വളർച്ചാ നിരക്ക്\n• ലാഭത്തിന്റെ അളവ്\n• കസ്റ്റമർ റിട്ടൻഷൻ റേറ്റ്\n• ഉൽപ്പാദനക്ഷമത നിരക്ക്`,
+            digital: `**ഡിജിറ്റൽ പുരോഗതിയുടെ ഘട്ടങ്ങൾ:**\n\n1. സിസ്റ്റം ഓഡിറ്റ്\n2. ക്ലൗഡ് സോഫ്റ്റ്‌വെയറുകൾ\n3. ഡാറ്റാ അനലിറ്റിക്സ്\n4. പുതിയ സാങ്കേതിക വിദ്യകൾ`,
+            default: `വളരെ നല്ലൊരു ചോദ്യം! സ്ട്രാറ്റജിക് പ്ലാനിംഗ്, ഗൾഫ് മാർക്കറ്റ് എൻട്രി, ഡിജിറ്റൽ ട്രാൻസ്ഫർമേഷൻ എന്നിവയിൽ സഹായിക്കാൻ സിംപാറ്റിക്കോ കൺസൾട്ടന്റുമാർ ലഭ്യമാണ്. കൂടുതൽ വിവരങ്ങൾക്ക്: info@simpaticohr.in`
+        }
+    };
+
     const advisorResponses = {
         swot: `Based on best practices, here's how to analyze your SWOT:\n\n**Strengths** — What do you do better than competitors? What unique resources do you have?\n**Weaknesses** — Where do you lose money? What can competitors exploit?\n**Opportunities** — What market trends favor you? Are there unserved customer segments?\n**Threats** — What regulations are changing? Are competitors gaining ground?\n\n📌 **Action Items:**\n1. List 5 items for each quadrant\n2. Prioritize by impact (high/medium/low)\n3. Map strengths to opportunities (SO strategies)\n4. Create mitigation plans for threats × weaknesses\n\n💡 Go to your **Strategy Scorecard** to fill in your SWOT right now!`,
 
@@ -1245,7 +1338,7 @@
 
         digital: `**Digital Transformation Roadmap:**\n\n**Stage 1: Foundation (Month 1-3)**\n• Audit current technology stack\n• Identify manual processes for automation\n• Cloud migration assessment\n• Cybersecurity baseline audit\n• Staff digital literacy training\n\n**Stage 2: Core Digitization (Month 3-6)**\n• Implement cloud ERP/CRM\n• Digitize document management\n• Automate finance (invoicing, expense tracking)\n• Set up HR automation (Simpatico HR platform!)\n• Build data collection infrastructure\n\n**Stage 3: Intelligence (Month 6-12)**\n• Business analytics dashboards\n• AI-powered decision support\n• Customer experience personalization\n• Predictive analytics implementation\n• Process mining for optimization\n\n**Stage 4: Innovation (Month 12+)**\n• AI/ML integration\n• IoT for operations (if applicable)\n• API ecosystem partnerships\n• Innovation labs/hackathons\n• Continuous improvement culture\n\n📊 **ROI Benchmark:** Digitally mature companies see 26% higher profitability.\n\n💡 Book a Digital Transformation consultation with Simpatico HR!`,
 
-        default: `That's a great question! Here are some key considerations:\n\n**Strategic Thinking Framework:**\n1. Define the problem clearly\n2. Gather data and analyze trends\n3. Identify options and evaluate trade-offs\n4. Choose the best path and create an action plan\n5. Set milestones and KPIs to track progress\n\n**Resources Available to You:**\n• 📊 **Health Assessment** — Evaluate your business across 5 dimensions\n• 📋 **Strategy Scorecard** — SWOT analysis and KPI tracking\n• 📁 **Document Hub** — Organize consulting deliverables\n• 📅 **Meeting Scheduler** — Book consulting sessions\n\n**Need Expert Advice?**\nSimpatico HR's business consultants are available for:\n• Free initial consultation\n• Strategic planning workshops\n• Market entry advisory\n• Digital transformation roadmaps\n\n📞 Contact: +91 954 484 2260\n💬 WhatsApp: Click the green button in the sidebar!\n✉️ Email: simpaticohrconsultancy@gmail.com`
+        default: `That's a great question! Here are some key considerations:\n\n**Strategic Thinking Framework:**\n1. Define the problem clearly\n2. Gather data and analyze trends\n3. Identify options and evaluate trade-offs\n4. Choose the best path and create an action plan\n5. Set milestones and KPIs to track progress\n\n**Resources Available to You:**\n• 📊 **Health Assessment** — Evaluate your business across 5 dimensions\n• 📋 **Strategy Scorecard** — SWOT analysis and KPI tracking\n• 📁 **Document Hub** — Organize consulting deliverables\n• 📅 **Meeting Scheduler** — Book consulting sessions\n\n**Need Expert Advice?**\nSimpatico HR's business consultants are available for:\n• Free initial consultation\n• Strategic planning workshops\n• Market entry advisory\n• Digital transformation roadmaps\n\n📞 Contact: +91 954 484 2260\n💬 WhatsApp: Click the green button in the sidebar!\n✉️ Email: info@simpaticohr.in`
     };
 
     window.sendPrompt = function (text) {
@@ -1253,7 +1346,7 @@
         sendChatMessage();
     };
 
-    window.sendChatMessage = function () {
+    window.sendChatMessage = async function () {
         const input = document.getElementById('chatInput');
         const text = input.value.trim();
         if (!text) return;
@@ -1274,33 +1367,99 @@
             '</div>';
         messages.scrollTop = messages.scrollHeight;
 
-        const lower = text.toLowerCase();
-        let response;
-        if (lower.includes('swot')) response = advisorResponses.swot;
-        else if (lower.includes('growth') || lower.includes('grow')) response = advisorResponses.growth;
-        else if (lower.includes('market entry') || lower.includes('gcc') || lower.includes('checklist')) response = advisorResponses.market_entry;
-        else if (lower.includes('cost') || lower.includes('reduce') || lower.includes('save')) response = advisorResponses.cost_reduction;
-        else if (lower.includes('kpi') || lower.includes('metric') || lower.includes('track')) response = advisorResponses.kpi;
-        else if (lower.includes('digital') || lower.includes('transform') || lower.includes('technology')) response = advisorResponses.digital;
-        else response = advisorResponses.default;
+        try {
+            const WORKER_URL = window.SIMPATICO_CONFIG?.workerUrl || 'https://simpatico-hr-ats.simpaticohrconsultancy.workers.dev';
+            
+            // Build strategy scorecard context
+            const swotContext = [];
+            if (window.cachedSwot) {
+                ['strengths', 'weaknesses', 'opportunities', 'threats'].forEach(k => {
+                    const items = window.cachedSwot[k] || [];
+                    if (items.length) {
+                        swotContext.push(k.toUpperCase() + ': ' + items.map(i => i.content || i).join(', '));
+                    }
+                });
+            }
+            const kpiContext = (window.cachedKPIs || []).map(k => k.name + ': ' + k.current_value + ' / ' + k.target_value + ' ' + (k.unit || '')).join(', ');
+            
+            const systemPrompt = `You are an expert Business Consulting AI Advisor for Simpatico HR. 
+Today's language is: ${LANG}. You MUST respond in the client's language (${LANG}).
+Client Strategy Context:
+SWOT: ${swotContext.length ? swotContext.join(' | ') : 'No SWOT data yet.'}
+KPIs: ${kpiContext.length ? kpiContext : 'No KPIs tracked yet.'}
 
-        setTimeout(() => {
+Be professional, highly strategic, clear, and action-oriented. Support the customer in their business operations. Use Markdown for formatting.`;
+
+            const headers = {
+                'Content-Type': 'application/json',
+                'X-Tenant-ID': getTenantId()
+            };
+            const token = localStorage.getItem('simpatico_token') || localStorage.getItem('sh_token');
+            if (token) headers['Authorization'] = 'Bearer ' + token;
+
+            const response = await fetch(`${WORKER_URL}/ai/chat`, {
+                method: 'POST',
+                headers: headers,
+                body: JSON.stringify({
+                    messages: [
+                        { role: 'system', content: systemPrompt },
+                        { role: 'user', content: text }
+                    ]
+                })
+            });
+
             const typing = document.getElementById(typingId);
             if (typing) typing.remove();
 
-            const formatted = response
-                .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-                .replace(/\n/g, '<br>')
-                .replace(/☐/g, '☐')
-                .replace(/📌|📊|💡|📞|💬|✉️|🏆|👍|⚠️|🚨/g, m => m);
+            if (!response.ok) throw new Error('API failed');
+
+            const data = await response.json();
+            const reply = data.data ? data.data.response : data.response;
 
             messages.innerHTML += '<div class="chat-msg bot">' +
                 '<div class="chat-msg-avatar"><i class="fas fa-robot"></i></div>' +
-                '<div class="chat-msg-bubble">' + formatted + '</div>' +
+                '<div class="chat-msg-bubble">' + markdownToHtml(reply) + '</div>' +
                 '</div>';
             messages.scrollTop = messages.scrollHeight;
-        }, 1200 + Math.random() * 800);
+
+        } catch (err) {
+            console.warn('[consulting AI] API failed, falling back to static keyword response:', err);
+            const typing = document.getElementById(typingId);
+            if (typing) typing.remove();
+
+            const lower = text.toLowerCase();
+            let responseText;
+            const fallbackList = advisorResponsesTranslations[LANG] || advisorResponsesTranslations['en'] || advisorResponses;
+            const originalFallback = advisorResponses;
+
+            if (lower.includes('swot')) responseText = fallbackList.swot || originalFallback.swot;
+            else if (lower.includes('growth') || lower.includes('grow')) responseText = fallbackList.growth || originalFallback.growth;
+            else if (lower.includes('market entry') || lower.includes('gcc') || lower.includes('checklist')) responseText = fallbackList.market_entry || originalFallback.market_entry;
+            else if (lower.includes('cost') || lower.includes('reduce') || lower.includes('save')) responseText = fallbackList.cost_reduction || originalFallback.cost_reduction;
+            else if (lower.includes('kpi') || lower.includes('metric') || lower.includes('track')) responseText = fallbackList.kpi || originalFallback.kpi;
+            else if (lower.includes('digital') || lower.includes('transform') || lower.includes('technology')) responseText = fallbackList.digital || originalFallback.digital;
+            else responseText = fallbackList.default || originalFallback.default;
+
+            messages.innerHTML += '<div class="chat-msg bot">' +
+                '<div class="chat-msg-avatar"><i class="fas fa-robot"></i></div>' +
+                '<div class="chat-msg-bubble">' + markdownToHtml(responseText) + '</div>' +
+                '</div>';
+            messages.scrollTop = messages.scrollHeight;
+        }
     };
+
+    function markdownToHtml(text) {
+        return (text || '')
+            .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+            .replace(/\*(.+?)\*/g, '<em>$1</em>')
+            .replace(/`(.+?)`/g, '<code>$1</code>')
+            .replace(/^### (.+)$/gm, '<h4 style="font-size:14px;font-weight:600;margin:12px 0 6px;">$1</h4>')
+            .replace(/^## (.+)$/gm,  '<h3 style="font-size:15px;font-weight:700;margin:14px 0 6px">$1</h3>')
+            .replace(/^# (.+)$/gm,   '<h2 style="font-size:17px;font-weight:700;margin:16px 0 8px">$1</h2>')
+            .replace(/^[-*] (.+)$/gm, '<li>$1</li>')
+            .replace(/(<li>.*<\/li>\n?)+/g, m => `<ul>${m}</ul>`)
+            .replace(/\n/g, '<br>');
+    }
 
     // ═══════════════════════════════════════════════════════════
     // § PDF EXPORT (jsPDF)
@@ -1590,6 +1749,8 @@
     // ═══════════════════════════════════════════════════════════
     // § MULTI-LANGUAGE / i18n
     // ═══════════════════════════════════════════════════════════
+    // § MULTI-LANGUAGE / i18n
+    // ═══════════════════════════════════════════════════════════
     var LANG = localStorage.getItem('sc_lang') || 'en';
 
     var i18n = {
@@ -1603,6 +1764,19 @@
             newProject: 'New Project', scheduleMeeting: 'Schedule Meeting', askAdvisor: 'Ask AI Advisor',
             welcome: 'Welcome to your Consulting Dashboard!', welcomeSub: 'Start by taking the Business Health Assessment',
             dragHint: 'Drag cards to move between stages',
+            // new keys
+            question: 'Question', next: 'Next', prev: 'Previous', finishAssessment: 'Finish Assessment',
+            excellent: 'Excellent', good: 'Good', needsImprovement: 'Needs Improvement', critical: 'Critical',
+            overallHealth: 'Overall Business Health', keyRecommendations: 'Key Recommendations',
+            retakeAssessment: 'Retake Assessment', exportPdfReport: 'Export PDF Report',
+            recStrategy: 'Develop a formal 3-5 year strategic plan with quarterly review cycles.',
+            recOperations: 'Document and standardize core processes. Consider lean methodology.',
+            recFinance: 'Implement financial dashboards and ROI tracking for all major projects.',
+            recDigital: 'Prioritize digital transformation — start with cloud migration and data analytics.',
+            recHR: 'Invest in employee engagement programs and structured career development paths.',
+            Strategy: 'Strategy', Operations: 'Operations', Finance: 'Finance', 'Digital Maturity': 'Digital Maturity', 'HR & Culture': 'HR & Culture',
+            navDashboard: 'Dashboard', navManagement: 'Management', navIntelligence: 'Intelligence', navLinks: 'Links',
+            chatPlaceholder: 'Ask a business question...', chatStatus: 'Powered by Simpatico Intelligence'
         },
         hi: {
             overview: 'अवलोकन', healthAssessment: 'स्वास्थ्य मूल्यांकन', projectTracker: 'प्रोजेक्ट ट्रैकर',
@@ -1614,6 +1788,19 @@
             newProject: 'नया प्रोजेक्ट', scheduleMeeting: 'बैठक निर्धारित करें', askAdvisor: 'AI सलाहकार से पूछें',
             welcome: 'आपके कंसल्टिंग डैशबोर्ड में स्वागत है!', welcomeSub: 'व्यापार स्वास्थ्य मूल्यांकन से शुरू करें',
             dragHint: 'चरणों के बीच ले जाने के लिए कार्ड खींचें',
+            // new keys
+            question: 'प्रश्न', next: 'आगे', prev: 'पीछे', finishAssessment: 'मूल्यांकन समाप्त करें',
+            excellent: 'उत्कृष्ट', good: 'अच्छा', needsImprovement: 'सुधार की आवश्यकता', critical: 'गंभीर',
+            overallHealth: 'समग्र व्यावसायिक स्वास्थ्य', keyRecommendations: 'प्रमुख सिफारिशें',
+            retakeAssessment: 'मूल्यांकन पुनः करें', exportPdfReport: 'PDF रिपोर्ट निर्यात करें',
+            recStrategy: 'तिमाही समीक्षा चक्रों के साथ एक औपचारिक 3-5 साल की रणनीतिक योजना विकसित करें।',
+            recOperations: 'मुख्य प्रक्रियाओं का दस्तावेजीकरण और मानकीकरण करें। लीन पद्धति पर विचार करें।',
+            recFinance: 'सभी प्रमुख परियोजनाओं के लिए वित्तीय डैशबोर्ड और आरओआई ट्रैकिंग लागू करें।',
+            recDigital: 'डिजिटल परिवर्तन को प्राथमिकता दें — क्लाउड माइग्रेशन और डेटा एनालिटिक्स के साथ शुरू करें।',
+            recHR: 'कर्मचारी जुड़ाव कार्यक्रमों और संरचित कैरियर विकास पथों में निवेश करें।',
+            Strategy: 'रणनीति', Operations: 'संचालन', Finance: 'वित्त', 'Digital Maturity': 'डिजिटल परिपक्वता', 'HR & Culture': 'एचआर और संस्कृति',
+            navDashboard: 'डैशबोर्ड', navManagement: 'प्रबंधन', navIntelligence: 'खुफिया', navLinks: 'लिंक्स',
+            chatPlaceholder: 'एक व्यावसायिक प्रश्न पूछें...', chatStatus: 'सिम्पैटिको इंटेलिजेंस द्वारा संचालित'
         },
         ar: {
             overview: 'نظرة عامة', healthAssessment: 'تقييم الصحة', projectTracker: 'متتبع المشاريع',
@@ -1625,6 +1812,19 @@
             newProject: 'مشروع جديد', scheduleMeeting: 'جدولة اجتماع', askAdvisor: 'اسأل المستشار الذكي',
             welcome: 'مرحباً بك في لوحة الاستشارات!', welcomeSub: 'ابدأ بإجراء تقييم صحة الأعمال',
             dragHint: 'اسحب البطاقات للتنقل بين المراحل',
+            // new keys
+            question: 'سؤال', next: 'التالي', prev: 'السابق', finishAssessment: 'إنهاء التقييم',
+            excellent: 'ممتاز', good: 'جيد', needsImprovement: 'بحاجة إلى تحسين', critical: 'حرج',
+            overallHealth: 'صحة العمل العامة', keyRecommendations: 'التوصيات الرئيسية',
+            retakeAssessment: 'إعادة التقييم', exportPdfReport: 'تصدير تقرير PDF',
+            recStrategy: 'تطوير خطة إستراتيجية رسمية لمدة 3-5 سنوات مع دورات مراجعة ربع سنوية.',
+            recOperations: 'توثيق وتوحيد العمليات الأساسية. النظر في منهجية لين (Lean).',
+            recFinance: 'تنفيذ لوحات المعلومات المالية وتتبع عائد الاستثمار لجميع المشاريع الكبرى.',
+            recDigital: 'تحديد أولويات التحول الرقمي — ابدأ بالهجرة السحابية وتحليلات البيانات.',
+            recHR: 'الاستثمار في برامج مشاركة الموظفين ومسارات التطوير المهني المهيكلة.',
+            Strategy: 'الاستراتيجية', Operations: 'العمليات', Finance: 'المالية', 'Digital Maturity': 'النضج الرقمي', 'HR & Culture': 'الموارد البشرية والثقافة',
+            navDashboard: 'لوحة القيادة', navManagement: 'الإدارة', navIntelligence: 'الذكاء', navLinks: 'روابط',
+            chatPlaceholder: 'اسأل سؤالاً تجارياً...', chatStatus: 'مدعوم من ذكاء سيمباتيكو'
         },
         ml: {
             overview: 'അവലോകനം', healthAssessment: 'ആരോഗ്യ വിലയിരുത്തൽ', projectTracker: 'പ്രോജക്ട് ട്രാക്കർ',
@@ -1636,6 +1836,19 @@
             newProject: 'പുതിയ പ്രോജക്ട്', scheduleMeeting: 'മീറ്റിംഗ് ഷെഡ്യൂൾ ചെയ്യുക', askAdvisor: 'AI ഉപദേശകനോട് ചോദിക്കുക',
             welcome: 'നിങ്ങളുടെ കൺസൾട്ടിംഗ് ഡാഷ്ബോർഡിലേക്ക് സ്വാഗതം!', welcomeSub: 'ബിസിനസ് ആരോഗ്യ വിലയിരുത്തൽ ആരംഭിക്കുക',
             dragHint: 'ഘട്ടങ്ങൾക്കിടയിൽ നീക്കാൻ കാർഡുകൾ വലിച്ചിടുക',
+            // new keys
+            question: 'ചോദ്യം', next: 'അടുത്തത്', prev: 'മുമ്പത്തേത്', finishAssessment: 'വിലയിരുത്തൽ പൂർത്തിയാക്കുക',
+            excellent: 'മികച്ചത്', good: 'നല്ലത്', needsImprovement: 'മെച്ചപ്പെടുത്തേണ്ടതുണ്ട്', critical: 'ഗുരുതരം',
+            overallHealth: 'ആകെ ബിസിനസ്സ് ആരോഗ്യം', keyRecommendations: 'പ്രധാന നിർദ്ദേശങ്ങൾ',
+            retakeAssessment: 'വീണ്ടും വിലയിരുത്തുക', exportPdfReport: 'PDF റിപ്പോർട്ട് ഡൗൺലോഡ് ചെയ്യുക',
+            recStrategy: 'ത്രൈമാസ അവലോകനങ്ങളോടെയുള്ള 3-5 വർഷത്തെ തന്ത്രപരമായ പ്ലാൻ തയ്യാറാക്കുക.',
+            recOperations: 'പ്രധാന പ്രവർത്തനങ്ങൾ ഡോക്യുമെന്റ് ചെയ്യുകയും ഒപ്റ്റിമൈസ് ചെയ്യുകയും ചെയ്യുക.',
+            recFinance: 'സാമ്പത്തിക ഡാഷ്‌ബോർഡുകളും ROI ട്രാക്കിംഗും നടപ്പിലാക്കുക.',
+            recDigital: 'ഡിജിറ്റൽ പുരോഗതിക്ക് മുൻഗണന നൽകുക — ക്ലൗഡ് മൈഗ്രേഷനിലൂടെ ആരംഭിക്കുക.',
+            recHR: 'ജീവനക്കാരുടെ തൃപ്തി വർദ്ധിപ്പിക്കുന്ന പ്രോഗ്രാമുകളിൽ നിക്ഷേപിക്കുക.',
+            Strategy: 'തന്ത്രം', Operations: 'പ്രവർത്തനങ്ങൾ', Finance: 'ധനകാര്യം', 'Digital Maturity': 'ഡിജിറ്റൽ പുരോഗതി', 'HR & Culture': 'HR & സംസ്കാരം',
+            navDashboard: 'ഡാഷ്‌ബോർഡ്', navManagement: 'മാനേജ്‌മെന്റ്', navIntelligence: 'ഇന്റലിജൻസ്', navLinks: 'ലിങ്കുകൾ',
+            chatPlaceholder: 'ഒരു ബിസിനസ്സ് ചോദ്യം ചോദിക്കുക...', chatStatus: 'സിംപാറ്റിക്കോ ഇന്റലിജൻസ് നൽകുന്നത്'
         }
     };
 
@@ -1654,7 +1867,7 @@
         });
         // Update key UI text
         applyLanguage();
-        var langNames = { en: 'Language: English', hi: 'भാ\u0937ा: हिंदी', ar: 'اللغة: العربية', ml: 'ഭാഷ: മലയാളം' };
+        var langNames = { en: 'Language: English', hi: 'भाषा: हिंदी', ar: 'اللغة: العربية', ml: 'ഭാഷ: മലയാളം' };
         showToast(langNames[lang] || 'Language changed', 'success');
     };
 
@@ -1668,6 +1881,55 @@
             var el = document.getElementById(pair[0]);
             if (el) el.textContent = t(pair[1]);
         });
+
+        // Update nav items
+        document.querySelectorAll('.nav-item[data-section]').forEach(el => {
+            const sec = el.dataset.section;
+            const icon = el.querySelector('i');
+            const badge = el.querySelector('.nav-badge');
+            el.innerHTML = '';
+            if (icon) el.appendChild(icon);
+            el.appendChild(document.createTextNode(' ' + t(sec)));
+            if (badge) el.appendChild(badge);
+        });
+
+        // Update nav labels
+        const labels = document.querySelectorAll('.nav-label');
+        if (labels.length >= 4) {
+            labels[0].textContent = t('navDashboard');
+            labels[1].textContent = t('navManagement');
+            labels[2].textContent = t('navIntelligence');
+            labels[3].textContent = t('navLinks');
+        }
+
+        // Update active page titles
+        const activeNav = document.querySelector('.nav-item.active');
+        if (activeNav) {
+            const sectionId = activeNav.dataset.section;
+            const titles = sectionTitles[sectionId];
+            if (titles) {
+                document.getElementById('pageTitle').textContent = t(titles[0]);
+                document.getElementById('pageTitleSub').textContent = t(titles[1]);
+            }
+        }
+
+        // Re-render assessment screen if loaded
+        if (document.getElementById('questionsContainer')) {
+            if (cachedAssessment) {
+                showResults(cachedAssessment);
+            } else {
+                buildQuestions();
+            }
+        }
+
+        // Re-render AI chat header status/name and input placeholders
+        const chatInput = document.getElementById('chatInput');
+        if (chatInput) chatInput.placeholder = t('chatPlaceholder');
+        const chatName = document.querySelector('.chat-name');
+        if (chatName) chatName.textContent = t('aiAdvisor');
+        const chatStatus = document.querySelector('.chat-status');
+        if (chatStatus) chatStatus.textContent = t('chatStatus');
+
         // Apply RTL
         if (LANG === 'ar') {
             document.documentElement.dir = 'rtl';
