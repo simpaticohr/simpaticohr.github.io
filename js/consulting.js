@@ -582,14 +582,6 @@
         if (cachedAssessment && cachedAssessment.dbId) {
             await dbDelete(TABLES.assessments, cachedAssessment.dbId);
         }
-        // Also clear from Supabase (delete latest)
-        const client = sb();
-        if (client) {
-            try {
-                const cid = getTenantId();
-                await client.from(TABLES.assessments).delete().eq('tenant_id', cid);
-            } catch (e) { /* ignore */ }
-        }
         cachedAssessment = null;
         answers = [];
         currentQuestion = 0;
