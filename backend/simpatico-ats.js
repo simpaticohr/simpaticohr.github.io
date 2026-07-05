@@ -6313,6 +6313,7 @@ async function handleCompanyRegister(request, env, ctx) {
     admin_phone,
     slug,
     turnstile_token,
+    service_type,
   } = body;
 
   if (!name || !email) throw new ValidationError("name and email are required");
@@ -6397,7 +6398,7 @@ async function handleCompanyRegister(request, env, ctx) {
           full_name: admin_name || "Admin",
           email,
           phone: admin_phone || null,
-          role: "company_admin",
+          role: service_type === "consulting" ? "consulting_admin" : "company_admin",
           company_id: company.id,
           is_active: true,
         },
@@ -6414,10 +6415,13 @@ async function handleCompanyRegister(request, env, ctx) {
 
   // Await the welcome email so Cloudflare doesn't terminate the thread early
   try {
+    const emailType = service_type === "consulting" ? "consulting" : "company";
     await sendEmail(env, {
       to: email,
-      subject: `Welcome to SimpaticoHR, ${admin_name || "Team"}!`,
-      html: registrationWelcomeHtml(admin_name || "there", name, "company"),
+      subject: service_type === "consulting"
+        ? `Welcome to Simpatico Business Consulting, ${admin_name || "Team"}!`
+        : `Welcome to SimpaticoHR, ${admin_name || "Team"}!`,
+      html: registrationWelcomeHtml(admin_name || "there", name, emailType),
     });
   } catch (e) {
     console.warn("[handleCompanyRegister] Welcome email failed:", e);
@@ -6428,10 +6432,11 @@ async function handleCompanyRegister(request, env, ctx) {
     const adminEmail = env.ADMIN_NOTIFICATION_EMAIL || "simpaticohrconsultancy@gmail.com";
     await sendEmail(env, {
       to: adminEmail,
-      subject: `🆕 New Company Registered: ${name}`,
+      subject: `🆕 New ${service_type === "consulting" ? "Consulting Client" : "Company"} Registered: ${name}`,
       html: `<div style="font-family:sans-serif;max-width:600px;margin:auto;padding:24px">
-        <h2 style="color:#1E40AF;margin-bottom:16px">New Company Registration</h2>
+        <h2 style="color:${service_type === "consulting" ? "#059669" : "#1E40AF"};margin-bottom:16px">New ${service_type === "consulting" ? "Business Consulting Client" : "Company"} Registration</h2>
         <table style="width:100%;border-collapse:collapse;font-size:14px">
+          <tr><td style="padding:8px 12px;font-weight:600;color:#374151;border-bottom:1px solid #E5E7EB">Service</td><td style="padding:8px 12px;border-bottom:1px solid #E5E7EB">${service_type === "consulting" ? "📊 Business Consulting" : "🏢 HR & Recruitment Platform"}</td></tr>
           <tr><td style="padding:8px 12px;font-weight:600;color:#374151;border-bottom:1px solid #E5E7EB">Company</td><td style="padding:8px 12px;border-bottom:1px solid #E5E7EB">${name}</td></tr>
           <tr><td style="padding:8px 12px;font-weight:600;color:#374151;border-bottom:1px solid #E5E7EB">Email</td><td style="padding:8px 12px;border-bottom:1px solid #E5E7EB">${email}</td></tr>
           <tr><td style="padding:8px 12px;font-weight:600;color:#374151;border-bottom:1px solid #E5E7EB">Admin</td><td style="padding:8px 12px;border-bottom:1px solid #E5E7EB">${admin_name || "Not provided"}</td></tr>
@@ -6441,7 +6446,7 @@ async function handleCompanyRegister(request, env, ctx) {
           <tr><td style="padding:8px 12px;font-weight:600;color:#374151">Plan</td><td style="padding:8px 12px">${subscription_plan || "trial"}</td></tr>
         </table>
         <p style="margin-top:16px;font-size:13px;color:#6B7280">Registered at ${new Date().toISOString()}</p>
-        <a href="https://simpaticohrconsultancy.com/platform/super-admin.html" style="display:inline-block;margin-top:12px;padding:10px 20px;background:#1E40AF;color:#fff;border-radius:8px;text-decoration:none;font-size:13px">View in Admin Panel →</a>
+        <a href="https://simpaticohrconsultancy.com/platform/super-admin.html" style="display:inline-block;margin-top:12px;padding:10px 20px;background:${service_type === "consulting" ? "#059669" : "#1E40AF"};color:#fff;border-radius:8px;text-decoration:none;font-size:13px">View in Admin Panel →</a>
       </div>`,
     });
   } catch (e) {
@@ -6460,7 +6465,9 @@ async function handleWelcomeEmail(request, env, ctx) {
   if (!email || !name) throw new ValidationError("email and name are required");
 
   const subject =
-    type === "company"
+    type === "consulting"
+      ? `Welcome to Simpatico Business Consulting, ${name}! Your account is ready 🚀`
+      : type === "company"
       ? `Welcome to SimpaticoHR, ${name}! Your company is ready 🚀`
       : `Welcome to SimpaticoHR, ${name}! 🎉`;
 
@@ -6478,26 +6485,45 @@ async function handleWelcomeEmail(request, env, ctx) {
 }
 
 function registrationWelcomeHtml(name, companyName, type) {
-  const greeting =
-    type === "company"
-      ? `Your company <strong>${companyName}</strong> has been registered on SimpaticoHR.`
-      : `You've successfully registered on SimpaticoHR as a candidate.`;
+  const isConsulting = type === "consulting";
+  const isCompany = type === "company";
 
-  const nextSteps =
-    type === "company"
-      ? `<li style="margin-bottom:8px">Post your first job opening (1 included in free trial)</li>
-         <li style="margin-bottom:8px">Configure your hiring pipeline</li>
-         <li style="margin-bottom:8px">Invite your HR team members</li>
-         <li style="margin-bottom:8px">Run an AI Proctored Interview (1 included in free trial)</li>
-         <li style="margin-top:16px; color:#b91c1c;"><em>Note: Your free trial includes 1 job post and 1 interview, and is valid for 2 days.</em></li>`
-      : `<li>Complete your profile</li><li>Upload your latest resume</li><li>Browse job openings</li><li>Prepare with AI mock interviews</li>`;
+  const greeting = isConsulting
+    ? `Your company <strong>${companyName}</strong> has been registered on Simpatico Business Consulting.`
+    : isCompany
+    ? `Your company <strong>${companyName}</strong> has been registered on SimpaticoHR.`
+    : `You've successfully registered on SimpaticoHR as a candidate.`;
+
+  const nextSteps = isConsulting
+    ? `<li style="margin-bottom:8px">Complete your company profile and business details</li>
+       <li style="margin-bottom:8px">Schedule a free consultation with our business strategists</li>
+       <li style="margin-bottom:8px">Take the complimentary Business Health Assessment</li>
+       <li style="margin-bottom:8px">Explore our consulting services: strategy, market entry, digital transformation & more</li>
+       <li style="margin-bottom:8px">Access your personalized consulting dashboard</li>`
+    : isCompany
+    ? `<li style="margin-bottom:8px">Post your first job opening (1 included in free trial)</li>
+       <li style="margin-bottom:8px">Configure your hiring pipeline</li>
+       <li style="margin-bottom:8px">Invite your HR team members</li>
+       <li style="margin-bottom:8px">Run an AI Proctored Interview (1 included in free trial)</li>
+       <li style="margin-top:16px; color:#b91c1c;"><em>Note: Your free trial includes 1 job post and 1 interview, and is valid for 2 days.</em></li>`
+    : `<li>Complete your profile</li><li>Upload your latest resume</li><li>Browse job openings</li><li>Prepare with AI mock interviews</li>`;
+
+  const headerBg = isConsulting
+    ? "linear-gradient(135deg,#059669,#0ea5e9)"
+    : "linear-gradient(135deg,#1E40AF,#3B82F6)";
+  const headerTitle = isConsulting ? "Welcome to Simpatico Business Consulting" : "Welcome to SimpaticoHR";
+  const headerSub = isConsulting ? "Expert Business Advisory &amp; Strategic Consulting" : "India&#39;s AI-Powered Recruitment Platform";
+  const ctaUrl = isConsulting ? "https://simpaticohr.in/dashboard/consulting.html" : "https://simpaticohr.in/platform/login.html";
+  const ctaText = isConsulting ? "Go to Consulting Dashboard" : "Go to Dashboard";
+  const ctaBg = isConsulting ? "linear-gradient(135deg,#059669,#0ea5e9)" : "linear-gradient(135deg,#1E40AF,#3B82F6)";
+  const linkColor = isConsulting ? "#059669" : "#3B82F6";
 
   return `
     <div style="max-width:600px;margin:0 auto;font-family:'Inter',Arial,sans-serif;background:#f8fafc;padding:32px 0;">
       <div style="background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,0.06);margin:0 16px;">
-        <div style="background:linear-gradient(135deg,#1E40AF,#3B82F6);padding:32px 24px;text-align:center;">
-          <h1 style="color:#fff;font-size:24px;margin:0;font-weight:800;">Welcome to SimpaticoHR</h1>
-          <p style="color:rgba(255,255,255,0.85);font-size:14px;margin:8px 0 0;">India&#39;s AI-Powered Recruitment Platform</p>
+        <div style="background:${headerBg};padding:32px 24px;text-align:center;">
+          <h1 style="color:#fff;font-size:24px;margin:0;font-weight:800;">${headerTitle}</h1>
+          <p style="color:rgba(255,255,255,0.85);font-size:14px;margin:8px 0 0;">${headerSub}</p>
         </div>
         <div style="padding:32px 24px;">
           <p style="font-size:16px;color:#1f2937;margin:0 0 16px;">Hi <strong>${name}</strong>,</p>
@@ -6505,11 +6531,11 @@ function registrationWelcomeHtml(name, companyName, type) {
           <p style="font-size:14px;color:#4b5563;font-weight:600;margin:0 0 12px;">Here's what to do next:</p>
           <ul style="font-size:14px;color:#4b5563;line-height:2;padding-left:20px;margin:0 0 24px;">${nextSteps}</ul>
           <div style="text-align:center;margin:24px 0;">
-            <a href="https://simpaticohr.in/platform/login.html" style="display:inline-block;background:linear-gradient(135deg,#1E40AF,#3B82F6);color:#fff;text-decoration:none;padding:14px 32px;border-radius:10px;font-weight:700;font-size:15px;">Go to Dashboard &rarr;</a>
+            <a href="${ctaUrl}" style="display:inline-block;background:${ctaBg};color:#fff;text-decoration:none;padding:14px 32px;border-radius:10px;font-weight:700;font-size:15px;">${ctaText} &rarr;</a>
           </div>
         </div>
         <div style="background:#f1f5f9;padding:16px 24px;text-align:center;border-top:1px solid #e2e8f0;">
-          <p style="font-size:12px;color:#94a3b8;margin:0;">&copy; ${new Date().getFullYear()} SimpaticoHR Consultancy Pvt Ltd &middot; <a href="https://simpaticohr.in" style="color:#3B82F6;text-decoration:none;">simpaticohr.in</a></p>
+          <p style="font-size:12px;color:#94a3b8;margin:0;">&copy; ${new Date().getFullYear()} SimpaticoHR Consultancy Pvt Ltd &middot; <a href="https://simpaticohr.in" style="color:${linkColor};text-decoration:none;">simpaticohr.in</a></p>
         </div>
       </div>
     </div>`;
