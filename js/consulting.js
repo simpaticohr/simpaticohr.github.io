@@ -140,6 +140,7 @@
         initCalendar();
         updateOverviewStats();
         if (typeof window.loadByokSettings === 'function') window.loadByokSettings();
+        if (typeof initVoiceSettings === 'function') initVoiceSettings();
     });
 
     function initUserAvatar() {
@@ -1490,6 +1491,10 @@
         const text = input.value.trim();
         if (!text) return;
 
+        if (window.speechSynthesis) {
+            window.speechSynthesis.cancel();
+        }
+
         const messages = document.getElementById('chatMessages');
 
         messages.innerHTML += '<div class="chat-msg user">' +
@@ -1648,6 +1653,7 @@ Be professional, highly strategic, clear, and action-oriented. Support the custo
                 '<div class="chat-msg-bubble">' + markdownToHtml(reply) + '</div>' +
                 '</div>';
             messages.scrollTop = messages.scrollHeight;
+            speakText(reply);
 
         } catch (err) {
             console.warn('[consulting AI] API failed, falling back to static keyword response:', err);
@@ -1672,6 +1678,7 @@ Be professional, highly strategic, clear, and action-oriented. Support the custo
                 '<div class="chat-msg-bubble">' + markdownToHtml(responseText) + '</div>' +
                 '</div>';
             messages.scrollTop = messages.scrollHeight;
+            speakText(responseText);
         }
     };
 
@@ -2003,7 +2010,8 @@ Be professional, highly strategic, clear, and action-oriented. Support the custo
             recHR: 'Invest in employee engagement programs and structured career development paths.',
             Strategy: 'Strategy', Operations: 'Operations', Finance: 'Finance', 'Digital Maturity': 'Digital Maturity', 'HR & Culture': 'HR & Culture',
             navDashboard: 'Dashboard', navManagement: 'Management', navIntelligence: 'Intelligence', navLinks: 'Links',
-            chatPlaceholder: 'Ask a business question...', chatStatus: 'Powered by Simpatico Intelligence'
+            chatPlaceholder: 'Ask a business question...', chatStatus: 'Powered by Simpatico Intelligence',
+            voiceOutputEnabled: 'Voice output enabled', voiceOutputDisabled: 'Voice output disabled', voiceInputTooltip: 'Start Voice Typing'
         },
         hi: {
             overview: 'अवलोकन', healthAssessment: 'स्वास्थ्य मूल्यांकन', projectTracker: 'प्रोजेक्ट ट्रैकर',
@@ -2027,7 +2035,8 @@ Be professional, highly strategic, clear, and action-oriented. Support the custo
             recHR: 'कर्मचारी जुड़ाव कार्यक्रमों और संरचित कैरियर विकास पथों में निवेश करें।',
             Strategy: 'रणनीति', Operations: 'संचालन', Finance: 'वित्त', 'Digital Maturity': 'डिजिटल परिपक्वता', 'HR & Culture': 'एचआर और संस्कृति',
             navDashboard: 'डैशबोर्ड', navManagement: 'प्रबंधन', navIntelligence: 'खुफिया', navLinks: 'लिंक्स',
-            chatPlaceholder: 'एक व्यावसायिक प्रश्न पूछें...', chatStatus: 'सिम्पैटिको इंटेलिजेंस द्वारा संचालित'
+            chatPlaceholder: 'एक व्यावसायिक प्रश्न पूछें...', chatStatus: 'सिम्पैटिको इंटेलिजेंस द्वारा संचालित',
+            voiceOutputEnabled: 'आवाज आउटपुट सक्षम', voiceOutputDisabled: 'आवाज आउटपुट अक्षम', voiceInputTooltip: 'आवाज टाइपिंग शुरू करें'
         },
         ar: {
             overview: 'نظرة عامة', healthAssessment: 'تقييم الصحة', projectTracker: 'متتبع المشاريع',
@@ -2051,7 +2060,8 @@ Be professional, highly strategic, clear, and action-oriented. Support the custo
             recHR: 'الاستثمار في برامج مشاركة الموظفين ومسارات التطوير المهني المهيكلة.',
             Strategy: 'الاستراتيجية', Operations: 'العمليات', Finance: 'المالية', 'Digital Maturity': 'النضج الرقمي', 'HR & Culture': 'الموارد البشرية والثقافة',
             navDashboard: 'لوحة القيادة', navManagement: 'الإدارة', navIntelligence: 'الذكاء', navLinks: 'روابط',
-            chatPlaceholder: 'اسأل سؤالاً تجارياً...', chatStatus: 'مدعوم من ذكاء سيمباتيكو'
+            chatPlaceholder: 'اسأل سؤالاً تجارياً...', chatStatus: 'مدعوم من ذكاء سيمباتيكو',
+            voiceOutputEnabled: 'تم تمكين الصوت', voiceOutputDisabled: 'تم تعطيل الصوت', voiceInputTooltip: 'بدء الكتابة بالصوت'
         },
         ml: {
             overview: 'അവലോകനം', healthAssessment: 'ആരോഗ്യ വിലയിരുത്തൽ', projectTracker: 'പ്രോജക്ട് ട്രാക്കർ',
@@ -2156,6 +2166,14 @@ Be professional, highly strategic, clear, and action-oriented. Support the custo
         if (chatName) chatName.textContent = t('aiAdvisor');
         const chatStatus = document.querySelector('.chat-status');
         if (chatStatus) chatStatus.textContent = t('chatStatus');
+        
+        const micBtn = document.getElementById('chatMicBtn');
+        if (micBtn && !isListening) micBtn.title = t('voiceInputTooltip');
+        const voiceBtn = document.getElementById('voiceOutputBtn');
+        if (voiceBtn) {
+            const enabled = localStorage.getItem('simpatico_voice_output_enabled') === 'true';
+            voiceBtn.title = enabled ? t('voiceOutputEnabled') : t('voiceOutputDisabled');
+        }
 
         // Apply RTL
         if (LANG === 'ar') {
@@ -2168,6 +2186,172 @@ Be professional, highly strategic, clear, and action-oriented. Support the custo
     // Apply saved language on load
     if (LANG !== 'en') {
         setTimeout(function() { applyLanguage(); }, 200);
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // § VOICE-TO-VOICE (SPEECH RECOGNITION & SYNTHESIS)
+    // ═══════════════════════════════════════════════════════════
+    var activeRecognition = null;
+    var isListening = false;
+
+    function getVoiceLangCode(lang) {
+        const map = {
+            'en': 'en-IN',
+            'hi': 'hi-IN',
+            'ar': 'ar-AE',
+            'ml': 'ml-IN'
+        };
+        return map[lang] || 'en-US';
+    }
+
+    function initVoiceSettings() {
+        const enabled = localStorage.getItem('simpatico_voice_output_enabled') === 'true';
+        updateVoiceOutputButtonUI(enabled);
+        
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        const micBtn = document.getElementById('chatMicBtn');
+        if (!SpeechRecognition && micBtn) {
+            micBtn.style.display = 'none';
+        }
+    }
+
+    function updateVoiceOutputButtonUI(enabled) {
+        const btn = document.getElementById('voiceOutputBtn');
+        if (!btn) return;
+        const icon = btn.querySelector('i');
+        if (enabled) {
+            btn.style.background = 'var(--primary)';
+            btn.style.color = '#fff';
+            if (icon) icon.className = 'fas fa-volume-up';
+            btn.title = t('voiceOutputEnabled') || 'Voice output enabled';
+        } else {
+            btn.style.background = 'rgba(255,255,255,0.15)';
+            btn.style.color = 'rgba(255,255,255,0.6)';
+            if (icon) icon.className = 'fas fa-volume-mute';
+            btn.title = t('voiceOutputDisabled') || 'Voice output disabled';
+        }
+    }
+
+    window.toggleVoiceOutput = function () {
+        let enabled = localStorage.getItem('simpatico_voice_output_enabled') === 'true';
+        enabled = !enabled;
+        localStorage.setItem('simpatico_voice_output_enabled', enabled ? 'true' : 'false');
+        updateVoiceOutputButtonUI(enabled);
+        if (!enabled && window.speechSynthesis) {
+            window.speechSynthesis.cancel();
+        }
+        showToast(enabled ? 'Voice responses turned ON' : 'Voice responses turned OFF', 'info');
+    };
+
+    window.toggleVoiceInput = function () {
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (!SpeechRecognition) {
+            showToast('Voice typing is not supported by your browser', 'error');
+            return;
+        }
+
+        const micBtn = document.getElementById('chatMicBtn');
+        if (isListening) {
+            if (activeRecognition) activeRecognition.stop();
+            return;
+        }
+
+        const recognition = new SpeechRecognition();
+        activeRecognition = recognition;
+        
+        recognition.continuous = false;
+        recognition.interimResults = true;
+        recognition.lang = getVoiceLangCode(LANG);
+
+        let finalTranscript = '';
+
+        recognition.onstart = function () {
+            isListening = true;
+            if (micBtn) {
+                micBtn.classList.add('listening');
+                micBtn.innerHTML = '<i class="fas fa-microphone-alt"></i>';
+                micBtn.title = 'Listening... Click to stop';
+            }
+            if (window.speechSynthesis) window.speechSynthesis.cancel();
+        };
+
+        recognition.onresult = function (event) {
+            let interimTranscript = '';
+            for (let i = event.resultIndex; i < event.results.length; ++i) {
+                if (event.results[i].isFinal) {
+                    finalTranscript += event.results[i][0].transcript;
+                } else {
+                    interimTranscript += event.results[i][0].transcript;
+                }
+            }
+            const chatInput = document.getElementById('chatInput');
+            if (chatInput) chatInput.value = finalTranscript || interimTranscript;
+        };
+
+        recognition.onerror = function (event) {
+            console.error('Speech recognition error:', event.error);
+            if (event.error === 'not-allowed') {
+                showToast('Microphone access denied', 'error');
+            } else {
+                showToast('Voice typing error: ' + event.error, 'error');
+            }
+            stopListening();
+        };
+
+        recognition.onend = function () {
+            stopListening();
+            if (finalTranscript.trim()) {
+                sendChatMessage();
+            }
+        };
+
+        function stopListening() {
+            isListening = false;
+            activeRecognition = null;
+            if (micBtn) {
+                micBtn.classList.remove('listening');
+                micBtn.innerHTML = '<i class="fas fa-microphone"></i>';
+                micBtn.title = t('voiceInputTooltip') || 'Start Voice Typing';
+            }
+        }
+
+        recognition.start();
+    };
+
+    function cleanTextForSpeech(text) {
+        if (!text) return '';
+        let cleaned = text;
+        cleaned = cleaned.replace(/<[^>]*>/g, '');
+        cleaned = cleaned.replace(/\*\*([^*]+)\*\*/g, '$1');
+        cleaned = cleaned.replace(/\*([^*]+)\*/g, '$1');
+        cleaned = cleaned.replace(/`([^`]+)`/g, '$1');
+        cleaned = cleaned.replace(/^#+\s+/gm, '');
+        cleaned = cleaned.replace(/^[-*+]\s+/gm, '');
+        cleaned = cleaned.replace(/\[([^\]]+)\]\([^)]+\)/g, '$1');
+        cleaned = cleaned.replace(/[\uE000-\uF8FF]|\uD83C[\uDC00-\uDFFF]|\uD83D[\uDC00-\uDFFF]|[\u2011-\u26FF]|\uD83E[\uDD10-\uDDFF]/g, '');
+        cleaned = cleaned.replace(/\s+/g, ' ');
+        return cleaned.trim();
+    }
+
+    function speakText(text) {
+        if (!window.speechSynthesis) return;
+        window.speechSynthesis.cancel();
+
+        const enabled = localStorage.getItem('simpatico_voice_output_enabled') === 'true';
+        if (!enabled) return;
+
+        const cleaned = cleanTextForSpeech(text);
+        if (!cleaned) return;
+
+        const utterance = new SpeechSynthesisUtterance(cleaned);
+        const langCode = getVoiceLangCode(LANG);
+        utterance.lang = langCode;
+
+        const voices = window.speechSynthesis.getVoices();
+        const matchingVoice = voices.find(v => v.lang.toLowerCase() === langCode.toLowerCase() || v.lang.toLowerCase().startsWith(langCode.substring(0, 2).toLowerCase()));
+        if (matchingVoice) utterance.voice = matchingVoice;
+
+        window.speechSynthesis.speak(utterance);
     }
 
     // ═══════════════════════════════════════════════════════════
