@@ -2194,6 +2194,17 @@ Be professional, highly strategic, clear, and action-oriented. Support the custo
     var activeRecognition = null;
     var isListening = false;
 
+    // Gemini Live Real-time Call variables
+    var liveSocket = null;
+    var liveAudioContext = null;
+    var liveMicStream = null;
+    var liveScriptNode = null;
+    var livePlaybackTime = 0;
+    var liveAudioQueue = [];
+    var isLiveCallActive = false;
+    var currentBotLiveMessageEl = null;
+    var currentUserLiveMessageEl = null;
+
     function getVoiceLangCode(lang) {
         const map = {
             'en': 'en-IN',
@@ -2316,6 +2327,407 @@ Be professional, highly strategic, clear, and action-oriented. Support the custo
         }
 
         recognition.start();
+    };
+
+    // ═══════════════════════════════════════════════════════════
+    // § GEMINI LIVE VOICE CALL IMPLEMENTATION
+    // ═══════════════════════════════════════════════════════════
+    function arrayBufferToBase64(buffer) {
+        let binary = '';
+        const bytes = new Uint8Array(buffer);
+        const len = bytes.byteLength;
+        for (let i = 0; i < len; i++) {
+            binary += String.fromCharCode(bytes[i]);
+        }
+        return window.btoa(binary);
+    }
+
+    function base64ToArrayBuffer(base64) {
+        const binaryString = window.atob(base64);
+        const len = binaryString.length;
+        const bytes = new Uint8Array(len);
+        for (let i = 0; i < len; i++) {
+            bytes[i] = binaryString.charCodeAt(i);
+        }
+        return bytes.buffer;
+    }
+
+    function clearPlaybackQueue() {
+        if (liveAudioQueue.length > 0) {
+            console.log('[Gemini Live] Clearing playback queue of length:', liveAudioQueue.length);
+            liveAudioQueue.forEach(node => {
+                try {
+                    node.stop();
+                } catch(e) {}
+            });
+            liveAudioQueue = [];
+        }
+        livePlaybackTime = 0;
+    }
+
+    function playIncomingAudioChunk(base64Data, sampleRate) {
+        if (!liveAudioContext || !isLiveCallActive) return;
+
+        const buffer = base64ToArrayBuffer(base64Data);
+        const int16Array = new Int16Array(buffer);
+        const float32Array = new Float32Array(int16Array.length);
+
+        // Convert Int16 PCM back to Float32
+        for (let i = 0; i < int16Array.length; i++) {
+            float32Array[i] = int16Array[i] / 32768.0;
+        }
+
+        // Create AudioBuffer
+        const audioBuffer = liveAudioContext.createBuffer(1, float32Array.length, sampleRate || 24000);
+        audioBuffer.copyToChannel(float32Array, 0);
+
+        // Create BufferSourceNode
+        const sourceNode = liveAudioContext.createBufferSource();
+        sourceNode.buffer = audioBuffer;
+        
+        // Connect to destination
+        sourceNode.connect(liveAudioContext.destination);
+
+        // Chronological scheduling
+        const currentTime = liveAudioContext.currentTime;
+        if (livePlaybackTime < currentTime) {
+            livePlaybackTime = currentTime;
+        }
+
+        sourceNode.start(livePlaybackTime);
+        
+        // Track the active nodes to support interrupts (barge-in)
+        liveAudioQueue.push(sourceNode);
+        sourceNode.onended = function () {
+            const index = liveAudioQueue.indexOf(sourceNode);
+            if (index > -1) {
+                liveAudioQueue.splice(index, 1);
+            }
+        };
+
+        // Advance scheduled time cursor
+        livePlaybackTime += audioBuffer.duration;
+    }
+
+    function startRecordingAudio(source) {
+        // Create ScriptProcessorNode with buffer size 2048, 1 input channel, 1 output channel
+        liveScriptNode = liveAudioContext.createScriptProcessor(2048, 1, 1);
+        
+        // Connect source to processor node, and processor node to destination
+        source.connect(liveScriptNode);
+        liveScriptNode.connect(liveAudioContext.destination);
+
+        liveScriptNode.onaudioprocess = function (audioProcessingEvent) {
+            if (!isLiveCallActive || !liveSocket || liveSocket.readyState !== WebSocket.OPEN) return;
+
+            const inputBuffer = audioProcessingEvent.inputBuffer;
+            const inputData = inputBuffer.getChannelData(0); // Float32 array
+
+            // Convert Float32Array to Int16Array PCM
+            const pcmData = new Int16Array(inputData.length);
+            for (let i = 0; i < inputData.length; i++) {
+                const s = Math.max(-1, Math.min(1, inputData[i]));
+                pcmData[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+            }
+
+            // Convert PCM Int16 to base64
+            const base64Audio = arrayBufferToBase64(pcmData.buffer);
+
+            // Send base64 chunk to Gemini
+            const mediaMsg = {
+                realtimeInput: {
+                    mediaChunks: [{
+                        mimeType: "audio/pcm;rate=16000",
+                        data: base64Audio
+                    }]
+                }
+            };
+            liveSocket.send(JSON.stringify(mediaMsg));
+        };
+    }
+
+    function appendBotMessageToChat(text) {
+        const messages = document.getElementById('chatMessages');
+        if (!messages) return;
+
+        if (!currentBotLiveMessageEl) {
+            const msgEl = document.createElement('div');
+            msgEl.className = 'chat-msg bot';
+            msgEl.innerHTML = '<div class="chat-msg-avatar"><i class="fas fa-robot"></i></div>' +
+                '<div class="chat-msg-bubble"></div>';
+            messages.appendChild(msgEl);
+            currentBotLiveMessageEl = msgEl.querySelector('.chat-msg-bubble');
+        }
+
+        // Add text and scroll to bottom
+        currentBotLiveMessageEl.textContent += text;
+        messages.scrollTop = messages.scrollHeight;
+    }
+
+    function appendUserMessageToChat(text) {
+        const messages = document.getElementById('chatMessages');
+        if (!messages) return;
+
+        if (!currentUserLiveMessageEl) {
+            const msgEl = document.createElement('div');
+            msgEl.className = 'chat-msg user';
+            msgEl.innerHTML = '<div class="chat-msg-avatar"><i class="fas fa-user"></i></div>' +
+                '<div class="chat-msg-bubble"></div>';
+            messages.appendChild(msgEl);
+            currentUserLiveMessageEl = msgEl.querySelector('.chat-msg-bubble');
+        }
+
+        currentUserLiveMessageEl.textContent = text;
+        messages.scrollTop = messages.scrollHeight;
+    }
+
+    window.endLiveVoiceCall = function () {
+        isLiveCallActive = false;
+        
+        if (liveSocket) {
+            try {
+                liveSocket.close();
+            } catch(e) {}
+            liveSocket = null;
+        }
+
+        if (liveMicStream) {
+            try {
+                liveMicStream.getTracks().forEach(track => track.stop());
+            } catch(e) {}
+            liveMicStream = null;
+        }
+
+        if (liveScriptNode) {
+            try {
+                liveScriptNode.disconnect();
+            } catch(e) {}
+            liveScriptNode = null;
+        }
+
+        if (liveAudioContext) {
+            try {
+                liveAudioContext.close();
+            } catch(e) {}
+            liveAudioContext = null;
+        }
+
+        clearPlaybackQueue();
+        
+        currentBotLiveMessageEl = null;
+        currentUserLiveMessageEl = null;
+
+        // Restore UI state
+        const overlay = document.getElementById('liveCallOverlay');
+        const chatMessages = document.getElementById('chatMessages');
+        const chatPrompts = document.querySelector('.chat-prompts');
+        const chatInputArea = document.querySelector('.chat-input-area');
+        const liveCallBtn = document.getElementById('liveCallBtn');
+
+        if (overlay) overlay.style.display = 'none';
+        if (chatMessages) chatMessages.style.display = 'flex';
+        if (chatPrompts) chatPrompts.style.display = 'flex';
+        if (chatInputArea) chatInputArea.style.display = 'flex';
+        
+        if (liveCallBtn) {
+            liveCallBtn.classList.remove('active');
+            liveCallBtn.innerHTML = '<i class="fas fa-phone"></i>';
+            liveCallBtn.title = 'Start Real-time Voice Session (BYOK Gemini)';
+        }
+        
+        showToast('Voice session ended', 'info');
+    };
+
+    window.toggleLiveVoiceCall = async function () {
+        if (isLiveCallActive) {
+            window.endLiveVoiceCall();
+            return;
+        }
+
+        // Get BYOK settings
+        let byokConfig = null;
+        try {
+            const configStr = localStorage.getItem('simpatico_byok_config');
+            if (configStr) byokConfig = JSON.parse(configStr);
+        } catch(e) {}
+
+        const useByok = byokConfig && byokConfig.enabled && byokConfig.key;
+        if (!useByok || byokConfig.provider !== 'gemini') {
+            showToast('Real-time Voice Session requires Google Gemini BYOK enabled with a valid API key in AI Settings.', 'error');
+            return;
+        }
+
+        const key = byokConfig.key;
+
+        // Show connecting state in UI
+        const overlay = document.getElementById('liveCallOverlay');
+        const chatMessages = document.getElementById('chatMessages');
+        const chatPrompts = document.querySelector('.chat-prompts');
+        const chatInputArea = document.querySelector('.chat-input-area');
+        const liveCallBtn = document.getElementById('liveCallBtn');
+        const statusText = document.getElementById('liveCallStatus');
+        const waveform = document.getElementById('liveCallWaveform');
+
+        if (overlay) overlay.style.display = 'flex';
+        if (chatMessages) chatMessages.style.display = 'none';
+        if (chatPrompts) chatPrompts.style.display = 'none';
+        if (chatInputArea) chatInputArea.style.display = 'none';
+        
+        if (liveCallBtn) {
+            liveCallBtn.classList.add('active');
+            liveCallBtn.innerHTML = '<i class="fas fa-phone-slash"></i>';
+            liveCallBtn.title = 'Hang Up Live Voice Session';
+        }
+
+        if (statusText) statusText.textContent = 'Initializing microphone and connecting...';
+        if (waveform) waveform.style.display = 'none';
+
+        try {
+            isLiveCallActive = true;
+            liveAudioQueue = [];
+            livePlaybackTime = 0;
+            currentBotLiveMessageEl = null;
+            currentUserLiveMessageEl = null;
+
+            // 1. Request microphone access
+            liveMicStream = await navigator.mediaDevices.getUserMedia({
+                audio: {
+                    echoCancellation: true,
+                    noiseSuppression: true,
+                    autoGainControl: true
+                }
+            });
+
+            // 2. Initialize AudioContext at 16kHz
+            const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+            liveAudioContext = new AudioContextClass({ sampleRate: 16000 });
+            const source = liveAudioContext.createMediaStreamSource(liveMicStream);
+
+            // 3. Connect WebSocket to Gemini Multimodal Live API
+            const wsUrl = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent?key=${key}`;
+            liveSocket = new WebSocket(wsUrl);
+
+            liveSocket.onopen = function () {
+                if (statusText) statusText.textContent = 'Setting up session...';
+
+                // Collect Strategy Scorecard Context
+                const swotContext = [];
+                if (window.cachedSwot) {
+                    ['strengths', 'weaknesses', 'opportunities', 'threats'].forEach(k => {
+                        const items = window.cachedSwot[k] || [];
+                        if (items.length) {
+                            swotContext.push(k.toUpperCase() + ': ' + items.map(i => i.content || i).join(', '));
+                        }
+                    });
+                }
+                const kpiContext = (window.cachedKPIs || []).map(k => k.name + ': ' + k.current_value + ' / ' + k.target_value + ' ' + (k.unit || '')).join(', ');
+
+                const systemPrompt = `You are an expert Business Consulting AI Advisor for Simpatico HR.
+Today's language is: ${LANG}. You MUST speak in the client's language (${LANG}).
+Client Strategy Context:
+SWOT: ${swotContext.length ? swotContext.join(' | ') : 'No SWOT data yet.'}
+KPIs: ${kpiContext.length ? kpiContext : 'No KPIs tracked yet.'}
+
+Be professional, highly strategic, clear, and action-oriented. Keep your spoken responses concise and conversational (around 1-3 sentences per turn) since this is a real-time voice call.`;
+
+                // Setup configuration message
+                const setupMsg = {
+                    setup: {
+                        model: "models/gemini-2.0-flash-exp",
+                        generationConfig: {
+                            responseModalities: ["AUDIO"],
+                            speechConfig: {
+                                voiceConfig: {
+                                    prebuiltVoiceConfig: {
+                                        voiceName: "Kore" // neutral and professional voice
+                                    }
+                                }
+                            }
+                        },
+                        systemInstruction: {
+                            parts: [{ text: systemPrompt }]
+                        }
+                    }
+                };
+                liveSocket.send(JSON.stringify(setupMsg));
+
+                if (statusText) statusText.textContent = 'Voice Call Active. Speak now!';
+                if (waveform) waveform.style.display = 'flex';
+
+                // Start capturing audio from mic
+                startRecordingAudio(source);
+            };
+
+            liveSocket.onmessage = function (event) {
+                try {
+                    const data = JSON.parse(event.data);
+
+                    // Server notifies of client interruption (user barges in)
+                    if (data.interrupted) {
+                        console.log('[Gemini Live] Interrupted by server');
+                        clearPlaybackQueue();
+                        currentBotLiveMessageEl = null;
+                        return;
+                    }
+
+                    const serverContent = data.serverContent;
+                    if (serverContent) {
+                        // Handle user transcription
+                        if (serverContent.inputTranscription && serverContent.inputTranscription.text) {
+                            appendUserMessageToChat(serverContent.inputTranscription.text);
+                            // Clear bot message pointer to start a new bubble when bot responds next
+                            currentBotLiveMessageEl = null;
+                        }
+
+                        // Handle bot response parts
+                        if (serverContent.modelTurn && serverContent.modelTurn.parts) {
+                            // If bot starts outputting audio, make sure user transcription pointer is reset
+                            currentUserLiveMessageEl = null;
+
+                            serverContent.modelTurn.parts.forEach(part => {
+                                // If audio chunk received, play it
+                                if (part.inlineData && part.inlineData.data) {
+                                    const base64Data = part.inlineData.data;
+                                    const sampleRate = part.inlineData.mimeType.includes('rate=') ? 
+                                        parseInt(part.inlineData.mimeType.split('rate=')[1]) : 24000;
+                                    
+                                    playIncomingAudioChunk(base64Data, sampleRate);
+                                }
+
+                                // If text transcript fragment received, display it
+                                if (part.text) {
+                                    appendBotMessageToChat(part.text);
+                                }
+                            });
+                        }
+
+                        // Reset Bot Message Pointer on Turn Completion
+                        if (serverContent.turnComplete) {
+                            console.log('[Gemini Live] Model Turn Complete');
+                            currentBotLiveMessageEl = null;
+                        }
+                    }
+                } catch (e) {
+                    console.error('[Gemini Live] Error parsing server message:', e);
+                }
+            };
+
+            liveSocket.onerror = function (err) {
+                console.error('[Gemini Live] WebSocket error:', err);
+                showToast('Voice session connection error', 'error');
+                window.endLiveVoiceCall();
+            };
+
+            liveSocket.onclose = function (event) {
+                console.log('[Gemini Live] WebSocket closed:', event.code, event.reason);
+                window.endLiveVoiceCall();
+            };
+
+        } catch (err) {
+            console.error('[Gemini Live] Failed to start voice session:', err);
+            showToast('Microphone access denied or error: ' + err.message, 'error');
+            window.endLiveVoiceCall();
+        }
     };
 
     function cleanTextForSpeech(text) {
