@@ -139,6 +139,7 @@
         ]);
         initCalendar();
         updateOverviewStats();
+        if (typeof window.loadByokSettings === 'function') window.loadByokSettings();
     });
 
     function initUserAvatar() {
@@ -1341,6 +1342,144 @@
         default: `That's a great question! Here are some key considerations:\n\n**Strategic Thinking Framework:**\n1. Define the problem clearly\n2. Gather data and analyze trends\n3. Identify options and evaluate trade-offs\n4. Choose the best path and create an action plan\n5. Set milestones and KPIs to track progress\n\n**Resources Available to You:**\n• 📊 **Health Assessment** — Evaluate your business across 5 dimensions\n• 📋 **Strategy Scorecard** — SWOT analysis and KPI tracking\n• 📁 **Document Hub** — Organize consulting deliverables\n• 📅 **Meeting Scheduler** — Book consulting sessions\n\n**Need Expert Advice?**\nSimpatico HR's business consultants are available for:\n• Free initial consultation\n• Strategic planning workshops\n• Market entry advisory\n• Digital transformation roadmaps\n\n📞 Contact: +91 954 484 2260\n💬 WhatsApp: Click the green button in the sidebar!\n✉️ Email: info@simpaticohr.in`
     };
 
+    // ═══════════════════════════════════════════════════════════
+    // § BYOK (BRING YOUR OWN KEY) CONFIGURATION & STORAGE
+    // ═══════════════════════════════════════════════════════════
+    const providerModels = {
+        gemini: [
+            { id: 'gemini-1.5-flash', name: 'Gemini 1.5 Flash (Recommended - Free Tier)' },
+            { id: 'gemini-1.5-pro', name: 'Gemini 1.5 Pro (High Reasoning)' },
+            { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash (Fastest / Newest)' }
+        ],
+        openai: [
+            { id: 'gpt-4o-mini', name: 'GPT-4o Mini (Cost-Effective & Fast)' },
+            { id: 'gpt-4o', name: 'GPT-4o (High Performance)' }
+        ]
+    };
+
+    window.byokChatHistory = [];
+
+    window.toggleByokFields = function () {
+        const enabled = document.getElementById('byokEnabled').checked;
+        document.getElementById('byokConfigFields').style.display = enabled ? 'block' : 'none';
+    };
+
+    window.updateByokModels = function () {
+        const provider = document.getElementById('byokProvider').value;
+        const modelSelect = document.getElementById('byokModel');
+        const models = providerModels[provider] || [];
+        
+        modelSelect.innerHTML = models.map(m => `<option value="${m.id}">${m.name}</option>`).join('');
+    };
+
+    window.toggleByokKeyVisibility = function () {
+        const keyInput = document.getElementById('byokKey');
+        const eyeBtn = document.getElementById('byokEyeBtn');
+        if (keyInput.type === 'password') {
+            keyInput.type = 'text';
+            eyeBtn.innerHTML = '<i class="fas fa-eye-slash"></i>';
+        } else {
+            keyInput.type = 'password';
+            eyeBtn.innerHTML = '<i class="fas fa-eye"></i>';
+        }
+    };
+
+    window.saveByokSettings = function () {
+        const enabled = document.getElementById('byokEnabled').checked;
+        const provider = document.getElementById('byokProvider').value;
+        const key = document.getElementById('byokKey').value.trim();
+        const model = document.getElementById('byokModel').value;
+
+        if (enabled && !key) {
+            window.showToast('Please enter an API Key if enabling BYOK', 'error');
+            return;
+        }
+
+        const config = { enabled, provider, key, model };
+        localStorage.setItem('simpatico_byok_config', JSON.stringify(config));
+        
+        applyByokUiState(config);
+        closeModal('byokModal');
+        window.showToast('AI Settings saved successfully', 'success');
+    };
+
+    function applyByokUiState(config) {
+        const statusEl = document.getElementById('aiStatus');
+        const headerLabel = document.getElementById('byokHeaderLabel');
+        
+        if (config && config.enabled && config.key) {
+            const providerName = config.provider === 'gemini' ? 'Gemini' : 'OpenAI';
+            const modelName = config.model;
+            if (statusEl) statusEl.textContent = `Powered by ${providerName} (${modelName})`;
+            if (headerLabel) headerLabel.style.display = 'inline-block';
+        } else {
+            if (statusEl) statusEl.textContent = 'Powered by Simpatico Intelligence';
+            if (headerLabel) headerLabel.style.display = 'none';
+        }
+    }
+
+    window.loadByokSettings = function () {
+        const configStr = localStorage.getItem('simpatico_byok_config');
+        if (!configStr) {
+            document.getElementById('byokEnabled').checked = false;
+            document.getElementById('byokProvider').value = 'gemini';
+            window.updateByokModels();
+            return;
+        }
+
+        try {
+            const config = JSON.parse(configStr);
+            document.getElementById('byokEnabled').checked = !!config.enabled;
+            document.getElementById('byokProvider').value = config.provider || 'gemini';
+            window.updateByokModels();
+            document.getElementById('byokKey').value = config.key || '';
+            document.getElementById('byokModel').value = config.model || '';
+            
+            window.toggleByokFields();
+            applyByokUiState(config);
+        } catch (e) {
+            console.error('Failed to parse BYOK settings:', e);
+        }
+    };
+
+    window.testByokConnection = async function () {
+        const provider = document.getElementById('byokProvider').value;
+        const key = document.getElementById('byokKey').value.trim();
+        const statusEl = document.getElementById('byokTestStatus');
+        const testBtn = document.getElementById('byokTestBtn');
+
+        if (!key) {
+            statusEl.style.color = 'var(--danger)';
+            statusEl.textContent = 'Enter API key first';
+            return;
+        }
+
+        testBtn.disabled = true;
+        statusEl.style.color = 'var(--text-muted)';
+        statusEl.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> Testing...';
+
+        try {
+            if (provider === 'gemini') {
+                const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${key}`);
+                if (!res.ok) throw new Error('Invalid key or API error');
+                statusEl.style.color = 'var(--success)';
+                statusEl.textContent = 'Connection Successful!';
+            } else if (provider === 'openai') {
+                const res = await fetch('https://api.openai.com/v1/models', {
+                    headers: { 'Authorization': `Bearer ${key}` }
+                });
+                if (!res.ok) throw new Error('Invalid key or API error');
+                statusEl.style.color = 'var(--success)';
+                statusEl.textContent = 'Connection Successful!';
+            }
+        } catch (err) {
+            statusEl.style.color = 'var(--danger)';
+            statusEl.textContent = 'Failed: ' + err.message;
+        } finally {
+            testBtn.disabled = false;
+        }
+    };
+
     window.sendPrompt = function (text) {
         document.getElementById('chatInput').value = text;
         sendChatMessage();
@@ -1367,22 +1506,19 @@
             '</div>';
         messages.scrollTop = messages.scrollHeight;
 
-        try {
-            const WORKER_URL = window.SIMPATICO_CONFIG?.workerUrl || 'https://simpatico-hr-ats.simpaticohrconsultancy.workers.dev';
-            
-            // Build strategy scorecard context
-            const swotContext = [];
-            if (window.cachedSwot) {
-                ['strengths', 'weaknesses', 'opportunities', 'threats'].forEach(k => {
-                    const items = window.cachedSwot[k] || [];
-                    if (items.length) {
-                        swotContext.push(k.toUpperCase() + ': ' + items.map(i => i.content || i).join(', '));
-                    }
-                });
-            }
-            const kpiContext = (window.cachedKPIs || []).map(k => k.name + ': ' + k.current_value + ' / ' + k.target_value + ' ' + (k.unit || '')).join(', ');
-            
-            const systemPrompt = `You are an expert Business Consulting AI Advisor for Simpatico HR. 
+        // Build strategy scorecard context
+        const swotContext = [];
+        if (window.cachedSwot) {
+            ['strengths', 'weaknesses', 'opportunities', 'threats'].forEach(k => {
+                const items = window.cachedSwot[k] || [];
+                if (items.length) {
+                    swotContext.push(k.toUpperCase() + ': ' + items.map(i => i.content || i).join(', '));
+                }
+            });
+        }
+        const kpiContext = (window.cachedKPIs || []).map(k => k.name + ': ' + k.current_value + ' / ' + k.target_value + ' ' + (k.unit || '')).join(', ');
+        
+        const systemPrompt = `You are an expert Business Consulting AI Advisor for Simpatico HR. 
 Today's language is: ${LANG}. You MUST respond in the client's language (${LANG}).
 Client Strategy Context:
 SWOT: ${swotContext.length ? swotContext.join(' | ') : 'No SWOT data yet.'}
@@ -1390,31 +1526,122 @@ KPIs: ${kpiContext.length ? kpiContext : 'No KPIs tracked yet.'}
 
 Be professional, highly strategic, clear, and action-oriented. Support the customer in their business operations. Use Markdown for formatting.`;
 
-            const headers = {
-                'Content-Type': 'application/json',
-                'X-Tenant-ID': getTenantId()
-            };
-            const token = localStorage.getItem('simpatico_token') || localStorage.getItem('sh_token');
-            if (token) headers['Authorization'] = 'Bearer ' + token;
+        // Check if BYOK is configured and enabled
+        let byokConfig = null;
+        try {
+            const configStr = localStorage.getItem('simpatico_byok_config');
+            if (configStr) byokConfig = JSON.parse(configStr);
+        } catch(e) {}
 
-            const response = await fetch(`${WORKER_URL}/ai/chat`, {
-                method: 'POST',
-                headers: headers,
-                body: JSON.stringify({
-                    messages: [
+        const useByok = byokConfig && byokConfig.enabled && byokConfig.key;
+
+        try {
+            let reply = '';
+            
+            if (useByok) {
+                const key = byokConfig.key;
+                const provider = byokConfig.provider;
+                const model = byokConfig.model;
+
+                if (provider === 'gemini') {
+                    // Update internal history for Gemini
+                    if (!window.byokChatHistory) window.byokChatHistory = [];
+                    window.byokChatHistory.push({ role: 'user', parts: [{ text: text }] });
+                    
+                    // Limit history length to last 10 items (5 rounds)
+                    if (window.byokChatHistory.length > 10) {
+                        window.byokChatHistory = window.byokChatHistory.slice(window.byokChatHistory.length - 10);
+                    }
+
+                    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            contents: window.byokChatHistory,
+                            systemInstruction: {
+                                parts: [{ text: systemPrompt }]
+                            }
+                        })
+                    });
+
+                    if (!response.ok) {
+                        const errData = await response.json().catch(() => ({}));
+                        throw new Error(errData?.error?.message || `Gemini API returned ${response.status}`);
+                    }
+
+                    const resData = await response.json();
+                    reply = resData.candidates?.[0]?.content?.parts?.[0]?.text;
+                    if (!reply) throw new Error('Received empty response from Gemini API');
+
+                    // Add assistant response to history
+                    window.byokChatHistory.push({ role: 'model', parts: [{ text: reply }] });
+
+                } else if (provider === 'openai') {
+                    // Update internal history for OpenAI
+                    if (!window.byokChatHistory) window.byokChatHistory = [];
+                    window.byokChatHistory.push({ role: 'user', content: text });
+                    
+                    if (window.byokChatHistory.length > 10) {
+                        window.byokChatHistory = window.byokChatHistory.slice(window.byokChatHistory.length - 10);
+                    }
+
+                    const openaiMessages = [
                         { role: 'system', content: systemPrompt },
-                        { role: 'user', content: text }
-                    ]
-                })
-            });
+                        ...window.byokChatHistory
+                    ];
+
+                    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${key}`
+                        },
+                        body: JSON.stringify({
+                            model: model,
+                            messages: openaiMessages
+                        })
+                    });
+
+                    if (!response.ok) {
+                        const errData = await response.json().catch(() => ({}));
+                        throw new Error(errData?.error?.message || `OpenAI API returned ${response.status}`);
+                    }
+
+                    const resData = await response.json();
+                    reply = resData.choices?.[0]?.message?.content;
+                    if (!reply) throw new Error('Received empty response from OpenAI API');
+
+                    window.byokChatHistory.push({ role: 'assistant', content: reply });
+                }
+            } else {
+                // FALLBACK: Use standard Simpatico Worker /ai/chat
+                const WORKER_URL = window.SIMPATICO_CONFIG?.workerUrl || 'https://simpatico-hr-ats.simpaticohrconsultancy.workers.dev';
+                const headers = {
+                    'Content-Type': 'application/json',
+                    'X-Tenant-ID': getTenantId()
+                };
+                const token = localStorage.getItem('simpatico_token') || localStorage.getItem('sh_token');
+                if (token) headers['Authorization'] = 'Bearer ' + token;
+
+                const response = await fetch(`${WORKER_URL}/ai/chat`, {
+                    method: 'POST',
+                    headers: headers,
+                    body: JSON.stringify({
+                        messages: [
+                            { role: 'system', content: systemPrompt },
+                            { role: 'user', content: text }
+                        ]
+                    })
+                });
+
+                if (!response.ok) throw new Error('Simpatico backend API failed');
+
+                const data = await response.json();
+                reply = data.data ? data.data.response : data.response;
+            }
 
             const typing = document.getElementById(typingId);
             if (typing) typing.remove();
-
-            if (!response.ok) throw new Error('API failed');
-
-            const data = await response.json();
-            const reply = data.data ? data.data.response : data.response;
 
             messages.innerHTML += '<div class="chat-msg bot">' +
                 '<div class="chat-msg-avatar"><i class="fas fa-robot"></i></div>' +
@@ -1438,7 +1665,7 @@ Be professional, highly strategic, clear, and action-oriented. Support the custo
             else if (lower.includes('cost') || lower.includes('reduce') || lower.includes('save')) responseText = fallbackList.cost_reduction || originalFallback.cost_reduction;
             else if (lower.includes('kpi') || lower.includes('metric') || lower.includes('track')) responseText = fallbackList.kpi || originalFallback.kpi;
             else if (lower.includes('digital') || lower.includes('transform') || lower.includes('technology')) responseText = fallbackList.digital || originalFallback.digital;
-            else responseText = fallbackList.default || originalFallback.default;
+            else responseText = (useByok ? `⚠️ <strong>AI Request Error:</strong> ${err.message}<br><br>Fallback Advice:<br>${fallbackList.default || originalFallback.default}` : (fallbackList.default || originalFallback.default));
 
             messages.innerHTML += '<div class="chat-msg bot">' +
                 '<div class="chat-msg-avatar"><i class="fas fa-robot"></i></div>' +
