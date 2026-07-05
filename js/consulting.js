@@ -1350,7 +1350,9 @@
         gemini: [
             { id: 'gemini-1.5-flash', name: 'Gemini 1.5 Flash (Recommended - Free Tier)' },
             { id: 'gemini-1.5-pro', name: 'Gemini 1.5 Pro (High Reasoning)' },
-            { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash (Fastest / Newest)' }
+            { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash (Fast / Stable)' },
+            { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro (Advanced Reasoning)' },
+            { id: 'gemini-3.5-flash', name: 'Gemini 3.5 Flash (Fastest / Newest)' }
         ],
         openai: [
             { id: 'gpt-4o-mini', name: 'GPT-4o Mini (Cost-Effective & Fast)' },
