@@ -421,6 +421,12 @@ window.exportReport = async function() {
 
 function destroyChart(id) {
   if (charts[id]) { charts[id].destroy(); delete charts[id]; }
+  // Also destroy any chart created by another module on the same canvas
+  const canvas = document.getElementById(id);
+  if (canvas && typeof Chart !== 'undefined' && Chart.getChart) {
+    const existing = Chart.getChart(canvas);
+    if (existing) existing.destroy();
+  }
 }
 // ── Utility functions: defer to shared-utils.js if loaded ──
 if (typeof window.authHeaders === 'undefined') {

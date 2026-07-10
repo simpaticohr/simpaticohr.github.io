@@ -683,7 +683,15 @@ function formatCompact(n) {
   if (n >= 1000) return (n/1000).toFixed(1) + 'K';
   return n.toString();
 }
-function destroyChart(id) { if (charts[id]) { charts[id].destroy(); delete charts[id]; } }
+function destroyChart(id) {
+  if (charts[id]) { charts[id].destroy(); delete charts[id]; }
+  // Also destroy any chart created by another module on the same canvas
+  const canvas = document.getElementById(id);
+  if (canvas && typeof Chart !== 'undefined' && Chart.getChart) {
+    const existing = Chart.getChart(canvas);
+    if (existing) existing.destroy();
+  }
+}
 
 // Conditional fallbacks
 if (typeof window.setText === 'undefined') {
