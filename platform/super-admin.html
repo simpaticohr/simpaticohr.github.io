@@ -133,6 +133,71 @@
         @keyframes toastIn { from{transform:translateX(100%);opacity:0} to{transform:translateX(0);opacity:1} }
         .menu-toggle { display:none; background:none; border:none; color:#0F172A; font-size:20px; cursor:pointer; }
 
+        /* ── Super Admin Notification Bell ── */
+        .sa-notif-wrap { position:relative; display:inline-flex; }
+        .sa-notif-btn {
+            background:none; border:none; color:#6B7280; font-size:17px;
+            cursor:pointer; padding:8px; border-radius:10px; transition:all .2s;
+            position:relative;
+        }
+        .sa-notif-btn:hover { background:rgba(0,0,0,.05); color:#0F172A; }
+        .sa-notif-badge {
+            position:absolute; top:2px; right:2px;
+            background:#EF4444; color:#fff;
+            font-size:10px; font-weight:700;
+            min-width:16px; height:16px;
+            border-radius:99px; display:none;
+            align-items:center; justify-content:center;
+            line-height:1; padding:0 4px;
+            box-shadow:0 2px 6px rgba(239,68,68,.4);
+            animation:pulse 2s infinite;
+        }
+        .sa-notif-panel {
+            position:absolute; top:44px; right:0;
+            width:360px; max-height:440px;
+            background:#fff; border:1px solid #E5E7EB;
+            border-radius:14px; box-shadow:0 12px 40px rgba(0,0,0,.15);
+            z-index:2000; display:none; overflow:hidden;
+            text-align:left;
+        }
+        .sa-notif-panel.open { display:block; }
+        .sa-notif-panel-head {
+            padding:14px 18px; border-bottom:1px solid #F3F4F6;
+            display:flex; justify-content:space-between; align-items:center;
+        }
+        .sa-notif-panel-head h4 { margin:0; font-size:14px; font-weight:700; color:#0F172A; }
+        .sa-notif-panel-head button {
+            background:none; border:none; color:#3B82F6;
+            font-size:12px; font-weight:600; cursor:pointer;
+        }
+        .sa-notif-panel-head button:hover { text-decoration:underline; }
+        .sa-notif-list { max-height:350px; overflow-y:auto; padding:4px 0; }
+        .sa-notif-item {
+            display:flex; gap:12px; padding:12px 18px;
+            border-bottom:1px solid #F9FAFB; transition:background .15s;
+            cursor:pointer;
+        }
+        .sa-notif-item:last-child { border-bottom:none; }
+        .sa-notif-item:hover { background:#F9FAFB; }
+        .sa-notif-item.unread { background:#EFF6FF; }
+        .sa-notif-item.unread:hover { background:#DBEAFE; }
+        .sa-notif-icon {
+            width:32px; height:32px; border-radius:50%;
+            display:flex; align-items:center; justify-content:center;
+            font-size:13px; flex-shrink:0; margin-top:2px;
+        }
+        .sa-notif-icon.login { background:rgba(16,185,129,.1); color:#059669; }
+        .sa-notif-icon.create { background:rgba(59,130,246,.1); color:#3B82F6; }
+        .sa-notif-icon.payment { background:rgba(245,158,11,.1); color:#D97706; }
+        .sa-notif-icon.admin { background:rgba(239,68,68,.1); color:#EF4444; }
+        .sa-notif-icon.default { background:rgba(107,114,128,.1); color:#6B7280; }
+        .sa-notif-title { font-size:13px; font-weight:600; color:#374151; line-height:1.4; }
+        .sa-notif-meta { font-size:11px; color:#9CA3AF; margin-top:3px; display:flex; gap:10px; align-items:center; }
+        .sa-notif-empty {
+            text-align:center; padding:40px 20px; color:#9CA3AF; font-size:13px;
+        }
+        .sa-notif-empty i { font-size:28px; margin-bottom:10px; display:block; opacity:.3; }
+
         /* ── Monitoring & Blocking Styles ── */
         .monitor-summary { display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin-bottom:24px; }
         .monitor-card {
@@ -341,6 +406,19 @@
             <div class="page-title" id="pageTitle">Super Admin Dashboard</div>
         </div>
         <div class="topbar-right">
+            <div class="sa-notif-wrap">
+                <button class="sa-notif-btn" id="saNotifBellBtn" onclick="saToggleNotifs(event)" title="Notifications">
+                    <i class="fas fa-bell"></i>
+                    <span class="sa-notif-badge" id="saNotifBadge">0</span>
+                </button>
+                <div class="sa-notif-panel" id="saNotifPanel">
+                    <div class="sa-notif-panel-head">
+                        <h4><i class="fas fa-bell" style="margin-right:6px;color:#EF4444"></i> Notifications</h4>
+                        <button onclick="saClearNotifs(event)">Clear All</button>
+                    </div>
+                    <div class="sa-notif-list" id="saNotifList"></div>
+                </div>
+            </div>
             <span class="dot-live"></span>
             <i class="fas fa-shield-alt" style="color:#EF4444"></i>
             <span id="adminName">Super Admin</span>
@@ -1904,6 +1982,182 @@ async function loadAnalytics() {
         document.getElementById('mainContent').innerHTML = '<p style="text-align:center;color:#EF4444;padding:40px">' + e.message + '</p>';
     }
 }
+
+// ══════════════════════════════════════════════════════════════════
+// REAL-TIME NOTIFICATION ENGINE (Super Admin)
+// Polls /admin/audit-logs for real events — no mock data.
+// ══════════════════════════════════════════════════════════════════
+
+const SA_NOTIF_KEY = 'simpatico_sa_notifs';
+const SA_SEEN_KEY = 'simpatico_sa_seen_ids';
+let saNotifications = [];
+let saSeenIds = new Set();
+let saPollingTimer = null;
+
+function saLoadNotifs() {
+    try {
+        saNotifications = JSON.parse(localStorage.getItem(SA_NOTIF_KEY) || '[]');
+        const seen = JSON.parse(localStorage.getItem(SA_SEEN_KEY) || '[]');
+        saSeenIds = new Set(seen);
+    } catch(e) { saNotifications = []; saSeenIds = new Set(); }
+}
+function saSaveNotifs() {
+    localStorage.setItem(SA_NOTIF_KEY, JSON.stringify(saNotifications.slice(0, 30)));
+    localStorage.setItem(SA_SEEN_KEY, JSON.stringify([...saSeenIds].slice(-200)));
+}
+
+function saClassifyAction(action) {
+    const a = (action || '').toLowerCase();
+    if (a.includes('login') || a.includes('verify') || a.includes('auth')) return { icon: 'fa-right-to-bracket', cls: 'login' };
+    if (a.includes('create') || a.includes('register') || a.includes('signup') || a.includes('onboard')) return { icon: 'fa-plus-circle', cls: 'create' };
+    if (a.includes('payment') || a.includes('billing') || a.includes('invoice') || a.includes('subscribe')) return { icon: 'fa-indian-rupee-sign', cls: 'payment' };
+    if (a.includes('admin') || a.includes('block') || a.includes('delete') || a.includes('restrict')) return { icon: 'fa-shield-alt', cls: 'admin' };
+    if (a.includes('update') || a.includes('edit') || a.includes('modify')) return { icon: 'fa-pen', cls: 'create' };
+    if (a.includes('job') || a.includes('post')) return { icon: 'fa-briefcase', cls: 'create' };
+    if (a.includes('interview')) return { icon: 'fa-video', cls: 'create' };
+    return { icon: 'fa-stream', cls: 'default' };
+}
+
+function saFormatTimeAgo(dateStr) {
+    const d = new Date(dateStr);
+    const secs = Math.floor((Date.now() - d.getTime()) / 1000);
+    if (secs < 60) return 'Just now';
+    const mins = Math.floor(secs / 60);
+    if (mins < 60) return mins + 'm ago';
+    const hours = Math.floor(mins / 60);
+    if (hours < 24) return hours + 'h ago';
+    const days = Math.floor(hours / 24);
+    if (days < 7) return days + 'd ago';
+    return d.toLocaleDateString();
+}
+
+function saAddNotif(title, action, actor, time) {
+    const { icon, cls } = saClassifyAction(action);
+    saNotifications.unshift({
+        id: 'sa_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
+        title: title,
+        time: time || new Date().toISOString(),
+        icon: icon,
+        cls: cls,
+        actor: actor || '',
+        unread: true
+    });
+    if (saNotifications.length > 30) saNotifications = saNotifications.slice(0, 30);
+    saSaveNotifs();
+    saRenderNotifs();
+    // Show toast for new items
+    if (typeof toast === 'function') toast(title, 'info');
+}
+
+function saRenderNotifs() {
+    const badge = document.getElementById('saNotifBadge');
+    const list = document.getElementById('saNotifList');
+    if (!badge || !list) return;
+
+    const unread = saNotifications.filter(n => n.unread).length;
+    if (unread > 0) {
+        badge.textContent = unread > 9 ? '9+' : unread;
+        badge.style.display = 'flex';
+    } else {
+        badge.style.display = 'none';
+    }
+
+    if (saNotifications.length === 0) {
+        list.innerHTML = '<div class="sa-notif-empty"><i class="fas fa-bell-slash"></i><p>No notifications yet</p><p style="font-size:11px;margin-top:4px">Real-time events will appear here</p></div>';
+        return;
+    }
+
+    list.innerHTML = saNotifications.map(n => {
+        const timeAgo = saFormatTimeAgo(n.time);
+        return `<div class="sa-notif-item ${n.unread ? 'unread' : ''}" onclick="saMarkRead('${n.id}')">
+            <div class="sa-notif-icon ${n.cls || 'default'}"><i class="fas ${n.icon || 'fa-bell'}"></i></div>
+            <div style="flex:1;min-width:0">
+                <div class="sa-notif-title">${esc(n.title)}</div>
+                <div class="sa-notif-meta">
+                    ${n.actor ? '<span><i class="fas fa-user" style="margin-right:3px"></i>' + esc(n.actor) + '</span>' : ''}
+                    <span><i class="fas fa-clock" style="margin-right:3px"></i>${timeAgo}</span>
+                </div>
+            </div>
+        </div>`;
+    }).join('');
+}
+
+function saMarkRead(id) {
+    const n = saNotifications.find(x => x.id === id);
+    if (n) { n.unread = false; saSaveNotifs(); saRenderNotifs(); }
+}
+
+function saToggleNotifs(e) {
+    if (e) e.stopPropagation();
+    const panel = document.getElementById('saNotifPanel');
+    if (panel) panel.classList.toggle('open');
+}
+
+function saClearNotifs(e) {
+    if (e) e.stopPropagation();
+    saNotifications = [];
+    saSaveNotifs();
+    saRenderNotifs();
+}
+
+// Close panel on outside click
+document.addEventListener('click', function(e) {
+    const panel = document.getElementById('saNotifPanel');
+    const btn = document.getElementById('saNotifBellBtn');
+    if (panel && panel.classList.contains('open')) {
+        if (!panel.contains(e.target) && !btn.contains(e.target)) {
+            panel.classList.remove('open');
+        }
+    }
+});
+
+// ── Poll backend audit logs for real events ──
+async function saPollAuditLogs() {
+    if (!serverVerified) return; // Don't poll until auth is verified
+    try {
+        const logs = await adminFetch('/admin/audit-logs?limit=10');
+        if (!Array.isArray(logs) || logs.length === 0) return;
+
+        let newCount = 0;
+        for (const log of logs) {
+            const logId = log.id || log.timestamp || JSON.stringify(log);
+            if (saSeenIds.has(logId)) continue;
+            saSeenIds.add(logId);
+            newCount++;
+
+            // Build a human-readable notification title from the audit log
+            const action = log.action || 'Activity';
+            const actor = log.actor_email || log.user_email || '';
+            const detail = log.details || log.resource || '';
+            let title = action;
+            if (actor) title += ` by ${actor.split('@')[0]}`;
+            if (detail && typeof detail === 'string') title += ` — ${detail.substring(0, 60)}`;
+
+            saAddNotif(title, action, actor, log.timestamp || log.created_at);
+        }
+
+        if (newCount > 0) saSaveNotifs();
+    } catch(e) {
+        // Silent fail — don't break the dashboard if audit API is temporarily unavailable
+        console.warn('[SA Notifications] Poll failed:', e.message);
+    }
+}
+
+// Initialize & start polling
+saLoadNotifs();
+saRenderNotifs();
+
+// Start polling after first dashboard load succeeds
+const _origLoadDashboard = loadDashboard;
+loadDashboard = async function() {
+    await _origLoadDashboard();
+    // First poll immediately after successful auth
+    if (serverVerified && !saPollingTimer) {
+        await saPollAuditLogs();
+        // Then poll every 60 seconds for real-time updates
+        saPollingTimer = setInterval(saPollAuditLogs, 60000);
+    }
+};
 
 loadDashboard();
 </script>
