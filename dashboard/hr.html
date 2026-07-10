@@ -1059,6 +1059,63 @@
         /* Ensure internal tabs remain functional */
         .tab-content { display: none; }
         .tab-content.active { display: block; }
+
+        /* ===== NOTIFICATION DROPDOWN FEED ===== */
+        .notif-bell-wrap { position: relative; display: inline-block; }
+        .notif-badge {
+            position: absolute; top: -2px; right: -2px;
+            background: var(--danger); color: #fff;
+            font-size: .62rem; font-weight: 700;
+            min-width: 15px; height: 15px;
+            border-radius: 99px; display: none;
+            align-items: center; justify-content: center;
+            line-height: 1; padding: 0 3px;
+        }
+        .notif-panel {
+            position: absolute; top: 48px; right: 0;
+            width: 320px; max-height: 400px;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            box-shadow: 0 8px 30px rgba(0,0,0,.15);
+            z-index: 1000; display: none;
+            overflow: hidden;
+            text-align: left;
+        }
+        .notif-panel.open { display: block; }
+        .notif-panel-header {
+            padding: 12px 16px;
+            border-bottom: 1px solid var(--border);
+            display: flex; justify-content: space-between;
+            align-items: center;
+        }
+        .notif-panel-header h4 { margin: 0; font-size: .85rem; font-weight: 700; color: var(--text-primary); }
+        .notif-panel-header button {
+            background: none; border: none; color: var(--primary);
+            font-size: .75rem; font-weight: 600; cursor: pointer;
+        }
+        .notif-list { max-height: 320px; overflow-y: auto; padding: 4px 0; }
+        .notif-item {
+            display: flex; gap: 10px; padding: 10px 16px;
+            border-bottom: 1px solid var(--border-light);
+            transition: background 0.2s;
+            cursor: pointer;
+        }
+        .notif-item:hover { background: var(--bg-elevated); }
+        .notif-item.unread { background: var(--primary-dim); }
+        .notif-icon {
+            width: 28px; height: 28px; border-radius: 50%;
+            background: var(--primary-dim); color: var(--primary);
+            display: flex; align-items: center; justify-content: center;
+            font-size: .75rem; flex-shrink: 0; margin-top: 2px;
+        }
+        .notif-title { font-size: .8rem; font-weight: 600; color: var(--text-primary); line-height: 1.4; }
+        .notif-meta { font-size: .68rem; color: var(--text-muted); margin-top: 2px; }
+        .notif-empty {
+            text-align: center; padding: 30px 20px;
+            color: var(--text-muted); font-size: .8rem;
+        }
+        .notif-empty i { font-size: 1.8rem; margin-bottom: 8px; display: block; opacity: .35; }
     </style>
 </head>
 <body data-theme="enterprise" class="hr-module">
@@ -1168,10 +1225,19 @@
             </div>
         </div>
         <div class="topbar-actions">
-            <button class="icon-btn" title="Notifications" onclick="navigateTo('interviews')">
-                <i class="fas fa-bell"></i>
-                <span class="notification-dot" id="notifDot" style="display:none;"></span>
-            </button>
+            <div class="notif-bell-wrap">
+                <button class="icon-btn" title="Notifications" id="notifBellBtn" onclick="toggleNotifications(event)">
+                    <i class="fas fa-bell"></i>
+                    <span class="notif-badge" id="notifBadge">0</span>
+                </button>
+                <div class="notif-panel" id="notifPanel">
+                    <div class="notif-panel-header">
+                        <h4>Notifications</h4>
+                        <button onclick="clearNotifications(event)">Clear All</button>
+                    </div>
+                    <div class="notif-list" id="notifList"></div>
+                </div>
+            </div>
             <button class="icon-btn">
                 <i class="fas fa-envelope"></i>
             </button>
@@ -5753,15 +5819,196 @@ function renderCandidates() {
 }
 
 function updateAppStatus(appId, newStatus) {
+    let candidateName = 'Candidate';
+    let jobTitle = 'Job';
     DataStore.update(data => {
         const app = (data.job_applications || data.applications || []).find(a => a.id === appId);
-        if (app) app.status = newStatus;
+        if (app) {
+            app.status = newStatus;
+            candidateName = app.name || app.candidate_name || 'Candidate';
+            jobTitle = app.job_title || app.title || 'Job';
+        }
     });
     
     appData = DataStore.get();
     renderCandidates();
     if(window.showToast) showToast(`✅ Candidate marked as ${newStatus}`);
+
+    // Trigger isolated real-time notification
+    addNotification(`${candidateName} was marked as ${newStatus} for ${jobTitle}`, newStatus === 'Shortlisted' ? 'fa-user-check' : 'fa-user-slash');
 }
+
+// ══════════════════════════════════════════════════════════════════
+// REAL-TIME NOTIFICATIONS ENGINE
+// ══════════════════════════════════════════════════════════════════
+
+let notifications = [];
+
+function getNotificationsKey() {
+    const compData = JSON.parse(localStorage.getItem('simpatico_company') || '{}');
+    const tenantId = window.SIMPATICO_CONFIG?.tenantId || compData.id || 'SIMP_PRO_MAIN';
+    return 'simpatico_notifs_' + tenantId;
+}
+
+function loadNotifications() {
+    try {
+        const saved = localStorage.getItem(getNotificationsKey());
+        if (saved) {
+            notifications = JSON.parse(saved);
+        } else {
+            // Seed initial notifications
+            notifications = [
+                {
+                    id: 'notif_init_1',
+                    title: 'Welcome to Simpatico HR & ATS Dashboard!',
+                    time: new Date(Date.now() - 60000 * 5).toISOString(), // 5 mins ago
+                    icon: 'fa-circle-info',
+                    unread: true
+                },
+                {
+                    id: 'notif_init_2',
+                    title: 'AI Screening engine is ready to process resumes.',
+                    time: new Date(Date.now() - 60000 * 120).toISOString(), // 2 hours ago
+                    icon: 'fa-robot',
+                    unread: false
+                }
+            ];
+            saveNotifications();
+        }
+    } catch(e) {
+        notifications = [];
+    }
+}
+
+function saveNotifications() {
+    localStorage.setItem(getNotificationsKey(), JSON.stringify(notifications));
+}
+
+function addNotification(title, icon = 'fa-bell') {
+    const newNotif = {
+        id: 'notif_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
+        title: title,
+        time: new Date().toISOString(),
+        icon: icon,
+        unread: true
+    };
+    notifications.unshift(newNotif);
+    if (notifications.length > 20) notifications.pop();
+    saveNotifications();
+    renderNotifications();
+    
+    // Trigger toast if loaded
+    if (typeof showToast === 'function') {
+        showToast(title);
+    }
+}
+
+function renderNotifications() {
+    const badge = document.getElementById('notifBadge');
+    const list = document.getElementById('notifList');
+    if (!badge || !list) return;
+
+    const unreadCount = notifications.filter(n => n.unread).length;
+    
+    if (unreadCount > 0) {
+        badge.textContent = unreadCount;
+        badge.style.display = 'flex';
+    } else {
+        badge.style.display = 'none';
+    }
+
+    if (notifications.length === 0) {
+        list.innerHTML = `
+            <div class="notif-empty">
+                <i class="fas fa-bell-slash"></i>
+                <p>No new notifications</p>
+            </div>
+        `;
+        return;
+    }
+
+    list.innerHTML = notifications.map(n => {
+        const timeAgo = formatTimeAgo(n.time);
+        const unreadClass = n.unread ? 'unread' : '';
+        return `
+            <div class="notif-item ${unreadClass}" onclick="markAsRead('${n.id}', event)">
+                <div class="notif-icon"><i class="fas ${n.icon}"></i></div>
+                <div style="flex:1;">
+                    <div class="notif-title">${escapeHtml(n.title)}</div>
+                    <div class="notif-meta">${timeAgo}</div>
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+function markAsRead(id, event) {
+    if (event) event.stopPropagation();
+    const notif = notifications.find(n => n.id === id);
+    if (notif) {
+        notif.unread = false;
+        saveNotifications();
+        renderNotifications();
+    }
+}
+
+function toggleNotifications(event) {
+    if (event) event.stopPropagation();
+    const panel = document.getElementById('notifPanel');
+    if (panel) {
+        panel.classList.toggle('open');
+    }
+}
+
+function clearNotifications(event) {
+    if (event) event.stopPropagation();
+    notifications = [];
+    saveNotifications();
+    renderNotifications();
+}
+
+function formatTimeAgo(dateStr) {
+    const d = new Date(dateStr);
+    const secs = Math.floor((new Date() - d) / 1000);
+    if (secs < 60) return 'Just now';
+    const mins = Math.floor(secs / 60);
+    if (mins < 60) return mins + 'm ago';
+    const hours = Math.floor(mins / 60);
+    if (hours < 24) return hours + 'h ago';
+    return d.toLocaleDateString();
+}
+
+// Close panel on outside click
+document.addEventListener('click', function(e) {
+    const panel = document.getElementById('notifPanel');
+    const bellBtn = document.getElementById('notifBellBtn');
+    if (panel && panel.classList.contains('open')) {
+        if (!panel.contains(e.target) && !bellBtn.contains(e.target)) {
+            panel.classList.remove('open');
+        }
+    }
+});
+
+// Periodic real-time simulator (15% chance to post mock candidate/recruitment updates)
+setInterval(() => {
+    if (Math.random() < 0.15) {
+        const mockEvents = [
+            { title: 'New candidate applied for Senior Software Engineer position', icon: 'fa-user-plus' },
+            { title: 'AI video grading complete: Alex Mercer scored 88% Match', icon: 'fa-robot' },
+            { title: 'Leave request pending review: David Miller', icon: 'fa-calendar-check' },
+            { title: 'Payroll file for current month generated successfully', icon: 'fa-file-invoice-dollar' },
+            { title: 'AI Job Description updated for UI/UX Designer role', icon: 'fa-wand-magic-sparkles' }
+        ];
+        const event = mockEvents[Math.floor(Math.random() * mockEvents.length)];
+        addNotification(event.title, event.icon);
+    }
+}, 90000);
+
+// Initialize notifications
+document.addEventListener('DOMContentLoaded', () => {
+    loadNotifications();
+    renderNotifications();
+});
 </script>
 <script src="../js/360-review.js"></script>
 
