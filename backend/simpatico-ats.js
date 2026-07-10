@@ -697,14 +697,14 @@ async function callExternalLLM(cfg, messages, maxTokens, stream = false) {
     ...(stream ? { stream: true } : {}),
   };
 
-  // Build auth headers — Gemini uses x-goog-api-key, others use Bearer
-  const headers = { "Content-Type": "application/json" };
+  // Build auth headers — Gemini OpenAI-compatible endpoint accepts Bearer token or x-goog-api-key
+  const headers = { 
+    "Content-Type": "application/json",
+    "Authorization": `Bearer ${cfg.apiKey}`
+  };
   const isGemini = cfg.provider === "gemini" || baseUrl.includes("googleapis.com");
   if (isGemini) {
-    // Gemini OpenAI-compatible endpoint accepts both, but x-goog-api-key is more reliable
     headers["x-goog-api-key"] = cfg.apiKey;
-  } else {
-    headers["Authorization"] = `Bearer ${cfg.apiKey}`;
   }
 
   console.log(`[BYOK-LLM] Request: POST ${chatUrl}, model=${model}, isGemini=${isGemini}`);
