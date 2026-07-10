@@ -1343,6 +1343,8 @@ route("POST", "/ai/byok-config", handleBYOKConfigSave);
 route("GET", "/ai/byok-config", handleBYOKConfigGet);
 route("POST", "/ai/byok-validate", handleBYOKValidate);
 
+route("POST", "/attendance/records/upsert", handleUpsertAttendance);
+
 // ===============================================================
 // § 13.  MAIN ENTRY POINT
 // ===============================================================
@@ -7509,6 +7511,78 @@ async function handleAttendanceSummary(request, env, ctx) {
     total_records: records.length,
     by_employee: byEmployee,
   });
+}
+
+/**
+ * POST /attendance/records/upsert — Upsert single or bulk attendance records.
+ */
+async function handleUpsertAttendance(request, env, ctx) {
+  requireRole(
+    ctx,
+    "hr",
+    "hr_manager",
+    "company_admin",
+    "admin",
+    "superadmin",
+  );
+
+  const body = await safeJson(request);
+  let records = Array.isArray(body) ? body : [body];
+
+  // Validate and inject fields
+  records = records.map((r) => {
+    if (!r.employee_id) throw new ValidationError("employee_id required");
+    if (!r.date) throw new ValidationError("date required");
+    if (!r.status) throw new ValidationError("status required");
+
+    let hw = r.hours_worked;
+    if (hw === undefined || hw === null) {
+      if (r.status === "present" || r.status === "remote") hw = 8;
+      else if (r.status === "half_day") hw = 4;
+      else if (r.status === "late") hw = 7;
+      else hw = 0;
+    }
+
+    return {
+      employee_id: r.employee_id,
+      date: r.date,
+      status: r.status,
+      check_in: r.check_in || null,
+      check_out: r.check_out || null,
+      hours_worked: hw,
+      notes: r.notes || "",
+      tenant_id: ctx.tenantId, // Force strict isolation
+    };
+  });
+
+  const res = await fetch(`${env.SUPABASE_URL}/rest/v1/attendance_records`, {
+    method: "POST",
+    headers: {
+      apikey: env.SUPABASE_SERVICE_KEY,
+      Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
+      "Content-Type": "application/json",
+      "X-Tenant-ID": ctx.tenantId,
+      "Prefer": "resolution=merge-duplicates,return=representation",
+    },
+    body: JSON.stringify(records),
+  });
+
+  if (!res.ok) {
+    const errText = await res.text().catch(() => "unknown");
+    throw new AppError(`Failed to save attendance: ${errText}`, res.status, "DB_ERROR");
+  }
+
+  const data = await res.json();
+
+  // Audit mark actions
+  for (const r of records) {
+    await audit(env, ctx, "attendance.mark", "attendance_records", r.employee_id, {
+      date: r.date,
+      status: r.status,
+    });
+  }
+
+  return apiResponse(data, HTTP.CREATED);
 }
 
 // ===============================================================

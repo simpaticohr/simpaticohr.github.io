@@ -233,9 +233,10 @@ async function executeMarkAttendance(geoPrefix) {
   else payload.hours_worked = 0;
 
   try {
-    const client = sb(); if (!client) throw new Error('Database not connected');
-    const { error } = await client.from('attendance_records').upsert([payload], { onConflict: 'employee_id,date' });
-    if (error) throw new Error(error.message);
+    await workerFetch('/attendance/records/upsert', {
+      method: 'POST',
+      body: payload
+    });
     showToast('Geo Check-in marked securely', 'success');
     if (typeof closeModal === 'function') closeModal('att-modal');
     await loadAttendance();
@@ -279,8 +280,10 @@ window.bulkMarkPresent = async function() {
   if (records.length === 0) { showToast('No active employees', 'error'); return; }
 
   try {
-    const { error } = await client.from('attendance_records').upsert(records, { onConflict: 'employee_id,date' });
-    if (error) throw new Error(error.message);
+    await workerFetch('/attendance/records/upsert', {
+      method: 'POST',
+      body: records
+    });
     showToast(`${records.length} employees marked present`, 'success');
     await loadAttendance();
   } catch(err) {
