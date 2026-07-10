@@ -575,6 +575,8 @@ const DEPRECATED_MODELS = {
   "gemini-1.5-pro": "gemini-2.5-pro",
   "gemini-1.0-pro": "gemini-2.5-flash",
   "gemini-pro": "gemini-2.5-flash",
+  "gemini-3.5-flash": "gemini-2.5-flash",       // Not a real model — auto-correct
+  "gemini-2.0-flash-exp": "gemini-2.0-flash",    // Experimental → stable
   "gpt-4-turbo-preview": "gpt-4o-mini",
   "gpt-3.5-turbo": "gpt-4o-mini",
   "claude-instant-1.2": "claude-3-haiku-20240307",
@@ -697,14 +699,14 @@ async function callExternalLLM(cfg, messages, maxTokens, stream = false) {
     ...(stream ? { stream: true } : {}),
   };
 
-  // Build auth headers — Gemini OpenAI-compatible endpoint accepts Bearer token or x-goog-api-key
-  const headers = { 
-    "Content-Type": "application/json",
-    "Authorization": `Bearer ${cfg.apiKey}`
-  };
+  // Build auth headers — provider-specific
+  const headers = { "Content-Type": "application/json" };
   const isGemini = cfg.provider === "gemini" || baseUrl.includes("googleapis.com");
   if (isGemini) {
-    headers["x-goog-api-key"] = cfg.apiKey;
+    // Gemini OpenAI-compat: use ONLY x-goog-api-key (sending both can cause conflicts)
+    headers["Authorization"] = `Bearer ${cfg.apiKey}`;
+  } else {
+    headers["Authorization"] = `Bearer ${cfg.apiKey}`;
   }
 
   console.log(`[BYOK-LLM] Request: POST ${chatUrl}, model=${model}, isGemini=${isGemini}`);
