@@ -282,20 +282,31 @@ function renderQuickActions() {
 
   // Dynamic actions based on what the user might need
   const actions = [
-    { icon: '<i class="fas fa-user-plus" style="color:var(--cx-primary)"></i>', label: 'Add Employee', href: '/employees.html' },
-    { icon: '<i class="fas fa-calendar-check" style="color:var(--cx-success)"></i>', label: 'Approve Leave', href: '/hr-ops.html' },
-    { icon: '<i class="fas fa-chart-pie" style="color:var(--cx-accent)"></i>', label: 'View Analytics', href: '/db-analytics.html' },
-    { icon: '<i class="fas fa-file-invoice-dollar" style="color:var(--cx-warning)"></i>', label: 'Run Payroll', href: '/payroll.html' },
-    { icon: '<i class="fas fa-graduation-cap" style="color:#ec4899"></i>', label: 'Training', href: '/training.html' },
-    { icon: '<i class="fas fa-robot" style="color:var(--cx-primary)"></i>', label: 'AI Assistant', href: '/ai-assistant.html' },
+    { icon: '<i class="fas fa-user-plus" style="color:var(--cx-primary)"></i>', label: 'Add Employee', section: 'employees' },
+    { icon: '<i class="fas fa-calendar-check" style="color:var(--cx-success)"></i>', label: 'Approve Leave', section: 'leaves' },
+    { icon: '<i class="fas fa-chart-pie" style="color:var(--cx-accent)"></i>', label: 'View Analytics', section: 'analytics' },
+    { icon: '<i class="fas fa-file-invoice-dollar" style="color:var(--cx-warning)"></i>', label: 'Run Payroll', section: 'payroll' },
+    { icon: '<i class="fas fa-graduation-cap" style="color:#ec4899"></i>', label: 'Training', section: 'training' },
+    { icon: '<i class="fas fa-robot" style="color:var(--cx-primary)"></i>', label: 'AI Assistant', section: 'aiAssistant' },
   ];
 
   container.innerHTML = actions.map(a => `
-    <div class="cx-quick-action" onclick="location.href='${a.href}'">
+    <div class="cx-quick-action" onclick="cxNavigate('${a.section}')">
       ${a.icon}
       <span>${a.label}</span>
     </div>
   `).join('');
+}
+
+// Navigate within the dashboard or redirect to it
+function cxNavigate(section) {
+  if (typeof navigateTo === 'function') {
+    // Inside the unified dashboard — use direct section navigation
+    navigateTo(section);
+  } else {
+    // Standalone page — redirect to the dashboard with the section
+    location.href = '/dashboard/hr.html#' + section;
+  }
 }
 
 // ── Engagement Heatmap ──
