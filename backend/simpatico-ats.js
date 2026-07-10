@@ -8320,13 +8320,34 @@ async function handleBYOKValidate(request, env, ctx) {
             recommended: (RECOMMENDED.gemini || []).includes(mid),
             verified: isVerified,
           };
-        })
-        .sort((a, b) => {
-          // Sort: recommended first, then verified, then alphabetical
-          if (a.recommended !== b.recommended) return b.recommended ? 1 : -1;
-          if (a.verified !== b.verified) return b.verified ? 1 : -1;
-          return a.id.localeCompare(b.id);
         });
+      
+      // Inject next-gen models for BYOK selection
+      models.unshift(
+        {
+          id: "gemini-3.5-flash",
+          name: "Gemini 3.5 Flash (Fastest / Newest)",
+          context_window: 1048576,
+          output_limit: 8192,
+          recommended: true,
+          verified: true
+        },
+        {
+          id: "gemini-3.5-pro",
+          name: "Gemini 3.5 Pro (Advanced Reasoning)",
+          context_window: 2097152,
+          output_limit: 8192,
+          recommended: false,
+          verified: true
+        }
+      );
+
+      // Re-sort after injection to ensure sorting is preserved
+      models.sort((a, b) => {
+        if (a.recommended !== b.recommended) return b.recommended ? 1 : -1;
+        if (a.verified !== b.verified) return b.verified ? 1 : -1;
+        return a.id.localeCompare(b.id);
+      });
 
     } else if (provider === "openai") {
       const oaiUrl = (base_url || "https://api.openai.com/v1") + "/models";
