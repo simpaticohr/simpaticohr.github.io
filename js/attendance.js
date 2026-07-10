@@ -40,6 +40,8 @@ async function loadAttUser() {
     if (user) {
       const el = document.getElementById('user-avatar');
       if (el) el.textContent = user.email?.slice(0,2).toUpperCase() || 'U';
+      window.currentLoggedUserEmail = user.email;
+      preselectLoggedEmployee();
     }
   } catch(e) { /* auth may not be set up */ }
 }
@@ -47,7 +49,7 @@ async function loadAttUser() {
 async function loadAttEmployees() {
   const client = sb(); if (!client) return;
   const cid = typeof getCompanyId === 'function' ? getCompanyId() : null;
-  let query = client.from('employees').select('id,first_name,last_name,job_title').eq('status','active').order('first_name');
+  let query = client.from('employees').select('id,first_name,last_name,job_title,email').eq('status','active').order('first_name');
   if (cid) query = query.eq('tenant_id', cid);
   const { data } = await query;
   attEmployees = data || [];
@@ -55,11 +57,23 @@ async function loadAttEmployees() {
   // Populate the employee select
   const sel = document.getElementById('att-employee');
   if (sel && attEmployees.length) {
+    sel.innerHTML = '<option value="">Select employee...</option>';
     attEmployees.forEach(e => {
       const opt = document.createElement('option');
       opt.value = e.id; opt.textContent = `${e.first_name} ${e.last_name}`;
       sel.appendChild(opt);
     });
+    preselectLoggedEmployee();
+  }
+}
+
+function preselectLoggedEmployee() {
+  const sel = document.getElementById('att-employee');
+  if (!sel || !window.currentLoggedUserEmail || !attEmployees.length) return;
+  
+  const emp = attEmployees.find(e => e.email && e.email.toLowerCase() === window.currentLoggedUserEmail.toLowerCase());
+  if (emp) {
+    sel.value = emp.id;
   }
 }
 
@@ -162,8 +176,8 @@ window.openMarkAttendanceModal = () => {
   if (typeof openModal === 'function') openModal('att-modal');
 };
 
-window.markAttendanceWithGeo = function() {
-   const btn = document.querySelector('.mfooter .btn-primary');
+window.markAttendanceWithGeo = function(btnEl) {
+   const btn = btnEl || document.querySelector('#att-modal .mfooter .btn-primary');
    const originalText = btn ? btn.innerHTML : 'Secure Check-in';
    if(btn) btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Locating...';
    
