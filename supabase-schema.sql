@@ -219,7 +219,7 @@ CREATE TABLE IF NOT EXISTS attendance_records (
 
 CREATE INDEX IF NOT EXISTS idx_attendance_employee_date ON attendance_records(employee_id, date);
 ALTER TABLE attendance_records ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Service role full access" ON attendance_records FOR ALL TO service_role USING (true);
+CREATE POLICY "Service role full access" ON attendance_records FOR ALL TO service_role USING (true) WITH CHECK (true);
 
 -- ════════════════════════════════════════════════════════
 -- HR OPS — POLICIES

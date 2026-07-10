@@ -7555,7 +7555,7 @@ async function handleUpsertAttendance(request, env, ctx) {
     };
   });
 
-  const res = await fetch(`${env.SUPABASE_URL}/rest/v1/attendance_records`, {
+  const res = await fetch(`${env.SUPABASE_URL}/rest/v1/attendance_records?on_conflict=employee_id,date`, {
     method: "POST",
     headers: {
       apikey: env.SUPABASE_SERVICE_KEY,
