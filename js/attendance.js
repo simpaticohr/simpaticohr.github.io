@@ -85,29 +85,36 @@ async function loadAttendance() {
   const today = new Date().toISOString().slice(0,10);
   const weekAgo = new Date(Date.now() - 7*24*60*60*1000).toISOString().slice(0,10);
 
-  const { data, error } = await client
-    .from('attendance_records')
-    .select(`
-      id, date, check_in, check_out, status, hours_worked, notes,
-      employees(first_name, last_name, job_title)
-    `)
-    .eq('tenant_id', cid)
-    .gte('date', weekAgo)
-    .order('date', { ascending: false });
+  try {
+    const result = await workerFetch(`/attendance/records?from=${weekAgo}&limit=200`);
+    const data = result.data || result || [];
 
-  if (error) {
-    // Table might not exist yet
-    if (error.code === '42P01' || (error.message && error.message.includes('does not exist'))) {
-      console.warn('[Attendance] Table not found — run migration 006');
-      const container = document.getElementById('att-tbody');
-      if (container) container.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:40px;color:var(--hr-text-muted)">Attendance module initializing. Please run the latest migration.</td></tr>';
+    allAttendance = Array.isArray(data) ? data : [];
+  } catch(err) {
+    // Fallback to direct Supabase query if worker is unavailable
+    const { data, error } = await client
+      .from('attendance_records')
+      .select(`
+        id, date, check_in, check_out, status, hours_worked, notes,
+        employees(first_name, last_name, job_title)
+      `)
+      .eq('tenant_id', cid)
+      .gte('date', weekAgo)
+      .order('date', { ascending: false });
+
+    if (error) {
+      if (error.code === '42P01' || (error.message && error.message.includes('does not exist'))) {
+        console.warn('[Attendance] Table not found — run migration 006');
+        const container = document.getElementById('att-tbody');
+        if (container) container.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:40px;color:var(--hr-text-muted)">Attendance module initializing. Please run the latest migration.</td></tr>';
+        return;
+      }
+      console.error(error);
       return;
     }
-    console.error(error);
-    return;
+    allAttendance = data || [];
   }
 
-  allAttendance = data || [];
 
   // Stats
   const todayRecords = allAttendance.filter(a => a.date === today);

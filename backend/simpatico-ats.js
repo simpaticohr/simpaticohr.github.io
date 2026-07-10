@@ -7458,7 +7458,7 @@ async function handleListAttendance(request, env, ctx) {
   const to = url.searchParams.get("to");
   const limit = Math.min(parseInt(url.searchParams.get("limit") || "100"), 500);
 
-  let query = `/rest/v1/attendance_records?select=*,employees(first_name,last_name)&order=date.desc&limit=${limit}`;
+  let query = `/rest/v1/attendance_records?select=*,employees(first_name,last_name,job_title)&order=date.desc&limit=${limit}`;
   if (employee_id) query += `&employee_id=eq.${employee_id}`;
   if (from) query += `&date=gte.${from}`;
   if (to) query += `&date=lte.${to}`;
