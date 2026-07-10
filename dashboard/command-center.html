@@ -1,0 +1,3295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Business Command Center — Simpatico HR</title>
+    <link rel="icon" type="image/png" sizes="96x96" href="../favicon-96x96.png">
+    <meta name="theme-color" content="#1E1B4B">
+    <meta name="robots" content="noindex, nofollow">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+
+    <!-- Auth Guard & Dependencies -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="../js/hr-config.js"></script>
+    <script src="../js/shared-utils.js"></script>
+    <script>
+        (function() {
+            var token = localStorage.getItem('simpatico_token') || localStorage.getItem('sh_token');
+            if (!token) { window.location.href = '../platform/login.html?role=consulting'; return; }
+            try {
+                var user = JSON.parse(localStorage.getItem('simpatico_user') || '{}');
+                var role = user.role || '';
+                var allowed = ['consulting_admin', 'consulting_user', 'super_admin', 'superadmin'];
+                if (allowed.indexOf(role) === -1) {
+                    window.location.href = '../platform/login.html?role=consulting';
+                    return;
+                }
+            } catch(e) {
+                window.location.href = '../platform/login.html?role=consulting';
+            }
+        })();
+    </script>
+
+    <style>
+    /* ════════════════════════════════════════════════════════════════
+       BUSINESS COMMAND CENTER — SIMPATICO HR
+       Premium operations dashboard for compliance, risk & contracts
+    ════════════════════════════════════════════════════════════════ */
+    :root {
+        --primary: #8b5cf6;
+        --primary-light: #a78bfa;
+        --primary-dark: #7c3aed;
+        --primary-dim: rgba(139,92,246,.08);
+        --primary-glow: rgba(139,92,246,.25);
+        --accent: #c084fc;
+        --success: #10b981;
+        --success-dim: rgba(16,185,129,.1);
+        --warning: #f59e0b;
+        --warning-dim: rgba(245,158,11,.1);
+        --danger: #ef4444;
+        --danger-dim: rgba(239,68,68,.1);
+        --info: #3b82f6;
+        --info-dim: rgba(59,130,246,.1);
+        --cyan: #06b6d4;
+        --cyan-dim: rgba(6,182,212,.1);
+
+        --bg-main: #f8fafc;
+        --bg-card: #ffffff;
+        --bg-elevated: #f1f5f9;
+        --text-primary: #0f172a;
+        --text-secondary: #475569;
+        --text-muted: #94a3b8;
+        --border: #e2e8f0;
+        --border-light: #f1f5f9;
+
+        --sidebar-width: 260px;
+        --topbar-height: 64px;
+        --radius: 14px;
+        --radius-lg: 18px;
+        --shadow-sm: 0 1px 3px rgba(0,0,0,.06);
+        --shadow: 0 4px 16px rgba(0,0,0,.06);
+        --shadow-lg: 0 12px 40px rgba(0,0,0,.08);
+        --shadow-glow: 0 0 30px rgba(139,92,246,.08);
+        --transition: .25s cubic-bezier(.4,0,.2,1);
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+
+    body {
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+        background: var(--bg-main);
+        color: var(--text-primary);
+        display: flex;
+        min-height: 100vh;
+        overflow-x: hidden;
+    }
+
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 99px; }
+
+    /* ═══ SIDEBAR ═══ */
+    .sidebar {
+        width: var(--sidebar-width);
+        background: linear-gradient(180deg, #1e1b4b 0%, #312e81 50%, #3b357a 100%);
+        color: #fff;
+        position: fixed;
+        top: 0; left: 0;
+        height: 100vh;
+        z-index: 1000;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        transition: transform .3s;
+    }
+
+    .sidebar-header {
+        padding: 20px 20px 16px;
+        border-bottom: 1px solid rgba(255,255,255,.08);
+    }
+
+    .brand-logo-box {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        text-decoration: none;
+    }
+
+    .brand-logo-text {
+        font-size: 1.15rem;
+        font-weight: 800;
+        color: #fff;
+    }
+
+    .brand-logo-highlight {
+        color: transparent;
+        background: linear-gradient(135deg, #00e5ff, #0078d4);
+        -webkit-background-clip: text;
+        background-clip: text;
+    }
+
+    .sidebar-role {
+        font-size: 10px;
+        color: rgba(255,255,255,.4);
+        text-transform: uppercase;
+        letter-spacing: 1.2px;
+        font-weight: 600;
+        margin-top: 4px;
+        padding-left: 44px;
+    }
+
+    .sidebar-nav {
+        flex: 1;
+        overflow-y: auto;
+        padding: 12px 10px;
+    }
+
+    .nav-label {
+        font-size: 10px;
+        color: rgba(255,255,255,.35);
+        text-transform: uppercase;
+        letter-spacing: 1.3px;
+        font-weight: 700;
+        padding: 14px 14px 6px;
+    }
+
+    .nav-item {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 11px 14px;
+        border-radius: 10px;
+        color: rgba(255,255,255,.65);
+        text-decoration: none;
+        font-size: 13.5px;
+        font-weight: 500;
+        margin-bottom: 2px;
+        cursor: pointer;
+        transition: all var(--transition);
+        border: 1px solid transparent;
+    }
+
+    .nav-item:hover {
+        background: rgba(255,255,255,.08);
+        color: #fff;
+    }
+
+    .nav-item.active {
+        background: rgba(139,92,246,.3);
+        color: #fff;
+        border-color: rgba(139,92,246,.2);
+        font-weight: 600;
+    }
+
+    .nav-item i { width: 20px; text-align: center; font-size: 14px; }
+
+    .nav-badge {
+        margin-left: auto;
+        font-size: 10px;
+        font-weight: 700;
+        background: var(--danger);
+        color: #fff;
+        padding: 2px 8px;
+        border-radius: 20px;
+    }
+
+    .nav-badge.warn { background: var(--warning); color: #000; }
+    .nav-badge.ok { background: var(--success); }
+
+    .sidebar-footer {
+        padding: 14px;
+        border-top: 1px solid rgba(255,255,255,.08);
+    }
+
+    .sidebar-footer .nav-item { color: rgba(255,150,150,.7); }
+    .sidebar-footer .nav-item:hover { background: rgba(239,68,68,.15); color: #fca5a5; }
+
+    /* ═══ MAIN ═══ */
+    .main {
+        margin-left: var(--sidebar-width);
+        flex: 1;
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+    }
+
+    .topbar {
+        height: var(--topbar-height);
+        background: rgba(255,255,255,.85);
+        backdrop-filter: blur(16px);
+        border-bottom: 1px solid var(--border);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0 28px;
+        position: sticky;
+        top: 0;
+        z-index: 100;
+    }
+
+    .topbar-left { display: flex; align-items: center; gap: 14px; }
+
+    .mobile-menu-btn {
+        display: none;
+        background: none;
+        border: none;
+        font-size: 1.2rem;
+        color: var(--text-primary);
+        cursor: pointer;
+        padding: 8px;
+        border-radius: 8px;
+    }
+
+    .page-title { font-size: 1.15rem; font-weight: 700; }
+    .page-title-sub { font-size: .78rem; color: var(--text-muted); }
+
+    .topbar-right { display: flex; align-items: center; gap: 10px; }
+
+    .topbar-btn {
+        width: 38px; height: 38px;
+        border-radius: 10px;
+        border: 1px solid var(--border);
+        background: var(--bg-card);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        color: var(--text-secondary);
+        font-size: 15px;
+        transition: all var(--transition);
+        text-decoration: none;
+    }
+
+    .topbar-btn:hover { border-color: var(--primary); color: var(--primary); }
+
+    .user-avatar {
+        width: 38px; height: 38px;
+        border-radius: 10px;
+        background: linear-gradient(135deg, var(--primary), var(--accent));
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: #fff;
+        font-weight: 700;
+        font-size: 14px;
+    }
+
+    .content {
+        flex: 1;
+        padding: 24px 28px 40px;
+        max-width: 1400px;
+        width: 100%;
+    }
+
+    /* ═══ SECTION PANELS ═══ */
+    .section-panel { display: none; animation: fadeIn .35s ease-out; }
+    .section-panel.active { display: block; }
+    @keyframes fadeIn {
+        from { opacity: 0; transform: translateY(12px); }
+        to { opacity: 1; transform: translateY(0); }
+    }
+
+    /* ═══ STATS GRID ═══ */
+    .stats-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 16px;
+        margin-bottom: 24px;
+    }
+
+    .stat-card {
+        background: var(--bg-card);
+        border-radius: var(--radius);
+        padding: 20px;
+        border: 1px solid var(--border);
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        transition: all var(--transition);
+        position: relative;
+        overflow: hidden;
+    }
+
+    .stat-card::before {
+        content: '';
+        position: absolute;
+        top: 0; left: 0;
+        width: 100%; height: 3px;
+        background: var(--card-accent, var(--primary));
+        opacity: 0;
+        transition: opacity var(--transition);
+    }
+
+    .stat-card:hover {
+        border-color: var(--primary);
+        box-shadow: var(--shadow), var(--shadow-glow);
+        transform: translateY(-2px);
+    }
+
+    .stat-card:hover::before { opacity: 1; }
+
+    .stat-icon {
+        width: 48px; height: 48px;
+        border-radius: 12px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 20px;
+        flex-shrink: 0;
+    }
+
+    .stat-icon.purple { background: var(--primary-dim); color: var(--primary); }
+    .stat-icon.green { background: var(--success-dim); color: var(--success); }
+    .stat-icon.red { background: var(--danger-dim); color: var(--danger); }
+    .stat-icon.orange { background: var(--warning-dim); color: var(--warning); }
+    .stat-icon.blue { background: var(--info-dim); color: var(--info); }
+    .stat-icon.cyan { background: var(--cyan-dim); color: var(--cyan); }
+
+    .stat-value { font-size: 1.6rem; font-weight: 800; line-height: 1.1; }
+    .stat-label { font-size: .75rem; color: var(--text-muted); font-weight: 500; margin-top: 2px; }
+
+    /* ═══ RISK GAUGE ═══ */
+    .risk-gauge-wrap {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 40px;
+        padding: 30px;
+        flex-wrap: wrap;
+    }
+
+    .gauge-container {
+        position: relative;
+        width: 220px;
+        height: 130px;
+    }
+
+    .gauge-bg, .gauge-fill {
+        position: absolute;
+        width: 220px;
+        height: 220px;
+        border-radius: 50%;
+        clip-path: polygon(0 0, 100% 0, 100% 50%, 0 50%);
+    }
+
+    .gauge-bg {
+        background: conic-gradient(
+            from 180deg,
+            #ef4444 0deg,
+            #f59e0b 72deg,
+            #10b981 144deg,
+            #10b981 180deg,
+            transparent 180deg
+        );
+        opacity: .15;
+    }
+
+    .gauge-fill {
+        background: conic-gradient(
+            from 180deg,
+            #ef4444 0deg,
+            #f59e0b 72deg,
+            #10b981 144deg,
+            #10b981 180deg,
+            transparent 180deg
+        );
+        mask: conic-gradient(from 180deg, #000 0deg, #000 var(--gauge-angle, 0deg), transparent var(--gauge-angle, 0deg));
+        -webkit-mask: conic-gradient(from 180deg, #000 0deg, #000 var(--gauge-angle, 0deg), transparent var(--gauge-angle, 0deg));
+        transition: --gauge-angle 1.5s cubic-bezier(.4,0,.2,1);
+    }
+
+    .gauge-center {
+        position: absolute;
+        bottom: 0;
+        left: 50%;
+        transform: translateX(-50%);
+        text-align: center;
+    }
+
+    .gauge-score {
+        font-size: 2.8rem;
+        font-weight: 900;
+        line-height: 1;
+    }
+
+    .gauge-score.excellent { color: var(--success); }
+    .gauge-score.good { color: #22c55e; }
+    .gauge-score.moderate { color: var(--warning); }
+    .gauge-score.poor { color: #f97316; }
+    .gauge-score.critical { color: var(--danger); }
+
+    .gauge-label {
+        font-size: .78rem;
+        color: var(--text-muted);
+        font-weight: 600;
+        margin-top: 4px;
+    }
+
+    .risk-breakdown {
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+        min-width: 280px;
+    }
+
+    .risk-item {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+    }
+
+    .risk-dot {
+        width: 10px; height: 10px;
+        border-radius: 50%;
+        flex-shrink: 0;
+    }
+
+    .risk-item-label {
+        flex: 1;
+        font-size: .82rem;
+        font-weight: 500;
+        color: var(--text-secondary);
+    }
+
+    .risk-item-bar {
+        width: 120px;
+        height: 6px;
+        border-radius: 99px;
+        background: var(--border);
+        overflow: hidden;
+    }
+
+    .risk-item-fill {
+        height: 100%;
+        border-radius: 99px;
+        transition: width 1s cubic-bezier(.4,0,.2,1);
+    }
+
+    .risk-item-val {
+        font-size: .75rem;
+        font-weight: 700;
+        min-width: 32px;
+        text-align: right;
+    }
+
+    /* ═══ PANEL ═══ */
+    .panel {
+        background: var(--bg-card);
+        border-radius: var(--radius);
+        border: 1px solid var(--border);
+        padding: 24px;
+        margin-bottom: 20px;
+        transition: box-shadow var(--transition);
+    }
+
+    .panel:hover { box-shadow: var(--shadow); }
+
+    .panel-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 20px;
+        padding-bottom: 16px;
+        border-bottom: 1px solid var(--border-light);
+        flex-wrap: wrap;
+        gap: 10px;
+    }
+
+    .panel-title {
+        font-size: 1rem;
+        font-weight: 700;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+
+    .panel-title i { color: var(--primary); font-size: .9rem; }
+
+    .panel-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+
+    /* ═══ BUTTONS ═══ */
+    .btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        padding: 9px 18px;
+        border-radius: 9px;
+        font-size: .82rem;
+        font-weight: 600;
+        font-family: inherit;
+        cursor: pointer;
+        transition: all var(--transition);
+        border: 1px solid transparent;
+        text-decoration: none;
+    }
+
+    .btn-primary {
+        background: linear-gradient(135deg, var(--primary), var(--primary-dark));
+        color: #fff;
+        border: none;
+        box-shadow: 0 4px 14px var(--primary-glow);
+    }
+
+    .btn-primary:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 8px 25px var(--primary-glow);
+    }
+
+    .btn-secondary {
+        background: var(--bg-elevated);
+        color: var(--text-primary);
+        border: 1px solid var(--border);
+    }
+
+    .btn-secondary:hover { border-color: var(--primary); color: var(--primary); }
+
+    .btn-sm { padding: 6px 12px; font-size: .75rem; border-radius: 7px; }
+
+    .btn-danger { background: var(--danger); color: #fff; border: none; }
+    .btn-success { background: var(--success); color: #fff; border: none; }
+
+    /* ═══ COMPLIANCE TABLE ═══ */
+    .compliance-table {
+        width: 100%;
+        border-collapse: separate;
+        border-spacing: 0;
+    }
+
+    .compliance-table thead th {
+        font-size: .72rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: .5px;
+        color: var(--text-muted);
+        padding: 12px 14px;
+        text-align: left;
+        border-bottom: 1px solid var(--border);
+        position: sticky;
+        top: 0;
+        background: var(--bg-card);
+    }
+
+    .compliance-table tbody tr {
+        transition: background var(--transition);
+    }
+
+    .compliance-table tbody tr:hover { background: var(--bg-elevated); }
+
+    .compliance-table td {
+        padding: 14px;
+        font-size: .84rem;
+        border-bottom: 1px solid var(--border-light);
+        vertical-align: middle;
+    }
+
+    .item-name {
+        font-weight: 600;
+        color: var(--text-primary);
+    }
+
+    .item-desc {
+        font-size: .72rem;
+        color: var(--text-muted);
+        margin-top: 2px;
+    }
+
+    .status-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        padding: 4px 12px;
+        border-radius: 20px;
+        font-size: .7rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: .3px;
+    }
+
+    .status-overdue { background: var(--danger-dim); color: var(--danger); }
+    .status-urgent { background: #fef3c7; color: #b45309; }
+    .status-upcoming { background: var(--info-dim); color: var(--info); }
+    .status-compliant { background: var(--success-dim); color: var(--success); }
+    .status-expired { background: var(--danger-dim); color: var(--danger); }
+    .status-active { background: var(--success-dim); color: var(--success); }
+    .status-expiring { background: var(--warning-dim); color: var(--warning); }
+
+    .countdown {
+        font-weight: 700;
+        font-size: .8rem;
+        font-variant-numeric: tabular-nums;
+    }
+
+    .countdown.overdue { color: var(--danger); }
+    .countdown.urgent { color: var(--warning); }
+    .countdown.ok { color: var(--success); }
+
+    .country-flag {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        font-size: .78rem;
+        color: var(--text-secondary);
+    }
+
+    .priority-dot {
+        width: 8px; height: 8px;
+        border-radius: 50%;
+        flex-shrink: 0;
+    }
+
+    .priority-critical { background: var(--danger); box-shadow: 0 0 6px var(--danger); }
+    .priority-high { background: var(--warning); }
+    .priority-medium { background: var(--info); }
+    .priority-low { background: var(--success); }
+
+    /* ═══ UPCOMING DEADLINES TIMELINE ═══ */
+    .timeline { position: relative; padding-left: 28px; }
+    .timeline::before {
+        content: '';
+        position: absolute;
+        left: 8px; top: 0; bottom: 0;
+        width: 2px;
+        background: linear-gradient(to bottom, var(--danger), var(--warning), var(--success));
+        border-radius: 99px;
+    }
+
+    .timeline-item {
+        position: relative;
+        padding-bottom: 20px;
+        cursor: pointer;
+        transition: all var(--transition);
+    }
+
+    .timeline-item:hover { transform: translateX(4px); }
+
+    .timeline-dot {
+        position: absolute;
+        left: -24px; top: 4px;
+        width: 12px; height: 12px;
+        border-radius: 50%;
+        border: 2px solid var(--bg-card);
+        box-shadow: 0 0 0 2px;
+    }
+
+    .timeline-dot.red { background: var(--danger); color: rgba(239,68,68,.2); }
+    .timeline-dot.orange { background: var(--warning); color: rgba(245,158,11,.2); }
+    .timeline-dot.blue { background: var(--info); color: rgba(59,130,246,.2); }
+    .timeline-dot.green { background: var(--success); color: rgba(16,185,129,.2); }
+
+    .timeline-content {
+        background: var(--bg-elevated);
+        border-radius: 10px;
+        padding: 14px 16px;
+        border: 1px solid var(--border-light);
+        transition: all var(--transition);
+    }
+
+    .timeline-item:hover .timeline-content {
+        border-color: var(--primary);
+        box-shadow: var(--shadow-sm);
+    }
+
+    .timeline-title { font-size: .84rem; font-weight: 600; }
+    .timeline-meta { font-size: .72rem; color: var(--text-muted); margin-top: 4px; display: flex; gap: 12px; flex-wrap: wrap; }
+
+    /* ═══ LICENSE/CONTRACT CARDS ═══ */
+    .cards-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+        gap: 16px;
+    }
+
+    .license-card {
+        background: var(--bg-card);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 20px;
+        transition: all var(--transition);
+        position: relative;
+        overflow: hidden;
+    }
+
+    .license-card::before {
+        content: '';
+        position: absolute;
+        top: 0; left: 0;
+        width: 4px; height: 100%;
+        background: var(--card-color, var(--primary));
+    }
+
+    .license-card:hover {
+        border-color: var(--primary);
+        box-shadow: var(--shadow);
+        transform: translateY(-2px);
+    }
+
+    .license-card-header {
+        display: flex;
+        align-items: start;
+        justify-content: space-between;
+        margin-bottom: 14px;
+    }
+
+    .license-icon {
+        width: 42px; height: 42px;
+        border-radius: 10px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 18px;
+        flex-shrink: 0;
+    }
+
+    .license-name { font-size: .9rem; font-weight: 700; margin-bottom: 4px; }
+    .license-issuer { font-size: .72rem; color: var(--text-muted); }
+
+    .license-details {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+        margin-top: 14px;
+        padding-top: 14px;
+        border-top: 1px solid var(--border-light);
+    }
+
+    .license-detail-label { font-size: .68rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: .5px; font-weight: 600; }
+    .license-detail-value { font-size: .82rem; font-weight: 600; margin-top: 2px; }
+
+    .expiry-bar {
+        height: 4px;
+        border-radius: 99px;
+        background: var(--border);
+        margin-top: 14px;
+        overflow: hidden;
+    }
+
+    .expiry-bar-fill {
+        height: 100%;
+        border-radius: 99px;
+        transition: width 1s cubic-bezier(.4,0,.2,1);
+    }
+
+    /* ═══ CALENDAR MINI ═══ */
+    .cal-grid {
+        display: grid;
+        grid-template-columns: repeat(7, 1fr);
+        gap: 3px;
+    }
+
+    .cal-head {
+        text-align: center;
+        font-size: .65rem;
+        font-weight: 700;
+        color: var(--text-muted);
+        text-transform: uppercase;
+        padding: 8px 0;
+    }
+
+    .cal-day {
+        aspect-ratio: 1;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: .78rem;
+        font-weight: 500;
+        border-radius: 8px;
+        cursor: pointer;
+        transition: all var(--transition);
+        position: relative;
+    }
+
+    .cal-day:hover { background: var(--primary-dim); }
+    .cal-day.today { background: var(--primary); color: #fff; font-weight: 700; }
+    .cal-day.other { opacity: .3; }
+    .cal-day.has-event::after {
+        content: '';
+        position: absolute;
+        bottom: 3px;
+        width: 5px; height: 5px;
+        border-radius: 50%;
+    }
+    .cal-day.has-deadline::after { background: var(--danger); }
+    .cal-day.has-renewal::after { background: var(--warning); }
+    .cal-day.has-task::after { background: var(--info); }
+
+    .cal-nav {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 14px;
+    }
+
+    .cal-month { font-size: 1rem; font-weight: 700; }
+
+    .cal-nav-btn {
+        width: 30px; height: 30px;
+        border-radius: 8px;
+        border: 1px solid var(--border);
+        background: var(--bg-card);
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 12px;
+        color: var(--text-secondary);
+        transition: all var(--transition);
+    }
+
+    .cal-nav-btn:hover { border-color: var(--primary); color: var(--primary); }
+
+    /* ═══ COUNTRY SELECTOR ═══ */
+    .country-selector {
+        display: flex;
+        gap: 6px;
+        flex-wrap: wrap;
+    }
+
+    .country-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        padding: 6px 14px;
+        border-radius: 20px;
+        font-size: .75rem;
+        font-weight: 600;
+        border: 1px solid var(--border);
+        background: var(--bg-card);
+        cursor: pointer;
+        transition: all var(--transition);
+    }
+
+    .country-chip:hover { border-color: var(--primary); color: var(--primary); }
+    .country-chip.active { background: var(--primary); color: #fff; border-color: var(--primary); }
+
+    /* ═══ QUICK ACTIONS ═══ */
+    .quick-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+        gap: 12px;
+    }
+
+    .quick-card {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 10px;
+        padding: 20px 14px;
+        background: var(--bg-card);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        cursor: pointer;
+        transition: all var(--transition);
+        text-decoration: none;
+        color: var(--text-primary);
+    }
+
+    .quick-card:hover {
+        border-color: var(--primary);
+        transform: translateY(-3px);
+        box-shadow: var(--shadow), var(--shadow-glow);
+    }
+
+    .quick-icon {
+        width: 44px; height: 44px;
+        border-radius: 12px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 18px;
+    }
+
+    .quick-card span { font-size: .78rem; font-weight: 600; text-align: center; }
+
+    /* ═══ ALERT BANNER ═══ */
+    .alert-banner {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        padding: 16px 20px;
+        border-radius: var(--radius);
+        margin-bottom: 20px;
+        font-size: .85rem;
+        font-weight: 500;
+        animation: slideDown .4s ease-out;
+    }
+
+    @keyframes slideDown {
+        from { opacity: 0; transform: translateY(-10px); }
+        to { opacity: 1; transform: translateY(0); }
+    }
+
+    .alert-banner.critical {
+        background: linear-gradient(135deg, rgba(239,68,68,.08), rgba(239,68,68,.04));
+        border: 1px solid rgba(239,68,68,.2);
+        color: #b91c1c;
+    }
+
+    .alert-banner.warning {
+        background: linear-gradient(135deg, rgba(245,158,11,.08), rgba(245,158,11,.04));
+        border: 1px solid rgba(245,158,11,.2);
+        color: #92400e;
+    }
+
+    .alert-banner i { font-size: 1.2rem; flex-shrink: 0; }
+    .alert-banner .alert-dismiss {
+        margin-left: auto;
+        background: none;
+        border: none;
+        cursor: pointer;
+        font-size: 1rem;
+        opacity: .5;
+        color: inherit;
+    }
+
+    /* ═══ MODAL ═══ */
+    .modal-overlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(15,23,42,.5);
+        backdrop-filter: blur(6px);
+        z-index: 2000;
+        display: none;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .modal-overlay.active { display: flex; }
+
+    .modal {
+        background: var(--bg-card);
+        border-radius: var(--radius-lg);
+        width: 90%;
+        max-width: 560px;
+        max-height: 85vh;
+        overflow-y: auto;
+        box-shadow: var(--shadow-lg);
+        animation: modalSlide .3s ease-out;
+    }
+
+    @keyframes modalSlide {
+        from { opacity: 0; transform: translateY(20px) scale(.96); }
+        to { opacity: 1; transform: translateY(0) scale(1); }
+    }
+
+    .modal-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 20px 24px;
+        border-bottom: 1px solid var(--border);
+    }
+
+    .modal-title { font-size: 1rem; font-weight: 700; }
+
+    .modal-close {
+        width: 30px; height: 30px;
+        border-radius: 8px;
+        border: none;
+        background: var(--bg-elevated);
+        color: var(--text-secondary);
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .modal-close:hover { background: var(--danger-dim); color: var(--danger); }
+
+    .modal-body { padding: 24px; }
+
+    .form-group { margin-bottom: 16px; }
+
+    .form-label {
+        display: block;
+        font-size: .78rem;
+        font-weight: 600;
+        color: var(--text-secondary);
+        margin-bottom: 6px;
+    }
+
+    .form-input, .form-select, .form-textarea {
+        width: 100%;
+        padding: 10px 14px;
+        border: 1px solid var(--border);
+        border-radius: 9px;
+        font-size: .85rem;
+        font-family: inherit;
+        outline: none;
+        background: var(--bg-card);
+        color: var(--text-primary);
+        transition: border-color var(--transition);
+    }
+
+    .form-input:focus, .form-select:focus, .form-textarea:focus {
+        border-color: var(--primary);
+        box-shadow: 0 0 0 3px var(--primary-dim);
+    }
+
+    .form-textarea { resize: vertical; min-height: 70px; }
+
+    .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+
+    .modal-footer {
+        padding: 16px 24px;
+        border-top: 1px solid var(--border);
+        display: flex;
+        justify-content: flex-end;
+        gap: 8px;
+    }
+
+    /* ═══ TOAST ═══ */
+    .toast-container {
+        position: fixed;
+        top: 20px;
+        right: 20px;
+        z-index: 3000;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+    }
+
+    .toast {
+        padding: 12px 20px;
+        border-radius: 10px;
+        font-size: .82rem;
+        font-weight: 600;
+        color: #fff;
+        box-shadow: var(--shadow-lg);
+        animation: toastIn .3s ease-out;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+
+    .toast.success { background: var(--success); }
+    .toast.error { background: var(--danger); }
+    .toast.info { background: var(--primary); }
+
+    @keyframes toastIn {
+        from { opacity: 0; transform: translateX(40px); }
+        to { opacity: 1; transform: translateX(0); }
+    }
+
+    /* ═══ FILTER TABS ═══ */
+    .filter-tabs {
+        display: flex;
+        gap: 4px;
+        background: var(--bg-elevated);
+        border-radius: 10px;
+        padding: 3px;
+    }
+
+    .filter-tab {
+        padding: 7px 16px;
+        border-radius: 8px;
+        font-size: .75rem;
+        font-weight: 600;
+        border: none;
+        background: transparent;
+        color: var(--text-muted);
+        cursor: pointer;
+        transition: all var(--transition);
+        font-family: inherit;
+    }
+
+    .filter-tab:hover { color: var(--text-primary); }
+    .filter-tab.active { background: var(--bg-card); color: var(--primary); box-shadow: var(--shadow-sm); }
+
+    /* ═══ EMPTY STATE ═══ */
+    .empty-state {
+        text-align: center;
+        padding: 48px 20px;
+        color: var(--text-muted);
+    }
+
+    .empty-state i { font-size: 3rem; margin-bottom: 14px; opacity: .3; }
+    .empty-state p { font-size: .88rem; margin-bottom: 16px; }
+
+    /* ═══ RESPONSIVE ═══ */
+    @media (max-width: 768px) {
+        .sidebar { transform: translateX(-100%); }
+        .sidebar.open { transform: translateX(0); }
+        .main { margin-left: 0; }
+        .mobile-menu-btn { display: block; }
+        .content { padding: 16px; }
+        .stats-grid { grid-template-columns: repeat(2, 1fr); }
+        .grid-2 { grid-template-columns: 1fr; }
+        .cards-grid { grid-template-columns: 1fr; }
+        .risk-gauge-wrap { flex-direction: column; }
+        .topbar { padding: 0 16px; }
+    }
+
+    @media (max-width: 480px) {
+        .stats-grid { grid-template-columns: 1fr; }
+    }
+
+    /* ═══ PULSE ANIMATION ═══ */
+    @keyframes pulse-ring {
+        0% { transform: scale(1); opacity: 1; }
+        100% { transform: scale(1.4); opacity: 0; }
+    }
+
+    .live-dot {
+        width: 8px; height: 8px;
+        border-radius: 50%;
+        background: var(--success);
+        position: relative;
+        flex-shrink: 0;
+    }
+
+    .live-dot::before {
+        content: '';
+        position: absolute;
+        inset: -3px;
+        border-radius: 50%;
+        border: 2px solid var(--success);
+        animation: pulse-ring 2s infinite;
+    }
+
+    /* ═══ FINANCIAL SNAPSHOT ═══ */
+    .fin-input-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 14px;
+        margin-bottom: 24px;
+    }
+
+    .fin-input-card {
+        background: var(--bg-elevated);
+        border-radius: 12px;
+        padding: 16px;
+        border: 1px solid var(--border-light);
+        transition: all var(--transition);
+    }
+
+    .fin-input-card:focus-within {
+        border-color: var(--primary);
+        box-shadow: 0 0 0 3px var(--primary-dim);
+    }
+
+    .fin-input-label {
+        font-size: .7rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: .5px;
+        color: var(--text-muted);
+        margin-bottom: 6px;
+        display: flex;
+        align-items: center;
+        gap: 5px;
+    }
+
+    .fin-input-field {
+        width: 100%;
+        padding: 8px 0;
+        border: none;
+        background: transparent;
+        font-size: 1.4rem;
+        font-weight: 800;
+        font-family: inherit;
+        color: var(--text-primary);
+        outline: none;
+    }
+
+    .fin-input-field::placeholder { color: var(--text-muted); opacity: .4; font-weight: 500; }
+
+    .fin-currency {
+        font-size: .78rem;
+        color: var(--text-muted);
+        font-weight: 500;
+    }
+
+    .fin-chart-wrap {
+        background: var(--bg-elevated);
+        border-radius: 12px;
+        padding: 20px;
+        border: 1px solid var(--border-light);
+        margin-bottom: 16px;
+    }
+
+    .fin-chart-title {
+        font-size: .78rem;
+        font-weight: 700;
+        color: var(--text-secondary);
+        margin-bottom: 14px;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+    }
+
+    .bar-chart {
+        display: flex;
+        align-items: flex-end;
+        gap: 6px;
+        height: 140px;
+        padding-bottom: 24px;
+        position: relative;
+    }
+
+    .bar-chart::before {
+        content: '';
+        position: absolute;
+        bottom: 24px; left: 0; right: 0;
+        height: 1px;
+        background: var(--border);
+    }
+
+    .bar-group {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 4px;
+    }
+
+    .bar {
+        width: 100%;
+        max-width: 32px;
+        border-radius: 6px 6px 0 0;
+        transition: height .8s cubic-bezier(.4,0,.2,1);
+        position: relative;
+        cursor: pointer;
+    }
+
+    .bar:hover { filter: brightness(1.15); }
+
+    .bar-label {
+        font-size: .6rem;
+        font-weight: 600;
+        color: var(--text-muted);
+        text-align: center;
+        position: absolute;
+        bottom: -20px;
+        left: 50%;
+        transform: translateX(-50%);
+        white-space: nowrap;
+    }
+
+    .bar-tooltip {
+        display: none;
+        position: absolute;
+        top: -28px;
+        left: 50%;
+        transform: translateX(-50%);
+        background: var(--text-primary);
+        color: #fff;
+        padding: 3px 8px;
+        border-radius: 4px;
+        font-size: .65rem;
+        font-weight: 600;
+        white-space: nowrap;
+    }
+
+    .bar:hover .bar-tooltip { display: block; }
+
+    .insight-card {
+        background: linear-gradient(135deg, rgba(139,92,246,.06), rgba(99,102,241,.04));
+        border: 1px solid rgba(139,92,246,.15);
+        border-radius: 12px;
+        padding: 18px 20px;
+        margin-bottom: 12px;
+        display: flex;
+        gap: 14px;
+        align-items: start;
+    }
+
+    .insight-icon {
+        width: 36px; height: 36px;
+        border-radius: 10px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 16px;
+        flex-shrink: 0;
+    }
+
+    .insight-text {
+        font-size: .84rem;
+        line-height: 1.6;
+        color: var(--text-secondary);
+    }
+
+    .insight-text strong { color: var(--text-primary); }
+
+    .fin-summary-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+        gap: 12px;
+    }
+
+    .fin-summary-card {
+        text-align: center;
+        padding: 18px 14px;
+        background: var(--bg-card);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+    }
+
+    .fin-summary-val {
+        font-size: 1.3rem;
+        font-weight: 800;
+        line-height: 1.1;
+    }
+
+    .fin-summary-label {
+        font-size: .7rem;
+        color: var(--text-muted);
+        font-weight: 500;
+        margin-top: 4px;
+    }
+
+    .fin-trend-up { color: var(--success); }
+    .fin-trend-down { color: var(--danger); }
+    .fin-trend-neutral { color: var(--text-muted); }
+
+    /* ═══ AUTO REPORT CARDS ═══ */
+    .report-cards-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+        gap: 16px;
+        margin-bottom: 24px;
+    }
+
+    .report-card {
+        background: var(--bg-card);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 24px;
+        transition: all var(--transition);
+        cursor: pointer;
+        position: relative;
+        overflow: hidden;
+    }
+
+    .report-card::before {
+        content: '';
+        position: absolute;
+        top: 0; left: 0;
+        width: 100%; height: 4px;
+        background: var(--report-accent, var(--primary));
+    }
+
+    .report-card:hover {
+        border-color: var(--primary);
+        box-shadow: var(--shadow), var(--shadow-glow);
+        transform: translateY(-3px);
+    }
+
+    .report-card-icon {
+        width: 52px; height: 52px;
+        border-radius: 14px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 22px;
+        margin-bottom: 16px;
+    }
+
+    .report-card-title {
+        font-size: 1rem;
+        font-weight: 700;
+        margin-bottom: 6px;
+    }
+
+    .report-card-desc {
+        font-size: .78rem;
+        color: var(--text-muted);
+        line-height: 1.5;
+        margin-bottom: 16px;
+    }
+
+    .report-card-meta {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding-top: 14px;
+        border-top: 1px solid var(--border-light);
+    }
+
+    .report-card-tag {
+        font-size: .68rem;
+        font-weight: 700;
+        padding: 3px 10px;
+        border-radius: 20px;
+        text-transform: uppercase;
+        letter-spacing: .3px;
+    }
+
+    .report-schedule {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 14px 18px;
+        background: var(--bg-elevated);
+        border-radius: 10px;
+        border: 1px solid var(--border-light);
+        margin-bottom: 10px;
+    }
+
+    .report-schedule-icon {
+        width: 36px; height: 36px;
+        border-radius: 9px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 15px;
+        flex-shrink: 0;
+    }
+
+    .report-schedule-info { flex: 1; }
+    .report-schedule-title { font-size: .82rem; font-weight: 600; }
+    .report-schedule-sub { font-size: .7rem; color: var(--text-muted); margin-top: 1px; }
+
+    /* Print styles */
+    @media print {
+        .sidebar, .topbar, .modal-overlay, .toast-container { display: none !important; }
+        .main { margin-left: 0 !important; }
+        .panel { break-inside: avoid; }
+    }
+    </style>
+</head>
+<body>
+
+<!-- ═══ SIDEBAR ═══ -->
+<aside class="sidebar" id="sidebar">
+    <div class="sidebar-header">
+        <a href="../index.html" class="brand-logo-box">
+            <img src="../favicon-96x96.png" alt="Simpatico HR" style="width:34px;height:34px;border-radius:9px;" onerror="this.style.display='none'">
+            <span class="brand-logo-text">SIMPATICO <span class="brand-logo-highlight">HR</span></span>
+        </a>
+        <div class="sidebar-role">Command Center</div>
+    </div>
+
+    <nav class="sidebar-nav">
+        <div class="nav-label">Operations</div>
+        <a class="nav-item active" data-section="overview" onclick="navigateTo('overview', this)">
+            <i class="fas fa-shield-alt"></i> Risk Overview
+        </a>
+        <a class="nav-item" data-section="compliance" onclick="navigateTo('compliance', this)">
+            <i class="fas fa-gavel"></i> Compliance
+            <span class="nav-badge" id="complianceBadge">0</span>
+        </a>
+        <a class="nav-item" data-section="licenses" onclick="navigateTo('licenses', this)">
+            <i class="fas fa-id-card"></i> Licenses & Permits
+        </a>
+        <a class="nav-item" data-section="contracts" onclick="navigateTo('contracts', this)">
+            <i class="fas fa-file-contract"></i> Contracts
+        </a>
+        <a class="nav-item" data-section="insurance" onclick="navigateTo('insurance', this)">
+            <i class="fas fa-shield-virus"></i> Insurance
+        </a>
+
+        <div class="nav-label">Financial</div>
+        <a class="nav-item" data-section="financial" onclick="navigateTo('financial', this)">
+            <i class="fas fa-chart-bar"></i> Financial Snapshot
+            <span class="nav-badge ok">💰</span>
+        </a>
+
+        <div class="nav-label">Intelligence</div>
+        <a class="nav-item" data-section="calendar" onclick="navigateTo('calendar', this)">
+            <i class="fas fa-calendar-alt"></i> Deadline Calendar
+        </a>
+        <a class="nav-item" data-section="reports" onclick="navigateTo('reports', this)">
+            <i class="fas fa-file-alt"></i> Auto Reports
+            <span class="nav-badge ok">New</span>
+        </a>
+
+        <div class="nav-label">Navigation</div>
+        <a class="nav-item" href="consulting.html">
+            <i class="fas fa-chart-line"></i> Consulting Dashboard
+        </a>
+        <a class="nav-item" href="hr.html">
+            <i class="fas fa-users"></i> HR Dashboard
+        </a>
+        <a class="nav-item" href="https://wa.me/919544842260" target="_blank">
+            <i class="fab fa-whatsapp"></i> WhatsApp Support
+        </a>
+    </nav>
+
+    <div class="sidebar-footer">
+        <a class="nav-item" onclick="signOut()">
+            <i class="fas fa-sign-out-alt"></i> Sign Out
+        </a>
+    </div>
+</aside>
+
+<!-- ═══ MAIN CONTENT ═══ -->
+<div class="main">
+    <header class="topbar">
+        <div class="topbar-left">
+            <button class="mobile-menu-btn" onclick="toggleSidebar()"><i class="fas fa-bars"></i></button>
+            <div>
+                <div class="page-title" id="pageTitle">Risk Overview</div>
+                <div class="page-title-sub">Business Operations Command Center</div>
+            </div>
+        </div>
+        <div class="topbar-right">
+            <div class="country-selector" id="countrySelector">
+                <button class="country-chip active" data-country="IN" onclick="selectCountry('IN', this)">🇮🇳 India</button>
+                <button class="country-chip" data-country="AE" onclick="selectCountry('AE', this)">🇦🇪 UAE</button>
+                <button class="country-chip" data-country="SA" onclick="selectCountry('SA', this)">🇸🇦 KSA</button>
+                <button class="country-chip" data-country="GB" onclick="selectCountry('GB', this)">🇬🇧 UK</button>
+                <button class="country-chip" data-country="US" onclick="selectCountry('US', this)">🇺🇸 USA</button>
+            </div>
+            <a href="https://wa.me/919544842260" target="_blank" class="topbar-btn" title="WhatsApp" style="color:#25d366;border-color:#25d366;">
+                <i class="fab fa-whatsapp"></i>
+            </a>
+            <div class="user-avatar" id="userAvatar">SC</div>
+        </div>
+    </header>
+
+    <div class="content">
+
+        <!-- ══════════════════════════════════════════
+             SECTION: RISK OVERVIEW
+        ══════════════════════════════════════════ -->
+        <div class="section-panel active" id="section-overview">
+
+            <div id="alertBanners"></div>
+
+            <div class="stats-grid">
+                <div class="stat-card" style="--card-accent: var(--danger);">
+                    <div class="stat-icon red"><i class="fas fa-exclamation-triangle"></i></div>
+                    <div>
+                        <div class="stat-value" id="statOverdue">0</div>
+                        <div class="stat-label">Overdue Items</div>
+                    </div>
+                </div>
+                <div class="stat-card" style="--card-accent: var(--warning);">
+                    <div class="stat-icon orange"><i class="fas fa-clock"></i></div>
+                    <div>
+                        <div class="stat-value" id="statUrgent">0</div>
+                        <div class="stat-label">Due in 30 Days</div>
+                    </div>
+                </div>
+                <div class="stat-card" style="--card-accent: var(--success);">
+                    <div class="stat-icon green"><i class="fas fa-check-circle"></i></div>
+                    <div>
+                        <div class="stat-value" id="statCompliant">0</div>
+                        <div class="stat-label">Compliant</div>
+                    </div>
+                </div>
+                <div class="stat-card" style="--card-accent: var(--info);">
+                    <div class="stat-icon blue"><i class="fas fa-layer-group"></i></div>
+                    <div>
+                        <div class="stat-value" id="statTotal">0</div>
+                        <div class="stat-label">Total Tracked</div>
+                    </div>
+                </div>
+                <div class="stat-card" style="--card-accent: var(--primary);">
+                    <div class="stat-icon purple"><i class="fas fa-file-contract"></i></div>
+                    <div>
+                        <div class="stat-value" id="statContracts">0</div>
+                        <div class="stat-label">Active Contracts</div>
+                    </div>
+                </div>
+                <div class="stat-card" style="--card-accent: var(--cyan);">
+                    <div class="stat-icon cyan"><i class="fas fa-shield-alt"></i></div>
+                    <div>
+                        <div class="stat-value" id="statInsurance">0</div>
+                        <div class="stat-label">Insurance Policies</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Risk Score Gauge -->
+            <div class="panel">
+                <div class="panel-header">
+                    <div class="panel-title"><i class="fas fa-tachometer-alt"></i> Compliance Health Score</div>
+                    <div style="display:flex;align-items:center;gap:8px;">
+                        <div class="live-dot"></div>
+                        <span style="font-size:.72rem;color:var(--success);font-weight:600;">Live</span>
+                    </div>
+                </div>
+                <div class="risk-gauge-wrap">
+                    <div style="text-align:center;">
+                        <div style="position:relative;width:200px;height:110px;margin:0 auto;">
+                            <svg viewBox="0 0 200 110" style="width:200px;height:110px;">
+                                <path d="M20,100 A80,80 0 0,1 180,100" fill="none" stroke="#e2e8f0" stroke-width="14" stroke-linecap="round"/>
+                                <path d="M20,100 A80,80 0 0,1 180,100" fill="none" stroke="url(#gaugeGrad)" stroke-width="14" stroke-linecap="round" id="gaugeArc" stroke-dasharray="251.2" stroke-dashoffset="251.2" style="transition: stroke-dashoffset 1.5s cubic-bezier(.4,0,.2,1);"/>
+                                <defs>
+                                    <linearGradient id="gaugeGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+                                        <stop offset="0%" style="stop-color:#ef4444"/>
+                                        <stop offset="40%" style="stop-color:#f59e0b"/>
+                                        <stop offset="100%" style="stop-color:#10b981"/>
+                                    </linearGradient>
+                                </defs>
+                            </svg>
+                            <div style="position:absolute;bottom:0;left:50%;transform:translateX(-50%);text-align:center;">
+                                <div id="riskScore" class="gauge-score excellent" style="font-size:2.5rem;font-weight:900;line-height:1;">—</div>
+                                <div class="gauge-label">out of 100</div>
+                            </div>
+                        </div>
+                        <div id="riskLabel" style="margin-top:12px;font-size:.85rem;font-weight:700;color:var(--success);">Calculating...</div>
+                    </div>
+                    <div class="risk-breakdown" id="riskBreakdown"></div>
+                </div>
+            </div>
+
+            <!-- Quick Actions -->
+            <div class="panel">
+                <div class="panel-header">
+                    <div class="panel-title"><i class="fas fa-bolt"></i> Quick Actions</div>
+                </div>
+                <div class="quick-grid">
+                    <div class="quick-card" onclick="navigateToSection('compliance')">
+                        <div class="quick-icon" style="background:var(--danger-dim);color:var(--danger);"><i class="fas fa-gavel"></i></div>
+                        <span>Compliance Check</span>
+                    </div>
+                    <div class="quick-card" onclick="openAddModal('license')">
+                        <div class="quick-icon" style="background:var(--info-dim);color:var(--info);"><i class="fas fa-plus-circle"></i></div>
+                        <span>Add License</span>
+                    </div>
+                    <div class="quick-card" onclick="openAddModal('contract')">
+                        <div class="quick-icon" style="background:var(--primary-dim);color:var(--primary);"><i class="fas fa-file-contract"></i></div>
+                        <span>Add Contract</span>
+                    </div>
+                    <div class="quick-card" onclick="openAddModal('insurance')">
+                        <div class="quick-icon" style="background:var(--cyan-dim);color:var(--cyan);"><i class="fas fa-shield-alt"></i></div>
+                        <span>Add Insurance</span>
+                    </div>
+                    <div class="quick-card" onclick="exportReport()">
+                        <div class="quick-icon" style="background:var(--success-dim);color:var(--success);"><i class="fas fa-file-pdf"></i></div>
+                        <span>Export Report</span>
+                    </div>
+                    <div class="quick-card" onclick="navigateToSection('calendar')">
+                        <div class="quick-icon" style="background:var(--warning-dim);color:var(--warning);"><i class="fas fa-calendar-alt"></i></div>
+                        <span>View Calendar</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Upcoming Deadlines -->
+            <div class="grid-2">
+                <div class="panel">
+                    <div class="panel-header">
+                        <div class="panel-title"><i class="fas fa-fire"></i> Upcoming Deadlines</div>
+                    </div>
+                    <div class="timeline" id="upcomingTimeline"></div>
+                </div>
+                <div class="panel">
+                    <div class="panel-header">
+                        <div class="panel-title"><i class="fas fa-history"></i> Recent Activity</div>
+                    </div>
+                    <div id="recentActivity"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ══════════════════════════════════════════
+             SECTION: COMPLIANCE
+        ══════════════════════════════════════════ -->
+        <div class="section-panel" id="section-compliance">
+            <div class="panel">
+                <div class="panel-header">
+                    <div class="panel-title"><i class="fas fa-gavel"></i> Regulatory Compliance Tracker</div>
+                    <div class="panel-actions">
+                        <div class="filter-tabs" id="complianceFilters">
+                            <button class="filter-tab active" data-filter="all" onclick="filterCompliance('all', this)">All</button>
+                            <button class="filter-tab" data-filter="overdue" onclick="filterCompliance('overdue', this)">Overdue</button>
+                            <button class="filter-tab" data-filter="urgent" onclick="filterCompliance('urgent', this)">Urgent</button>
+                            <button class="filter-tab" data-filter="upcoming" onclick="filterCompliance('upcoming', this)">Upcoming</button>
+                            <button class="filter-tab" data-filter="compliant" onclick="filterCompliance('compliant', this)">Done</button>
+                        </div>
+                        <button class="btn btn-primary btn-sm" onclick="openAddModal('compliance')"><i class="fas fa-plus"></i> Add</button>
+                    </div>
+                </div>
+                <div style="overflow-x:auto;">
+                    <table class="compliance-table">
+                        <thead>
+                            <tr>
+                                <th style="width:5%;"></th>
+                                <th>Obligation</th>
+                                <th>Category</th>
+                                <th>Due Date</th>
+                                <th>Countdown</th>
+                                <th>Status</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="complianceBody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- ══════════════════════════════════════════
+             SECTION: LICENSES & PERMITS
+        ══════════════════════════════════════════ -->
+        <div class="section-panel" id="section-licenses">
+            <div class="panel">
+                <div class="panel-header">
+                    <div class="panel-title"><i class="fas fa-id-card"></i> Licenses & Permits</div>
+                    <button class="btn btn-primary btn-sm" onclick="openAddModal('license')"><i class="fas fa-plus"></i> Add License</button>
+                </div>
+                <div class="cards-grid" id="licensesGrid"></div>
+            </div>
+        </div>
+
+        <!-- ══════════════════════════════════════════
+             SECTION: CONTRACTS
+        ══════════════════════════════════════════ -->
+        <div class="section-panel" id="section-contracts">
+            <div class="panel">
+                <div class="panel-header">
+                    <div class="panel-title"><i class="fas fa-file-contract"></i> Contracts & Agreements</div>
+                    <button class="btn btn-primary btn-sm" onclick="openAddModal('contract')"><i class="fas fa-plus"></i> Add Contract</button>
+                </div>
+                <div class="cards-grid" id="contractsGrid"></div>
+            </div>
+        </div>
+
+        <!-- ══════════════════════════════════════════
+             SECTION: INSURANCE
+        ══════════════════════════════════════════ -->
+        <div class="section-panel" id="section-insurance">
+            <div class="panel">
+                <div class="panel-header">
+                    <div class="panel-title"><i class="fas fa-shield-virus"></i> Insurance Policies</div>
+                    <button class="btn btn-primary btn-sm" onclick="openAddModal('insurance')"><i class="fas fa-plus"></i> Add Policy</button>
+                </div>
+                <div class="cards-grid" id="insuranceGrid"></div>
+            </div>
+        </div>
+
+        <!-- ══════════════════════════════════════════
+             SECTION: DEADLINE CALENDAR
+        ══════════════════════════════════════════ -->
+        <div class="section-panel" id="section-calendar">
+            <div class="grid-2">
+                <div class="panel">
+                    <div class="panel-header">
+                        <div class="panel-title"><i class="fas fa-calendar-alt"></i> Deadline Calendar</div>
+                    </div>
+                    <div class="cal-nav">
+                        <button class="cal-nav-btn" onclick="changeMonth(-1)"><i class="fas fa-chevron-left"></i></button>
+                        <div class="cal-month" id="calMonth"></div>
+                        <button class="cal-nav-btn" onclick="changeMonth(1)"><i class="fas fa-chevron-right"></i></button>
+                    </div>
+                    <div class="cal-grid" id="calGrid"></div>
+                    <div style="display:flex;gap:16px;margin-top:16px;flex-wrap:wrap;">
+                        <div style="display:flex;align-items:center;gap:5px;font-size:.7rem;color:var(--text-muted);"><div style="width:8px;height:8px;border-radius:50%;background:var(--danger);"></div> Compliance</div>
+                        <div style="display:flex;align-items:center;gap:5px;font-size:.7rem;color:var(--text-muted);"><div style="width:8px;height:8px;border-radius:50%;background:var(--warning);"></div> Renewal</div>
+                        <div style="display:flex;align-items:center;gap:5px;font-size:.7rem;color:var(--text-muted);"><div style="width:8px;height:8px;border-radius:50%;background:var(--info);"></div> Contract</div>
+                    </div>
+                </div>
+                <div class="panel">
+                    <div class="panel-header">
+                        <div class="panel-title"><i class="fas fa-list"></i> Events This Month</div>
+                    </div>
+                    <div id="calEvents"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ══════════════════════════════════════════
+             SECTION: FINANCIAL SNAPSHOT
+        ══════════════════════════════════════════ -->
+        <div class="section-panel" id="section-financial">
+            <!-- Month Selector -->
+            <div class="panel">
+                <div class="panel-header">
+                    <div class="panel-title"><i class="fas fa-chart-bar"></i> Financial Snapshot</div>
+                    <div class="panel-actions">
+                        <button class="btn btn-secondary btn-sm" onclick="changeFinMonth(-1)"><i class="fas fa-chevron-left"></i></button>
+                        <span id="finMonthLabel" style="font-size:.85rem;font-weight:700;min-width:120px;text-align:center;"></span>
+                        <button class="btn btn-secondary btn-sm" onclick="changeFinMonth(1)"><i class="fas fa-chevron-right"></i></button>
+                        <button class="btn btn-primary btn-sm" onclick="saveFinancialData()"><i class="fas fa-save"></i> Save</button>
+                    </div>
+                </div>
+
+                <div class="fin-input-grid">
+                    <div class="fin-input-card">
+                        <div class="fin-input-label"><i class="fas fa-arrow-up" style="color:var(--success)"></i> Revenue / Sales</div>
+                        <input class="fin-input-field" type="number" id="finRevenue" placeholder="0" oninput="updateFinPreview()">
+                        <div class="fin-currency" id="finCurrencyLabel">INR</div>
+                    </div>
+                    <div class="fin-input-card">
+                        <div class="fin-input-label"><i class="fas fa-arrow-down" style="color:var(--danger)"></i> Total Expenses</div>
+                        <input class="fin-input-field" type="number" id="finExpenses" placeholder="0" oninput="updateFinPreview()">
+                        <div class="fin-currency">Operating + Overhead</div>
+                    </div>
+                    <div class="fin-input-card">
+                        <div class="fin-input-label"><i class="fas fa-wallet" style="color:var(--info)"></i> Cash in Bank</div>
+                        <input class="fin-input-field" type="number" id="finCash" placeholder="0" oninput="updateFinPreview()">
+                        <div class="fin-currency">Current balance</div>
+                    </div>
+                    <div class="fin-input-card">
+                        <div class="fin-input-label"><i class="fas fa-hand-holding-usd" style="color:var(--warning)"></i> Receivables (Owed to you)</div>
+                        <input class="fin-input-field" type="number" id="finReceivables" placeholder="0" oninput="updateFinPreview()">
+                        <div class="fin-currency">Outstanding invoices</div>
+                    </div>
+                    <div class="fin-input-card">
+                        <div class="fin-input-label"><i class="fas fa-credit-card" style="color:var(--cyan)"></i> Payables (You owe)</div>
+                        <input class="fin-input-field" type="number" id="finPayables" placeholder="0" oninput="updateFinPreview()">
+                        <div class="fin-currency">Outstanding bills</div>
+                    </div>
+                    <div class="fin-input-card">
+                        <div class="fin-input-label"><i class="fas fa-users" style="color:var(--primary)"></i> Employee Count</div>
+                        <input class="fin-input-field" type="number" id="finEmployees" placeholder="0" oninput="updateFinPreview()">
+                        <div class="fin-currency">Total headcount</div>
+                    </div>
+                </div>
+
+                <!-- Live Summary -->
+                <div class="fin-summary-grid" id="finSummary">
+                    <div class="fin-summary-card">
+                        <div class="fin-summary-val" id="finProfit">—</div>
+                        <div class="fin-summary-label">Net Profit/Loss</div>
+                    </div>
+                    <div class="fin-summary-card">
+                        <div class="fin-summary-val" id="finMargin">—</div>
+                        <div class="fin-summary-label">Profit Margin</div>
+                    </div>
+                    <div class="fin-summary-card">
+                        <div class="fin-summary-val" id="finRunway">—</div>
+                        <div class="fin-summary-label">Cash Runway</div>
+                    </div>
+                    <div class="fin-summary-card">
+                        <div class="fin-summary-val" id="finPerEmployee">—</div>
+                        <div class="fin-summary-label">Revenue / Employee</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Trend Charts -->
+            <div class="grid-2">
+                <div class="panel">
+                    <div class="panel-header">
+                        <div class="panel-title"><i class="fas fa-chart-line"></i> Revenue vs Expenses (6 Months)</div>
+                    </div>
+                    <div class="fin-chart-wrap">
+                        <div class="bar-chart" id="revExpChart"></div>
+                        <div style="display:flex;gap:16px;justify-content:center;margin-top:8px;">
+                            <div style="display:flex;align-items:center;gap:5px;font-size:.7rem;color:var(--text-muted);"><div style="width:10px;height:10px;border-radius:3px;background:var(--success);"></div> Revenue</div>
+                            <div style="display:flex;align-items:center;gap:5px;font-size:.7rem;color:var(--text-muted);"><div style="width:10px;height:10px;border-radius:3px;background:var(--danger);"></div> Expenses</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="panel">
+                    <div class="panel-header">
+                        <div class="panel-title"><i class="fas fa-wallet"></i> Cash Position Trend</div>
+                    </div>
+                    <div class="fin-chart-wrap">
+                        <div class="bar-chart" id="cashChart"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- AI Insights -->
+            <div class="panel">
+                <div class="panel-header">
+                    <div class="panel-title"><i class="fas fa-brain"></i> AI Financial Insights</div>
+                    <div style="display:flex;align-items:center;gap:6px;">
+                        <div class="live-dot"></div>
+                        <span style="font-size:.72rem;color:var(--success);font-weight:600;">Auto-analyzed</span>
+                    </div>
+                </div>
+                <div id="finInsights"></div>
+            </div>
+
+            <!-- Historical Data Notice -->
+            <div style="text-align:center;padding:20px;background:linear-gradient(135deg,rgba(139,92,246,.04),rgba(99,102,241,.02));border:1px dashed rgba(139,92,246,.2);border-radius:12px;">
+                <i class="fas fa-database" style="font-size:1.5rem;color:var(--primary);margin-bottom:8px;"></i>
+                <p style="font-size:.82rem;color:var(--text-secondary);max-width:500px;margin:0 auto;"><strong>Your financial history is securely stored.</strong> The longer you track, the more powerful the AI insights become. After 3 months, you'll unlock trend forecasting and benchmarking.</p>
+            </div>
+        </div>
+
+        <!-- ══════════════════════════════════════════
+             SECTION: AUTO REPORTS
+        ══════════════════════════════════════════ -->
+        <div class="section-panel" id="section-reports">
+            <!-- Report Types -->
+            <div class="report-cards-grid">
+                <div class="report-card" onclick="generateMonthlyReport()" style="--report-accent: var(--primary);">
+                    <div class="report-card-icon" style="background:var(--primary-dim);color:var(--primary);"><i class="fas fa-chart-pie"></i></div>
+                    <div class="report-card-title">Monthly Business Report</div>
+                    <div class="report-card-desc">Complete management report with financial overview, compliance status, AI recommendations, and trend analysis. Ready for board presentations.</div>
+                    <div class="report-card-meta">
+                        <span class="report-card-tag" style="background:var(--primary-dim);color:var(--primary);">Most Popular</span>
+                        <span style="font-size:.75rem;color:var(--text-muted);"><i class="fas fa-clock"></i> ~2 min</span>
+                    </div>
+                </div>
+                <div class="report-card" onclick="exportReport()" style="--report-accent: var(--danger);">
+                    <div class="report-card-icon" style="background:var(--danger-dim);color:var(--danger);"><i class="fas fa-gavel"></i></div>
+                    <div class="report-card-title">Compliance Status Report</div>
+                    <div class="report-card-desc">Detailed compliance audit showing all regulatory deadlines, overdue items, license status, and risk score with recommendations.</div>
+                    <div class="report-card-meta">
+                        <span class="report-card-tag" style="background:var(--danger-dim);color:var(--danger);">Compliance</span>
+                        <span style="font-size:.75rem;color:var(--text-muted);"><i class="fas fa-clock"></i> ~1 min</span>
+                    </div>
+                </div>
+                <div class="report-card" onclick="generateFinancialReport()" style="--report-accent: var(--success);">
+                    <div class="report-card-icon" style="background:var(--success-dim);color:var(--success);"><i class="fas fa-chart-line"></i></div>
+                    <div class="report-card-title">Financial Analysis Report</div>
+                    <div class="report-card-desc">6-month financial trend analysis with revenue, expenses, profit margins, cash runway, and AI-powered forecasting insights.</div>
+                    <div class="report-card-meta">
+                        <span class="report-card-tag" style="background:var(--success-dim);color:var(--success);">Financial</span>
+                        <span style="font-size:.75rem;color:var(--text-muted);"><i class="fas fa-clock"></i> ~1 min</span>
+                    </div>
+                </div>
+                <div class="report-card" onclick="generateQBR()" style="--report-accent: var(--warning);">
+                    <div class="report-card-icon" style="background:var(--warning-dim);color:var(--warning);"><i class="fas fa-star"></i></div>
+                    <div class="report-card-title">Quarterly Business Review (QBR)</div>
+                    <div class="report-card-desc">Executive summary of Q performance — KPIs, strategic goals progress, risk assessment, and next quarter recommendations.</div>
+                    <div class="report-card-meta">
+                        <span class="report-card-tag" style="background:var(--warning-dim);color:var(--warning);">Executive</span>
+                        <span style="font-size:.75rem;color:var(--text-muted);"><i class="fas fa-clock"></i> ~3 min</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Report Schedule -->
+            <div class="panel">
+                <div class="panel-header">
+                    <div class="panel-title"><i class="fas fa-clock"></i> Auto-Generated Reports Schedule</div>
+                </div>
+                <div class="report-schedule">
+                    <div class="report-schedule-icon" style="background:var(--primary-dim);color:var(--primary);"><i class="fas fa-calendar-week"></i></div>
+                    <div class="report-schedule-info">
+                        <div class="report-schedule-title">Weekly Business Summary</div>
+                        <div class="report-schedule-sub">Auto-generated every Monday at 9:00 AM</div>
+                    </div>
+                    <span class="status-badge status-active">Active</span>
+                </div>
+                <div class="report-schedule">
+                    <div class="report-schedule-icon" style="background:var(--success-dim);color:var(--success);"><i class="fas fa-calendar-alt"></i></div>
+                    <div class="report-schedule-info">
+                        <div class="report-schedule-title">Monthly Management Report</div>
+                        <div class="report-schedule-sub">Auto-generated on the 1st of every month</div>
+                    </div>
+                    <span class="status-badge status-active">Active</span>
+                </div>
+                <div class="report-schedule">
+                    <div class="report-schedule-icon" style="background:var(--warning-dim);color:var(--warning);"><i class="fas fa-calendar-check"></i></div>
+                    <div class="report-schedule-info">
+                        <div class="report-schedule-title">Quarterly Business Review (QBR)</div>
+                        <div class="report-schedule-sub">Auto-generated on Jan 1, Apr 1, Jul 1, Oct 1</div>
+                    </div>
+                    <span class="status-badge status-active">Active</span>
+                </div>
+            </div>
+
+            <!-- Quick Export -->
+            <div class="panel">
+                <div class="panel-header">
+                    <div class="panel-title"><i class="fas fa-download"></i> Quick Export</div>
+                </div>
+                <div style="display:flex;gap:12px;flex-wrap:wrap;">
+                    <button class="btn btn-primary" onclick="generateMonthlyReport()"><i class="fas fa-file-pdf"></i> Monthly Report PDF</button>
+                    <button class="btn btn-secondary" onclick="exportReport()"><i class="fas fa-gavel"></i> Compliance PDF</button>
+                    <button class="btn btn-secondary" onclick="generateFinancialReport()"><i class="fas fa-chart-line"></i> Financial PDF</button>
+                    <button class="btn btn-secondary" onclick="exportCSV()"><i class="fas fa-file-csv"></i> All Data CSV</button>
+                    <button class="btn btn-secondary" onclick="printReport()"><i class="fas fa-print"></i> Print</button>
+                </div>
+            </div>
+        </div>
+
+    </div>
+</div>
+
+<!-- ═══ ADD ITEM MODAL ═══ -->
+<div class="modal-overlay" id="addModal">
+    <div class="modal">
+        <div class="modal-header">
+            <div class="modal-title" id="modalTitle">Add Item</div>
+            <button class="modal-close" onclick="closeModal()"><i class="fas fa-times"></i></button>
+        </div>
+        <div class="modal-body">
+            <input type="hidden" id="modalType">
+            <div class="form-group">
+                <label class="form-label">Name / Title *</label>
+                <input class="form-input" id="itemName" placeholder="e.g., Trade License Renewal">
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label class="form-label">Category</label>
+                    <select class="form-select" id="itemCategory">
+                        <option value="tax">Tax & Filing</option>
+                        <option value="labor">Labour Law</option>
+                        <option value="license">License & Permit</option>
+                        <option value="insurance">Insurance</option>
+                        <option value="contract">Contract</option>
+                        <option value="safety">Safety & Health</option>
+                        <option value="environmental">Environmental</option>
+                        <option value="other">Other</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Priority</label>
+                    <select class="form-select" id="itemPriority">
+                        <option value="critical">🔴 Critical</option>
+                        <option value="high">🟡 High</option>
+                        <option value="medium" selected>🔵 Medium</option>
+                        <option value="low">🟢 Low</option>
+                    </select>
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label class="form-label">Due / Expiry Date *</label>
+                    <input class="form-input" type="date" id="itemDate">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Renewal Frequency</label>
+                    <select class="form-select" id="itemFrequency">
+                        <option value="once">One-time</option>
+                        <option value="monthly">Monthly</option>
+                        <option value="quarterly">Quarterly</option>
+                        <option value="semi-annual">Semi-Annual</option>
+                        <option value="annual" selected>Annual</option>
+                    </select>
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label class="form-label">Issuing Authority</label>
+                    <input class="form-input" id="itemIssuer" placeholder="e.g., GST Department">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Reference / ID Number</label>
+                    <input class="form-input" id="itemRef" placeholder="e.g., GSTIN 29XXXXX">
+                </div>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Notes</label>
+                <textarea class="form-textarea" id="itemNotes" placeholder="Additional details..."></textarea>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+            <button class="btn btn-primary" onclick="saveItem()"><i class="fas fa-check"></i> Save Item</button>
+        </div>
+    </div>
+</div>
+
+<div class="toast-container" id="toastContainer"></div>
+
+<script>
+// ══════════════════════════════════════════════════════════════════
+// BUSINESS COMMAND CENTER — CORE ENGINE
+// ══════════════════════════════════════════════════════════════════
+
+let currentCountry = 'IN';
+let currentCalMonth = new Date().getMonth();
+let currentCalYear = new Date().getFullYear();
+let allItems = [];
+
+function getTenantId() {
+    try {
+        if (window.SIMPATICO_CONFIG && window.SIMPATICO_CONFIG.tenantId) return window.SIMPATICO_CONFIG.tenantId;
+        if (typeof getCompanyId === 'function' && getCompanyId()) return getCompanyId();
+        const user = JSON.parse(localStorage.getItem('simpatico_user') || '{}');
+        return user.company_id || 'SIMP_PRO_MAIN';
+    } catch(e) { return 'SIMP_PRO_MAIN'; }
+}
+
+// ─── COUNTRY-SPECIFIC COMPLIANCE DATA ───
+const complianceDB = {
+    IN: [
+        { name: 'GST Return (GSTR-3B)', desc: 'Monthly GST return filing', category: 'tax', frequency: 'monthly', dayOfMonth: 20, priority: 'critical', issuer: 'GST Department' },
+        { name: 'GSTR-1 (Outward Supplies)', desc: 'Monthly sales return', category: 'tax', frequency: 'monthly', dayOfMonth: 11, priority: 'critical', issuer: 'GST Department' },
+        { name: 'TDS Payment', desc: 'Tax deducted at source deposit', category: 'tax', frequency: 'monthly', dayOfMonth: 7, priority: 'critical', issuer: 'Income Tax Dept' },
+        { name: 'PF Contribution', desc: 'Employee Provident Fund deposit', category: 'labor', frequency: 'monthly', dayOfMonth: 15, priority: 'critical', issuer: 'EPFO' },
+        { name: 'ESI Contribution', desc: 'Employee State Insurance deposit', category: 'labor', frequency: 'monthly', dayOfMonth: 15, priority: 'high', issuer: 'ESIC' },
+        { name: 'Professional Tax', desc: 'State professional tax payment', category: 'tax', frequency: 'monthly', dayOfMonth: 20, priority: 'high', issuer: 'State Govt' },
+        { name: 'TDS Return (24Q/26Q)', desc: 'Quarterly TDS return filing', category: 'tax', frequency: 'quarterly', months: [6, 9, 12, 3], dayOfMonth: 31, priority: 'critical', issuer: 'Income Tax Dept' },
+        { name: 'Advance Tax Payment', desc: 'Quarterly advance tax installment', category: 'tax', frequency: 'quarterly', months: [5, 8, 11, 2], dayOfMonth: 15, priority: 'high', issuer: 'Income Tax Dept' },
+        { name: 'Annual GST Return (GSTR-9)', desc: 'Annual GST reconciliation', category: 'tax', frequency: 'annual', month: 11, dayOfMonth: 31, priority: 'critical', issuer: 'GST Department' },
+        { name: 'Income Tax Return', desc: 'Annual ITR filing', category: 'tax', frequency: 'annual', month: 6, dayOfMonth: 31, priority: 'critical', issuer: 'Income Tax Dept' },
+        { name: 'MCA Annual Filing (AOC-4/MGT-7)', desc: 'Company annual compliance', category: 'license', frequency: 'annual', month: 9, dayOfMonth: 30, priority: 'high', issuer: 'MCA / ROC' },
+        { name: 'Shops & Establishment Renewal', desc: 'State S&E license renewal', category: 'license', frequency: 'annual', month: 0, dayOfMonth: 1, priority: 'medium', issuer: 'Labour Dept' },
+        { name: 'Fire Safety Certificate', desc: 'Annual fire NOC renewal', category: 'safety', frequency: 'annual', month: 2, dayOfMonth: 31, priority: 'high', issuer: 'Fire Department' },
+        { name: 'Trade License Renewal', desc: 'Municipal trade license', category: 'license', frequency: 'annual', month: 3, dayOfMonth: 1, priority: 'medium', issuer: 'Municipal Corp' },
+        { name: 'Labour Welfare Fund', desc: 'Semi-annual LWF contribution', category: 'labor', frequency: 'semi-annual', months: [5, 11], dayOfMonth: 30, priority: 'medium', issuer: 'Labour Dept' },
+    ],
+    AE: [
+        { name: 'VAT Return Filing', desc: 'Quarterly VAT return', category: 'tax', frequency: 'quarterly', months: [3, 6, 9, 12], dayOfMonth: 28, priority: 'critical', issuer: 'FTA' },
+        { name: 'Trade License Renewal', desc: 'Annual trade license', category: 'license', frequency: 'annual', month: 0, dayOfMonth: 31, priority: 'critical', issuer: 'DED / Free Zone' },
+        { name: 'WPS Salary Upload', desc: 'Monthly Wage Protection System', category: 'labor', frequency: 'monthly', dayOfMonth: 15, priority: 'critical', issuer: 'MOHRE' },
+        { name: 'Emirates ID Renewal', desc: 'Employee Emirates ID renewal', category: 'labor', frequency: 'annual', month: 5, dayOfMonth: 30, priority: 'high', issuer: 'ICA' },
+        { name: 'Labour Card Renewal', desc: 'Employee work permits', category: 'labor', frequency: 'annual', month: 5, dayOfMonth: 30, priority: 'critical', issuer: 'MOHRE' },
+        { name: 'Corporate Tax Return', desc: 'Annual CT filing (9% above AED 375K)', category: 'tax', frequency: 'annual', month: 8, dayOfMonth: 30, priority: 'critical', issuer: 'FTA' },
+        { name: 'Economic Substance Filing', desc: 'ESR annual notification', category: 'license', frequency: 'annual', month: 5, dayOfMonth: 30, priority: 'high', issuer: 'Ministry of Finance' },
+        { name: 'Tenancy Contract (Ejari)', desc: 'Office lease registration', category: 'contract', frequency: 'annual', month: 11, dayOfMonth: 31, priority: 'medium', issuer: 'RERA' },
+        { name: 'Health Insurance Renewal', desc: 'Mandatory medical insurance', category: 'insurance', frequency: 'annual', month: 11, dayOfMonth: 31, priority: 'critical', issuer: 'DHA / HAAD' },
+        { name: 'UBO Declaration', desc: 'Ultimate Beneficial Ownership', category: 'license', frequency: 'annual', month: 5, dayOfMonth: 30, priority: 'high', issuer: 'Ministry of Economy' },
+    ],
+    SA: [
+        { name: 'Zakat / Income Tax Return', desc: 'Annual Zakat & tax filing', category: 'tax', frequency: 'annual', month: 3, dayOfMonth: 30, priority: 'critical', issuer: 'ZATCA' },
+        { name: 'VAT Return', desc: 'Monthly/Quarterly VAT', category: 'tax', frequency: 'monthly', dayOfMonth: 28, priority: 'critical', issuer: 'ZATCA' },
+        { name: 'GOSI Payment', desc: 'Social insurance contribution', category: 'labor', frequency: 'monthly', dayOfMonth: 15, priority: 'critical', issuer: 'GOSI' },
+        { name: 'Saudization (Nitaqat)', desc: 'Quarterly Saudization review', category: 'labor', frequency: 'quarterly', months: [2, 5, 8, 11], dayOfMonth: 30, priority: 'critical', issuer: 'MHRSD' },
+        { name: 'Commercial Registration (CR) Renewal', desc: 'Annual CR renewal', category: 'license', frequency: 'annual', month: 0, dayOfMonth: 31, priority: 'critical', issuer: 'MoC' },
+        { name: 'Chamber of Commerce Subscription', desc: 'Annual membership', category: 'license', frequency: 'annual', month: 0, dayOfMonth: 31, priority: 'medium', issuer: 'CoC' },
+        { name: 'Municipal License Renewal', desc: 'Yearly municipal permit', category: 'license', frequency: 'annual', month: 2, dayOfMonth: 31, priority: 'high', issuer: 'Municipality' },
+        { name: 'Iqama Renewal', desc: 'Employee residence permits', category: 'labor', frequency: 'annual', month: 5, dayOfMonth: 30, priority: 'critical', issuer: 'MOI / Jawazat' },
+    ],
+    GB: [
+        { name: 'VAT Return (MTD)', desc: 'Quarterly VAT via Making Tax Digital', category: 'tax', frequency: 'quarterly', months: [3, 6, 9, 12], dayOfMonth: 7, priority: 'critical', issuer: 'HMRC' },
+        { name: 'PAYE / NIC Payment', desc: 'Monthly payroll tax', category: 'tax', frequency: 'monthly', dayOfMonth: 22, priority: 'critical', issuer: 'HMRC' },
+        { name: 'Corporation Tax Payment', desc: '9 months after year end', category: 'tax', frequency: 'annual', month: 8, dayOfMonth: 30, priority: 'critical', issuer: 'HMRC' },
+        { name: 'Annual Confirmation Statement', desc: 'Companies House annual filing', category: 'license', frequency: 'annual', month: 5, dayOfMonth: 30, priority: 'high', issuer: 'Companies House' },
+        { name: 'Annual Accounts Filing', desc: '9 months after FY end', category: 'tax', frequency: 'annual', month: 8, dayOfMonth: 30, priority: 'critical', issuer: 'Companies House' },
+        { name: 'Workplace Pension Contributions', desc: 'Monthly auto-enrolment', category: 'labor', frequency: 'monthly', dayOfMonth: 22, priority: 'critical', issuer: 'TPR' },
+        { name: 'Health & Safety Assessment', desc: 'Annual risk assessment review', category: 'safety', frequency: 'annual', month: 3, dayOfMonth: 1, priority: 'high', issuer: 'HSE' },
+        { name: 'ICO Data Protection Fee', desc: 'Annual data protection registration', category: 'license', frequency: 'annual', month: 3, dayOfMonth: 30, priority: 'medium', issuer: 'ICO' },
+        { name: 'Employer Liability Insurance', desc: 'Mandatory £5M+ cover', category: 'insurance', frequency: 'annual', month: 3, dayOfMonth: 30, priority: 'critical', issuer: 'Insurer' },
+    ],
+    US: [
+        { name: 'Payroll Tax (941)', desc: 'Quarterly federal employment tax', category: 'tax', frequency: 'quarterly', months: [3, 6, 9, 12], dayOfMonth: 30, priority: 'critical', issuer: 'IRS' },
+        { name: 'Federal Income Tax (Estimated)', desc: 'Quarterly estimated tax', category: 'tax', frequency: 'quarterly', months: [3, 5, 8, 0], dayOfMonth: 15, priority: 'critical', issuer: 'IRS' },
+        { name: 'State Sales Tax', desc: 'Monthly/quarterly filing', category: 'tax', frequency: 'monthly', dayOfMonth: 20, priority: 'high', issuer: 'State DOR' },
+        { name: 'Annual Corporate Tax (1120)', desc: 'Annual federal return', category: 'tax', frequency: 'annual', month: 3, dayOfMonth: 15, priority: 'critical', issuer: 'IRS' },
+        { name: 'W-2 / 1099 Filing', desc: 'Annual wage statements', category: 'tax', frequency: 'annual', month: 0, dayOfMonth: 31, priority: 'critical', issuer: 'IRS / SSA' },
+        { name: 'State Annual Report', desc: 'Annual business filing', category: 'license', frequency: 'annual', month: 3, dayOfMonth: 1, priority: 'high', issuer: 'Secretary of State' },
+        { name: 'Workers Compensation Insurance', desc: 'Annual renewal', category: 'insurance', frequency: 'annual', month: 0, dayOfMonth: 1, priority: 'critical', issuer: 'State WC Board' },
+        { name: 'OSHA Log (Form 300A)', desc: 'Annual workplace safety posting', category: 'safety', frequency: 'annual', month: 1, dayOfMonth: 1, priority: 'medium', issuer: 'OSHA' },
+        { name: 'Business License Renewal', desc: 'City/county license', category: 'license', frequency: 'annual', month: 11, dayOfMonth: 31, priority: 'medium', issuer: 'Local Govt' },
+    ]
+};
+
+// ─── INITIALIZE ───
+document.addEventListener('DOMContentLoaded', function() {
+    loadData();
+    generateComplianceItems();
+    renderAll();
+    renderCalendar();
+    updateBadges();
+
+    // Auto-refresh every minute
+    setInterval(() => { renderAll(); updateBadges(); }, 60000);
+});
+
+function loadData() {
+    try {
+        const saved = localStorage.getItem('shr_command_center_' + getTenantId() + '_' + currentCountry);
+        if (saved) {
+            allItems = JSON.parse(saved);
+        }
+    } catch(e) {
+        allItems = [];
+    }
+}
+
+function saveData() {
+    localStorage.setItem('shr_command_center_' + getTenantId() + '_' + currentCountry, JSON.stringify(allItems));
+}
+
+function generateComplianceItems() {
+    if (allItems.length > 0) return; // Already has data
+
+    const db = complianceDB[currentCountry] || [];
+    const now = new Date();
+
+    db.forEach((item, idx) => {
+        let dueDate;
+        if (item.frequency === 'monthly') {
+            dueDate = new Date(now.getFullYear(), now.getMonth(), item.dayOfMonth);
+            if (dueDate < now) dueDate.setMonth(dueDate.getMonth() + 1);
+        } else if (item.frequency === 'quarterly' && item.months) {
+            const upcoming = item.months.map(m => {
+                const d = new Date(now.getFullYear(), m, item.dayOfMonth);
+                if (d < now) d.setFullYear(d.getFullYear() + 1);
+                return d;
+            }).sort((a, b) => a - b);
+            dueDate = upcoming[0];
+        } else if (item.frequency === 'semi-annual' && item.months) {
+            const upcoming = item.months.map(m => {
+                const d = new Date(now.getFullYear(), m, item.dayOfMonth);
+                if (d < now) d.setFullYear(d.getFullYear() + 1);
+                return d;
+            }).sort((a, b) => a - b);
+            dueDate = upcoming[0];
+        } else if (item.frequency === 'annual') {
+            dueDate = new Date(now.getFullYear(), item.month, item.dayOfMonth);
+            if (dueDate < now) dueDate.setFullYear(dueDate.getFullYear() + 1);
+        } else {
+            dueDate = new Date(now.getFullYear(), now.getMonth() + 1, item.dayOfMonth);
+        }
+
+        allItems.push({
+            id: 'comp_' + currentCountry + '_' + idx,
+            type: item.category === 'insurance' ? 'insurance' : item.category === 'contract' ? 'contract' : item.category === 'license' ? 'license' : 'compliance',
+            name: item.name,
+            desc: item.desc,
+            category: item.category,
+            priority: item.priority,
+            dueDate: dueDate.toISOString().split('T')[0],
+            frequency: item.frequency,
+            issuer: item.issuer,
+            ref: '',
+            notes: '',
+            country: currentCountry,
+            status: 'active',
+            completedDate: null
+        });
+    });
+
+    saveData();
+}
+
+// ─── NAVIGATION ───
+function navigateTo(section, el) {
+    document.querySelectorAll('.section-panel').forEach(p => p.classList.remove('active'));
+    document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+    document.getElementById('section-' + section).classList.add('active');
+    if (el) el.classList.add('active');
+    document.getElementById('pageTitle').textContent = el ? el.textContent.trim() : section;
+    if (window.innerWidth < 768) document.getElementById('sidebar').classList.remove('open');
+}
+
+function navigateToSection(section) {
+    const navItem = document.querySelector('[data-section="' + section + '"]');
+    navigateTo(section, navItem);
+}
+
+function toggleSidebar() {
+    document.getElementById('sidebar').classList.toggle('open');
+}
+
+function selectCountry(code, el) {
+    currentCountry = code;
+    document.querySelectorAll('.country-chip').forEach(c => c.classList.remove('active'));
+    el.classList.add('active');
+    allItems = [];
+    loadData();
+    if (allItems.length === 0) generateComplianceItems();
+    renderAll();
+    renderCalendar();
+    updateBadges();
+}
+
+// ─── RENDER ALL ───
+function renderAll() {
+    renderOverviewStats();
+    renderRiskScore();
+    renderUpcomingTimeline();
+    renderRecentActivity();
+    renderComplianceTable();
+    renderLicenses();
+    renderContracts();
+    renderInsurance();
+    renderAlerts();
+}
+
+function getDaysUntil(dateStr) {
+    const due = new Date(dateStr + 'T23:59:59');
+    const now = new Date();
+    return Math.ceil((due - now) / (1000 * 60 * 60 * 24));
+}
+
+function getItemStatus(item) {
+    if (item.status === 'completed') return 'compliant';
+    const days = getDaysUntil(item.dueDate);
+    if (days < 0) return 'overdue';
+    if (days <= 7) return 'urgent';
+    if (days <= 30) return 'upcoming';
+    return 'compliant';
+}
+
+function renderOverviewStats() {
+    let overdue = 0, urgent = 0, compliant = 0;
+    const contracts = allItems.filter(i => i.type === 'contract').length;
+    const insurance = allItems.filter(i => i.type === 'insurance').length;
+
+    allItems.forEach(item => {
+        const s = getItemStatus(item);
+        if (s === 'overdue') overdue++;
+        else if (s === 'urgent') urgent++;
+        else compliant++;
+    });
+
+    document.getElementById('statOverdue').textContent = overdue;
+    document.getElementById('statUrgent').textContent = urgent;
+    document.getElementById('statCompliant').textContent = compliant;
+    document.getElementById('statTotal').textContent = allItems.length;
+    document.getElementById('statContracts').textContent = contracts;
+    document.getElementById('statInsurance').textContent = insurance;
+}
+
+function renderRiskScore() {
+    const total = allItems.length;
+    if (total === 0) {
+        document.getElementById('riskScore').textContent = '—';
+        return;
+    }
+
+    let score = 100;
+    allItems.forEach(item => {
+        const s = getItemStatus(item);
+        if (s === 'overdue') score -= (15 / total * 100);
+        else if (s === 'urgent') score -= (5 / total * 100);
+    });
+
+    score = Math.max(0, Math.min(100, Math.round(score)));
+
+    const scoreEl = document.getElementById('riskScore');
+    scoreEl.textContent = score;
+    scoreEl.className = 'gauge-score ' + (score >= 90 ? 'excellent' : score >= 70 ? 'good' : score >= 50 ? 'moderate' : score >= 30 ? 'poor' : 'critical');
+
+    const labelEl = document.getElementById('riskLabel');
+    if (score >= 90) { labelEl.textContent = '✅ Excellent Compliance'; labelEl.style.color = 'var(--success)'; }
+    else if (score >= 70) { labelEl.textContent = '👍 Good Standing'; labelEl.style.color = '#22c55e'; }
+    else if (score >= 50) { labelEl.textContent = '⚠️ Needs Attention'; labelEl.style.color = 'var(--warning)'; }
+    else if (score >= 30) { labelEl.textContent = '🔶 At Risk'; labelEl.style.color = '#f97316'; }
+    else { labelEl.textContent = '🚨 Critical — Immediate Action Required'; labelEl.style.color = 'var(--danger)'; }
+
+    // Gauge arc
+    const arc = document.getElementById('gaugeArc');
+    const totalLen = 251.2;
+    arc.style.strokeDashoffset = totalLen - (totalLen * score / 100);
+
+    // Breakdown
+    const categories = {};
+    allItems.forEach(item => {
+        const cat = item.category;
+        if (!categories[cat]) categories[cat] = { total: 0, ok: 0 };
+        categories[cat].total++;
+        if (getItemStatus(item) === 'compliant') categories[cat].ok++;
+    });
+
+    const breakdownEl = document.getElementById('riskBreakdown');
+    const catLabels = { tax: 'Tax & Filing', labor: 'Labour Law', license: 'Licenses', insurance: 'Insurance', contract: 'Contracts', safety: 'Safety', environmental: 'Environment', other: 'Other' };
+    const catColors = { tax: '#ef4444', labor: '#f59e0b', license: '#3b82f6', insurance: '#06b6d4', contract: '#8b5cf6', safety: '#f97316', environmental: '#22c55e', other: '#94a3b8' };
+
+    breakdownEl.innerHTML = Object.entries(categories).map(([cat, data]) => {
+        const pct = Math.round(data.ok / data.total * 100);
+        const color = catColors[cat] || '#94a3b8';
+        return `<div class="risk-item">
+            <div class="risk-dot" style="background:${color};"></div>
+            <div class="risk-item-label">${catLabels[cat] || cat}</div>
+            <div class="risk-item-bar"><div class="risk-item-fill" style="width:${pct}%;background:${color};"></div></div>
+            <div class="risk-item-val" style="color:${color};">${pct}%</div>
+        </div>`;
+    }).join('');
+}
+
+function renderAlerts() {
+    const container = document.getElementById('alertBanners');
+    const overdue = allItems.filter(i => getItemStatus(i) === 'overdue');
+
+    if (overdue.length > 0) {
+        container.innerHTML = `<div class="alert-banner critical">
+            <i class="fas fa-exclamation-circle"></i>
+            <div><strong>${overdue.length} overdue item${overdue.length > 1 ? 's' : ''}</strong> require immediate attention. ${overdue.slice(0, 2).map(i => i.name).join(', ')}${overdue.length > 2 ? '...' : ''}</div>
+            <button class="alert-dismiss" onclick="this.parentElement.remove()"><i class="fas fa-times"></i></button>
+        </div>`;
+    } else {
+        const urgent = allItems.filter(i => getItemStatus(i) === 'urgent');
+        if (urgent.length > 0) {
+            container.innerHTML = `<div class="alert-banner warning">
+                <i class="fas fa-clock"></i>
+                <div><strong>${urgent.length} item${urgent.length > 1 ? 's' : ''} due within 7 days:</strong> ${urgent.slice(0, 3).map(i => i.name).join(', ')}</div>
+                <button class="alert-dismiss" onclick="this.parentElement.remove()"><i class="fas fa-times"></i></button>
+            </div>`;
+        } else {
+            container.innerHTML = '';
+        }
+    }
+}
+
+function renderUpcomingTimeline() {
+    const container = document.getElementById('upcomingTimeline');
+    const upcoming = allItems
+        .filter(i => i.status !== 'completed')
+        .sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate))
+        .slice(0, 8);
+
+    if (upcoming.length === 0) {
+        container.innerHTML = '<div class="empty-state"><i class="fas fa-check-circle"></i><p>All caught up! No upcoming deadlines.</p></div>';
+        return;
+    }
+
+    container.innerHTML = upcoming.map(item => {
+        const days = getDaysUntil(item.dueDate);
+        const s = getItemStatus(item);
+        const dotColor = s === 'overdue' ? 'red' : s === 'urgent' ? 'orange' : days <= 30 ? 'blue' : 'green';
+        const countdownText = days < 0 ? `${Math.abs(days)} days overdue` : days === 0 ? 'Due today!' : days === 1 ? 'Due tomorrow' : `${days} days left`;
+        const countdownClass = days < 0 ? 'overdue' : days <= 7 ? 'urgent' : 'ok';
+
+        return `<div class="timeline-item" onclick="markCompleted('${item.id}')">
+            <div class="timeline-dot ${dotColor}"></div>
+            <div class="timeline-content">
+                <div class="timeline-title">${item.name}</div>
+                <div class="timeline-meta">
+                    <span><i class="fas fa-calendar"></i> ${formatDate(item.dueDate)}</span>
+                    <span class="countdown ${countdownClass}">${countdownText}</span>
+                    <span><i class="fas fa-building"></i> ${item.issuer || '—'}</span>
+                </div>
+            </div>
+        </div>`;
+    }).join('');
+}
+
+function renderRecentActivity() {
+    const container = document.getElementById('recentActivity');
+    const completed = allItems.filter(i => i.status === 'completed').slice(-5).reverse();
+
+    if (completed.length === 0) {
+        container.innerHTML = '<div class="empty-state"><i class="fas fa-inbox"></i><p>No recent activity yet. Mark items as completed to see them here.</p></div>';
+        return;
+    }
+
+    container.innerHTML = completed.map(item => `<div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--border-light);">
+        <div style="width:32px;height:32px;border-radius:8px;background:var(--success-dim);color:var(--success);display:flex;align-items:center;justify-content:center;font-size:12px;flex-shrink:0;"><i class="fas fa-check"></i></div>
+        <div style="flex:1;">
+            <div style="font-size:.82rem;font-weight:600;">${item.name}</div>
+            <div style="font-size:.7rem;color:var(--text-muted);">Completed ${item.completedDate ? formatDate(item.completedDate) : 'recently'}</div>
+        </div>
+    </div>`).join('');
+}
+
+// ─── COMPLIANCE TABLE ───
+function renderComplianceTable(filter) {
+    filter = filter || 'all';
+    const tbody = document.getElementById('complianceBody');
+    let items = allItems.filter(i => i.type === 'compliance' || i.type === 'license');
+
+    if (filter !== 'all') {
+        items = items.filter(i => getItemStatus(i) === filter);
+    }
+
+    items.sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate));
+
+    if (items.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="7"><div class="empty-state"><i class="fas fa-check-circle"></i><p>No items in this category.</p></div></td></tr>`;
+        return;
+    }
+
+    tbody.innerHTML = items.map(item => {
+        const days = getDaysUntil(item.dueDate);
+        const s = getItemStatus(item);
+        const statusLabel = s === 'overdue' ? 'Overdue' : s === 'urgent' ? 'Urgent' : s === 'upcoming' ? 'Upcoming' : 'Compliant';
+        const countdownText = days < 0 ? `${Math.abs(days)}d overdue` : days === 0 ? 'Today!' : `${days}d left`;
+        const countdownClass = days < 0 ? 'overdue' : days <= 7 ? 'urgent' : 'ok';
+        const priorityClass = 'priority-' + item.priority;
+        const catLabels = { tax: 'Tax', labor: 'Labour', license: 'License', safety: 'Safety', environmental: 'Enviro', other: 'Other' };
+
+        return `<tr>
+            <td><div class="priority-dot ${priorityClass}"></div></td>
+            <td><div class="item-name">${item.name}</div><div class="item-desc">${item.desc || ''}</div></td>
+            <td><span style="font-size:.75rem;font-weight:600;color:var(--text-secondary);">${catLabels[item.category] || item.category}</span></td>
+            <td style="white-space:nowrap;">${formatDate(item.dueDate)}</td>
+            <td><span class="countdown ${countdownClass}">${countdownText}</span></td>
+            <td><span class="status-badge status-${s}">${statusLabel}</span></td>
+            <td>
+                <div style="display:flex;gap:4px;">
+                    <button class="btn btn-sm ${s !== 'compliant' ? 'btn-success' : 'btn-secondary'}" onclick="markCompleted('${item.id}')" title="Mark done"><i class="fas fa-check"></i></button>
+                    <button class="btn btn-sm btn-secondary" onclick="deleteItem('${item.id}')" title="Delete"><i class="fas fa-trash"></i></button>
+                </div>
+            </td>
+        </tr>`;
+    }).join('');
+}
+
+function filterCompliance(filter, el) {
+    document.querySelectorAll('#complianceFilters .filter-tab').forEach(t => t.classList.remove('active'));
+    el.classList.add('active');
+    renderComplianceTable(filter);
+}
+
+// ─── LICENSES GRID ───
+function renderLicenses() {
+    const grid = document.getElementById('licensesGrid');
+    const items = allItems.filter(i => i.type === 'license' || i.category === 'license');
+
+    if (items.length === 0) {
+        grid.innerHTML = '<div class="empty-state"><i class="fas fa-id-card"></i><p>No licenses tracked yet. Click "Add License" to get started.</p><button class="btn btn-primary" onclick="openAddModal(\'license\')"><i class="fas fa-plus"></i> Add License</button></div>';
+        return;
+    }
+
+    grid.innerHTML = items.map(item => {
+        const days = getDaysUntil(item.dueDate);
+        const s = getItemStatus(item);
+        const color = s === 'overdue' ? 'var(--danger)' : s === 'urgent' ? 'var(--warning)' : 'var(--success)';
+        const pct = Math.max(0, Math.min(100, days <= 0 ? 0 : days > 365 ? 100 : (days / 365) * 100));
+
+        return `<div class="license-card" style="--card-color: ${color};">
+            <div class="license-card-header">
+                <div>
+                    <div class="license-name">${item.name}</div>
+                    <div class="license-issuer">${item.issuer || 'Unknown Authority'}</div>
+                </div>
+                <span class="status-badge status-${s}">${s === 'overdue' ? 'Expired' : s === 'urgent' ? 'Expiring' : 'Active'}</span>
+            </div>
+            <div class="license-details">
+                <div><div class="license-detail-label">Expiry Date</div><div class="license-detail-value">${formatDate(item.dueDate)}</div></div>
+                <div><div class="license-detail-label">Countdown</div><div class="license-detail-value countdown ${days < 0 ? 'overdue' : days <= 30 ? 'urgent' : 'ok'}">${days < 0 ? Math.abs(days) + 'd overdue' : days + ' days'}</div></div>
+                <div><div class="license-detail-label">Renewal</div><div class="license-detail-value">${item.frequency || 'Annual'}</div></div>
+                <div><div class="license-detail-label">Reference</div><div class="license-detail-value">${item.ref || '—'}</div></div>
+            </div>
+            <div class="expiry-bar"><div class="expiry-bar-fill" style="width:${pct}%;background:${color};"></div></div>
+            <div style="margin-top:12px;display:flex;gap:6px;">
+                <button class="btn btn-sm btn-success" onclick="markCompleted('${item.id}')"><i class="fas fa-check"></i> Renewed</button>
+                <button class="btn btn-sm btn-secondary" onclick="deleteItem('${item.id}')"><i class="fas fa-trash"></i></button>
+            </div>
+        </div>`;
+    }).join('');
+}
+
+// ─── CONTRACTS GRID ───
+function renderContracts() {
+    const grid = document.getElementById('contractsGrid');
+    const items = allItems.filter(i => i.type === 'contract' || i.category === 'contract');
+
+    if (items.length === 0) {
+        grid.innerHTML = '<div class="empty-state"><i class="fas fa-file-contract"></i><p>No contracts tracked yet.</p><button class="btn btn-primary" onclick="openAddModal(\'contract\')"><i class="fas fa-plus"></i> Add Contract</button></div>';
+        return;
+    }
+
+    grid.innerHTML = items.map(item => {
+        const days = getDaysUntil(item.dueDate);
+        const s = getItemStatus(item);
+        const color = s === 'overdue' ? 'var(--danger)' : s === 'urgent' ? 'var(--warning)' : 'var(--primary)';
+
+        return `<div class="license-card" style="--card-color: ${color};">
+            <div class="license-card-header">
+                <div>
+                    <div class="license-name">${item.name}</div>
+                    <div class="license-issuer">${item.issuer || 'Counterparty'}</div>
+                </div>
+                <span class="status-badge status-${s === 'overdue' ? 'expired' : s === 'urgent' ? 'expiring' : 'active'}">${s === 'overdue' ? 'Expired' : s === 'urgent' ? 'Expiring' : 'Active'}</span>
+            </div>
+            <div class="license-details">
+                <div><div class="license-detail-label">End Date</div><div class="license-detail-value">${formatDate(item.dueDate)}</div></div>
+                <div><div class="license-detail-label">Countdown</div><div class="license-detail-value countdown ${days < 0 ? 'overdue' : days <= 30 ? 'urgent' : 'ok'}">${days < 0 ? Math.abs(days) + 'd expired' : days + ' days'}</div></div>
+            </div>
+            <div style="margin-top:14px;display:flex;gap:6px;">
+                <button class="btn btn-sm btn-success" onclick="markCompleted('${item.id}')"><i class="fas fa-check"></i> Renewed</button>
+                <button class="btn btn-sm btn-secondary" onclick="deleteItem('${item.id}')"><i class="fas fa-trash"></i></button>
+            </div>
+        </div>`;
+    }).join('');
+}
+
+// ─── INSURANCE GRID ───
+function renderInsurance() {
+    const grid = document.getElementById('insuranceGrid');
+    const items = allItems.filter(i => i.type === 'insurance' || i.category === 'insurance');
+
+    if (items.length === 0) {
+        grid.innerHTML = '<div class="empty-state"><i class="fas fa-shield-virus"></i><p>No insurance policies tracked yet.</p><button class="btn btn-primary" onclick="openAddModal(\'insurance\')"><i class="fas fa-plus"></i> Add Policy</button></div>';
+        return;
+    }
+
+    grid.innerHTML = items.map(item => {
+        const days = getDaysUntil(item.dueDate);
+        const s = getItemStatus(item);
+        const color = s === 'overdue' ? 'var(--danger)' : s === 'urgent' ? 'var(--warning)' : 'var(--cyan)';
+
+        return `<div class="license-card" style="--card-color: ${color};">
+            <div class="license-card-header">
+                <div>
+                    <div class="license-name">${item.name}</div>
+                    <div class="license-issuer">${item.issuer || 'Insurance Provider'}</div>
+                </div>
+                <span class="status-badge status-${s === 'overdue' ? 'expired' : s === 'urgent' ? 'expiring' : 'active'}">${s === 'overdue' ? 'Lapsed' : s === 'urgent' ? 'Expiring' : 'Active'}</span>
+            </div>
+            <div class="license-details">
+                <div><div class="license-detail-label">Renewal Date</div><div class="license-detail-value">${formatDate(item.dueDate)}</div></div>
+                <div><div class="license-detail-label">Countdown</div><div class="license-detail-value countdown ${days < 0 ? 'overdue' : days <= 30 ? 'urgent' : 'ok'}">${days < 0 ? Math.abs(days) + 'd overdue' : days + ' days'}</div></div>
+                <div><div class="license-detail-label">Policy No.</div><div class="license-detail-value">${item.ref || '—'}</div></div>
+                <div><div class="license-detail-label">Frequency</div><div class="license-detail-value">${item.frequency || 'Annual'}</div></div>
+            </div>
+            <div style="margin-top:14px;display:flex;gap:6px;">
+                <button class="btn btn-sm btn-success" onclick="markCompleted('${item.id}')"><i class="fas fa-check"></i> Renewed</button>
+                <button class="btn btn-sm btn-secondary" onclick="deleteItem('${item.id}')"><i class="fas fa-trash"></i></button>
+            </div>
+        </div>`;
+    }).join('');
+}
+
+// ─── CALENDAR ───
+function renderCalendar() {
+    const grid = document.getElementById('calGrid');
+    const monthLabel = document.getElementById('calMonth');
+    const eventsEl = document.getElementById('calEvents');
+
+    const months = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+    monthLabel.textContent = months[currentCalMonth] + ' ' + currentCalYear;
+
+    const firstDay = new Date(currentCalYear, currentCalMonth, 1).getDay();
+    const daysInMonth = new Date(currentCalYear, currentCalMonth + 1, 0).getDate();
+    const today = new Date();
+
+    // Day labels
+    let html = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map(d => `<div class="cal-head">${d}</div>`).join('');
+
+    // Events this month
+    const monthEvents = allItems.filter(item => {
+        const d = new Date(item.dueDate);
+        return d.getMonth() === currentCalMonth && d.getFullYear() === currentCalYear;
+    });
+
+    const eventDays = {};
+    monthEvents.forEach(item => {
+        const day = new Date(item.dueDate).getDate();
+        if (!eventDays[day]) eventDays[day] = [];
+        eventDays[day].push(item);
+    });
+
+    // Prev month padding
+    const prevDays = new Date(currentCalYear, currentCalMonth, 0).getDate();
+    for (let i = firstDay - 1; i >= 0; i--) {
+        html += `<div class="cal-day other">${prevDays - i}</div>`;
+    }
+
+    // Current month
+    for (let d = 1; d <= daysInMonth; d++) {
+        const isToday = d === today.getDate() && currentCalMonth === today.getMonth() && currentCalYear === today.getFullYear();
+        let classes = 'cal-day';
+        if (isToday) classes += ' today';
+        if (eventDays[d]) {
+            const hasDeadline = eventDays[d].some(i => i.category === 'tax' || i.category === 'labor');
+            const hasRenewal = eventDays[d].some(i => i.category === 'license' || i.category === 'insurance');
+            const hasContract = eventDays[d].some(i => i.category === 'contract');
+            if (hasDeadline) classes += ' has-event has-deadline';
+            else if (hasRenewal) classes += ' has-event has-renewal';
+            else if (hasContract) classes += ' has-event has-task';
+        }
+        html += `<div class="${classes}" onclick="showDayEvents(${d})">${d}</div>`;
+    }
+
+    // Next month padding
+    const totalCells = firstDay + daysInMonth;
+    const remaining = 7 - (totalCells % 7);
+    if (remaining < 7) {
+        for (let i = 1; i <= remaining; i++) {
+            html += `<div class="cal-day other">${i}</div>`;
+        }
+    }
+
+    grid.innerHTML = html;
+
+    // Events list
+    if (monthEvents.length === 0) {
+        eventsEl.innerHTML = '<div class="empty-state"><i class="fas fa-calendar-check"></i><p>No events this month.</p></div>';
+    } else {
+        monthEvents.sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate));
+        eventsEl.innerHTML = monthEvents.map(item => {
+            const d = new Date(item.dueDate);
+            const s = getItemStatus(item);
+            return `<div style="display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid var(--border-light);">
+                <div style="text-align:center;min-width:44px;">
+                    <div style="font-size:1.3rem;font-weight:800;line-height:1;color:var(--primary);">${d.getDate()}</div>
+                    <div style="font-size:.6rem;color:var(--text-muted);font-weight:600;text-transform:uppercase;">${months[d.getMonth()].slice(0,3)}</div>
+                </div>
+                <div style="width:3px;height:32px;border-radius:99px;background:${s === 'overdue' ? 'var(--danger)' : s === 'urgent' ? 'var(--warning)' : 'var(--primary)'};opacity:.4;"></div>
+                <div style="flex:1;">
+                    <div style="font-size:.82rem;font-weight:600;">${item.name}</div>
+                    <div style="font-size:.7rem;color:var(--text-muted);">${item.issuer || ''} · ${item.category}</div>
+                </div>
+                <span class="status-badge status-${s}">${s}</span>
+            </div>`;
+        }).join('');
+    }
+}
+
+function changeMonth(dir) {
+    currentCalMonth += dir;
+    if (currentCalMonth > 11) { currentCalMonth = 0; currentCalYear++; }
+    if (currentCalMonth < 0) { currentCalMonth = 11; currentCalYear--; }
+    renderCalendar();
+}
+
+function showDayEvents(day) {
+    // Scroll to events
+    const eventsEl = document.getElementById('calEvents');
+    eventsEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+// ─── MODALS ───
+function openAddModal(type) {
+    document.getElementById('modalType').value = type;
+    document.getElementById('modalTitle').textContent = 'Add ' + (type === 'compliance' ? 'Compliance Item' : type === 'license' ? 'License / Permit' : type === 'contract' ? 'Contract' : 'Insurance Policy');
+    document.getElementById('itemCategory').value = type === 'license' ? 'license' : type === 'contract' ? 'contract' : type === 'insurance' ? 'insurance' : 'tax';
+    document.getElementById('addModal').classList.add('active');
+}
+
+function closeModal() {
+    document.getElementById('addModal').classList.remove('active');
+    document.getElementById('itemName').value = '';
+    document.getElementById('itemDate').value = '';
+    document.getElementById('itemIssuer').value = '';
+    document.getElementById('itemRef').value = '';
+    document.getElementById('itemNotes').value = '';
+}
+
+function saveItem() {
+    const name = document.getElementById('itemName').value.trim();
+    const date = document.getElementById('itemDate').value;
+    if (!name || !date) {
+        showToast('Please fill in name and date', 'error');
+        return;
+    }
+
+    const type = document.getElementById('modalType').value;
+    allItems.push({
+        id: type + '_' + Date.now(),
+        type: type,
+        name: name,
+        desc: '',
+        category: document.getElementById('itemCategory').value,
+        priority: document.getElementById('itemPriority').value,
+        dueDate: date,
+        frequency: document.getElementById('itemFrequency').value,
+        issuer: document.getElementById('itemIssuer').value.trim(),
+        ref: document.getElementById('itemRef').value.trim(),
+        notes: document.getElementById('itemNotes').value.trim(),
+        country: currentCountry,
+        status: 'active',
+        completedDate: null
+    });
+
+    saveData();
+    closeModal();
+    renderAll();
+    renderCalendar();
+    updateBadges();
+    showToast(name + ' added successfully', 'success');
+}
+
+function markCompleted(id) {
+    const item = allItems.find(i => i.id === id);
+    if (!item) return;
+
+    if (item.status === 'completed') {
+        item.status = 'active';
+        item.completedDate = null;
+        showToast(item.name + ' marked as active', 'info');
+    } else {
+        item.status = 'completed';
+        item.completedDate = new Date().toISOString().split('T')[0];
+        showToast(item.name + ' completed ✓', 'success');
+    }
+
+    saveData();
+    renderAll();
+    renderCalendar();
+    updateBadges();
+}
+
+function deleteItem(id) {
+    const item = allItems.find(i => i.id === id);
+    if (!item) return;
+    if (!confirm('Delete "' + item.name + '"?')) return;
+
+    allItems = allItems.filter(i => i.id !== id);
+    saveData();
+    renderAll();
+    renderCalendar();
+    updateBadges();
+    showToast('Item deleted', 'info');
+}
+
+// ─── BADGES ───
+function updateBadges() {
+    const overdue = allItems.filter(i => getItemStatus(i) === 'overdue').length;
+    const urgent = allItems.filter(i => getItemStatus(i) === 'urgent').length;
+    const badge = document.getElementById('complianceBadge');
+    badge.textContent = overdue + urgent;
+    badge.className = 'nav-badge' + (overdue > 0 ? '' : urgent > 0 ? ' warn' : ' ok');
+}
+
+// ─── EXPORTS ───
+function exportReport() {
+    let reportHtml = `<html><head><title>Compliance Report — Simpatico HR</title>
+    <style>body{font-family:Arial,sans-serif;padding:40px;color:#1a1a2e;}
+    h1{color:#8b5cf6;border-bottom:3px solid #8b5cf6;padding-bottom:10px;}
+    h2{color:#475569;margin-top:30px;}
+    table{width:100%;border-collapse:collapse;margin:16px 0;}
+    th,td{padding:10px 14px;border:1px solid #e2e8f0;text-align:left;font-size:13px;}
+    th{background:#f8fafc;font-weight:700;text-transform:uppercase;font-size:11px;color:#64748b;}
+    .overdue{color:#ef4444;font-weight:700;} .urgent{color:#f59e0b;font-weight:700;}
+    .ok{color:#10b981;font-weight:700;} .footer{margin-top:40px;font-size:11px;color:#94a3b8;}
+    </style></head><body>`;
+
+    const countryNames = { IN: 'India', AE: 'UAE', SA: 'Saudi Arabia', GB: 'United Kingdom', US: 'United States' };
+    reportHtml += `<h1>🛡️ Business Compliance Report</h1>`;
+    reportHtml += `<p><strong>Company:</strong> Client Company | <strong>Country:</strong> ${countryNames[currentCountry]} | <strong>Generated:</strong> ${new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })} | <strong>By:</strong> Simpatico HR Consultancy</p>`;
+
+    const overdue = allItems.filter(i => getItemStatus(i) === 'overdue').length;
+    const urgent = allItems.filter(i => getItemStatus(i) === 'urgent').length;
+    const score = Math.max(0, Math.min(100, Math.round(100 - (overdue * 15 + urgent * 5))));
+    reportHtml += `<h2>Compliance Score: ${score}/100</h2>`;
+    reportHtml += `<p>Overdue: <span class="overdue">${overdue}</span> | Urgent: <span class="urgent">${urgent}</span> | Compliant: <span class="ok">${allItems.length - overdue - urgent}</span> | Total: ${allItems.length}</p>`;
+
+    reportHtml += `<h2>All Compliance Items</h2><table><tr><th>Item</th><th>Category</th><th>Due Date</th><th>Days Left</th><th>Status</th><th>Authority</th></tr>`;
+
+    allItems.sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate)).forEach(item => {
+        const days = getDaysUntil(item.dueDate);
+        const s = getItemStatus(item);
+        const cls = s === 'overdue' ? 'overdue' : s === 'urgent' ? 'urgent' : 'ok';
+        reportHtml += `<tr><td>${item.name}</td><td>${item.category}</td><td>${formatDate(item.dueDate)}</td><td class="${cls}">${days < 0 ? Math.abs(days) + 'd overdue' : days + 'd'}</td><td class="${cls}">${s}</td><td>${item.issuer || '—'}</td></tr>`;
+    });
+
+    reportHtml += `</table><div class="footer"><p>Generated by Simpatico HR Business Command Center | www.simpaticohr.in</p></div></body></html>`;
+
+    const w = window.open('', '_blank');
+    w.document.write(reportHtml);
+    w.document.close();
+    w.print();
+}
+
+function printReport() { exportReport(); }
+
+function exportCSV() {
+    let csv = 'Name,Category,Due Date,Days Left,Status,Priority,Authority,Reference,Frequency\n';
+    allItems.forEach(item => {
+        const days = getDaysUntil(item.dueDate);
+        const s = getItemStatus(item);
+        csv += `"${item.name}","${item.category}","${item.dueDate}","${days}","${s}","${item.priority}","${item.issuer || ''}","${item.ref || ''}","${item.frequency || ''}"\n`;
+    });
+
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `compliance_report_${currentCountry}_${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    showToast('CSV exported', 'success');
+}
+
+// ══════════════════════════════════════════════════════════════════
+// FINANCIAL SNAPSHOT ENGINE
+// ══════════════════════════════════════════════════════════════════
+
+let finMonth = new Date().getMonth();
+let finYear = new Date().getFullYear();
+let financialData = {};
+
+const currencies = { IN: '₹', AE: 'AED', SA: 'SAR', GB: '£', US: '$' };
+const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const fullMonths = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+
+function loadFinancialData() {
+    try {
+        const saved = localStorage.getItem('shr_financial_' + getTenantId() + '_' + currentCountry);
+        if (saved) financialData = JSON.parse(saved);
+        else financialData = {};
+    } catch(e) { financialData = {}; }
+}
+
+function saveFinancialData() {
+    const key = finYear + '-' + String(finMonth).padStart(2, '0');
+    financialData[key] = {
+        revenue: parseFloat(document.getElementById('finRevenue').value) || 0,
+        expenses: parseFloat(document.getElementById('finExpenses').value) || 0,
+        cash: parseFloat(document.getElementById('finCash').value) || 0,
+        receivables: parseFloat(document.getElementById('finReceivables').value) || 0,
+        payables: parseFloat(document.getElementById('finPayables').value) || 0,
+        employees: parseInt(document.getElementById('finEmployees').value) || 0,
+        savedAt: new Date().toISOString()
+    };
+    localStorage.setItem('shr_financial_' + getTenantId() + '_' + currentCountry, JSON.stringify(financialData));
+    renderFinCharts();
+    renderFinInsights();
+    showToast('Financial data saved for ' + fullMonths[finMonth] + ' ' + finYear, 'success');
+}
+
+function changeFinMonth(dir) {
+    finMonth += dir;
+    if (finMonth > 11) { finMonth = 0; finYear++; }
+    if (finMonth < 0) { finMonth = 11; finYear--; }
+    renderFinMonth();
+}
+
+function renderFinMonth() {
+    document.getElementById('finMonthLabel').textContent = fullMonths[finMonth] + ' ' + finYear;
+    const curr = currencies[currentCountry] || '₹';
+    document.getElementById('finCurrencyLabel').textContent = curr;
+
+    const key = finYear + '-' + String(finMonth).padStart(2, '0');
+    const data = financialData[key] || {};
+
+    document.getElementById('finRevenue').value = data.revenue || '';
+    document.getElementById('finExpenses').value = data.expenses || '';
+    document.getElementById('finCash').value = data.cash || '';
+    document.getElementById('finReceivables').value = data.receivables || '';
+    document.getElementById('finPayables').value = data.payables || '';
+    document.getElementById('finEmployees').value = data.employees || '';
+
+    updateFinPreview();
+    renderFinCharts();
+    renderFinInsights();
+}
+
+function updateFinPreview() {
+    const curr = currencies[currentCountry] || '₹';
+    const rev = parseFloat(document.getElementById('finRevenue').value) || 0;
+    const exp = parseFloat(document.getElementById('finExpenses').value) || 0;
+    const cash = parseFloat(document.getElementById('finCash').value) || 0;
+    const emps = parseInt(document.getElementById('finEmployees').value) || 1;
+
+    const profit = rev - exp;
+    const margin = rev > 0 ? ((profit / rev) * 100).toFixed(1) : 0;
+    const runway = exp > 0 ? Math.round(cash / exp) : '∞';
+    const perEmp = emps > 0 ? Math.round(rev / emps) : 0;
+
+    const profitEl = document.getElementById('finProfit');
+    profitEl.textContent = curr + ' ' + formatNumber(profit);
+    profitEl.className = 'fin-summary-val ' + (profit >= 0 ? 'fin-trend-up' : 'fin-trend-down');
+
+    const marginEl = document.getElementById('finMargin');
+    marginEl.textContent = margin + '%';
+    marginEl.className = 'fin-summary-val ' + (margin >= 15 ? 'fin-trend-up' : margin >= 0 ? 'fin-trend-neutral' : 'fin-trend-down');
+
+    document.getElementById('finRunway').textContent = runway === '∞' ? '∞' : runway + ' months';
+    document.getElementById('finPerEmployee').textContent = curr + ' ' + formatNumber(perEmp);
+}
+
+function formatNumber(num) {
+    if (Math.abs(num) >= 10000000) return (num / 10000000).toFixed(1) + 'Cr';
+    if (Math.abs(num) >= 100000) return (num / 100000).toFixed(1) + 'L';
+    if (Math.abs(num) >= 1000) return (num / 1000).toFixed(1) + 'K';
+    return num.toLocaleString();
+}
+
+function renderFinCharts() {
+    // Get last 6 months of data
+    const months = [];
+    let m = finMonth, y = finYear;
+    for (let i = 0; i < 6; i++) {
+        months.unshift({ key: y + '-' + String(m).padStart(2, '0'), label: monthNames[m] + ' ' + String(y).slice(2) });
+        m--;
+        if (m < 0) { m = 11; y--; }
+    }
+
+    // Revenue vs Expenses chart
+    const revExpEl = document.getElementById('revExpChart');
+    const maxRevExp = Math.max(...months.map(m => Math.max(financialData[m.key]?.revenue || 0, financialData[m.key]?.expenses || 0)), 1);
+
+    revExpEl.innerHTML = months.map(mo => {
+        const d = financialData[mo.key] || {};
+        const revH = d.revenue ? (d.revenue / maxRevExp * 100) : 2;
+        const expH = d.expenses ? (d.expenses / maxRevExp * 100) : 2;
+        const curr = currencies[currentCountry] || '₹';
+        return `<div class="bar-group">
+            <div style="display:flex;gap:3px;align-items:flex-end;width:100%;justify-content:center;">
+                <div class="bar" style="height:${revH}%;background:var(--success);width:14px;position:relative;">
+                    <div class="bar-tooltip">${curr}${formatNumber(d.revenue || 0)}</div>
+                </div>
+                <div class="bar" style="height:${expH}%;background:var(--danger);width:14px;position:relative;">
+                    <div class="bar-tooltip">${curr}${formatNumber(d.expenses || 0)}</div>
+                </div>
+            </div>
+            <div style="font-size:.6rem;font-weight:600;color:var(--text-muted);margin-top:4px;">${mo.label}</div>
+        </div>`;
+    }).join('');
+
+    // Cash position chart
+    const cashEl = document.getElementById('cashChart');
+    const maxCash = Math.max(...months.map(m => financialData[m.key]?.cash || 0), 1);
+
+    cashEl.innerHTML = months.map(mo => {
+        const d = financialData[mo.key] || {};
+        const h = d.cash ? (d.cash / maxCash * 100) : 2;
+        const curr = currencies[currentCountry] || '₹';
+        return `<div class="bar-group">
+            <div class="bar" style="height:${h}%;background:linear-gradient(to top, var(--info), var(--primary));width:100%;max-width:28px;position:relative;">
+                <div class="bar-tooltip">${curr}${formatNumber(d.cash || 0)}</div>
+            </div>
+            <div style="font-size:.6rem;font-weight:600;color:var(--text-muted);margin-top:4px;">${mo.label}</div>
+        </div>`;
+    }).join('');
+}
+
+function renderFinInsights() {
+    const el = document.getElementById('finInsights');
+    const key = finYear + '-' + String(finMonth).padStart(2, '0');
+    const data = financialData[key] || {};
+    const curr = currencies[currentCountry] || '₹';
+    const insights = [];
+
+    if (!data.revenue && !data.expenses) {
+        el.innerHTML = '<div class="empty-state"><i class="fas fa-lightbulb"></i><p>Enter your financial data above to receive AI-powered insights and recommendations.</p></div>';
+        return;
+    }
+
+    const profit = (data.revenue || 0) - (data.expenses || 0);
+    const margin = data.revenue ? ((profit / data.revenue) * 100).toFixed(1) : 0;
+    const runway = data.expenses > 0 ? Math.round((data.cash || 0) / data.expenses) : null;
+
+    // Profitability insight
+    if (profit > 0) {
+        insights.push({ icon: '📈', color: 'var(--success-dim)', iconColor: 'var(--success)', text: `<strong>Profitable month.</strong> Net profit of ${curr}${formatNumber(profit)} with a ${margin}% margin. ${margin > 20 ? 'Excellent margin — consider reinvesting in growth.' : margin > 10 ? 'Healthy margin. Look for cost optimization to push above 20%.' : 'Thin margin — review your largest expense categories for savings.'}` });
+    } else if (profit < 0) {
+        insights.push({ icon: '⚠️', color: 'var(--danger-dim)', iconColor: 'var(--danger)', text: `<strong>Loss of ${curr}${formatNumber(Math.abs(profit))} this month.</strong> Expenses exceed revenue by ${Math.abs(margin)}%. Immediate cost review recommended. Focus on reducing your top 3 expense categories.` });
+    }
+
+    // Cash runway
+    if (runway !== null && runway < 3) {
+        insights.push({ icon: '🚨', color: 'var(--danger-dim)', iconColor: 'var(--danger)', text: `<strong>Critical: Cash runway is only ${runway} month${runway !== 1 ? 's' : ''}.</strong> At current burn rate, cash will run out by ${fullMonths[(finMonth + runway) % 12]}. Actions: collect receivables faster, negotiate payment terms with vendors, or reduce discretionary spending.` });
+    } else if (runway !== null && runway < 6) {
+        insights.push({ icon: '⏰', color: 'var(--warning-dim)', iconColor: 'var(--warning)', text: `<strong>Cash runway: ${runway} months.</strong> This is manageable but requires monitoring. Target 6+ months of runway for business stability.` });
+    } else if (runway !== null && runway >= 6) {
+        insights.push({ icon: '✅', color: 'var(--success-dim)', iconColor: 'var(--success)', text: `<strong>Healthy cash position — ${runway} months runway.</strong> You have a comfortable buffer. Consider investing excess cash in growth initiatives or high-yield business deposits.` });
+    }
+
+    // Receivables
+    if (data.receivables > data.revenue * 0.5) {
+        insights.push({ icon: '💸', color: 'var(--warning-dim)', iconColor: 'var(--warning)', text: `<strong>High receivables alert.</strong> ${curr}${formatNumber(data.receivables)} outstanding (${data.revenue ? Math.round(data.receivables / data.revenue * 100) : '?'}% of revenue). Implement stricter payment terms, offer early payment discounts (2/10 net 30), and follow up on invoices older than 30 days.` });
+    }
+
+    // Revenue per employee
+    if (data.employees > 0 && data.revenue > 0) {
+        const rpe = Math.round(data.revenue / data.employees);
+        insights.push({ icon: '👥', color: 'var(--info-dim)', iconColor: 'var(--info)', text: `<strong>Revenue per employee: ${curr}${formatNumber(rpe)}/month.</strong> ${rpe > 200000 ? 'Above average productivity — your team is efficient.' : rpe > 100000 ? 'Average productivity. Look for automation opportunities to boost output.' : 'Below average — consider training investments, process automation, or headcount optimization.'}` });
+    }
+
+    // Trend comparison
+    const prevKey = (finMonth === 0 ? (finYear-1) : finYear) + '-' + String(finMonth === 0 ? 11 : finMonth - 1).padStart(2, '0');
+    const prevData = financialData[prevKey];
+    if (prevData && prevData.revenue > 0) {
+        const revGrowth = ((data.revenue - prevData.revenue) / prevData.revenue * 100).toFixed(1);
+        if (revGrowth > 0) {
+            insights.push({ icon: '🚀', color: 'var(--success-dim)', iconColor: 'var(--success)', text: `<strong>Revenue grew ${revGrowth}% vs last month.</strong> Great momentum! Identify what's driving growth and double down on those channels.` });
+        } else {
+            insights.push({ icon: '📉', color: 'var(--danger-dim)', iconColor: 'var(--danger)', text: `<strong>Revenue declined ${Math.abs(revGrowth)}% vs last month.</strong> Investigate the cause — seasonal pattern, lost clients, or market shift? Take corrective action within 2 weeks.` });
+        }
+    }
+
+    el.innerHTML = insights.length > 0 ? insights.map(i => `<div class="insight-card">
+        <div class="insight-icon" style="background:${i.color};color:${i.iconColor};">${i.icon}</div>
+        <div class="insight-text">${i.text}</div>
+    </div>`).join('') : '<div class="empty-state"><i class="fas fa-lightbulb"></i><p>Add more data to unlock insights.</p></div>';
+}
+
+// ══════════════════════════════════════════════════════════════════
+// AUTO REPORT GENERATORS
+// ══════════════════════════════════════════════════════════════════
+
+function generateMonthlyReport() {
+    const curr = currencies[currentCountry] || '₹';
+    const countryNames = { IN: 'India', AE: 'UAE', SA: 'Saudi Arabia', GB: 'United Kingdom', US: 'United States' };
+    const now = new Date();
+    const key = now.getFullYear() + '-' + String(now.getMonth()).padStart(2, '0');
+    const finData = financialData[key] || {};
+
+    const overdue = allItems.filter(i => getItemStatus(i) === 'overdue').length;
+    const urgent = allItems.filter(i => getItemStatus(i) === 'urgent').length;
+    const compScore = Math.max(0, Math.min(100, Math.round(100 - (overdue * 15 + urgent * 5))));
+    const profit = (finData.revenue || 0) - (finData.expenses || 0);
+    const margin = finData.revenue ? ((profit / finData.revenue) * 100).toFixed(1) : '—';
+    const runway = finData.expenses > 0 ? Math.round((finData.cash || 0) / finData.expenses) : '—';
+
+    let html = `<html><head><title>Monthly Business Report — ${fullMonths[now.getMonth()]} ${now.getFullYear()}</title>
+    <style>
+    body{font-family:Arial,Helvetica,sans-serif;padding:40px 50px;color:#1a1a2e;line-height:1.7;max-width:900px;margin:0 auto;}
+    h1{color:#8b5cf6;font-size:24px;border-bottom:3px solid #8b5cf6;padding-bottom:12px;margin-bottom:8px;}
+    h2{color:#334155;font-size:18px;margin-top:32px;padding-bottom:8px;border-bottom:2px solid #e2e8f0;}
+    h3{color:#475569;font-size:15px;margin-top:20px;}
+    .subtitle{color:#64748b;font-size:14px;margin-bottom:24px;}
+    .summary-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:16px 0;}
+    .summary-box{text-align:center;padding:16px;background:#f8fafc;border-radius:10px;border:1px solid #e2e8f0;}
+    .summary-val{font-size:22px;font-weight:800;line-height:1.2;}
+    .summary-label{font-size:11px;color:#64748b;text-transform:uppercase;letter-spacing:.5px;margin-top:4px;}
+    .green{color:#10b981;} .red{color:#ef4444;} .blue{color:#3b82f6;} .purple{color:#8b5cf6;} .orange{color:#f59e0b;}
+    table{width:100%;border-collapse:collapse;margin:12px 0;}
+    th,td{padding:10px 12px;border:1px solid #e2e8f0;text-align:left;font-size:13px;}
+    th{background:#f1f5f9;font-size:11px;text-transform:uppercase;color:#64748b;font-weight:700;}
+    .insight{background:#f5f3ff;border-left:4px solid #8b5cf6;padding:12px 16px;margin:10px 0;border-radius:0 8px 8px 0;font-size:13px;}
+    .footer{margin-top:40px;padding-top:16px;border-top:2px solid #e2e8f0;font-size:11px;color:#94a3b8;text-align:center;}
+    .badge{display:inline-block;padding:3px 10px;border-radius:12px;font-size:11px;font-weight:700;}
+    .badge-green{background:#d1fae5;color:#065f46;} .badge-red{background:#fee2e2;color:#991b1b;} .badge-yellow{background:#fef3c7;color:#92400e;}
+    @media print{body{padding:20px;}} 
+    </style></head><body>`;
+
+    html += `<h1>📊 Monthly Business Report</h1>`;
+    html += `<div class="subtitle">${fullMonths[now.getMonth()]} ${now.getFullYear()} | ${countryNames[currentCountry]} | Prepared by Simpatico HR Consultancy</div>`;
+
+    // Executive Summary
+    html += `<h2>📋 Executive Summary</h2>`;
+    html += `<div class="insight">This report covers the operational and financial performance for <strong>${fullMonths[now.getMonth()]} ${now.getFullYear()}</strong>. `;
+    if (finData.revenue) {
+        html += `Revenue was <strong>${curr}${formatNumber(finData.revenue)}</strong> with a profit margin of <strong>${margin}%</strong>. `;
+        if (profit > 0) html += `The business generated a net profit of <strong>${curr}${formatNumber(profit)}</strong>. `;
+        else html += `<span class="red">The business recorded a loss of ${curr}${formatNumber(Math.abs(profit))}.</span> `;
+    }
+    html += `Compliance health score is <strong>${compScore}/100</strong> with ${overdue} overdue and ${urgent} urgent items requiring attention.</div>`;
+
+    // Financial Overview
+    html += `<h2>💰 Financial Overview</h2>`;
+    html += `<div class="summary-grid">`;
+    html += `<div class="summary-box"><div class="summary-val green">${curr}${formatNumber(finData.revenue || 0)}</div><div class="summary-label">Revenue</div></div>`;
+    html += `<div class="summary-box"><div class="summary-val red">${curr}${formatNumber(finData.expenses || 0)}</div><div class="summary-label">Expenses</div></div>`;
+    html += `<div class="summary-box"><div class="summary-val ${profit >= 0 ? 'green' : 'red'}">${curr}${formatNumber(profit)}</div><div class="summary-label">Net Profit</div></div>`;
+    html += `<div class="summary-box"><div class="summary-val blue">${curr}${formatNumber(finData.cash || 0)}</div><div class="summary-label">Cash in Bank</div></div>`;
+    html += `</div>`;
+
+    html += `<div class="summary-grid">`;
+    html += `<div class="summary-box"><div class="summary-val purple">${margin}%</div><div class="summary-label">Profit Margin</div></div>`;
+    html += `<div class="summary-box"><div class="summary-val blue">${runway} mo</div><div class="summary-label">Cash Runway</div></div>`;
+    html += `<div class="summary-box"><div class="summary-val orange">${curr}${formatNumber(finData.receivables || 0)}</div><div class="summary-label">Receivables</div></div>`;
+    html += `<div class="summary-box"><div class="summary-val purple">${finData.employees || '—'}</div><div class="summary-label">Employees</div></div>`;
+    html += `</div>`;
+
+    // Compliance Status
+    html += `<h2>🛡️ Compliance Status — Score: ${compScore}/100</h2>`;
+    html += `<div class="summary-grid">`;
+    html += `<div class="summary-box"><div class="summary-val red">${overdue}</div><div class="summary-label">Overdue</div></div>`;
+    html += `<div class="summary-box"><div class="summary-val orange">${urgent}</div><div class="summary-label">Urgent (7 days)</div></div>`;
+    html += `<div class="summary-box"><div class="summary-val green">${allItems.filter(i => getItemStatus(i) === 'compliant').length}</div><div class="summary-label">Compliant</div></div>`;
+    html += `<div class="summary-box"><div class="summary-val blue">${allItems.length}</div><div class="summary-label">Total Tracked</div></div>`;
+    html += `</div>`;
+
+    if (overdue > 0) {
+        html += `<h3>⚠️ Overdue Items — Immediate Action Required</h3><table><tr><th>Item</th><th>Category</th><th>Due Date</th><th>Days Overdue</th><th>Authority</th></tr>`;
+        allItems.filter(i => getItemStatus(i) === 'overdue').forEach(item => {
+            html += `<tr><td><strong>${item.name}</strong></td><td>${item.category}</td><td>${formatDate(item.dueDate)}</td><td class="red">${Math.abs(getDaysUntil(item.dueDate))} days</td><td>${item.issuer || '—'}</td></tr>`;
+        });
+        html += `</table>`;
+    }
+
+    if (urgent > 0) {
+        html += `<h3>⏰ Urgent — Due Within 7 Days</h3><table><tr><th>Item</th><th>Due Date</th><th>Days Left</th><th>Authority</th></tr>`;
+        allItems.filter(i => getItemStatus(i) === 'urgent').forEach(item => {
+            html += `<tr><td><strong>${item.name}</strong></td><td>${formatDate(item.dueDate)}</td><td class="orange">${getDaysUntil(item.dueDate)} days</td><td>${item.issuer || '—'}</td></tr>`;
+        });
+        html += `</table>`;
+    }
+
+    // Recommendations
+    html += `<h2>💡 AI Recommendations</h2>`;
+    if (overdue > 0) html += `<div class="insight">🔴 <strong>Compliance:</strong> ${overdue} overdue items need immediate resolution. Penalties may apply. Contact the relevant authorities to file/renew before further delays.</div>`;
+    if (profit < 0 && finData.revenue) html += `<div class="insight">🔴 <strong>Profitability:</strong> The business is operating at a loss. Review your top 3 expense categories for potential 10-15% reduction. Consider renegotiating vendor contracts.</div>`;
+    if (runway !== '—' && runway < 6) html += `<div class="insight">🟡 <strong>Cash Flow:</strong> Cash runway is ${runway} months. Accelerate receivable collections and consider a credit line as a safety net.</div>`;
+    if (finData.receivables > (finData.revenue || 0) * 0.4) html += `<div class="insight">🟡 <strong>Receivables:</strong> Outstanding invoices are high relative to revenue. Implement automated payment reminders and consider offering early payment discounts.</div>`;
+    html += `<div class="insight">🟢 <strong>Next Month:</strong> Focus on closing overdue compliance items, reviewing Q${Math.ceil((now.getMonth() + 1) / 3)} goals, and scheduling a strategy review meeting with your advisor.</div>`;
+
+    html += `<div class="footer">
+        <p><strong>Simpatico HR Consultancy</strong> | www.simpaticohr.in | +91 9544842260</p>
+        <p>This report was auto-generated by the Business Command Center on ${now.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })} at ${now.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}.</p>
+        <p style="margin-top:8px;font-size:10px;">Confidential — For authorized personnel only. Data accuracy depends on inputs provided by the client.</p>
+    </div></body></html>`;
+
+    const w = window.open('', '_blank');
+    w.document.write(html);
+    w.document.close();
+    setTimeout(() => w.print(), 500);
+    showToast('Monthly report generated', 'success');
+}
+
+function generateFinancialReport() {
+    const curr = currencies[currentCountry] || '₹';
+    const countryNames = { IN: 'India', AE: 'UAE', SA: 'Saudi Arabia', GB: 'United Kingdom', US: 'United States' };
+    const now = new Date();
+
+    let html = `<html><head><title>Financial Analysis Report</title>
+    <style>
+    body{font-family:Arial,sans-serif;padding:40px 50px;color:#1a1a2e;line-height:1.7;max-width:900px;margin:0 auto;}
+    h1{color:#10b981;font-size:22px;border-bottom:3px solid #10b981;padding-bottom:10px;}
+    h2{color:#334155;font-size:17px;margin-top:28px;}
+    .subtitle{color:#64748b;font-size:13px;margin-bottom:24px;}
+    table{width:100%;border-collapse:collapse;margin:12px 0;}
+    th,td{padding:10px;border:1px solid #e2e8f0;font-size:13px;text-align:right;}
+    th{background:#f1f5f9;font-size:11px;text-transform:uppercase;color:#64748b;text-align:center;}
+    td:first-child{text-align:left;font-weight:600;}
+    .green{color:#10b981;} .red{color:#ef4444;}
+    .footer{margin-top:40px;font-size:11px;color:#94a3b8;text-align:center;border-top:2px solid #e2e8f0;padding-top:16px;}
+    </style></head><body>`;
+
+    html += `<h1>📈 Financial Trend Analysis Report</h1>`;
+    html += `<div class="subtitle">${countryNames[currentCountry]} | 6-Month Analysis | Prepared by Simpatico HR Consultancy | ${now.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}</div>`;
+
+    // Build 6-month table
+    const months = [];
+    let m = now.getMonth(), y = now.getFullYear();
+    for (let i = 0; i < 6; i++) {
+        months.unshift({ key: y + '-' + String(m).padStart(2, '0'), label: monthNames[m] + ' ' + y });
+        m--; if (m < 0) { m = 11; y--; }
+    }
+
+    html += `<h2>Revenue & Expense Trend</h2>`;
+    html += `<table><tr><th>Metric</th>${months.map(m => `<th>${m.label}</th>`).join('')}</tr>`;
+
+    const metrics = [
+        { label: 'Revenue', key: 'revenue', cls: 'green' },
+        { label: 'Expenses', key: 'expenses', cls: 'red' },
+        { label: 'Net Profit', calc: d => (d.revenue || 0) - (d.expenses || 0) },
+        { label: 'Margin %', calc: d => d.revenue ? (((d.revenue - (d.expenses || 0)) / d.revenue) * 100).toFixed(1) + '%' : '—' },
+        { label: 'Cash in Bank', key: 'cash' },
+        { label: 'Receivables', key: 'receivables' },
+        { label: 'Payables', key: 'payables' },
+        { label: 'Employees', key: 'employees', noFmt: true },
+    ];
+
+    metrics.forEach(metric => {
+        html += `<tr><td>${metric.label}</td>`;
+        months.forEach(mo => {
+            const d = financialData[mo.key] || {};
+            let val;
+            if (metric.calc) {
+                val = metric.calc(d);
+                if (typeof val === 'number') {
+                    const cls = val >= 0 ? 'green' : 'red';
+                    val = `<span class="${cls}">${curr}${formatNumber(val)}</span>`;
+                }
+            } else {
+                val = d[metric.key] || 0;
+                val = metric.noFmt ? val : curr + formatNumber(val);
+            }
+            html += `<td>${val}</td>`;
+        });
+        html += `</tr>`;
+    });
+    html += `</table>`;
+
+    html += `<div class="footer"><p><strong>Simpatico HR Consultancy</strong> | www.simpaticohr.in | Generated ${now.toLocaleDateString('en-GB')}</p></div></body></html>`;
+
+    const w = window.open('', '_blank');
+    w.document.write(html);
+    w.document.close();
+    setTimeout(() => w.print(), 500);
+    showToast('Financial report generated', 'success');
+}
+
+function generateQBR() {
+    showToast('Generating Quarterly Business Review...', 'info');
+    setTimeout(() => generateMonthlyReport(), 300);
+}
+
+// Initialize financial on page load (extend DOMContentLoaded)
+const origInit = document.addEventListener;
+document.addEventListener('DOMContentLoaded', function() {
+    loadFinancialData();
+    renderFinMonth();
+});
+
+// ─── UTILITIES ───
+function formatDate(dateStr) {
+    const d = new Date(dateStr);
+    return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+function showToast(msg, type) {
+    const container = document.getElementById('toastContainer');
+    const toast = document.createElement('div');
+    toast.className = 'toast ' + type;
+    toast.innerHTML = `<i class="fas fa-${type === 'success' ? 'check-circle' : type === 'error' ? 'exclamation-circle' : 'info-circle'}"></i> ${msg}`;
+    container.appendChild(toast);
+    setTimeout(() => toast.remove(), 4000);
+}
+
+function signOut() {
+    localStorage.removeItem('simpatico_token');
+    localStorage.removeItem('sh_token');
+    localStorage.removeItem('simpatico_user');
+    window.location.href = '../platform/login.html';
+}
+
+// User avatar
+try {
+    const user = JSON.parse(localStorage.getItem('simpatico_user') || '{}');
+    const name = user.name || user.email || 'User';
+    document.getElementById('userAvatar').textContent = name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
+} catch(e) {}
+</script>
+
+</body>
+</html>
