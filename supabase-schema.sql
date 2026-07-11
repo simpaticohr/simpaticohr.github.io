@@ -462,6 +462,9 @@ CREATE TABLE IF NOT EXISTS automation_rules (
   is_ai        BOOLEAN DEFAULT false
 );
 
+-- Ensure module column exists if table was previously created without it
+ALTER TABLE automation_rules ADD COLUMN IF NOT EXISTS module TEXT NOT NULL DEFAULT 'hr' CHECK (module IN ('ats','hr'));
+
 CREATE TABLE IF NOT EXISTS automation_logs (
   id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   rule_id      UUID REFERENCES automation_rules(id) ON DELETE CASCADE,
@@ -473,6 +476,9 @@ CREATE TABLE IF NOT EXISTS automation_logs (
   details      TEXT,
   created_at   TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- Ensure module column exists if table was previously created without it
+ALTER TABLE automation_logs ADD COLUMN IF NOT EXISTS module TEXT NOT NULL DEFAULT 'hr' CHECK (module IN ('ats','hr'));
 
 CREATE INDEX IF NOT EXISTS idx_auto_rules_module ON automation_rules(module);
 CREATE INDEX IF NOT EXISTS idx_auto_logs_module ON automation_logs(module);
