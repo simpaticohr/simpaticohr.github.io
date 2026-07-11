@@ -1828,16 +1828,26 @@ async function loadPayments() {
                     <button class="btn-ghost" style="padding:5px 12px;font-size:12px" onclick="exportPaymentsCSV()"><i class="fas fa-download"></i> Export CSV</button>
                 </div>
                 <div class="table-wrap"><table>
-                    <thead><tr><th>Date</th><th>Company</th><th>Plan</th><th>Amount</th><th>Status</th><th>Gateway</th><th>Order ID</th><th>Action</th></tr></thead>
+                    <thead><tr><th>Date</th><th>Customer & Email</th><th>Company</th><th>Plan & Cycle</th><th>Amount</th><th>Status</th><th>Gateway</th><th>Order ID</th><th>Action</th></tr></thead>
                     <tbody>
-                        ${items.length === 0 ? '<tr><td colspan="7" style="text-align:center;color:#9CA3AF;padding:24px">No transactions found</td></tr>' :
+                        ${items.length === 0 ? '<tr><td colspan="9" style="text-align:center;color:#9CA3AF;padding:24px">No transactions found</td></tr>' :
                         items.map(t => '<tr>' +
                             '<td>' + formatDate(t.created_at) + '</td>' +
+                            '<td>' +
+                                '<div style="font-weight:600">' + esc(t.customer_name || '-') + '</div>' +
+                                '<div style="font-size:11px;color:#6B7280">' + esc(t.customer_email || '-') + '</div>' +
+                            '</td>' +
                             '<td>' + esc(t.company_name || t.company_id || '-') + '</td>' +
-                            '<td>' + esc(t.plan || '-') + '</td>' +
+                            '<td>' +
+                                '<div style="text-transform:capitalize;font-weight:500">' + esc(t.plan || '-') + '</div>' +
+                                '<div style="font-size:10px;text-transform:uppercase;color:#9CA3AF">' + esc(t.billing_cycle || 'monthly') + '</div>' +
+                            '</td>' +
                             '<td style="font-weight:700">' + (t.currency === 'USD' ? '$' : '\u20B9') + (parseFloat(t.amount)||0).toLocaleString('en-IN') + '</td>' +
                             '<td><span class="pay-status ' + ((t.status==='paid'||t.status==='success')?'pay-paid':(t.status==='pending'||t.status==='awaiting_payment'||t.status==='awaiting_transfer')?'pay-pending':'pay-failed') + '">' + esc(t.status||'unknown') + '</span></td>' +
-                            '<td>' + esc(t.gateway || '-') + '</td>' +
+                            '<td>' +
+                                '<div style="text-transform:capitalize">' + esc(t.gateway || '-') + '</div>' +
+                                '<div style="font-size:10px;color:#9CA3AF">' + (t.is_international ? '🌍 International' : '🇮🇳 Domestic') + '</div>' +
+                            '</td>' +
                             '<td style="font-size:11px;font-family:monospace">' + esc(t.gateway_order_id || t.id || '-') + '</td>' +
                             '<td>' + ((t.status==='pending'||t.status==='awaiting_payment'||t.status==='awaiting_transfer') ? '<button class="btn-save" style="padding:4px 10px;font-size:11px;border-radius:6px" onclick="confirmPayment(\'' + esc(t.gateway_order_id||t.id) + '\')" title="Confirm this payment"><i class="fas fa-check"></i> Confirm</button>' : (t.status==='paid'||t.status==='success') ? '<span style="color:#10B981;font-size:12px"><i class="fas fa-check-circle"></i> Done</span>' : '-') + '</td>' +
                         '</tr>').join('')}
@@ -1863,8 +1873,20 @@ async function loadPayments() {
 function exportPaymentsCSV() {
     const data = window._paymentsData || [];
     if (!data.length) { toast('No data to export', 'warning'); return; }
-    const headers = ['Date','Company','Plan','Amount','Status','Method','Transaction ID'];
-    const rows = data.map(t => [formatDate(t.created_at), t.company_name||t.tenant_id||'', t.plan_name||t.plan||'', t.amount||0, t.status||'', t.payment_method||t.gateway||'', t.transaction_id||t.id||'']);
+    const headers = ['Date','Customer Name','Customer Email','Company','Plan','Billing Cycle','Region','Amount','Status','Method','Transaction ID'];
+    const rows = data.map(t => [
+        formatDate(t.created_at), 
+        t.customer_name||'',
+        t.customer_email||'',
+        t.company_name||t.tenant_id||'', 
+        t.plan_name||t.plan||'', 
+        t.billing_cycle||'monthly',
+        t.is_international ? 'International' : 'Domestic',
+        t.amount||0, 
+        t.status||'', 
+        t.payment_method||t.gateway||'', 
+        t.transaction_id||t.id||''
+    ]);
     const csv = [headers.join(','), ...rows.map(r => r.map(v => '"'+String(v).replace(/"/g,'""')+'"').join(','))].join('\n');
     const blob = new Blob([csv], {type:'text/csv'});
     const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'payments_export.csv'; a.click();

@@ -1697,7 +1697,7 @@ export default {
           if (trialExpired > 0) {
             console.log(`[CRON] Auto-expired ${trialExpired} trial(s)`);
             // Notify admin
-            const adminEmail = env.ADMIN_NOTIFICATION_EMAIL || "simpaticohrconsultancy@gmail.com";
+            const adminEmail = env.ADMIN_NOTIFICATION_EMAIL || "info@simpaticohr.in";
             await sendEmail(env, {
               to: adminEmail,
               subject: `⏰ ${trialExpired} Trial(s) Auto-Expired`,
@@ -1784,7 +1784,7 @@ export default {
 
           if (subsExpired > 0) {
             console.log(`[CRON] Auto-expired ${subsExpired} subscription(s)`);
-            const adminEmail = env.ADMIN_NOTIFICATION_EMAIL || "simpaticohrconsultancy@gmail.com";
+            const adminEmail = env.ADMIN_NOTIFICATION_EMAIL || "info@simpaticohr.in";
             await sendEmail(env, {
               to: adminEmail,
               subject: `⚠️ ${subsExpired} Subscription(s) Auto-Expired`,
@@ -6466,7 +6466,7 @@ async function handleCompanyRegister(request, env, ctx) {
 
   // Notify admin about new registration
   try {
-    const adminEmail = env.ADMIN_NOTIFICATION_EMAIL || "simpaticohrconsultancy@gmail.com";
+    const adminEmail = env.ADMIN_NOTIFICATION_EMAIL || "info@simpaticohr.in";
     await sendEmail(env, {
       to: adminEmail,
       subject: `🆕 New ${service_type === "consulting" ? "Consulting Client" : "Company"} Registered: ${name}`,
@@ -7738,7 +7738,7 @@ async function handleManualCreateOrder(request, env, ctx) {
   await audit(env, ctx, "billing.manual_order_created", "payment_transactions", orderId, { plan, billing_cycle, amount: pricing.inr });
 
   // Notify admin about new domestic payment order
-  const adminEmail = env.ADMIN_NOTIFICATION_EMAIL || "simpaticohrconsultancy@gmail.com";
+  const adminEmail = env.ADMIN_NOTIFICATION_EMAIL || "info@simpaticohr.in";
   sendEmail(env, {
     to: adminEmail,
     subject: `💰 New Payment Order: ${plan.charAt(0).toUpperCase() + plan.slice(1)} (${billing_cycle}) — ₹${pricing.inr.toLocaleString()} INR`,
@@ -7762,13 +7762,13 @@ async function handleManualCreateOrder(request, env, ctx) {
     order_id: orderId, gateway: "manual", amount: pricing.inr, currency: "INR",
     plan, billing_cycle,
     payment_details: {
-      upi_id: env.UPI_ID || "simpaticohrconsultancy@ybl",
+      upi_id: env.UPI_ID || "faisalkkod@okhdfcbank",
       account_name: env.DOMESTIC_ACCOUNT_NAME || "FAISAL .K",
       bank_name: env.DOMESTIC_BANK_NAME || "State Bank of India",
       account_number: env.DOMESTIC_ACCOUNT_NUMBER || "67326003131",
       ifsc_code: env.DOMESTIC_IFSC_CODE || "SBIN0070198",
       branch: env.DOMESTIC_BRANCH || "Perinthalmanna",
-      email: "simpaticohrconsultancy@gmail.com",
+      email: "info@simpaticohr.in",
       reference: orderId,
       note: `Please include order reference "${orderId}" in your payment note. Your subscription will activate within a few hours after payment verification.`,
     },
@@ -7825,7 +7825,7 @@ async function handleWiseCreateOrder(request, env, ctx) {
   await audit(env, ctx, "billing.wise_order_created", "payment_transactions", orderId, { plan, billing_cycle, amount, currency: currencyUpper });
 
   // Notify admin about new international Wise payment order
-  const adminEmailWise = env.ADMIN_NOTIFICATION_EMAIL || "simpaticohrconsultancy@gmail.com";
+  const adminEmailWise = env.ADMIN_NOTIFICATION_EMAIL || "info@simpaticohr.in";
   sendEmail(env, {
     to: adminEmailWise,
     subject: `🌍 International Payment Order: ${plan.charAt(0).toUpperCase() + plan.slice(1)} (${billing_cycle}) — ${symbol}${amount} ${currencyUpper} via Wise`,
@@ -7941,7 +7941,7 @@ async function handleConfirmPayment(request, env, ctx) {
   await audit(env, ctx, "billing.payment_confirmed", "payment_transactions", order_id, { plan: tx.plan, amount: tx.amount, gateway: tx.gateway });
 
   // Notify admin about payment confirmation
-  const adminEmailConfirm = env.ADMIN_NOTIFICATION_EMAIL || "simpaticohrconsultancy@gmail.com";
+  const adminEmailConfirm = env.ADMIN_NOTIFICATION_EMAIL || "info@simpaticohr.in";
   const currencySymbol = tx.currency === "USD" ? "$" : "₹";
   sendEmail(env, {
     to: adminEmailConfirm,
