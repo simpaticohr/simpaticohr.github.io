@@ -492,7 +492,7 @@ CREATE TABLE IF NOT EXISTS subscriptions (
   company_id      UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
   plan            TEXT NOT NULL DEFAULT 'trial' CHECK (plan IN ('trial','starter','professional','enterprise')),
   status          TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('trial','active','past_due','cancelled','expired','paused')),
-  gateway         TEXT CHECK (gateway IN ('cashfree','paddle','manual')),
+  gateway         TEXT CHECK (gateway IN ('cashfree','paddle','manual','wise')),
   gateway_subscription_id TEXT,         -- Cashfree subscription ID or Paddle subscription ID
   gateway_customer_id     TEXT,         -- Gateway customer reference
   amount          NUMERIC(10,2),
@@ -512,7 +512,7 @@ CREATE TABLE IF NOT EXISTS payment_transactions (
   company_id      UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
   company_name    TEXT,                  -- Denormalized for admin display
   subscription_id UUID REFERENCES subscriptions(id),
-  gateway         TEXT NOT NULL CHECK (gateway IN ('cashfree','paddle','manual')),
+  gateway         TEXT NOT NULL CHECK (gateway IN ('cashfree','paddle','manual','wise')),
   gateway_order_id    TEXT,             -- Cashfree order_id or Paddle transaction_id
   gateway_payment_id  TEXT,             -- Cashfree cf_payment_id or Paddle checkout_id
   amount          NUMERIC(10,2) NOT NULL,
