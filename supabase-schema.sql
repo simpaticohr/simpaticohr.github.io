@@ -397,8 +397,13 @@ RETURNS TRIGGER AS $$
 BEGIN NEW.updated_at = NOW(); RETURN NEW; END;
 $$ LANGUAGE plpgsql;
 
+DROP TRIGGER IF EXISTS t_employees_updated ON employees;
 CREATE TRIGGER t_employees_updated       BEFORE UPDATE ON employees           FOR EACH ROW EXECUTE FUNCTION touch_updated_at();
+
+DROP TRIGGER IF EXISTS t_leave_updated ON leave_requests;
 CREATE TRIGGER t_leave_updated           BEFORE UPDATE ON leave_requests      FOR EACH ROW EXECUTE FUNCTION touch_updated_at();
+
+DROP TRIGGER IF EXISTS t_perf_updated ON performance_reviews;
 CREATE TRIGGER t_perf_updated            BEFORE UPDATE ON performance_reviews FOR EACH ROW EXECUTE FUNCTION touch_updated_at();
 
 -- Recalculate onboarding completion % when tasks change
@@ -432,6 +437,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+DROP TRIGGER IF EXISTS t_onboarding_pct ON onboarding_tasks;
 CREATE TRIGGER t_onboarding_pct
   AFTER INSERT OR UPDATE OR DELETE ON onboarding_tasks
   FOR EACH ROW EXECUTE FUNCTION update_onboarding_pct();
