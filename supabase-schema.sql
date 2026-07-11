@@ -510,13 +510,14 @@ CREATE TABLE IF NOT EXISTS subscriptions (
 CREATE TABLE IF NOT EXISTS payment_transactions (
   id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   company_id      UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+  company_name    TEXT,                  -- Denormalized for admin display
   subscription_id UUID REFERENCES subscriptions(id),
   gateway         TEXT NOT NULL CHECK (gateway IN ('cashfree','paddle','manual')),
   gateway_order_id    TEXT,             -- Cashfree order_id or Paddle transaction_id
   gateway_payment_id  TEXT,             -- Cashfree cf_payment_id or Paddle checkout_id
   amount          NUMERIC(10,2) NOT NULL,
   currency        TEXT DEFAULT 'INR',
-  status          TEXT DEFAULT 'pending' CHECK (status IN ('pending','paid','failed','refunded')),
+  status          TEXT DEFAULT 'pending' CHECK (status IN ('pending','paid','success','failed','refunded','cancelled','awaiting_payment','awaiting_transfer')),
   plan            TEXT,
   billing_cycle   TEXT,
   payment_method  TEXT,                 -- upi, card, netbanking, paddle_card, etc.

@@ -351,6 +351,9 @@
         <a class="nav-item" id="navConsulting" onclick="showSection('consulting')">
             <i class="fas fa-chart-line" style="color:#8b5cf6"></i> Business Consulting
         </a>
+        <a class="nav-item" id="navConsultingBilling" onclick="showSection('consultingBilling')">
+            <i class="fas fa-file-invoice-dollar" style="color:#10b981"></i> Consulting Billing
+        </a>
         <a class="nav-item" id="navMonitor" onclick="showSection('monitor')">
             <i class="fas fa-chart-bar"></i> Client Monitoring
         </a>
@@ -506,11 +509,11 @@ async function sbQuery(table, params = '') {
 
 function showSection(section) {
     document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
-    const navMap = { dashboard:'navDash', companies:'navCompanies', users:'navUsers', jobs:'navJobs', consulting:'navConsulting', monitor:'navMonitor', activity:'navActivity', payments:'navPayments', analytics:'navAnalytics', billing:'navBilling', settings:'navSettings', email:'navEmail', interview:'navInterview', branding:'navBranding', audit:'navAudit', features:'navFeatures' };
+    const navMap = { dashboard:'navDash', companies:'navCompanies', users:'navUsers', jobs:'navJobs', consulting:'navConsulting', consultingBilling:'navConsultingBilling', monitor:'navMonitor', activity:'navActivity', payments:'navPayments', analytics:'navAnalytics', billing:'navBilling', settings:'navSettings', email:'navEmail', interview:'navInterview', branding:'navBranding', audit:'navAudit', features:'navFeatures' };
     const el = document.getElementById(navMap[section]);
     if (el) el.classList.add('active');
     document.getElementById('sidebar').classList.remove('open');
-    const actions = { dashboard:loadDashboard, companies:loadCompanies, users:loadUsers, jobs:loadJobs, consulting:loadConsulting, monitor:loadMonitoring, activity:loadActivity, payments:loadPayments, analytics:loadAnalytics, billing:loadPayments, settings:loadSettings, email:loadEmailSettings, interview:loadInterviewDefaults, branding:loadBranding, audit:loadAuditLogs, features:loadFeatureFlags };
+    const actions = { dashboard:loadDashboard, companies:loadCompanies, users:loadUsers, jobs:loadJobs, consulting:loadConsulting, consultingBilling:loadConsultingBilling, monitor:loadMonitoring, activity:loadActivity, payments:loadPayments, analytics:loadAnalytics, billing:loadPayments, settings:loadSettings, email:loadEmailSettings, interview:loadInterviewDefaults, branding:loadBranding, audit:loadAuditLogs, features:loadFeatureFlags };
     if (actions[section]) actions[section]();
 }
 
@@ -1833,7 +1836,7 @@ async function loadPayments() {
                             '<td>' + esc(t.company_name || t.company_id || '-') + '</td>' +
                             '<td>' + esc(t.plan || '-') + '</td>' +
                             '<td style="font-weight:700">' + (t.currency === 'USD' ? '$' : '\u20B9') + (parseFloat(t.amount)||0).toLocaleString('en-IN') + '</td>' +
-                            '<td><span class="pay-status ' + (t.status==='paid'||t.status==='success'?'pay-paid':(t.status==='pending'||t.status==='awaiting_payment'||t.status==='awaiting_transfer')?'pay-pending':'pay-failed') + '">' + esc(t.status||'unknown') + '</span></td>' +
+                            '<td><span class="pay-status ' + ((t.status==='paid'||t.status==='success')?'pay-paid':(t.status==='pending'||t.status==='awaiting_payment'||t.status==='awaiting_transfer')?'pay-pending':'pay-failed') + '">' + esc(t.status||'unknown') + '</span></td>' +
                             '<td>' + esc(t.gateway || '-') + '</td>' +
                             '<td style="font-size:11px;font-family:monospace">' + esc(t.gateway_order_id || t.id || '-') + '</td>' +
                             '<td>' + ((t.status==='pending'||t.status==='awaiting_payment'||t.status==='awaiting_transfer') ? '<button class="btn-save" style="padding:4px 10px;font-size:11px;border-radius:6px" onclick="confirmPayment(\'' + esc(t.gateway_order_id||t.id) + '\')" title="Confirm this payment"><i class="fas fa-check"></i> Confirm</button>' : (t.status==='paid'||t.status==='success') ? '<span style="color:#10B981;font-size:12px"><i class="fas fa-check-circle"></i> Done</span>' : '-') + '</td>' +
@@ -1843,7 +1846,17 @@ async function loadPayments() {
             </div>`;
         window._paymentsData = items;
     } catch(e) {
-        document.getElementById('mainContent').innerHTML = '<p style="text-align:center;color:#EF4444;padding:40px">' + e.message + '</p>';
+        document.getElementById('mainContent').innerHTML = `
+            <div style="text-align:center;padding:60px 20px">
+                <div style="width:64px;height:64px;border-radius:50%;background:rgba(239,68,68,.1);display:flex;align-items:center;justify-content:center;margin:0 auto 16px">
+                    <i class="fas fa-exclamation-triangle" style="font-size:28px;color:#EF4444"></i>
+                </div>
+                <h3 style="font-size:18px;font-weight:700;color:#0F172A;margin-bottom:8px">Unable to Load Payments</h3>
+                <p style="color:#6B7280;font-size:14px;max-width:420px;margin:0 auto 16px">${esc(e.message)}</p>
+                <p style="color:#9CA3AF;font-size:12px;margin-bottom:20px">This usually means the payment_transactions table hasn't been created in Supabase yet.</p>
+                <button class="btn-create" onclick="loadPayments()" style="margin-right:8px"><i class="fas fa-redo"></i> Retry</button>
+                <button class="btn-ghost" onclick="showSection('dashboard')"><i class="fas fa-arrow-left"></i> Back to Dashboard</button>
+            </div>`;
     }
 }
 
@@ -2158,6 +2171,152 @@ loadDashboard = async function() {
         saPollingTimer = setInterval(saPollAuditLogs, 60000);
     }
 };
+
+loadDashboard();
+
+// ═══════════════════════════════════════════════════════
+// CONSULTING BILLING MANAGEMENT
+// ═══════════════════════════════════════════════════════
+async function loadConsultingBilling() {
+    document.getElementById('pageTitle').textContent = 'Consulting Billing';
+    const mc = document.getElementById('mainContent');
+    mc.innerHTML = '<div class="loader"><div class="spin"></div><p>Loading billing data...</p></div>';
+    if (!(await checkAuth())) return;
+
+    // Demo data — replace with real API when backend supports it
+    const invoices = [
+        { id:'SHR-BC-202607-101', client:'TechVision Solutions', type:'Milestone', amount:300000, currency:'INR', status:'paid', gateway:'UPI', date:'2026-07-01', due:'2026-07-15' },
+        { id:'SHR-BC-202607-102', client:'Gulf Enterprises LLC', type:'Retainer', amount:2500, currency:'USD', status:'pending', gateway:'Wise', date:'2026-07-05', due:'2026-07-20' },
+        { id:'SHR-BC-202606-098', client:'StartupHub Kerala', type:'One-Time', amount:50000, currency:'INR', status:'paid', gateway:'NEFT', date:'2026-06-20', due:'2026-07-05' },
+        { id:'SHR-BC-202607-103', client:'London Advisory Group', type:'Milestone', amount:3500, currency:'GBP', status:'sent', gateway:'Wise', date:'2026-07-08', due:'2026-07-23' },
+        { id:'SHR-BC-202606-095', client:'Malabar Foods Pvt Ltd', type:'One-Time', amount:75000, currency:'INR', status:'overdue', gateway:'UPI', date:'2026-06-10', due:'2026-06-25' },
+    ];
+
+    const totalRev = invoices.filter(i=>i.status==='paid').reduce((s,i)=>s+(i.currency==='INR'?i.amount:i.amount*85),0);
+    const pendingCount = invoices.filter(i=>i.status==='pending'||i.status==='sent').length;
+    const overdueCount = invoices.filter(i=>i.status==='overdue').length;
+    const retainerCount = invoices.filter(i=>i.type==='Retainer').length;
+
+    const statusBadge = (s) => {
+        const m = { paid:'pay-paid', pending:'pay-pending', sent:'pay-pending', overdue:'pay-failed' };
+        const l = { paid:'Paid', pending:'Pending', sent:'Sent', overdue:'Overdue' };
+        return `<span class="pay-status ${m[s]||'pay-pending'}">${l[s]||s}</span>`;
+    };
+    const fmtAmt = (a,c) => {
+        const sym = {INR:'₹',USD:'$',GBP:'£',EUR:'€',AED:'AED '};
+        return (sym[c]||'') + a.toLocaleString(c==='INR'?'en-IN':'en-US');
+    };
+
+    mc.innerHTML = `
+        <div class="pay-grid">
+            <div class="pay-card" style="border-bottom:3px solid #10B981">
+                <div style="width:42px;height:42px;border-radius:12px;background:rgba(16,185,129,.1);color:#10B981;display:flex;align-items:center;justify-content:center;font-size:18px;margin:0 auto 8px"><i class="fas fa-indian-rupee-sign"></i></div>
+                <div class="pc-val" style="color:#10B981">₹${totalRev.toLocaleString('en-IN')}</div>
+                <div class="pc-lbl">Consulting Revenue</div>
+            </div>
+            <div class="pay-card" style="border-bottom:3px solid #F59E0B">
+                <div style="width:42px;height:42px;border-radius:12px;background:rgba(245,158,11,.1);color:#F59E0B;display:flex;align-items:center;justify-content:center;font-size:18px;margin:0 auto 8px"><i class="fas fa-clock"></i></div>
+                <div class="pc-val" style="color:#F59E0B">${pendingCount}</div>
+                <div class="pc-lbl">Pending Invoices</div>
+            </div>
+            <div class="pay-card" style="border-bottom:3px solid #EF4444">
+                <div style="width:42px;height:42px;border-radius:12px;background:rgba(239,68,68,.1);color:#EF4444;display:flex;align-items:center;justify-content:center;font-size:18px;margin:0 auto 8px"><i class="fas fa-exclamation-triangle"></i></div>
+                <div class="pc-val" style="color:#EF4444">${overdueCount}</div>
+                <div class="pc-lbl">Overdue</div>
+            </div>
+            <div class="pay-card" style="border-bottom:3px solid #8B5CF6">
+                <div style="width:42px;height:42px;border-radius:12px;background:rgba(139,92,246,.1);color:#8B5CF6;display:flex;align-items:center;justify-content:center;font-size:18px;margin:0 auto 8px"><i class="fas fa-calendar-check"></i></div>
+                <div class="pc-val" style="color:#8B5CF6">${retainerCount}</div>
+                <div class="pc-lbl">Active Retainers</div>
+            </div>
+        </div>
+
+        <div class="panel">
+            <div class="panel-header">
+                <div class="panel-title"><i class="fas fa-file-invoice-dollar" style="color:#8B5CF6;margin-right:8px"></i>Consulting Invoices</div>
+                <div style="display:flex;gap:8px;align-items:center">
+                    <a href="consulting-invoice.html" target="_blank" class="btn-create" style="background:linear-gradient(135deg,#8B5CF6,#7C3AED)">
+                        <i class="fas fa-plus"></i> Create Invoice
+                    </a>
+                </div>
+            </div>
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Invoice #</th>
+                            <th>Client</th>
+                            <th>Type</th>
+                            <th>Amount</th>
+                            <th>Gateway</th>
+                            <th>Status</th>
+                            <th>Date</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${invoices.map(inv => `
+                        <tr>
+                            <td style="font-family:monospace;font-weight:600;font-size:12px">${esc(inv.id)}</td>
+                            <td style="font-weight:600">${esc(inv.client)}</td>
+                            <td><span class="badge ${inv.type==='Retainer'?'badge-premium':inv.type==='Milestone'?'badge-trial':'badge-active'}">${inv.type}</span></td>
+                            <td style="font-weight:700;font-variant-numeric:tabular-nums">${fmtAmt(inv.amount,inv.currency)}</td>
+                            <td><span style="font-size:11px;font-weight:600;padding:3px 8px;border-radius:6px;background:${inv.gateway==='Wise'?'rgba(16,185,129,.1)':'rgba(59,130,246,.1)'};color:${inv.gateway==='Wise'?'#059669':'#2563EB'}"><i class="fas ${inv.gateway==='Wise'?'fa-globe':'fa-indian-rupee-sign'}" style="margin-right:4px"></i>${inv.gateway}</span></td>
+                            <td>${statusBadge(inv.status)}</td>
+                            <td style="font-size:13px;color:#6B7280">${inv.date}</td>
+                            <td>
+                                ${inv.status==='pending'||inv.status==='sent'?
+                                    '<button class="act-btn act-unblock" onclick="verifyConsultingPayment(\''+inv.id+'\',\''+esc(inv.client)+'\')"><i class="fas fa-check"></i> Verify</button>'
+                                    :inv.status==='overdue'?
+                                    '<button class="act-btn act-restrict" onclick="sendPaymentReminder(\''+esc(inv.client)+'\')"><i class="fas fa-bell"></i> Remind</button>'
+                                    :'<span style="font-size:11px;color:#9CA3AF">—</span>'
+                                }
+                            </td>
+                        </tr>`).join('')}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
+            <div class="panel">
+                <div class="panel-header">
+                    <div class="panel-title"><i class="fas fa-university" style="color:#3B82F6;margin-right:8px"></i>Domestic Payment Details</div>
+                </div>
+                <div class="info-row"><span class="info-key">Account Name</span><span class="info-val">Simpatico HR Consultancy</span></div>
+                <div class="info-row"><span class="info-key">UPI ID</span><span class="info-val">simpaticohr@upi</span></div>
+                <div class="info-row"><span class="info-key">Bank</span><span class="info-val">Your Bank Name</span></div>
+                <div class="info-row"><span class="info-key">Account No</span><span class="info-val">XXXXXXXXXXXX</span></div>
+                <div class="info-row"><span class="info-key">IFSC</span><span class="info-val">XXXX0XXXXXX</span></div>
+                <p style="font-size:11px;color:#9CA3AF;margin-top:12px"><i class="fas fa-info-circle" style="margin-right:4px"></i>Update these details in Settings when you have your bank info ready.</p>
+            </div>
+            <div class="panel">
+                <div class="panel-header">
+                    <div class="panel-title"><i class="fas fa-globe" style="color:#10B981;margin-right:8px"></i>Wise (International)</div>
+                </div>
+                <div class="info-row"><span class="info-key">Platform</span><span class="info-val">Wise Business</span></div>
+                <div class="info-row"><span class="info-key">Recipient</span><span class="info-val">Simpatico HR Consultancy</span></div>
+                <div class="info-row"><span class="info-key">Email</span><span class="info-val">info@simpaticohr.in</span></div>
+                <div class="info-row"><span class="info-key">Currencies</span><span class="info-val">USD, GBP, EUR, AED, AUD, CAD</span></div>
+                <div class="info-row"><span class="info-key">Fees</span><span class="info-val">~0.4-0.7% (mid-market rate)</span></div>
+                <p style="font-size:11px;color:#9CA3AF;margin-top:12px"><i class="fas fa-shield-halved" style="margin-right:4px"></i>Wise is RBI-compliant for receiving international payments in India.</p>
+            </div>
+        </div>
+    `;
+}
+
+function verifyConsultingPayment(invId, client) {
+    if (confirm(`Confirm payment received for invoice ${invId} from ${client}?\n\nThis will activate/continue their consulting dashboard access.`)) {
+        showToast(`Payment verified for ${invId}. Client access updated.`, 'success');
+        setTimeout(() => loadConsultingBilling(), 1000);
+    }
+}
+
+function sendPaymentReminder(client) {
+    const waUrl = `https://wa.me/?text=${encodeURIComponent('Hi ' + client + ', this is a friendly reminder regarding your outstanding consulting invoice from Simpatico HR. Please complete the payment at your earliest convenience. Thank you!')}`;
+    window.open(waUrl, '_blank');
+    showToast('Payment reminder sent via WhatsApp', 'info');
+}
 
 loadDashboard();
 </script>

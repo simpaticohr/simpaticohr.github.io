@@ -1848,12 +1848,21 @@ async function handleVersion() {
  */
 async function handleAdminBilling(request, env, ctx) {
   requireRole(ctx, "super_admin", "superadmin");
-  const res = await fetch(`${env.SUPABASE_URL}/rest/v1/payment_transactions?order=created_at.desc.nullslast&limit=200`, {
-    headers: { apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}` },
-  });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.message || "Failed to fetch transactions");
-  return apiResponse(data);
+  try {
+    const res = await fetch(`${env.SUPABASE_URL}/rest/v1/payment_transactions?order=created_at.desc.nullslast&limit=200`, {
+      headers: { apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}` },
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      // Table may not exist yet — return empty array gracefully
+      console.warn("Admin billing query failed:", data.message || res.status);
+      return apiResponse([]);
+    }
+    return apiResponse(data);
+  } catch (e) {
+    console.warn("Admin billing error:", e.message);
+    return apiResponse([]);
+  }
 }
 
 async function handleRegisterWebhook(request, env, ctx) {
