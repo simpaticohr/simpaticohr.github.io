@@ -7715,16 +7715,25 @@ async function handleManualCreateOrder(request, env, ctx) {
   const companyId = ctx.tenantId;
   const orderId = `MANUAL_${plan.toUpperCase()}_${crypto.randomUUID().replace(/-/g, "").substring(0, 12)}`;
 
-  const txRes = await sbFetch(env, "POST", "/rest/v1/payment_transactions", {
-    company_id: companyId, gateway: "manual", gateway_order_id: orderId,
-    amount: pricing.inr, currency: "INR", status: "awaiting_payment", plan, billing_cycle,
-    customer_email, customer_name, is_international: false,
-    metadata: { internal_order_id: orderId, instructions: "UPI or Bank Transfer" },
-  }, false, companyId);
-
-  if (!txRes.ok) {
-    const errText = await txRes.text().catch(() => "unknown");
-    throw new AppError(`Failed to create order: ${errText}`, txRes.status, "DB_ERROR");
+  let txRes;
+  try {
+    txRes = await sbFetch(env, "POST", "/rest/v1/payment_transactions", {
+      company_id: companyId, gateway: "manual", gateway_order_id: orderId,
+      amount: pricing.inr, currency: "INR", status: "awaiting_payment", plan, billing_cycle,
+      customer_email, customer_name, is_international: false,
+      metadata: { internal_order_id: orderId, instructions: "UPI or Bank Transfer" },
+    }, false, companyId);
+  } catch (err) {
+    if (err.message && (err.message.includes("customer_email") || err.message.includes("customer_name") || err.message.includes("is_international") || err.message.includes("PGRST204"))) {
+      console.warn("[handleManualCreateOrder] Database missing payment_transactions columns, retrying insert without them");
+      txRes = await sbFetch(env, "POST", "/rest/v1/payment_transactions", {
+        company_id: companyId, gateway: "manual", gateway_order_id: orderId,
+        amount: pricing.inr, currency: "INR", status: "awaiting_payment", plan, billing_cycle,
+        metadata: { internal_order_id: orderId, instructions: "UPI or Bank Transfer" },
+      }, false, companyId);
+    } else {
+      throw err;
+    }
   }
 
   await audit(env, ctx, "billing.manual_order_created", "payment_transactions", orderId, { plan, billing_cycle, amount: pricing.inr });
@@ -7794,12 +7803,25 @@ async function handleWiseCreateOrder(request, env, ctx) {
   const companyId = ctx.tenantId;
   const orderId = `WISE_${plan.toUpperCase()}_${crypto.randomUUID().replace(/-/g, "").substring(0, 12)}`;
 
-  await sbFetch(env, "POST", "/rest/v1/payment_transactions", {
-    company_id: companyId, gateway: "wise", gateway_order_id: orderId,
-    amount, currency: currencyUpper, status: "awaiting_transfer", plan, billing_cycle,
-    customer_email, customer_name, is_international: true,
-    metadata: { internal_order_id: orderId, instructions: `Bank transfer via Wise (${currencyUpper})` },
-  }, false, companyId);
+  try {
+    await sbFetch(env, "POST", "/rest/v1/payment_transactions", {
+      company_id: companyId, gateway: "wise", gateway_order_id: orderId,
+      amount, currency: currencyUpper, status: "awaiting_transfer", plan, billing_cycle,
+      customer_email, customer_name, is_international: true,
+      metadata: { internal_order_id: orderId, instructions: `Bank transfer via Wise (${currencyUpper})` },
+    }, false, companyId);
+  } catch (err) {
+    if (err.message && (err.message.includes("customer_email") || err.message.includes("customer_name") || err.message.includes("is_international") || err.message.includes("PGRST204"))) {
+      console.warn("[handleWiseCreateOrder] Database missing payment_transactions columns, retrying insert without them");
+      await sbFetch(env, "POST", "/rest/v1/payment_transactions", {
+        company_id: companyId, gateway: "wise", gateway_order_id: orderId,
+        amount, currency: currencyUpper, status: "awaiting_transfer", plan, billing_cycle,
+        metadata: { internal_order_id: orderId, instructions: `Bank transfer via Wise (${currencyUpper})` },
+      }, false, companyId);
+    } else {
+      throw err;
+    }
+  }
 
   await audit(env, ctx, "billing.wise_order_created", "payment_transactions", orderId, { plan, billing_cycle, amount, currency: currencyUpper });
 
