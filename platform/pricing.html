@@ -7,7 +7,10 @@
   <meta name="description" content="Simple pricing for AI-powered HR & recruitment. UPI/Bank Transfer for India, Wise for international.">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="../js/hr-config.js"></script>
+  <script src="../js/shared-utils.js"></script>
+  <script src="../js/supabase-client.js"></script>
   <style>
     :root {
       --primary: #4F46E5; --primary-hover: #4338CA;
@@ -341,24 +344,35 @@
   </div>
 
 <script>
-// Retrieve auth token — check simpatico_token first, then Supabase native sb-*-auth-token format
 const WORKER_URL = window.SIMPATICO_CONFIG?.workerUrl || 'https://simpatico-hr-ats.simpaticohrconsultancy.workers.dev';
-let token = localStorage.getItem('simpatico_token') || sessionStorage.getItem('simpatico_token');
-if (!token) {
-  // Fallback: try Supabase native storage key
-  for (let i = 0; i < localStorage.length; i++) {
-    const k = localStorage.key(i);
-    if (k && k.startsWith('sb-') && k.endsWith('-auth-token')) {
-      try {
-        const parsed = JSON.parse(localStorage.getItem(k));
-        token = parsed?.access_token || parsed?.token || null;
-        if (token) break;
-      } catch(e) {}
+let token = '';
+let user = {};
+let TENANT_ID = '';
+
+async function refreshSession() {
+  const db = window.SimpaticoDB || (typeof getSupabaseClient === 'function' ? getSupabaseClient() : null);
+  if (db?.auth?.getSession) {
+    try {
+      const { data } = await db.auth.getSession();
+      if (data?.session) {
+        token = data.session.access_token;
+        user = data.session.user;
+        const localUser = JSON.parse(localStorage.getItem('simpatico_user') || sessionStorage.getItem('simpatico_user') || '{}');
+        user = { ...user, ...localUser };
+        TENANT_ID = user.company_id || user.tenant_id || window.SIMPATICO_CONFIG?.tenantId || '';
+        return true;
+      }
+    } catch (e) {
+      console.warn('[Session] Session refresh failed:', e);
     }
   }
+  
+  // Fallback
+  token = localStorage.getItem('simpatico_token') || sessionStorage.getItem('simpatico_token') || (typeof getAuthToken === 'function' ? getAuthToken() : '');
+  user = JSON.parse(localStorage.getItem('simpatico_user') || sessionStorage.getItem('simpatico_user') || '{}');
+  TENANT_ID = user.company_id || user.tenant_id || window.SIMPATICO_CONFIG?.tenantId || '';
+  return !!token;
 }
-const user = JSON.parse(localStorage.getItem('simpatico_user') || sessionStorage.getItem('simpatico_user') || '{}');
-const TENANT_ID = user.company_id || user.tenant_id || window.SIMPATICO_CONFIG?.tenantId || '';
 
 let billingCycle = 'monthly';
 let currentPlan = null;
@@ -409,10 +423,12 @@ async function fetchDetectedCurrency() {
 }
 
 // Initialize currency selector dropdown on page load
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
   const select = document.getElementById('currencySelect');
   if (select) select.value = detectedCurrency;
   fetchDetectedCurrency();
+  await refreshSession();
+  await loadCurrentPlan();
 });
 
 function toggleBilling() { setBilling(billingCycle === 'monthly' ? 'annual' : 'monthly'); }
@@ -453,6 +469,7 @@ function updatePrices() {
 }
 
 async function loadCurrentPlan() {
+  await refreshSession();
   if (!token || !TENANT_ID) return;
   try {
     const res = await fetch(`${WORKER_URL}/billing/subscription`, {
@@ -472,6 +489,7 @@ async function loadCurrentPlan() {
 
 // ── Subscribe — routes to Manual Payment (domestic) or Wise (international) ──
 async function subscribe(plan) {
+  await refreshSession();
   if (!token) { alert('Please log in first to subscribe.'); window.location.href = '/platform/login.html'; return; }
 
   const btn = document.getElementById(`btn-${plan}`);
@@ -576,7 +594,6 @@ if (urlParams.get('payment') === 'cancelled') {
 }
 
 updatePrices();
-loadCurrentPlan();
 </script>
 </body>
 </html>
