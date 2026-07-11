@@ -2205,29 +2205,48 @@ async function loadConsultingBilling() {
     mc.innerHTML = '<div class="loader"><div class="spin"></div><p>Loading billing data...</p></div>';
     if (!(await checkAuth())) return;
 
-    // Demo data — replace with real API when backend supports it
-    const invoices = [
-        { id:'SHR-BC-202607-101', client:'TechVision Solutions', type:'Milestone', amount:300000, currency:'INR', status:'paid', gateway:'UPI', date:'2026-07-01', due:'2026-07-15' },
-        { id:'SHR-BC-202607-102', client:'Gulf Enterprises LLC', type:'Retainer', amount:2500, currency:'USD', status:'pending', gateway:'Wise', date:'2026-07-05', due:'2026-07-20' },
-        { id:'SHR-BC-202606-098', client:'StartupHub Kerala', type:'One-Time', amount:50000, currency:'INR', status:'paid', gateway:'NEFT', date:'2026-06-20', due:'2026-07-05' },
-        { id:'SHR-BC-202607-103', client:'London Advisory Group', type:'Milestone', amount:3500, currency:'GBP', status:'sent', gateway:'Wise', date:'2026-07-08', due:'2026-07-23' },
-        { id:'SHR-BC-202606-095', client:'Malabar Foods Pvt Ltd', type:'One-Time', amount:75000, currency:'INR', status:'overdue', gateway:'UPI', date:'2026-06-10', due:'2026-06-25' },
-    ];
+    try {
+        const [txns, companies] = await Promise.all([
+            adminFetch('/admin/billing'),
+            cachedCompanies || adminFetch('/admin/companies')
+        ]);
+        cachedCompanies = companies;
 
-    const totalRev = invoices.filter(i=>i.status==='paid').reduce((s,i)=>s+(i.currency==='INR'?i.amount:i.amount*85),0);
-    const pendingCount = invoices.filter(i=>i.status==='pending'||i.status==='sent').length;
-    const overdueCount = invoices.filter(i=>i.status==='overdue').length;
-    const retainerCount = invoices.filter(i=>i.type==='Retainer').length;
+        const consultingCompanies = Array.isArray(companies) 
+            ? companies.filter(c => (c.service_type||'').toLowerCase() === 'consulting' || (c.industry||'').toLowerCase().includes('consult'))
+            : [];
+        const consultingCompanyIds = consultingCompanies.map(c => c.id);
 
-    const statusBadge = (s) => {
-        const m = { paid:'pay-paid', pending:'pay-pending', sent:'pay-pending', overdue:'pay-failed' };
-        const l = { paid:'Paid', pending:'Pending', sent:'Sent', overdue:'Overdue' };
-        return `<span class="pay-status ${m[s]||'pay-pending'}">${l[s]||s}</span>`;
-    };
-    const fmtAmt = (a,c) => {
-        const sym = {INR:'₹',USD:'$',GBP:'£',EUR:'€',AED:'AED '};
-        return (sym[c]||'') + a.toLocaleString(c==='INR'?'en-IN':'en-US');
-    };
+        const rawInvoices = Array.isArray(txns) ? txns : [];
+        const invoices = rawInvoices.filter(t => 
+            consultingCompanyIds.includes(t.company_id) || 
+            (t.plan || '').toLowerCase().includes('consulting')
+        ).map(t => ({
+            id: t.gateway_order_id || t.id,
+            client: t.customer_name || t.company_name || t.company_id || '-',
+            type: t.plan || 'Consulting',
+            amount: parseFloat(t.amount) || 0,
+            currency: t.currency || 'INR',
+            status: t.status || 'pending',
+            gateway: t.gateway || 'UPI',
+            date: formatDate(t.created_at),
+            due: '-'
+        }));
+
+        const totalRev = invoices.filter(i=>i.status==='paid' || i.status==='success').reduce((s,i)=>s+(i.currency==='INR'?i.amount:i.amount*85),0);
+        const pendingCount = invoices.filter(i=>i.status==='pending'||i.status==='sent'||i.status==='awaiting_payment'||i.status==='awaiting_transfer').length;
+        const overdueCount = invoices.filter(i=>i.status==='overdue'||i.status==='failed').length;
+        const retainerCount = invoices.filter(i=>i.type.toLowerCase().includes('retainer')).length;
+
+        const statusBadge = (s) => {
+            const m = { paid:'pay-paid', success:'pay-paid', pending:'pay-pending', sent:'pay-pending', awaiting_payment:'pay-pending', awaiting_transfer:'pay-pending', overdue:'pay-failed', failed:'pay-failed' };
+            const l = { paid:'Paid', success:'Paid', pending:'Pending', sent:'Sent', awaiting_payment:'Awaiting Payment', awaiting_transfer:'Awaiting Transfer', overdue:'Overdue', failed:'Failed' };
+            return `<span class="pay-status ${m[s]||'pay-pending'}">${l[s]||s}</span>`;
+        };
+        const fmtAmt = (a,c) => {
+            const sym = {INR:'₹',USD:'$',GBP:'£',EUR:'€',AED:'AED '};
+            return (sym[c]||'') + a.toLocaleString(c==='INR'?'en-IN':'en-US');
+        };
 
     mc.innerHTML = `
         <div class="pay-grid">
@@ -2325,6 +2344,18 @@ async function loadConsultingBilling() {
             </div>
         </div>
     `;
+    } catch (e) {
+        mc.innerHTML = `
+            <div style="text-align:center;padding:60px 20px">
+                <div style="width:64px;height:64px;border-radius:50%;background:rgba(239,68,68,.1);display:flex;align-items:center;justify-content:center;margin:0 auto 16px">
+                    <i class="fas fa-exclamation-triangle" style="font-size:28px;color:#EF4444"></i>
+                </div>
+                <h3 style="font-size:18px;font-weight:700;color:#0F172A;margin-bottom:8px">Unable to Load Consulting Invoices</h3>
+                <p style="color:#6B7280;font-size:14px;max-width:420px;margin:0 auto 16px">${esc(e.message)}</p>
+                <button class="btn-create" onclick="loadConsultingBilling()"><i class="fas fa-redo"></i> Retry</button>
+            </div>
+        `;
+    }
 }
 
 function verifyConsultingPayment(invId, client) {
