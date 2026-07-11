@@ -5466,9 +5466,8 @@ async function sbFetch(
     "automation_rules",
     "automation_logs",
     "org_profiles",
-    // Billing
-    "subscriptions",
-    "payment_transactions",
+    // Billing — NOTE: subscriptions and payment_transactions use company_id, NOT tenant_id.
+    // They are NOT tenant_id-aware and must NOT be in this list.
   ];
   // Inject tenant_id filter for GET, PATCH, and DELETE to prevent cross-tenant access
   if (["GET", "PATCH", "DELETE"].includes(method) && tenantId && tenantId !== "default") {
