@@ -640,7 +640,22 @@
                             subscription_end: new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
                             slug: payload.company_name.toLowerCase().replace(/[^a-z0-9]+/g, '-') + '-' + Date.now().toString(36)
                         }).select().single();
-                        if (!compError && company) companyId = company.id;
+                        if (!compError && company) {
+                            companyId = company.id;
+                        } else if (compError) {
+                            console.warn('[registration] Direct insert with slug failed, retrying without slug:', compError.message);
+                            const { data: company2, error: compError2 } = await db.from('companies').insert({
+                                name: payload.company_name, industry: payload.industry,
+                                email: payload.email, contact_email: payload.email,
+                                company_size: payload.company_size,
+                                subscription_plan: 'trial', is_active: true,
+                                service_type: payload.service_type || 'hr',
+                                subscription_start: new Date().toISOString().split('T')[0],
+                                subscription_end: new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+                            }).select().single();
+                            if (!compError2 && company2) companyId = company2.id;
+                            else if (compError2) console.error('[registration] Direct fallback insert failed:', compError2.message);
+                        }
                     } catch(e) { console.warn('[registration] Direct insert error:', e); }
                 }
             }

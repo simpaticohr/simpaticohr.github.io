@@ -109,6 +109,10 @@
 
     if (isPaid) return { status: 'paid', plan, remaining: Infinity };
 
+    if (plan === 'expired_trial') {
+      return { status: 'expired', plan, remaining: 0, hoursLeft: 0, daysLeft: 0 };
+    }
+
     if (!isTrialPlan) return { status: 'unknown', plan, remaining: 0 };
 
     // Calculate from subscription_start or subscription_end
@@ -370,10 +374,24 @@
   }
 
   // Boot — wait for DOM + Supabase
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', () => setTimeout(initTrialGuard, 500));
-  } else {
+  function boot() {
     setTimeout(initTrialGuard, 500);
+    
+    // Listen for auth state changes to avoid race conditions
+    const client = sb();
+    if (client && client.auth) {
+      client.auth.onAuthStateChange((event, session) => {
+        if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
+          initTrialGuard();
+        }
+      });
+    }
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', boot);
+  } else {
+    boot();
   }
 
   // Expose for manual re-check and action gating

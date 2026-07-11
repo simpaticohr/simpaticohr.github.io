@@ -6321,6 +6321,8 @@ async function handleCompanyRegister(request, env, ctx) {
     company_size,
     website,
     subscription_plan,
+    subscription_start,
+    subscription_end,
     admin_user_id,
     admin_name,
     admin_phone,
@@ -6364,36 +6366,59 @@ async function handleCompanyRegister(request, env, ctx) {
   }
 
   // Insert company using service_role key (bypasses RLS)
-  const compRes = await sbFetch(
-    env,
-    "POST",
-    "/rest/v1/companies",
-    {
-      name,
-      email,
-      contact_email: contact_email || email,
-      industry: industry || null,
-      company_size: company_size || null,
-      website: website || null,
-      subscription_plan: subscription_plan || "trial",
-      slug:
-        slug ||
-        name.toLowerCase().replace(/[^a-z0-9]+/g, "-") +
-        "-" +
-        Date.now().toString(36),
-      is_active: true,
-    },
-    false,
-    "default",
-  );
-
-  if (!compRes.ok) {
-    const errText = await compRes.text();
-    throw new AppError(
-      `Failed to create company: ${errText}`,
-      HTTP.SERVER_ERROR,
-      "DB_ERROR",
+  let compRes;
+  try {
+    compRes = await sbFetch(
+      env,
+      "POST",
+      "/rest/v1/companies",
+      {
+        name,
+        email,
+        contact_email: contact_email || email,
+        industry: industry || null,
+        company_size: company_size || null,
+        website: website || null,
+        subscription_plan: subscription_plan || "trial",
+        subscription_start: subscription_start || new Date().toISOString().split('T')[0],
+        subscription_end: subscription_end || new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+        service_type: service_type || "hr",
+        slug:
+          slug ||
+          name.toLowerCase().replace(/[^a-z0-9]+/g, "-") +
+          "-" +
+          Date.now().toString(36),
+        is_active: true,
+      },
+      false,
+      "default",
     );
+  } catch (err) {
+    if (err.message && (err.message.includes("slug") || err.message.includes("PGRST204"))) {
+      console.warn("[handleCompanyRegister] Database missing 'slug' column, retrying insert without it");
+      compRes = await sbFetch(
+        env,
+        "POST",
+        "/rest/v1/companies",
+        {
+          name,
+          email,
+          contact_email: contact_email || email,
+          industry: industry || null,
+          company_size: company_size || null,
+          website: website || null,
+          subscription_plan: subscription_plan || "trial",
+          subscription_start: subscription_start || new Date().toISOString().split('T')[0],
+          subscription_end: subscription_end || new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+          service_type: service_type || "hr",
+          is_active: true,
+        },
+        false,
+        "default",
+      );
+    } else {
+      throw err;
+    }
   }
 
   const companies = await compRes.json();
@@ -7730,7 +7755,11 @@ async function handleManualCreateOrder(request, env, ctx) {
     plan, billing_cycle,
     payment_details: {
       upi_id: env.UPI_ID || "simpaticohrconsultancy@ybl",
-      account_name: "Simpatico HR Consultancy",
+      account_name: env.DOMESTIC_ACCOUNT_NAME || "FAISAL .K",
+      bank_name: env.DOMESTIC_BANK_NAME || "State Bank of India",
+      account_number: env.DOMESTIC_ACCOUNT_NUMBER || "67326003131",
+      ifsc_code: env.DOMESTIC_IFSC_CODE || "SBIN0070198",
+      branch: env.DOMESTIC_BRANCH || "Perinthalmanna",
       email: "simpaticohrconsultancy@gmail.com",
       reference: orderId,
       note: `Please include order reference "${orderId}" in your payment note. Your subscription will activate within a few hours after payment verification.`,

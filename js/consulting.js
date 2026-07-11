@@ -165,6 +165,7 @@
         documents: ['Document Hub', 'Manage consulting deliverables'],
         meetings: ['Meeting Scheduler', 'Schedule and track consulting sessions'],
         advisor: ['AI Business Advisor', 'Get intelligent business insights'],
+        billing: ['Billing & Invoices', 'View invoices and make payments'],
     };
 
     window.navigateTo = function (sectionId, el) {
