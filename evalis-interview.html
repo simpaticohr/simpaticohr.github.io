@@ -77,15 +77,17 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);heigh
 .ms-b{background:rgba(236,72,153,.2);color:#f9a8d4;border:1px solid rgba(236,72,153,.3)}
 .ms-p{background:rgba(245,158,11,.2);color:#fcd34d;border:1px solid rgba(245,158,11,.3)}
 
-/* AI Avatar */
+/* AI Avatar Video Overlay */
 .orb-wrap{position:absolute;top:38%;left:50%;transform:translate(-50%,-50%);
   z-index:20;display:flex;flex-direction:column;align-items:center;pointer-events:none}
 .avatar-container{width:160px;height:160px;border-radius:50%;position:relative;
   display:flex;align-items:center;justify-content:center;
   transition:all 0.5s cubic-bezier(0.4,0,0.2,1)}
-#avatarCanvas{width:140px;height:140px;border-radius:50%;
-  position:relative;z-index:3;border:3px solid rgba(99,102,241,.5);
-  box-shadow:0 0 30px rgba(99,102,241,.3);transition:border-color 0.5s,box-shadow 0.5s}
+.avatar-video, .avatar-video-fallback{width:140px;height:140px;border-radius:50%;object-fit:cover;
+  position:absolute;z-index:3;border:3px solid rgba(99,102,241,.5);
+  box-shadow:0 0 30px rgba(99,102,241,.3);transition:opacity 0.4s ease, border-color 0.5s, box-shadow 0.5s}
+#avatarVideoIdle{opacity:1}
+#avatarVideoTalking{opacity:0;pointer-events:none}
 .avatar-ring{position:absolute;inset:-6px;border-radius:50%;
   border:2.5px solid rgba(99,102,241,.45);z-index:2;
   animation:avatar-breathe 3s ease-in-out infinite;transition:border-color 0.4s}
@@ -98,7 +100,7 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);heigh
 @keyframes avatar-breathe{0%,100%{transform:scale(1) rotate(0deg);opacity:.5}50%{transform:scale(1.08) rotate(180deg);opacity:1}}
 
 /* Speaking state */
-.avatar-container.speaking #avatarCanvas{border-color:rgba(139,92,246,.7);
+.avatar-container.speaking .avatar-video, .avatar-container.speaking .avatar-video-fallback{border-color:rgba(139,92,246,.7);
   box-shadow:0 0 50px rgba(139,92,246,.5),0 0 100px rgba(99,102,241,.3)}
 .avatar-container.speaking .avatar-ring{border-color:rgba(139,92,246,.6);
   animation:avatar-speak-ring 0.3s ease-in-out infinite alternate}
@@ -110,7 +112,7 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);heigh
 @keyframes avatar-speak-pulse{0%{transform:scale(1);opacity:.4}50%{transform:scale(1.25);opacity:.8}100%{transform:scale(1);opacity:.4}}
 
 /* Listening state */
-.avatar-container.listening #avatarCanvas{border-color:rgba(16,185,129,.6);
+.avatar-container.listening .avatar-video, .avatar-container.listening .avatar-video-fallback{border-color:rgba(16,185,129,.6);
   box-shadow:0 0 40px rgba(16,185,129,.4),0 0 80px rgba(16,185,129,.15)}
 .avatar-container.listening .avatar-ring{border-color:rgba(16,185,129,.5);
   animation:avatar-listen-ring 2s ease-in-out infinite}
@@ -120,7 +122,7 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);heigh
 @keyframes avatar-listen-ring{0%,100%{transform:scale(1);opacity:.5}50%{transform:scale(1.06);opacity:1}}
 
 /* Thinking state */
-.avatar-container.thinking #avatarCanvas{border-color:rgba(245,158,11,.6);
+.avatar-container.thinking .avatar-video, .avatar-container.thinking .avatar-video-fallback{border-color:rgba(245,158,11,.6);
   box-shadow:0 0 40px rgba(245,158,11,.35),0 0 80px rgba(245,158,11,.15)}
 .avatar-container.thinking .avatar-ring{border-color:rgba(245,158,11,.5);
   border-style:dashed;animation:avatar-think-spin 4s linear infinite}
@@ -131,7 +133,7 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);heigh
 @keyframes avatar-think-spin{to{transform:rotate(360deg)}}
 
 /* Processing state */
-.avatar-container.processing #avatarCanvas{border-color:rgba(6,182,212,.6);
+.avatar-container.processing .avatar-video, .avatar-container.processing .avatar-video-fallback{border-color:rgba(6,182,212,.6);
   box-shadow:0 0 40px rgba(6,182,212,.35),0 0 80px rgba(6,182,212,.15)}
 .avatar-container.processing .avatar-ring{border-color:rgba(6,182,212,.5);
   border-style:dotted;animation:avatar-think-spin 2s linear infinite}
@@ -269,7 +271,7 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);heigh
   .self-cam{width:120px;height:90px;bottom:90px;right:16px}
   .setup-card{padding:24px}
   .avatar-container{width:120px;height:120px}
-  #avatarCanvas{width:100px;height:100px}
+  .avatar-video, .avatar-video-fallback{width:100px;height:100px}
 }
 </style>
 </head>
@@ -422,7 +424,9 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);heigh
         <div class="viz-wrap" id="vizWrap"></div>
         <div class="orb-wrap">
           <div class="avatar-container" id="orb">
-            <canvas id="avatarCanvas" width="280" height="280"></canvas>
+            <img id="avatarFallbackImg" src="assets/ai-interviewer-avatar.png" alt="AI Interviewer" class="avatar-video-fallback" style="display:none;" />
+            <video id="avatarVideoIdle" class="avatar-video" src="assets/avatar-idle.mp4" loop muted playsinline autoplay onerror="this.style.display='none'; document.getElementById('avatarFallbackImg').style.display='block';"></video>
+            <video id="avatarVideoTalking" class="avatar-video" src="assets/avatar-talking.mp4" loop muted playsinline onerror="this.style.display='none';"></video>
             <div class="avatar-ring"></div>
             <div class="avatar-glow" id="avatarGlow"></div>
             <div class="avatar-pulse-ring" id="avatarPulse"></div>
@@ -532,9 +536,6 @@ let useWhisper=false, mediaRecorder=null, audioChunks=[];
 let audioCtx=null, analyser=null;
 const vizBars=[];
 const NUM_BARS=60;
-
-// Talking Avatar
-let talkingAvatar=null;
 
 // TTS
 const SS=window.speechSynthesis;
@@ -1039,7 +1040,6 @@ async function startSession(){
   timerInt = setInterval(tick,1000);
   startProctor();
   initViz();
-  initTalkingAvatar();
   startSilenceDetect();
 
   try{ await document.documentElement.requestFullscreen(); }catch{}
@@ -1123,34 +1123,44 @@ Be conversational, not interrogative.
     .map(h=>`${h.role==='ai'?'INTERVIEWER':'CANDIDATE'}: ${h.content.substring(0,250)}`)
     .join('\n');
 
+  let difficultyText = '';
+  if (S.aiDifficulty === 'easy') {
+    difficultyText = 'DIFFICULTY: EASY — Ask foundational, conceptual questions. Focus on "what" and "why" basics. No tricky edge cases. Suitable for freshers or juniors.';
+  } else if (S.aiDifficulty === 'medium') {
+    difficultyText = 'DIFFICULTY: MEDIUM — Ask practical, applied questions. Focus on "how" with real-world scenarios. Some depth required. Expect working knowledge.';
+  } else if (S.aiDifficulty === 'hard') {
+    difficultyText = 'DIFFICULTY: HARD — Ask deep technical questions requiring battle-tested experience. Probe edge cases, failure modes, scaling challenges. Challenge vague claims.';
+  } else if (S.aiDifficulty === 'expert') {
+    difficultyText = 'DIFFICULTY: EXPERT — Ask architect/principal-level questions. Expect system-level thinking, trade-off analysis, cross-cutting concerns. Design-level depth.';
+  } else {
+    difficultyText = 'DIFFICULTY: ADAPTIVE — Start at ' + (S.roundNumber > 1 ? 'hard' : 'medium') + ' difficulty. If candidate answers well, escalate. If they struggle, maintain current level.';
+  }
+
+  let antiRepeatText = '';
+  if (S.pastQuestions.length > 0) {
+    const maxRound = Math.max(...S.pastQuestions.map(q=>q.round), 0);
+    const questionList = S.pastQuestions.slice(-30).map(q => '- [Round ' + q.round + '] ' + q.topic + ': "' + q.text.substring(0,100) + '"').join('\n');
+    antiRepeatText = `
+CRITICAL ANTI-REPEAT RULE:
+This candidate has been interviewed before (${S.pastQuestions.length} past questions across ${maxRound} rounds).
+You MUST NOT ask questions on these topics or any close variation:
+${questionList}
+Ask about DIFFERENT aspects of their skills that have NOT been explored.
+`;
+  }
+
   const sys = `You are an elite AI technical interviewer for "${S.jobTitle||'Professional Role'}" at ${S.jobLevel} level.
 Language: ${LANG[selectedLang]?.n||'English'} — respond ENTIRELY in this language.
 Phase: ${phase.toUpperCase()} — Q${S.questionCount+1} of ${S.maxQuestions}
 
-${(() => {
-  const dg = {
-    easy: 'DIFFICULTY: EASY — Ask foundational, conceptual questions. Focus on "what" and "why" basics. No tricky edge cases. Suitable for freshers or juniors.',
-    medium: 'DIFFICULTY: MEDIUM — Ask practical, applied questions. Focus on "how" with real-world scenarios. Some depth required. Expect working knowledge.',
-    hard: 'DIFFICULTY: HARD — Ask deep technical questions requiring battle-tested experience. Probe edge cases, failure modes, scaling challenges. Challenge vague claims.',
-    expert: 'DIFFICULTY: EXPERT — Ask architect/principal-level questions. Expect system-level thinking, trade-off analysis, cross-cutting concerns. Design-level depth.',
-    adaptive: `DIFFICULTY: ADAPTIVE — Start at ${S.roundNumber > 1 ? 'hard' : 'medium'} difficulty. If candidate answers well, escalate. If they struggle, maintain current level.`
-  };
-  return dg[S.aiDifficulty] || dg.adaptive;
-})()}
+${difficultyText}
 Round: ${S.roundNumber} of the interview process.
 
 ${profileCtx}
 
 ${phaseGuide[phase]||''}
 ${followUpGuide}
-
-${S.pastQuestions.length > 0 ? `
-CRITICAL ANTI-REPEAT RULE:
-This candidate has been interviewed before (${S.pastQuestions.length} past questions across ${Math.max(...S.pastQuestions.map(q=>q.round),0)} rounds).
-You MUST NOT ask questions on these topics or any close variation:
-${S.pastQuestions.slice(-30).map(q => '- [Round ' + q.round + '] ' + q.topic + ': "' + q.text.substring(0,100) + '"').join('\n')}
-Ask about DIFFERENT aspects of their skills that have NOT been explored.
-` : ''}
+${antiRepeatText}
 
 HARD RULES:
 1. Output EXACTLY ONE question. Max 2 sentences.
@@ -1165,7 +1175,8 @@ Recent conversation:
 ${recentHistory||'Interview just starting.'}`;
 
   let retries=2;
-  while(retries-->0){
+  while(retries > 0){
+    retries--;
     try{
       const q = await aiCall([
         {role:'system',content:sys},
@@ -1333,17 +1344,8 @@ function makeUtt(text,cb){
     ? bestVoice
     : vs.find(v=>v.lang.startsWith((LANG[selectedLang]?.t||'en-US').split('-')[0]))||bestVoice;
   if(v) u.voice=v;
-  // Lip sync hooks
-  u.onboundary = (e)=>{
-    if(talkingAvatar && e.name==='word'){
-      const word=text.substr(e.charIndex, e.charLength||6).split(/\s/)[0];
-      talkingAvatar.onWord(word);
-      talkingAvatar._hasWordEvents=true;
-    }
-  };
-  u.onstart = ()=>{ if(talkingAvatar){ talkingAvatar.startSpeaking(); talkingAvatar._hasWordEvents=false; } };
-  u.onend=()=>{ if(talkingAvatar) talkingAvatar.stopSpeaking(); if(cb) cb(); };
-  u.onerror=()=>{ if(talkingAvatar) talkingAvatar.stopSpeaking(); if(cb) cb(); };
+  u.onend=()=>{ if(cb) cb(); };
+  u.onerror=()=>{ if(cb) cb(); };
   return u;
 }
 
@@ -1467,290 +1469,43 @@ function startWhisperRecorder(){
 }
 
 // ----------------------------------------------------------------
-//  TALKING AVATAR ENGINE (Canvas-based lip sync + idle animations)
+//  TALKING AVATAR VIDEO STATE MANAGEMENT
 // ----------------------------------------------------------------
-class TalkingAvatar {
-  constructor(canvasId, imageSrc){
-    this.canvas = document.getElementById(canvasId);
-    this.ctx = this.canvas.getContext('2d');
-    this.W = this.canvas.width;
-    this.H = this.canvas.height;
-    this.img = new Image();
-    this.img.crossOrigin = 'anonymous';
-    this.img.src = imageSrc;
-    this.loaded = false;
-    this.img.onload = ()=>{ this.loaded=true; this._startLoop(); };
+  function setAvatarState(state) {
+    const idleVid = document.getElementById('avatarVideoIdle');
+    const talkVid = document.getElementById('avatarVideoTalking');
+    const fallback = document.getElementById('avatarFallbackImg');
+    if (!idleVid || !talkVid) return;
 
-    // Face geometry ratios (tuned for this portrait)
-    this.splitRatio  = 0.6;   // Upper/lower face split (above upper lip)
-    this.mouthCX     = 0.5;   // Mouth center X ratio
-    this.mouthCY     = 0.58;  // Mouth center Y ratio
-    this.mouthW      = 0.16;  // Mouth ellipse width ratio
-    this.eyeY        = 0.34;  // Eye vertical center ratio
-    this.eyeLX       = 0.34;  // Left eye center X
-    this.eyeRX       = 0.66;  // Right eye center X
-    this.eyeW        = 0.11;  // Eye width ratio
-    this.eyeH        = 0.035; // Eye height ratio
-
-    // Animation state
-    this.jawOpen      = 0;
-    this.jawTarget    = 0;
-    this.blinkProg    = 0;
-    this.isBlinking   = false;
-    this.lastBlinkT   = Date.now();
-    this.nextBlinkIn  = this._rndBlink();
-    this.headX        = 0;
-    this.headY        = 0;
-    this.breathPhase  = 0;
-    this.state        = 'idle';
-    this._speaking    = false;
-    this._hasWordEvents = false;
-    this._wordTimer   = null;
-    this._looping     = false;
-    this._nodPhase    = 0;
-
-    // Skin color sampled from image (will auto-detect)
-    this._skinR=190; this._skinG=150; this._skinB=120;
-    this._skinSampled = false;
-  }
-
-  _rndBlink(){ return 2500 + Math.random()*4500; }
-
-  // Estimate mouth openness from a word (vowel density)
-  _viseme(word){
-    if(!word) return 0;
-    word = word.toLowerCase().replace(/[^a-z]/g,'');
-    if(!word.length) return 0.2;
-    const vowels = (word.match(/[aeiou]/g)||[]).length;
-    const wide   = (word.match(/[ao]/g)||[]).length;
-    const ratio  = vowels / word.length;
-    return Math.min(0.2 + ratio*0.55 + (wide/word.length)*0.25, 1.0);
-  }
-
-  onWord(word){
-    this.jawTarget = this._viseme(word);
-    clearTimeout(this._wordTimer);
-    this._wordTimer = setTimeout(()=>{
-      // Between words — mouth slightly open
-      if(this._speaking) this.jawTarget = 0.08;
-    }, 100 + Math.random()*60);
-  }
-
-  startSpeaking(){
-    this._speaking = true;
-    this.jawTarget = 0.25;
-  }
-
-  stopSpeaking(){
-    this._speaking = false;
-    this.jawTarget = 0;
-    clearTimeout(this._wordTimer);
-  }
-
-  // Sample skin color from the cheek area
-  _sampleSkin(){
-    if(this._skinSampled || !this.loaded) return;
-    try{
-      const tmp = document.createElement('canvas');
-      tmp.width = this.img.width; tmp.height = this.img.height;
-      const tc = tmp.getContext('2d');
-      tc.drawImage(this.img, 0, 0);
-      // Sample from right cheek area
-      const sx = Math.round(this.img.width * 0.7);
-      const sy = Math.round(this.img.height * 0.48);
-      const px = tc.getImageData(sx, sy, 8, 8).data;
-      let r=0,g=0,b=0,n=0;
-      for(let i=0;i<px.length;i+=4){
-        r+=px[i]; g+=px[i+1]; b+=px[i+2]; n++;
-      }
-      this._skinR=Math.round(r/n); this._skinG=Math.round(g/n); this._skinB=Math.round(b/n);
-      this._skinSampled = true;
-    }catch(e){}
-  }
-
-  _startLoop(){
-    if(this._looping) return;
-    this._looping = true;
-    this._sampleSkin();
-    this._draw();
-  }
-
-  _draw(){
-    if(!this.loaded) return;
-    requestAnimationFrame(()=>this._draw());
-
-    const now = Date.now();
-    const ctx = this.ctx;
-    const W = this.W, H = this.H;
-
-    ctx.clearRect(0,0,W,H);
-
-    // ---- Smooth jaw interpolation ----
-    const jawLerp = this._speaking ? 0.22 : 0.12;
-    this.jawOpen += (this.jawTarget - this.jawOpen) * jawLerp;
-    if(Math.abs(this.jawOpen - this.jawTarget) < 0.005) this.jawOpen = this.jawTarget;
-
-    // ---- Fallback speaking animation (no boundary events) ----
-    if(this._speaking && !this._hasWordEvents){
-      const t = now * 0.01;
-      this.jawTarget = 0.12 +
-        Math.abs(Math.sin(t)) * 0.3 +
-        Math.abs(Math.sin(t*2.7)) * 0.18 +
-        Math.abs(Math.sin(t*4.1)) * 0.12;
+    if (state === 'speaking') {
+      talkVid.style.opacity = '1';
+      idleVid.style.opacity = '0';
+      if (fallback) fallback.style.opacity = '0';
+      try {
+        talkVid.play().catch(()=>{});
+        idleVid.pause();
+      } catch(e) {}
+    } else {
+      talkVid.style.opacity = '0';
+      idleVid.style.opacity = '1';
+      if (fallback) fallback.style.opacity = '1';
+      try {
+        idleVid.play().catch(()=>{});
+        talkVid.pause();
+      } catch(e) {}
     }
-
-    // ---- Breathing ----
-    this.breathPhase += 0.012;
-    const breathY = Math.sin(this.breathPhase) * 0.7;
-
-    // ---- Micro head movement ----
-    this.headX = Math.sin(now*0.0007)*1.2 + Math.sin(now*0.0012)*0.6;
-    this.headY = Math.cos(now*0.0005)*0.8 + breathY;
-
-    // ---- Listening nod ----
-    if(this.state === 'listening'){
-      this._nodPhase += 0.03;
-      this.headY += Math.sin(this._nodPhase) * 1.5;
-    }
-
-    // ---- Thinking tilt ----
-    const tilt = this.state==='thinking' ? Math.sin(now*0.001)*0.008 : 0;
-
-    // ---- Eye blink ----
-    if(!this.isBlinking && now - this.lastBlinkT > this.nextBlinkIn){
-      this.isBlinking = true;
-      this.blinkProg = 0;
-    }
-    if(this.isBlinking){
-      this.blinkProg += 0.14;
-      if(this.blinkProg >= 1){
-        this.isBlinking = false;
-        this.lastBlinkT = now;
-        this.nextBlinkIn = this._rndBlink();
-      }
-    }
-
-    // ---- RENDER ----
-    ctx.save();
-
-    // Circular clip
-    ctx.beginPath();
-    ctx.arc(W/2, H/2, W/2 - 2, 0, Math.PI*2);
-    ctx.clip();
-
-    // Dark background fill
-    ctx.fillStyle = '#0a0a14';
-    ctx.fillRect(0,0,W,H);
-
-    const splitPx = Math.round(H * this.splitRatio);
-    const jawPx   = this.jawOpen * 14; // Max 14px jaw displacement
-    const dx = this.headX;
-    const dy = this.headY;
-
-    // Apply subtle rotation for tilt
-    if(tilt){
-      ctx.translate(W/2, H/2);
-      ctx.rotate(tilt);
-      ctx.translate(-W/2, -H/2);
-    }
-
-    // --- Draw UPPER face (fixed) ---
-    const srcSplitY = Math.round(this.img.height * this.splitRatio);
-    ctx.drawImage(
-      this.img,
-      0, 0, this.img.width, srcSplitY,       // source: top half
-      dx, dy, W, splitPx                       // dest: same position
-    );
-
-    // --- Draw MOUTH INTERIOR (dark ellipse in gap) ---
-    if(jawPx > 0.5){
-      ctx.save();
-      const mcx = W * this.mouthCX + dx;
-      const mcy = splitPx + dy - 1;
-      const mw  = W * this.mouthW;
-      const mh  = Math.max(jawPx * 0.7, 1);
-
-      // Outer mouth shadow
-      ctx.beginPath();
-      ctx.ellipse(mcx, mcy + mh*0.3, mw*1.1, mh*1.2, 0, 0, Math.PI*2);
-      const sg = ctx.createRadialGradient(mcx, mcy, 0, mcx, mcy, mw*1.3);
-      sg.addColorStop(0, 'rgba(15,5,5,0.95)');
-      sg.addColorStop(0.6, 'rgba(30,10,10,0.7)');
-      sg.addColorStop(1, 'rgba(50,20,15,0.0)');
-      ctx.fillStyle = sg;
-      ctx.fill();
-
-      // Inner dark mouth
-      ctx.beginPath();
-      ctx.ellipse(mcx, mcy + mh*0.2, mw*0.8, mh*0.8, 0, 0, Math.PI*2);
-      ctx.fillStyle = 'rgba(10,2,2,0.98)';
-      ctx.fill();
-
-      // Subtle teeth hint for wider openings
-      if(jawPx > 6){
-        ctx.beginPath();
-        ctx.ellipse(mcx, mcy - mh*0.1, mw*0.55, mh*0.25, 0, Math.PI*0.1, Math.PI*0.9);
-        ctx.fillStyle = `rgba(240,235,228,${Math.min(jawPx/14*0.4, 0.35)})`;
-        ctx.fill();
-      }
-
-      ctx.restore();
-    }
-
-    // --- Draw LOWER face (displaced down) ---
-    ctx.drawImage(
-      this.img,
-      0, srcSplitY, this.img.width, this.img.height - srcSplitY,  // source: bottom half
-      dx, splitPx + jawPx + dy, W, H - splitPx                     // dest: shifted down
-    );
-
-    // --- Blend seam (thin gradient at split line) ---
-    if(jawPx > 0.5){
-      const seamGrad = ctx.createLinearGradient(0, splitPx+dy-3, 0, splitPx+dy+3);
-      seamGrad.addColorStop(0, `rgba(${this._skinR},${this._skinG},${this._skinB},0)`);
-      seamGrad.addColorStop(0.5, `rgba(${this._skinR},${this._skinG},${this._skinB},0.3)`);
-      seamGrad.addColorStop(1, `rgba(${this._skinR},${this._skinG},${this._skinB},0)`);
-      ctx.fillStyle = seamGrad;
-      ctx.fillRect(W*0.3+dx, splitPx+dy-3, W*0.4, 6);
-    }
-
-    // --- Eye blink overlay ---
-    if(this.isBlinking){
-      const ba = Math.sin(this.blinkProg * Math.PI);
-      ctx.fillStyle = `rgba(${this._skinR},${this._skinG},${this._skinB},${ba*0.92})`;
-      const ew = W * this.eyeW;
-      const eh = H * this.eyeH;
-      const ey = H * this.eyeY + dy;
-      // Left eye
-      ctx.beginPath();
-      ctx.ellipse(W*this.eyeLX+dx, ey, ew, eh*1.5, 0, 0, Math.PI*2);
-      ctx.fill();
-      // Right eye
-      ctx.beginPath();
-      ctx.ellipse(W*this.eyeRX+dx, ey, ew, eh*1.5, 0, 0, Math.PI*2);
-      ctx.fill();
-    }
-
-    ctx.restore();
   }
-}
 
-function initTalkingAvatar(){
-  talkingAvatar = new TalkingAvatar('avatarCanvas', 'assets/ai-interviewer-avatar.png');
-}
-
-// ----------------------------------------------------------------
-//  UI HELPERS
-// ----------------------------------------------------------------
-function setOrb(state){
-  const o=document.getElementById('orb');
-  o.classList.remove('speaking','listening','thinking','processing','interrupted');
-  if(state && state!=='idle') o.classList.add(state);
-  if(talkingAvatar){
-    talkingAvatar.state=state||'idle';
-    if(state!=='speaking') talkingAvatar.stopSpeaking();
+  // ----------------------------------------------------------------
+  //  UI HELPERS
+  // ----------------------------------------------------------------
+  function setOrb(state){
+    const o=document.getElementById('orb');
+    o.classList.remove('speaking','listening','thinking','processing','interrupted');
+    if(state && state!=='idle') o.classList.add(state);
+    
+    setAvatarState(state);
   }
-}
 function setStatus(t){ document.getElementById('statusTxt').textContent=t; }
 function updatePhaseUI(phase){
   const el=document.getElementById('phasePill');
