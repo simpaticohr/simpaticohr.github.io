@@ -1,0 +1,515 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Evalis AI — Interview Platform Admin</title>
+    <meta name="robots" content="noindex, nofollow">
+    <link rel="icon" type="image/png" href="favicon-96x96.png">
+    <link rel="preconnect" href="https://fonts.googleapis.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Space+Grotesk:wght@600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <style>
+        :root {
+            --bg: #0a0a12; --bg-card: rgba(15,20,35,0.7); --bg-card-hover: rgba(20,28,50,0.8);
+            --border: rgba(255,255,255,0.06); --border-hover: rgba(99,102,241,0.3);
+            --primary: #6366f1; --primary-light: #818cf8;
+            --green: #10b981; --amber: #f59e0b; --red: #ef4444; --cyan: #06b6d4;
+            --text: #e2e8f0; --text-sec: #94a3b8; --text-dim: #64748b;
+            --radius: 16px;
+        }
+        * { margin:0; padding:0; box-sizing:border-box; }
+        body {
+            font-family: 'Inter', -apple-system, sans-serif;
+            background: var(--bg); color: var(--text);
+            min-height: 100vh;
+        }
+        .bg-mesh {
+            position:fixed; inset:0; z-index:0;
+            background:
+                radial-gradient(ellipse at 20% 50%, rgba(99,102,241,0.06) 0%, transparent 60%),
+                radial-gradient(ellipse at 80% 20%, rgba(6,182,212,0.04) 0%, transparent 50%);
+        }
+
+        /* Auth Gate */
+        .auth-gate {
+            position:relative; z-index:1;
+            display:flex; align-items:center; justify-content:center;
+            min-height:100vh; padding:2rem;
+        }
+        .auth-card {
+            background: var(--bg-card); backdrop-filter:blur(24px);
+            border:1px solid var(--border); border-radius:var(--radius);
+            padding:2.5rem 2rem; max-width:400px; width:100%; text-align:center;
+        }
+        .auth-card h2 { font-family:'Space Grotesk',sans-serif; font-size:1.4rem; margin-bottom:.3rem; }
+        .auth-card .sub { color:var(--text-sec); font-size:.85rem; margin-bottom:1.5rem; }
+        .auth-input {
+            width:100%; padding:12px 16px; background:rgba(255,255,255,.04);
+            border:1px solid rgba(255,255,255,.08); border-radius:12px;
+            color:#fff; font-size:.95rem; font-family:inherit; text-align:center;
+            letter-spacing:2px;
+        }
+        .auth-input:focus { outline:none; border-color:var(--primary); box-shadow:0 0 0 3px rgba(99,102,241,.12); }
+        .auth-btn {
+            width:100%; padding:13px; margin-top:1rem; border:none; border-radius:12px;
+            background:linear-gradient(135deg,var(--primary),var(--primary-light));
+            color:#fff; font-weight:700; font-size:.95rem; cursor:pointer;
+            font-family:inherit; transition:all .3s;
+        }
+        .auth-btn:hover { transform:translateY(-2px); box-shadow:0 8px 25px rgba(99,102,241,.3); }
+        .auth-error { color:var(--red); font-size:.82rem; margin-top:.8rem; display:none; }
+
+        /* Main Layout */
+        .admin-layout { position:relative; z-index:1; display:none; }
+        .topbar {
+            display:flex; align-items:center; justify-content:space-between;
+            padding:1rem 2rem; border-bottom:1px solid var(--border);
+            background:rgba(10,10,18,.8); backdrop-filter:blur(12px);
+            position:sticky; top:0; z-index:10;
+        }
+        .topbar-brand { display:flex; align-items:center; gap:10px; }
+        .topbar-brand img { width:28px; height:28px; border-radius:8px; }
+        .topbar-brand span { font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:1rem; }
+        .topbar-brand .badge { font-size:.65rem; background:var(--primary); padding:2px 8px; border-radius:6px; font-weight:600; }
+        .topbar-actions { display:flex; gap:.8rem; align-items:center; }
+        .topbar-btn {
+            padding:8px 16px; border:1px solid var(--border); border-radius:10px;
+            background:transparent; color:var(--text-sec); font-size:.82rem;
+            font-family:inherit; cursor:pointer; transition:all .2s;
+        }
+        .topbar-btn:hover { border-color:var(--border-hover); color:#fff; }
+        .topbar-btn.danger { border-color:rgba(239,68,68,.2); color:var(--red); }
+        .topbar-btn.danger:hover { background:rgba(239,68,68,.1); }
+
+        .main { padding:2rem; max-width:1200px; margin:0 auto; }
+
+        /* Tabs */
+        .tabs { display:flex; gap:.5rem; margin-bottom:2rem; }
+        .tab {
+            padding:10px 20px; border-radius:10px; border:1px solid var(--border);
+            background:transparent; color:var(--text-sec); font-size:.85rem;
+            font-family:inherit; font-weight:600; cursor:pointer; transition:all .2s;
+        }
+        .tab:hover { border-color:var(--border-hover); color:#fff; }
+        .tab.active { background:rgba(99,102,241,.12); border-color:var(--primary); color:#fff; }
+
+        /* Stats Grid */
+        .stat-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:1rem; margin-bottom:2rem; }
+        .stat-card {
+            background:var(--bg-card); border:1px solid var(--border); border-radius:var(--radius);
+            padding:1.2rem 1.4rem; transition:all .3s;
+        }
+        .stat-card:hover { border-color:var(--border-hover); }
+        .stat-icon { width:36px; height:36px; border-radius:10px; display:flex; align-items:center; justify-content:center; font-size:.9rem; margin-bottom:.8rem; }
+        .stat-value { font-family:'Space Grotesk',sans-serif; font-size:1.8rem; font-weight:800; color:#fff; }
+        .stat-label { font-size:.78rem; color:var(--text-dim); margin-top:2px; text-transform:uppercase; letter-spacing:.5px; }
+
+        /* Table */
+        .table-card {
+            background:var(--bg-card); border:1px solid var(--border);
+            border-radius:var(--radius); overflow:hidden;
+        }
+        .table-header {
+            display:flex; align-items:center; justify-content:space-between;
+            padding:1.2rem 1.5rem; border-bottom:1px solid var(--border);
+        }
+        .table-title { font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:1rem; }
+        .table-count { font-size:.78rem; color:var(--text-dim); background:rgba(255,255,255,.05); padding:4px 10px; border-radius:6px; }
+        table { width:100%; border-collapse:collapse; }
+        th {
+            text-align:left; padding:10px 16px; font-size:.72rem; font-weight:600;
+            color:var(--text-dim); text-transform:uppercase; letter-spacing:.5px;
+            border-bottom:1px solid var(--border); background:rgba(0,0,0,.2);
+        }
+        td {
+            padding:12px 16px; font-size:.85rem; border-bottom:1px solid rgba(255,255,255,.03);
+            color:var(--text-sec);
+        }
+        tr:hover td { background:rgba(255,255,255,.02); }
+        .plan-badge {
+            padding:3px 10px; border-radius:6px; font-size:.72rem; font-weight:700;
+            text-transform:uppercase; letter-spacing:.5px;
+        }
+        .plan-starter { background:rgba(100,116,139,.15); color:#94a3b8; }
+        .plan-professional { background:rgba(99,102,241,.12); color:var(--primary-light); }
+        .plan-enterprise { background:rgba(245,158,11,.12); color:var(--amber); }
+        .status-dot { width:8px; height:8px; border-radius:50%; display:inline-block; margin-right:6px; }
+        .status-active { background:var(--green); box-shadow:0 0 8px rgba(16,185,129,.4); }
+        .status-inactive { background:var(--red); }
+        .byok-yes { color:var(--green); font-weight:600; }
+        .byok-no { color:var(--text-dim); }
+        .mono { font-family:'JetBrains Mono',monospace; font-size:.78rem; }
+        .empty-state { text-align:center; padding:3rem; color:var(--text-dim); }
+        .empty-state i { font-size:2.5rem; margin-bottom:1rem; display:block; opacity:.3; }
+        .loader { text-align:center; padding:3rem; color:var(--text-dim); }
+
+        /* Session detail */
+        .session-meta { display:flex; gap:1.5rem; flex-wrap:wrap; margin-bottom:.5rem; }
+        .session-meta span { font-size:.8rem; color:var(--text-dim); }
+        .session-meta strong { color:var(--text-sec); }
+
+        @media (max-width:768px) {
+            .main { padding:1rem; }
+            .stat-grid { grid-template-columns:1fr 1fr; }
+            .tabs { flex-wrap:wrap; }
+            .topbar { padding:.8rem 1rem; }
+            table { font-size:.8rem; }
+            th, td { padding:8px 10px; }
+        }
+    </style>
+</head>
+<body>
+    <div class="bg-mesh"></div>
+
+    <!-- AUTH GATE -->
+    <div class="auth-gate" id="authGate">
+        <div class="auth-card">
+            <div style="font-size:2rem;margin-bottom:.8rem">🔒</div>
+            <h2>Interview Platform Admin</h2>
+            <p class="sub">Enter admin password to continue</p>
+            <input type="password" class="auth-input" id="authPass" placeholder="••••••••" onkeydown="if(event.key==='Enter')doAuth()">
+            <button class="auth-btn" onclick="doAuth()">Unlock Dashboard</button>
+            <p class="auth-error" id="authError">Invalid password. Try again.</p>
+        </div>
+    </div>
+
+    <!-- MAIN ADMIN -->
+    <div class="admin-layout" id="adminLayout">
+        <div class="topbar">
+            <div class="topbar-brand">
+                <img src="logo.png" alt="Evalis" onerror="this.style.display='none'">
+                <span>Evalis <span class="badge">ADMIN</span></span>
+            </div>
+            <div class="topbar-actions">
+                <button class="topbar-btn" onclick="refreshAll()"><i class="fas fa-sync-alt"></i> Refresh</button>
+                <button class="topbar-btn" onclick="window.open('register-interview.html','_blank')"><i class="fas fa-plus"></i> Register</button>
+                <button class="topbar-btn danger" onclick="doLogout()"><i class="fas fa-sign-out-alt"></i></button>
+            </div>
+        </div>
+
+        <div class="main">
+            <div class="tabs">
+                <button class="tab active" onclick="switchTab('companies')"><i class="fas fa-building"></i> Companies</button>
+                <button class="tab" onclick="switchTab('sessions')"><i class="fas fa-video"></i> Sessions</button>
+                <button class="tab" onclick="switchTab('api-keys')"><i class="fas fa-key"></i> API Keys</button>
+            </div>
+
+            <div class="stat-grid" id="statsGrid"></div>
+            <div id="tabContent"></div>
+        </div>
+    </div>
+
+    <script>
+    // ── Config ──
+    const SB_URL = 'https://mdbgdlawjuoyuvqxthar.supabase.co';
+    const SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1kYmdkbGF3anVveXV2cXh0aGFyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg1NDA1NDcsImV4cCI6MjA5NDExNjU0N30.IvVXnMXDiNIZHOrCrjsi84YT0IK11TikgPOxieyGUNE';
+    const ADMIN_HASH = '5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8'; // sha256 of 'password' — CHANGE THIS
+
+    let currentTab = 'companies';
+
+    // ── Auth ──
+    async function sha256(msg) {
+        const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(msg));
+        return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,'0')).join('');
+    }
+
+    async function doAuth() {
+        const pass = document.getElementById('authPass').value;
+        const hash = await sha256(pass);
+        if (hash === ADMIN_HASH) {
+            sessionStorage.setItem('evalis_admin', '1');
+            document.getElementById('authGate').style.display = 'none';
+            document.getElementById('adminLayout').style.display = 'block';
+            refreshAll();
+        } else {
+            document.getElementById('authError').style.display = 'block';
+            document.getElementById('authPass').value = '';
+        }
+    }
+
+    function doLogout() {
+        sessionStorage.removeItem('evalis_admin');
+        location.reload();
+    }
+
+    // Auto-login if session exists
+    if (sessionStorage.getItem('evalis_admin') === '1') {
+        document.getElementById('authGate').style.display = 'none';
+        document.getElementById('adminLayout').style.display = 'block';
+        setTimeout(refreshAll, 100);
+    }
+
+    // ── Supabase REST ──
+    async function sbSelect(table, query = '') {
+        const res = await fetch(`${SB_URL}/rest/v1/${table}?${query}`, {
+            headers: {
+                'apikey': SB_KEY,
+                'Authorization': `Bearer ${SB_KEY}`,
+                'Content-Type': 'application/json',
+                'Prefer': 'return=representation'
+            }
+        });
+        if (!res.ok) return [];
+        return res.json();
+    }
+
+    // ── Tabs ──
+    function switchTab(tab) {
+        currentTab = tab;
+        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+        event.target.closest('.tab').classList.add('active');
+        loadTab();
+    }
+
+    async function refreshAll() {
+        await loadStats();
+        await loadTab();
+    }
+
+    // ── Stats ──
+    async function loadStats() {
+        const grid = document.getElementById('statsGrid');
+        grid.innerHTML = '<div class="loader"><i class="fas fa-spinner fa-spin"></i></div>';
+        try {
+            const [companies, sessions] = await Promise.all([
+                sbSelect('interview_companies_public', 'select=id,plan,is_active,interviews_used_this_month'),
+                sbSelect('interview_sessions', 'select=id,status,created_at&order=created_at.desc&limit=500')
+            ]);
+
+            const active = companies.filter(c => c.is_active).length;
+            const plans = { starter:0, professional:0, enterprise:0 };
+            let totalUsage = 0;
+            companies.forEach(c => { plans[c.plan] = (plans[c.plan]||0) + 1; totalUsage += (c.interviews_used_this_month||0); });
+
+            const now = new Date();
+            const thisMonth = sessions.filter(s => {
+                const d = new Date(s.created_at);
+                return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+            }).length;
+
+            grid.innerHTML = `
+                <div class="stat-card">
+                    <div class="stat-icon" style="background:rgba(99,102,241,.12);color:var(--primary)"><i class="fas fa-building"></i></div>
+                    <div class="stat-value">${companies.length}</div>
+                    <div class="stat-label">Registered Companies</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon" style="background:rgba(16,185,129,.12);color:var(--green)"><i class="fas fa-check-circle"></i></div>
+                    <div class="stat-value">${active}</div>
+                    <div class="stat-label">Active Companies</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon" style="background:rgba(6,182,212,.12);color:var(--cyan)"><i class="fas fa-video"></i></div>
+                    <div class="stat-value">${sessions.length}</div>
+                    <div class="stat-label">Total Sessions</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon" style="background:rgba(245,158,11,.12);color:var(--amber)"><i class="fas fa-calendar"></i></div>
+                    <div class="stat-value">${thisMonth}</div>
+                    <div class="stat-label">Sessions This Month</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon" style="background:rgba(139,92,246,.12);color:#8b5cf6"><i class="fas fa-bolt"></i></div>
+                    <div class="stat-value">${totalUsage}</div>
+                    <div class="stat-label">Total Usage (Month)</div>
+                </div>
+            `;
+        } catch(e) {
+            grid.innerHTML = `<div class="stat-card" style="grid-column:1/-1;text-align:center;color:var(--red)"><i class="fas fa-exclamation-triangle"></i> Failed to load stats: ${e.message}</div>`;
+        }
+    }
+
+    async function loadTab() {
+        if (currentTab === 'companies') await loadCompanies();
+        else if (currentTab === 'sessions') await loadSessions();
+        else if (currentTab === 'api-keys') await loadApiKeys();
+    }
+
+    // ── Companies Tab ──
+    async function loadCompanies() {
+        const el = document.getElementById('tabContent');
+        el.innerHTML = '<div class="loader"><i class="fas fa-spinner fa-spin"></i> Loading companies...</div>';
+        try {
+            const data = await sbSelect('interview_companies_public',
+                'select=*&order=created_at.desc');
+
+            if (!data.length) {
+                el.innerHTML = '<div class="table-card"><div class="empty-state"><i class="fas fa-building"></i>No companies registered yet.<br>Share your <strong>register-interview.html</strong> link to get started.</div></div>';
+                return;
+            }
+
+            el.innerHTML = `
+            <div class="table-card">
+                <div class="table-header">
+                    <span class="table-title"><i class="fas fa-building"></i> B2B Companies</span>
+                    <span class="table-count">${data.length} total</span>
+                </div>
+                <div style="overflow-x:auto">
+                <table>
+                    <thead><tr>
+                        <th>Company</th>
+                        <th>Plan</th>
+                        <th>Contact</th>
+                        <th>BYOK</th>
+                        <th>Avatar</th>
+                        <th>Usage</th>
+                        <th>Status</th>
+                        <th>Registered</th>
+                    </tr></thead>
+                    <tbody>
+                        ${data.map(c => `<tr>
+                            <td>
+                                <strong style="color:#fff">${esc(c.brand_name || c.company_name)}</strong>
+                                <div class="mono" style="color:var(--text-dim)">${esc(c.agent_id || c.company_slug || '—')}</div>
+                            </td>
+                            <td><span class="plan-badge plan-${c.plan}">${c.plan}</span></td>
+                            <td>
+                                <div style="color:#fff">${esc(c.contact_email)}</div>
+                            </td>
+                            <td>${c.gemini_api_key ? '<span class="byok-yes">✓ BYOK</span>' : '<span class="byok-no">—</span>'}</td>
+                            <td>${c.avatar_mode === 'simli' ? '<span style="color:var(--amber)">Simli</span>' : '<span style="color:var(--text-dim)">Orb</span>'}</td>
+                            <td>
+                                <strong style="color:#fff">${c.interviews_used_this_month || 0}</strong>
+                                <span style="color:var(--text-dim)">/ ${c.monthly_interview_limit || 50}</span>
+                            </td>
+                            <td><span class="status-dot ${c.is_active ? 'status-active' : 'status-inactive'}"></span>${c.is_active ? 'Active' : 'Inactive'}</td>
+                            <td class="mono">${fmtDate(c.created_at)}</td>
+                        </tr>`).join('')}
+                    </tbody>
+                </table>
+                </div>
+            </div>`;
+        } catch(e) {
+            el.innerHTML = `<div class="table-card"><div class="empty-state" style="color:var(--red)"><i class="fas fa-exclamation-triangle"></i>${e.message}<br><small>Make sure you've run the 026_interview_companies.sql migration.</small></div></div>`;
+        }
+    }
+
+    // ── Sessions Tab ──
+    async function loadSessions() {
+        const el = document.getElementById('tabContent');
+        el.innerHTML = '<div class="loader"><i class="fas fa-spinner fa-spin"></i> Loading sessions...</div>';
+        try {
+            const data = await sbSelect('interview_sessions',
+                'select=*&order=created_at.desc&limit=100');
+
+            if (!data.length) {
+                el.innerHTML = '<div class="table-card"><div class="empty-state"><i class="fas fa-video"></i>No interview sessions yet.</div></div>';
+                return;
+            }
+
+            el.innerHTML = `
+            <div class="table-card">
+                <div class="table-header">
+                    <span class="table-title"><i class="fas fa-video"></i> Interview Sessions</span>
+                    <span class="table-count">${data.length} shown (latest 100)</span>
+                </div>
+                <div style="overflow-x:auto">
+                <table>
+                    <thead><tr>
+                        <th>Candidate</th>
+                        <th>Role</th>
+                        <th>Level</th>
+                        <th>Mode</th>
+                        <th>Questions</th>
+                        <th>Avg Score</th>
+                        <th>Recommendation</th>
+                        <th>Status</th>
+                        <th>Date</th>
+                    </tr></thead>
+                    <tbody>
+                        ${data.map(s => `<tr>
+                            <td>
+                                <strong style="color:#fff">${esc(s.candidate_name || '—')}</strong>
+                                <div class="mono" style="color:var(--text-dim)">${esc(s.candidate_email || s.session_id || '—')}</div>
+                            </td>
+                            <td>${esc(s.role || '—')}</td>
+                            <td>${esc(s.level || '—')}</td>
+                            <td>${s.mode === 'voice' ? '<span style="color:var(--primary)"><i class="fas fa-microphone"></i> Voice</span>' : '<span style="color:var(--text-dim)"><i class="fas fa-keyboard"></i> Text</span>'}</td>
+                            <td style="color:#fff">${s.question_count || 0}</td>
+                            <td><strong style="color:${(s.avg_score||0) >= 70 ? 'var(--green)' : (s.avg_score||0) >= 40 ? 'var(--amber)' : 'var(--red)'}">${s.avg_score || 0}%</strong></td>
+                            <td>${fmtRec(s.recommendation)}</td>
+                            <td>${fmtStatus(s.status)}</td>
+                            <td class="mono">${fmtDate(s.created_at)}</td>
+                        </tr>`).join('')}
+                    </tbody>
+                </table>
+                </div>
+            </div>`;
+        } catch(e) {
+            el.innerHTML = `<div class="table-card"><div class="empty-state" style="color:var(--red)"><i class="fas fa-exclamation-triangle"></i>${e.message}</div></div>`;
+        }
+    }
+
+    // ── API Keys Tab ──
+    async function loadApiKeys() {
+        const el = document.getElementById('tabContent');
+        el.innerHTML = '<div class="loader"><i class="fas fa-spinner fa-spin"></i> Loading API keys...</div>';
+        try {
+            const data = await sbSelect('api_keys',
+                'select=*&order=created_at.desc');
+
+            if (!data.length) {
+                el.innerHTML = '<div class="table-card"><div class="empty-state"><i class="fas fa-key"></i>No API keys issued yet.</div></div>';
+                return;
+            }
+
+            el.innerHTML = `
+            <div class="table-card">
+                <div class="table-header">
+                    <span class="table-title"><i class="fas fa-key"></i> API Keys</span>
+                    <span class="table-count">${data.length} total</span>
+                </div>
+                <div style="overflow-x:auto">
+                <table>
+                    <thead><tr>
+                        <th>Key</th>
+                        <th>Agent ID</th>
+                        <th>Plan</th>
+                        <th>Monthly Limit</th>
+                        <th>Active</th>
+                        <th>Created</th>
+                    </tr></thead>
+                    <tbody>
+                        ${data.map(k => `<tr>
+                            <td class="mono">${esc(k.key ? k.key.substring(0,12) + '...' : '—')}</td>
+                            <td class="mono">${esc(k.agent_id || '—')}</td>
+                            <td><span class="plan-badge plan-${k.plan || 'starter'}">${k.plan || 'starter'}</span></td>
+                            <td>${k.monthly_limit || 50}</td>
+                            <td><span class="status-dot ${k.is_active ? 'status-active' : 'status-inactive'}"></span>${k.is_active ? 'Active' : 'Revoked'}</td>
+                            <td class="mono">${fmtDate(k.created_at)}</td>
+                        </tr>`).join('')}
+                    </tbody>
+                </table>
+                </div>
+            </div>`;
+        } catch(e) {
+            el.innerHTML = `<div class="table-card"><div class="empty-state" style="color:var(--red)"><i class="fas fa-exclamation-triangle"></i>${e.message}</div></div>`;
+        }
+    }
+
+    // ── Helpers ──
+    function esc(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
+    function fmtDate(d) {
+        if (!d) return '—';
+        const dt = new Date(d);
+        return dt.toLocaleDateString('en-IN', { day:'2-digit', month:'short', year:'numeric' }) +
+            ' ' + dt.toLocaleTimeString('en-IN', { hour:'2-digit', minute:'2-digit' });
+    }
+    function fmtRec(r) {
+        if (!r) return '<span style="color:var(--text-dim)">—</span>';
+        const lower = r.toLowerCase();
+        if (lower.includes('strong') && lower.includes('hire')) return `<span style="color:var(--green)">🟢 ${esc(r)}</span>`;
+        if (lower.includes('hire') || lower.includes('recommend')) return `<span style="color:var(--green)">${esc(r)}</span>`;
+        if (lower.includes('maybe') || lower.includes('consider')) return `<span style="color:var(--amber)">${esc(r)}</span>`;
+        if (lower.includes('no') || lower.includes('reject')) return `<span style="color:var(--red)">${esc(r)}</span>`;
+        return esc(r);
+    }
+    function fmtStatus(s) {
+        if (!s) return '—';
+        const colors = { started:'var(--amber)', completed:'var(--green)', abandoned:'var(--red)' };
+        return `<span style="color:${colors[s] || 'var(--text-dim)'}">${s}</span>`;
+    }
+    </script>
+</body>
+</html>
