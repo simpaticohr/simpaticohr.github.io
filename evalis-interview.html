@@ -1766,7 +1766,7 @@
         inFollowUp: false,
         originalAnswer: '',
         currentFollowUpQuestion: '',
-        proctoringViolations: { tabSwitches: 0, pasteAttempts: 0 }
+        proctoringViolations: { tabSwitches: 0, pasteAttempts: 0, faceNotDetected: 0, multipleFaces: 0 }
     };
 
     // ── BYOK (Bring Your Own Key) ──
@@ -1812,6 +1812,7 @@
 
     // ── Proctoring & Resume Matching Configuration ──
     let _enableProctoring = _urlParams.get('proctoring') === '1';
+    let _enableWebcamProctoring = _urlParams.get('webcam') === '1';
     let _requireResume = _urlParams.get('resume') === '1';
     let _resumeText = '';
     let _resumeAnalysis = null;
@@ -1943,6 +1944,139 @@
         if (answerInput) {
             answerInput.removeEventListener('paste', handleProctorPaste);
         }
+    }
+
+    let faceDetectionInterval = null;
+    let proctorStream = null;
+
+    async function initWebcamFaceTracking() {
+        let video = document.getElementById('proctor-webcam');
+        if (!video) {
+            video = document.createElement('video');
+            video.id = 'proctor-webcam';
+            video.autoplay = true;
+            video.playsinline = true;
+            video.muted = true;
+            video.style.position = 'fixed';
+            video.style.bottom = '20px';
+            video.style.right = '20px';
+            video.style.width = '140px';
+            video.style.height = '105px';
+            video.style.objectFit = 'cover';
+            video.style.borderRadius = '10px';
+            video.style.border = '2px solid rgba(239, 68, 68, 0.4)';
+            video.style.zIndex = '99998';
+            video.style.boxShadow = '0 8px 24px rgba(0,0,0,0.6)';
+            video.style.transform = 'scaleX(-1)';
+            document.body.appendChild(video);
+        }
+
+        let badge = document.getElementById('proctor-badge');
+        if (!badge) {
+            badge = document.createElement('div');
+            badge.id = 'proctor-badge';
+            badge.style.position = 'fixed';
+            badge.style.bottom = '130px';
+            badge.style.right = '20px';
+            badge.style.padding = '4px 8px';
+            badge.style.background = 'rgba(239, 68, 68, 0.85)';
+            badge.style.color = '#fff';
+            badge.style.fontSize = '0.62rem';
+            badge.style.fontWeight = 'bold';
+            badge.style.borderRadius = '4px';
+            badge.style.zIndex = '99999';
+            badge.style.display = 'flex';
+            badge.style.alignItems = 'center';
+            badge.style.gap = '4px';
+            badge.style.boxShadow = '0 2px 8px rgba(0,0,0,0.3)';
+            badge.innerHTML = '<span style="width:6px;height:6px;background:#fff;border-radius:50%;display:inline-block;animation:pulse-red 1s infinite;"></span> AI CAM MONITOR';
+            document.body.appendChild(badge);
+
+            if (!document.getElementById('proctor-animations')) {
+                const style = document.createElement('style');
+                style.id = 'proctor-animations';
+                style.innerHTML = `
+                    @keyframes pulse-red {
+                        0% { opacity: 0.3; }
+                        50% { opacity: 1; }
+                        100% { opacity: 0.3; }
+                    }
+                `;
+                document.head.appendChild(style);
+            }
+        }
+
+        try {
+            proctorStream = await navigator.mediaDevices.getUserMedia({ video: { width: 320, height: 240 } });
+            video.srcObject = proctorStream;
+            
+            await loadFaceApi();
+            startFaceDetectionLoop(video);
+        } catch(e) {
+            console.warn('Webcam access denied or failed:', e.message);
+            showProctorWarning('⚠️ Webcam access is required for proctoring. Please allow camera permissions.');
+        }
+    }
+
+    async function loadFaceApi() {
+        if (window.faceapi) return;
+        return new Promise((resolve) => {
+            const script = document.createElement('script');
+            script.src = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/dist/face-api.js';
+            script.onload = async () => {
+                try {
+                    const MODEL_URL = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model/';
+                    await faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL);
+                } catch(e) {
+                    console.error('Failed to load face-api model weights:', e);
+                }
+                resolve();
+            };
+            script.onerror = () => {
+                console.error('Failed to load face-api.js script');
+                resolve();
+            };
+            document.head.appendChild(script);
+        });
+    }
+
+    function startFaceDetectionLoop(video) {
+        if (faceDetectionInterval) clearInterval(faceDetectionInterval);
+        
+        faceDetectionInterval = setInterval(async () => {
+            if (!window.faceapi || !video || video.paused || video.ended) return;
+            try {
+                const options = new faceapi.TinyFaceDetectorOptions({ inputSize: 128, scoreThreshold: 0.4 });
+                const detections = await faceapi.detectAllFaces(video, options);
+                
+                if (detections.length === 0) {
+                    state.proctoringViolations.faceNotDetected++;
+                    showProctorWarning(`⚠️ WARNING: No face detected! Please look directly at the camera. (${state.proctoringViolations.faceNotDetected} notices)`);
+                } else if (detections.length > 1) {
+                    state.proctoringViolations.multipleFaces++;
+                    showProctorWarning(`⚠️ WARNING: Multiple faces detected! Please ensure you are alone. (${state.proctoringViolations.multipleFaces} notices)`);
+                }
+            } catch(e) {
+                console.error('Face detection loop error:', e);
+            }
+        }, 3000);
+    }
+
+    function cleanupWebcamFaceTracking() {
+        if (faceDetectionInterval) {
+            clearInterval(faceDetectionInterval);
+            faceDetectionInterval = null;
+        }
+        if (proctorStream) {
+            try {
+                proctorStream.getTracks().forEach(track => track.stop());
+            } catch(e) {}
+            proctorStream = null;
+        }
+        const video = document.getElementById('proctor-webcam');
+        if (video) video.remove();
+        const badge = document.getElementById('proctor-badge');
+        if (badge) badge.remove();
     }
 
     function handleProctorBlur() {
@@ -2548,6 +2682,9 @@ Guidelines:
             if (_enableProctoring) {
                 cleanupProctoring();
             }
+            if (_enableWebcamProctoring) {
+                cleanupWebcamFaceTracking();
+            }
 
             const report = await apiCall('/api/interview/report-from-transcript', {
                 sessionId: state.sessionId || crypto.randomUUID(),
@@ -2557,7 +2694,7 @@ Guidelines:
                 candidate_name: _b2bCandidateName || null,
                 candidate_email: _b2bCandidateEmail || null,
                 mode: 'voice',
-                proctoring_violations: _enableProctoring ? state.proctoringViolations : null,
+                proctoring_violations: (_enableProctoring || _enableWebcamProctoring) ? state.proctoringViolations : null,
                 resume_matching_report: _resumeAnalysis
             });
 
@@ -3266,6 +3403,9 @@ Guidelines:
         if (_enableProctoring) {
             initProctoring();
         }
+        if (_enableWebcamProctoring) {
+            initWebcamFaceTracking();
+        }
 
         btn.innerHTML = '<div class="spinner"></div> Generating Questions...';
 
@@ -3852,6 +3992,9 @@ Guidelines:
             if (_enableProctoring) {
                 cleanupProctoring();
             }
+            if (_enableWebcamProctoring) {
+                cleanupWebcamFaceTracking();
+            }
 
             const report = await apiCall('/api/interview/report', {
                 sessionId: state.sessionId,
@@ -3866,7 +4009,7 @@ Guidelines:
                     strengths: a.strengths,
                     improvements: a.improvements,
                 })),
-                proctoring_violations: _enableProctoring ? state.proctoringViolations : null,
+                proctoring_violations: (_enableProctoring || _enableWebcamProctoring) ? state.proctoringViolations : null,
                 resume_matching_report: _resumeAnalysis
             });
 
