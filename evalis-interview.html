@@ -1556,9 +1556,12 @@
 
     // ── B2B Mode Detection ──
     const _urlParams = new URLSearchParams(window.location.search);
-    const _isB2B = _urlParams.get('b2b') === '1';
+    const _isB2B = _urlParams.get('b2b') === '1' || _urlParams.has('token');
     const _b2bApiKey = _urlParams.get('api_key') || '';
     const _b2bCompanySlug = _urlParams.get('company') || '';
+    const _b2bCandidateName = _urlParams.get('name') ? decodeURIComponent(_urlParams.get('name')) : '';
+    const _b2bCandidateEmail = _urlParams.get('email') ? decodeURIComponent(_urlParams.get('email')) : '';
+    const _b2bToken = _urlParams.get('token') || '';
     let _b2bCompanyConfig = null;  // Fetched company config for branding + avatar mode
     let _simliAdapter = null;      // SimliAdapter instance (premium avatar)
 
@@ -2119,6 +2122,9 @@ Guidelines:
                 role: state.role,
                 level: state.level,
                 transcript: state.liveTranscript,
+                candidate_name: _b2bCandidateName || null,
+                candidate_email: _b2bCandidateEmail || null,
+                mode: 'voice'
             });
 
             state.answers = report.answers || [];
@@ -2744,9 +2750,20 @@ Guidelines:
 
     // ── API Calls ──
     async function apiCall(endpoint, body) {
+        const headers = { 'Content-Type': 'application/json' };
+        
+        // Pass B2B API Key if available
+        if (_isB2B && _b2bApiKey) {
+            headers['X-API-Key'] = _b2bApiKey;
+        }
+
+        // Pass BYOK headers if available
+        const byokH = getByokHeaders();
+        Object.assign(headers, byokH);
+
         const response = await fetch(`${API_BASE}${endpoint}`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: headers,
             body: JSON.stringify(body),
         });
         if (!response.ok) {
@@ -2800,7 +2817,14 @@ Guidelines:
         }
 
         try {
-            const data = await apiCall('/api/interview/start', { role, level, count });
+            const data = await apiCall('/api/interview/start', {
+                role,
+                level,
+                count,
+                candidate_name: _b2bCandidateName || null,
+                candidate_email: _b2bCandidateEmail || null,
+                mode: 'text'
+            });
 
             if (!data.questions || !Array.isArray(data.questions) || data.questions.length === 0) {
                 throw new Error('No questions were generated. Please try again.');
@@ -3321,6 +3345,9 @@ Guidelines:
                 sessionId: state.sessionId,
                 role: state.role,
                 level: state.level,
+                candidate_name: _b2bCandidateName || null,
+                candidate_email: _b2bCandidateEmail || null,
+                mode: 'text',
                 answers: state.answers.map(a => ({
                     score: a.score,
                     verdict: a.verdict,

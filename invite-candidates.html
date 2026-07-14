@@ -853,6 +853,8 @@ Best regards,
         const expiryDate = new Date(Date.now() + parseInt(expiry) * 86400000).toLocaleDateString('en-US', {
             weekday: 'short', month: 'short', day: 'numeric', year: 'numeric'
         });
+        const companyName = companyConfig ? companyConfig.name : 'Simpatico HR';
+        const sampleLink = companyConfig ? `https://simpaticohr.in/evalis-interview.html?b2b=1&token=abc123&company=${companyConfig.slug}&api_key=${_apiKey}` : `https://simpaticohr.in/evalis-interview.html?token=abc123`;
 
         const sampleName = candidates.length > 0 ? (candidates[0].name || 'Candidate') : 'John Doe';
         const sampleEmail = candidates.length > 0 ? candidates[0].email : 'john@example.com';
@@ -861,8 +863,8 @@ Best regards,
             .replace(/\{\{candidate_name\}\}/g, '<span class="var-highlight">' + esc(sampleName) + '</span>')
             .replace(/\{\{candidate_email\}\}/g, '<span class="var-highlight">' + esc(sampleEmail) + '</span>')
             .replace(/\{\{role\}\}/g, '<span class="var-highlight">' + esc(role) + '</span>')
-            .replace(/\{\{company\}\}/g, '<span class="var-highlight">Simpatico HR</span>')
-            .replace(/\{\{interview_link\}\}/g, '<span class="var-highlight">https://simpaticohr.in/evalis-interview.html?token=abc123</span>')
+            .replace(/\{\{company\}\}/g, '<span class="var-highlight">' + esc(companyName) + '</span>')
+            .replace(/\{\{interview_link\}\}/g, '<span class="var-highlight">' + esc(sampleLink) + '</span>')
             .replace(/\{\{expiry_date\}\}/g, '<span class="var-highlight">' + expiryDate + '</span>')
             .replace(/\{\{question_count\}\}/g, '<span class="var-highlight">' + questions + '</span>')
             .replace(/\n/g, '<br>');
@@ -905,6 +907,15 @@ Best regards,
                 count: questions,
                 mode: mode,
             });
+
+            if (companyConfig && companyConfig.slug) {
+                params.set('company', companyConfig.slug);
+                params.set('b2b', '1');
+            }
+            if (_apiKey) {
+                params.set('api_key', _apiKey);
+            }
+
             const link = 'https://simpaticohr.in/evalis-interview.html?' + params.toString();
             return { email: c.email, name: c.name, token: token, link: link, status: 'generated' };
         });
@@ -963,8 +974,32 @@ Best regards,
         setTimeout(() => toast.classList.remove('show'), 3500);
     }
 
+    // B2B Config Loading
+    const _urlParams = new URLSearchParams(window.location.search);
+    const _apiKey = _urlParams.get('api_key') || localStorage.getItem('evalis_client_key') || '';
+    let companyConfig = null;
+
+    async function loadCompanyDetails() {
+        if (!_apiKey) return;
+        try {
+            const res = await fetch(`${API_BASE}/api/interview/sessions`, {
+                headers: { 'X-API-Key': _apiKey }
+            });
+            if (res.ok) {
+                const data = await res.json();
+                companyConfig = {
+                    name: data.company_name,
+                    slug: data.sessions && data.sessions.length > 0 ? data.sessions[0].company_id : ''
+                };
+                console.log('Company config loaded:', companyConfig);
+            }
+        } catch(e) { console.error('Failed to load B2B config:', e); }
+    }
+
     // Init
-    updatePreview();
+    loadCompanyDetails().then(() => {
+        updatePreview();
+    });
     </script>
 </body>
 </html>
