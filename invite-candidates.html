@@ -559,6 +559,27 @@ Best regards,
                         <option value="false">No &#8212; Reusable link</option>
                     </select>
                 </div>
+                <div class="form-group">
+                    <label class="form-label">Auto-Email Invites</label>
+                    <select class="form-select" id="set-autoemail">
+                        <option value="true">Yes — Send emails via Resend</option>
+                        <option value="false" selected>No — Generate links only</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">AI Proctoring</label>
+                    <select class="form-select" id="set-proctoring">
+                        <option value="true">Enabled (Track tab switches/Paste)</option>
+                        <option value="false" selected>Disabled</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Resume Screening</label>
+                    <select class="form-select" id="set-resume">
+                        <option value="true">Required (Candidate upload)</option>
+                        <option value="false" selected>Disabled</option>
+                    </select>
+                </div>
             </div>
         </div>
 
@@ -888,13 +909,16 @@ Best regards,
 
         const btn = document.getElementById('btn-send');
         btn.disabled = true;
-        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Generating Links...';
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Processing...';
 
         const role = document.getElementById('set-role').value;
         const level = document.getElementById('set-level').value;
         const questions = document.getElementById('set-questions').value;
         const expiry = document.getElementById('set-expiry').value;
         const mode = document.getElementById('set-mode').value;
+        const autoEmail = document.getElementById('set-autoemail').value === 'true';
+        const proctoring = document.getElementById('set-proctoring').value === 'true';
+        const resume = document.getElementById('set-resume').value === 'true';
 
         const invitations = validCandidates.map(c => {
             const token = crypto.randomUUID();
@@ -908,6 +932,9 @@ Best regards,
                 mode: mode,
             });
 
+            if (proctoring) params.set('proctoring', '1');
+            if (resume) params.set('resume', '1');
+
             if (companyConfig && companyConfig.slug) {
                 params.set('company', companyConfig.slug);
                 params.set('b2b', '1');
@@ -917,8 +944,44 @@ Best regards,
             }
 
             const link = 'https://simpaticohr.in/evalis-interview.html?' + params.toString();
-            return { email: c.email, name: c.name, token: token, link: link, status: 'generated' };
+            return { email: c.email, name: c.name, token: token, link: link, status: 'generating' };
         });
+
+        // Trigger transactional emails if auto-email is ON
+        if (autoEmail) {
+            btn.innerHTML = '<i class="fas fa-paper-plane fa-spin"></i> Sending Emails...';
+            const customBody = document.getElementById('template-body')?.value || '';
+            
+            for (const inv of invitations) {
+                try {
+                    const response = await fetch(`${API_BASE}/api/interview/send-invite`, {
+                        method: 'POST',
+                        headers: {
+                          'Content-Type': 'application/json',
+                          'X-API-Key': _apiKey
+                        },
+                        body: JSON.stringify({
+                            candidate_email: inv.email,
+                            candidate_name: inv.name,
+                            role: role,
+                            level: level,
+                            interview_link: inv.link,
+                            custom_body: customBody || null
+                        })
+                    });
+                    if (response.ok) {
+                        inv.status = 'sent';
+                    } else {
+                        inv.status = 'failed';
+                    }
+                } catch(e) {
+                    console.error(e);
+                    inv.status = 'failed';
+                }
+            }
+        } else {
+            invitations.forEach(inv => inv.status = 'ready');
+        }
 
         // Store in localStorage for tracking
         const stored = JSON.parse(localStorage.getItem('evalis_invitations') || '[]');
@@ -927,19 +990,31 @@ Best regards,
             createdAt: new Date().toISOString(),
             expiresAt: new Date(Date.now() + parseInt(expiry) * 86400000).toISOString(),
             role: role, level: level, questions: parseInt(questions),
+            status: inv.status
         }));
         stored.push(...newInvitations);
         localStorage.setItem('evalis_invitations', JSON.stringify(stored));
 
-        showToast('Generated ' + invitations.length + ' invitation link' + (invitations.length > 1 ? 's' : '') + '!', 'success');
+        showToast(autoEmail ? 'Invitations sent!' : 'Links generated!', 'success');
 
         const tbody = document.getElementById('candidate-table-body');
         tbody.innerHTML = '<table class="cand-table"><thead><tr><th>Candidate</th><th>Interview Link</th><th>Status</th><th></th></tr></thead><tbody>' +
-            invitations.map(inv => '<tr><td><div class="email-cell">' + esc(inv.name || inv.email) + '</div><div style="font-size:.75rem;color:var(--text-dim)">' + esc(inv.email) + '</div></td><td><div style="font-family:\'JetBrains Mono\',monospace;font-size:.72rem;color:var(--primary-light);max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer" onclick="copyLink(\'' + inv.link.replace(/'/g, "\\'") + '\')" title="' + esc(inv.link) + '">' + esc(inv.link) + '</div></td><td><span class="status-badge success"><i class="fas fa-check"></i> Ready</span></td><td><button class="btn btn-ghost btn-sm" onclick="copyLink(\'' + inv.link.replace(/'/g, "\\'") + '\')" style="font-size:.75rem"><i class="fas fa-copy"></i> Copy</button></td></tr>').join('') +
+            invitations.map(inv => {
+                let badgeClass = 'warning';
+                let badgeText = 'Ready';
+                if (inv.status === 'sent') {
+                    badgeClass = 'success';
+                    badgeText = 'Sent';
+                } else if (inv.status === 'failed') {
+                    badgeClass = 'danger';
+                    badgeText = 'Failed';
+                }
+                return '<tr><td><div class="email-cell">' + esc(inv.name || inv.email) + '</div><div style="font-size:.75rem;color:var(--text-dim)">' + esc(inv.email) + '</div></td><td><div style="font-family:\'JetBrains Mono\',monospace;font-size:.72rem;color:var(--primary-light);max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer" onclick="copyLink(\'' + inv.link.replace(/'/g, "\\'") + '\')" title="' + esc(inv.link) + '">' + esc(inv.link) + '</div></td><td><span class="status-badge ' + badgeClass + '">' + (inv.status === 'sent' ? '<i class="fas fa-paper-plane"></i>' : '<i class="fas fa-check"></i>') + ' ' + badgeText + '</span></td><td><button class="btn btn-ghost btn-sm" onclick="copyLink(\'' + inv.link.replace(/'/g, "\\'") + '\')" style="font-size:.75rem"><i class="fas fa-copy"></i> Copy</button></td></tr>';
+            }).join('') +
             '</tbody></table>';
 
         btn.disabled = false;
-        btn.innerHTML = '<i class="fas fa-check"></i> Links Generated!';
+        btn.innerHTML = autoEmail ? '<i class="fas fa-check"></i> Invites Sent!' : '<i class="fas fa-check"></i> Links Generated!';
         setTimeout(() => {
             btn.innerHTML = '<i class="fas fa-paper-plane"></i> Send ' + validCandidates.length + ' Invitations';
         }, 3000);

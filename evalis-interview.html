@@ -1191,12 +1191,17 @@
             </div>
 
             <div class="card">
-                <div class="card-header">
-                    <div class="card-icon">🎯</div>
-                    <div>
-                        <div class="card-title">Configure Your Interview</div>
-                        <div class="card-subtitle">Customize the role, difficulty, and scope</div>
+                <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
+                    <div style="display:flex;align-items:center;gap:12px;">
+                        <div class="card-icon">🎯</div>
+                        <div>
+                            <div class="card-title">Configure Your Interview</div>
+                            <div class="card-subtitle">Customize the role, difficulty, and scope</div>
+                        </div>
                     </div>
+                    <button class="btn btn-ghost" onclick="openHelpModal()" style="font-size:0.8rem;border:1px solid rgba(255,255,255,0.1);padding:6px 12px;display:flex;align-items:center;gap:6px;color:#818cf8;border-radius:6px;background:rgba(99,102,241,0.05);cursor:pointer;outline:none;">
+                        ❓ Help & Guide
+                    </button>
                 </div>
 
                 <div id="setup-error" class="error-banner">
@@ -1295,6 +1300,17 @@
                             <a href="https://build.nvidia.com/" target="_blank" style="color:var(--accent-indigo-light)">NVIDIA</a> · 
                             <a href="https://huggingface.co/settings/tokens" target="_blank" style="color:var(--accent-indigo-light)">HuggingFace</a>
                         </div>
+                    </div>
+                </div>
+
+                <!-- Resume Upload Section (displayed if _requireResume is true) -->
+                <div class="form-group" id="resume-upload-container" style="display:none;margin-top:1.5rem;padding:1.2rem;background:rgba(255,255,255,0.02);border:1px solid var(--border);border-radius:var(--radius-md);">
+                    <label class="form-label" style="display:flex;align-items:center;gap:6px;color:#fff;font-weight:700;margin:0;">
+                        📄 Upload Resume (PDF / TXT) <span style="color:var(--accent-amber);font-size:0.8rem;margin-left:auto;">*Required</span>
+                    </label>
+                    <input type="file" id="resume-file" class="form-input" accept=".pdf,.txt" onchange="handleResumeUpload(event)" style="padding:10px;margin-top:0.5rem;background:rgba(0,0,0,0.2);">
+                    <div id="resume-status" style="font-size:0.78rem;color:var(--text-muted);margin-top:0.5rem;display:flex;align-items:center;gap:6px;">
+                        Upload your resume to pre-screen and automatically match details.
                     </div>
                 </div>
 
@@ -1540,6 +1556,36 @@
         </div>
     </main>
 
+    <!-- MODAL: HELP & MULTI-LINGUAL TUTORIAL -->
+    <div id="helpModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.85);backdrop-filter:blur(8px);z-index:99999;align-items:center;justify-content:center;padding:1rem;" onclick="if(event.target===this) closeHelpModal()">
+        <div style="background:var(--card-bg);border:1px solid var(--border);border-radius:var(--radius-lg);width:100%;max-width:650px;box-shadow:0 20px 50px rgba(0,0,0,0.5);display:flex;flex-direction:column;animation:premiumFadeSlideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1);">
+            <div style="display:flex;justify-content:space-between;align-items:center;padding:1.2rem 1.5rem;border-bottom:1px solid var(--border)">
+                <div style="display:flex;align-items:center;gap:8px;">
+                    <span style="font-size:1.5rem">💡</span>
+                    <h3 style="margin:0;font-size:1.25rem;font-weight:700;color:#fff;">Platform Tutorial & Guide</h3>
+                </div>
+                <div style="display:flex;align-items:center;gap:12px;">
+                    <select id="help-lang-select" class="form-select" onchange="changeHelpLanguage()" style="padding:6px 10px;font-size:0.8rem;width:auto;margin:0;background:rgba(255,255,255,0.04);border:1px solid var(--border);color:#fff;border-radius:6px;cursor:pointer;">
+                        <option value="en" selected>English</option>
+                        <option value="ml">മലയാളം (Malayalam)</option>
+                        <option value="es">Español (Spanish)</option>
+                        <option value="fr">Français (French)</option>
+                        <option value="de">Deutsch (German)</option>
+                        <option value="it">Italiano (Italian)</option>
+                        <option value="pt">Português (Portuguese)</option>
+                    </select>
+                    <button onclick="closeHelpModal()" style="background:none;border:none;color:#9ca3af;font-size:1.8rem;cursor:pointer;padding:0;line-height:1;transition:color 0.2s;" onmouseover="this.style.color='#fff'" onmouseout="this.style.color='#9ca3af'">&times;</button>
+                </div>
+            </div>
+            <div id="help-modal-body" style="padding:1.5rem;max-height:480px;overflow-y:auto;font-size:0.92rem;line-height:1.6;color:var(--text-sec);">
+                <!-- Localized content loaded dynamically -->
+            </div>
+            <div style="padding:1rem 1.5rem;border-top:1px solid var(--border);display:flex;justify-content:flex-end;background:rgba(255,255,255,0.01);">
+                <button class="btn btn-secondary" onclick="closeHelpModal()" style="padding:6px 16px;font-size:0.85rem;">Close Guide</button>
+            </div>
+        </div>
+    </div>
+
     <!-- FOOTER -->
     <footer class="page-footer">
         <p>Powered by <a href="https://simpaticohr.in">Simpatico HR</a> · Gemini AI · Internal Use Only</p>
@@ -1606,7 +1652,25 @@
                 if (panel) panel.style.display = 'block';
                 if (arrow) arrow.style.transform = 'rotate(180deg)';
             }
+            initOptionalFeatures();
         });
+
+        // Initialize proctoring & resume matching checks
+        function initOptionalFeatures() {
+            if (_urlParams.get('proctoring') === '1') _enableProctoring = true;
+            if (_urlParams.get('resume') === '1') _requireResume = true;
+
+            if (_b2bCompanyConfig && _b2bCompanyConfig.settings) {
+                const settings = typeof _b2bCompanyConfig.settings === 'string' ? JSON.parse(_b2bCompanyConfig.settings) : _b2bCompanyConfig.settings;
+                if (settings.proctoring !== undefined) _enableProctoring = settings.proctoring;
+                if (settings.resume !== undefined) _requireResume = settings.resume;
+            }
+
+            const resumeContainer = document.getElementById('resume-upload-container');
+            if (resumeContainer) {
+                resumeContainer.style.display = _requireResume ? 'block' : 'none';
+            }
+        }
 
         // Fetch B2B company config for branding and avatar mode
         if (_b2bCompanySlug) {
@@ -1620,6 +1684,7 @@
                         if (config.brand_color) {
                             document.documentElement.style.setProperty('--primary', config.brand_color);
                         }
+                        initOptionalFeatures();
                     }
                 })
                 .catch(e => console.warn('[B2B] Config fetch failed:', e.message));
@@ -1701,6 +1766,7 @@
         inFollowUp: false,
         originalAnswer: '',
         currentFollowUpQuestion: '',
+        proctoringViolations: { tabSwitches: 0, pasteAttempts: 0 }
     };
 
     // ── BYOK (Bring Your Own Key) ──
@@ -1742,6 +1808,309 @@
             headers['X-AI-Key'] = key;
         }
         return headers;
+    }
+
+    // ── Proctoring & Resume Matching Configuration ──
+    let _enableProctoring = _urlParams.get('proctoring') === '1';
+    let _requireResume = _urlParams.get('resume') === '1';
+    let _resumeText = '';
+    let _resumeAnalysis = null;
+
+    // Load PDF.js dynamically
+    function loadPdfJs() {
+        return new Promise((resolve) => {
+            if (window['pdfjs-dist/build/pdf']) return resolve();
+            const script = document.createElement('script');
+            script.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.js';
+            script.onload = () => resolve();
+            document.head.appendChild(script);
+        });
+    }
+
+    // Extract text from PDF using PDF.js
+    async function extractTextFromPdf(arrayBuffer) {
+        const pdfjsLib = window['pdfjs-dist/build/pdf'];
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
+        const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+        let text = '';
+        for (let i = 1; i <= pdf.numPages; i++) {
+            const page = await pdf.getPage(i);
+            const content = await page.getTextContent();
+            text += content.items.map(item => item.str).join(' ') + '\n';
+        }
+        return text;
+    }
+
+    // Handle resume file upload
+    async function handleResumeUpload(event) {
+        const file = event.target.files[0];
+        if (!file) return;
+
+        const statusEl = document.getElementById('resume-status');
+        statusEl.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Reading resume content...';
+        statusEl.style.color = 'var(--text-muted)';
+
+        try {
+            if (file.type === 'text/plain') {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    _resumeText = e.target.result;
+                    statusEl.innerHTML = '✅ Resume read successfully (Text file)';
+                    statusEl.style.color = 'var(--green)';
+                };
+                reader.readAsText(file);
+            } else if (file.type === 'application/pdf') {
+                statusEl.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Loading PDF extractor...';
+                await loadPdfJs();
+                statusEl.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Extracting text from PDF...';
+                
+                const reader = new FileReader();
+                reader.onload = async function(e) {
+                    try {
+                        const arrayBuffer = e.target.result;
+                        _resumeText = await extractTextFromPdf(arrayBuffer);
+                        if (_resumeText.trim().length > 100) {
+                            statusEl.innerHTML = '✅ Resume read successfully (PDF file)';
+                            statusEl.style.color = 'var(--green)';
+                        } else {
+                            throw new Error('PDF appears to contain no text (scanned image).');
+                        }
+                    } catch(err) {
+                        statusEl.innerHTML = '❌ Failed to parse PDF: ' + err.message + '. Please use a text file or clean PDF.';
+                        statusEl.style.color = 'var(--accent-amber)';
+                    }
+                };
+                reader.readAsArrayBuffer(file);
+            } else {
+                statusEl.innerHTML = '❌ Unsupported file type. Please upload a PDF or TXT file.';
+                statusEl.style.color = 'var(--accent-amber)';
+            }
+        } catch(e) {
+            statusEl.innerHTML = '❌ Error reading file: ' + e.message;
+            statusEl.style.color = 'var(--accent-amber)';
+        }
+    }
+
+    // Proctoring warning visual feedback
+    function showProctorWarning(msg) {
+        const pr = document.getElementById('proctor-toast') || createProctorToast();
+        pr.textContent = msg;
+        pr.className = 'proctor-toast show';
+        setTimeout(() => pr.classList.remove('show'), 5000);
+    }
+
+    function createProctorToast() {
+        const pr = document.createElement('div');
+        pr.id = 'proctor-toast';
+        pr.style.position = 'fixed';
+        pr.style.top = '20px';
+        pr.style.left = '50%';
+        pr.style.transform = 'translateX(-50%)';
+        pr.style.background = 'var(--accent-amber)';
+        pr.style.color = '#000';
+        pr.style.padding = '12px 24px';
+        pr.style.borderRadius = '8px';
+        pr.style.fontWeight = '700';
+        pr.style.zIndex = '99999';
+        pr.style.boxShadow = '0 10px 25px rgba(0,0,0,0.5)';
+        pr.style.transition = 'all 0.3s ease';
+        pr.style.fontSize = '0.9rem';
+        document.body.appendChild(pr);
+        
+        // Add show/hide CSS transition dynamically
+        const style = document.createElement('style');
+        style.innerHTML = `
+            .proctor-toast { opacity: 0; pointer-events: none; }
+            .proctor-toast.show { opacity: 1; pointer-events: auto; }
+        `;
+        document.head.appendChild(style);
+        return pr;
+    }
+
+    function initProctoring() {
+        window.addEventListener('blur', handleProctorBlur);
+        document.addEventListener('visibilitychange', handleProctorVisibility);
+        const answerInput = document.getElementById('answer-input');
+        if (answerInput) {
+            answerInput.addEventListener('paste', handleProctorPaste);
+        }
+    }
+
+    function cleanupProctoring() {
+        window.removeEventListener('blur', handleProctorBlur);
+        document.removeEventListener('visibilitychange', handleProctorVisibility);
+        const answerInput = document.getElementById('answer-input');
+        if (answerInput) {
+            answerInput.removeEventListener('paste', handleProctorPaste);
+        }
+    }
+
+    function handleProctorBlur() {
+        if (!_enableProctoring) return;
+        state.proctoringViolations.tabSwitches++;
+        showProctorWarning(`⚠️ WARNING: Tab switch / Window focus lost detected! Violations count: ${state.proctoringViolations.tabSwitches}. Please stay on this screen to avoid disqualification.`);
+    }
+
+    function handleProctorVisibility() {
+        if (!_enableProctoring) return;
+        if (document.visibilityState === 'hidden') {
+            state.proctoringViolations.tabSwitches++;
+            showProctorWarning(`⚠️ WARNING: Tab switch detected! Violations count: ${state.proctoringViolations.tabSwitches}. Your activity is being monitored.`);
+        }
+    }
+
+    function handleProctorPaste(e) {
+        if (!_enableProctoring) return;
+        e.preventDefault();
+        state.proctoringViolations.pasteAttempts++;
+        showProctorWarning(`⚠️ Copy-paste is disabled for this assessment. Paste attempt count: ${state.proctoringViolations.pasteAttempts}.`);
+    }
+
+    // ── Multi-lingual Help & Guides ──
+    const HELP_TRANSLATIONS = {
+        en: `
+            <h4 style="color:#fff;margin-top:0;margin-bottom:0.5rem;font-weight:700;">📝 General Instructions</h4>
+            <p>Welcome to the AI Technical Screening. The assessment can be taken in either <strong>Text Mode</strong> or <strong>Voice Mode</strong>. The AI interviewer will ask you 5 technical questions one-by-one. Each question allows a maximum of 5 minutes of response time.</p>
+            
+            <h4 style="color:#fff;margin-top:1.5rem;margin-bottom:0.5rem;font-weight:700;">🎤 Audio & Microphone Setup</h4>
+            <p>If you choose <strong>Voice Mode</strong>, please click "Allow" when the browser requests microphone access. Ensure you are in a quiet room and speak clearly into your mic. The AI interviewer uses real-time conversational streaming and will listen to your answers naturally.</p>
+            
+            <h4 style="color:#fff;margin-top:1.5rem;margin-bottom:0.5rem;font-weight:700;">🛡 AI Proctoring & Anti-Cheating Rules</h4>
+            <p>To ensure evaluation integrity, if the recruiter has enabled Proctoring:</p>
+            <ul>
+                <li><strong>No Tab Switching:</strong> Leaving this browser window or switching tabs will be tracked as a violation.</li>
+                <li><strong>No Copy-Paste:</strong> Copying questions or pasting answers into the response box is strictly disabled and logged.</li>
+                <li>Violations are logged and marked as "Cheating Risk" on the employer's dashboard.</li>
+            </ul>
+            
+            <h4 style="color:#fff;margin-top:1.5rem;margin-bottom:0.5rem;font-weight:700;">🔑 Bring Your Own Key (BYOK)</h4>
+            <p>To use voice mode or generate text questions, the platform requires an active API key. Expand the "Bring Your Own Key" section on the setup screen, select your preferred provider (e.g. Google Gemini), paste your API key, and it will be securely saved in your local browser storage.</p>
+        `,
+        ml: `
+            <h4 style="color:#fff;margin-top:0;margin-bottom:0.5rem;font-weight:700;">📝 പൊതുവായ നിർദ്ദേശങ്ങൾ</h4>
+            <p>എഐ ടെക്നിക്കൽ സ്ക്രീനിംഗിലേക്ക് സ്വാഗതം. നിങ്ങൾക്ക് <strong>ടെക്സ്റ്റ് മോഡിലോ</strong> അല്ലെങ്കിൽ <strong>വോയ്സ് മോഡിലോ</strong> ഇന്റർവ്യൂ നൽകാം. എഐ ഇന്റർവ്യൂവർ ഓരോ ചോദ്യങ്ങളായി നിങ്ങളോട് ആകെ 5 ചോദ്യങ്ങൾ ചോദിക്കും. ഓരോ ചോദ്യത്തിനും ഉത്തരം നൽകാൻ പരമാവധി 5 മിനിറ്റ് സമയം ലഭിക്കും.</p>
+            
+            <h4 style="color:#fff;margin-top:1.5rem;margin-bottom:0.5rem;font-weight:700;">🎤 ഓഡിയോ & മൈക്രോഫോൺ സജ്ജീകരണം</h4>
+            <p>നിങ്ങൾ <strong>വോയ്സ് മോഡ്</strong> തിരഞ്ഞെടുക്കുകയാണെങ്കിൽ, ബ്രൗസർ മൈക്രോഫോൺ ആക്സസ് ചോദിക്കുമ്പോൾ "Allow" ക്ലിക്ക് ചെയ്യുക. ശബ്ദമില്ലാത്ത മുറിയിലിരുന്ന് മൈക്കിലേക്ക് വ്യക്തമായി സംസാരിക്കുക. എഐ ഇന്റർവ്യൂവർ തത്സമയം നിങ്ങളുടെ ഉത്തരങ്ങൾ കേട്ട് പ്രതികിക്കുന്നതാണ്.</p>
+            
+            <h4 style="color:#fff;margin-top:1.5rem;margin-bottom:0.5rem;font-weight:700;">🛡 എഐ പ്രോക്ടറിംഗ് & കോപ്പിയടി തടയൽ നിയമങ്ങൾ</h4>
+            <p>വിലയിരുത്തലിന്റെ സുതാര്യത ഉറപ്പാക്കാൻ, റിക്രൂട്ടർ പ്രോക്ടറിംഗ് ഓൺ ചെയ്തിട്ടുണ്ടെങ്കിൽ:</p>
+            <ul>
+                <li><strong>ടാബ് മാറ്റരുത്:</strong> ഇന്റർവ്യൂ സ്ക്രീനിൽ നിന്ന് മാറുന്നതും മറ്റ് ടാബുകളിലേക്ക് പോകുന്നതും നിയമലംഘനമായി രേഖപ്പെടുത്തും.</li>
+                <li><strong>കോപ്പി-പേസ്റ്റ് പാടില്ല:</strong> ചോദ്യങ്ങൾ കോപ്പി ചെയ്യാനോ ഉത്തരങ്ങൾ പേസ്റ്റ് ചെയ്യാനോ സാധിക്കില്ല. പേസ്റ്റ് ചെയ്യാൻ ശ്രമിക്കുന്നത് റെക്കോർഡ് ചെയ്യപ്പെടും.</li>
+                <li>ഇത്തരം നിയമലംഘനങ്ങൾ തൊഴിലുടമയുടെ ഡാഷ്‌ബോർഡിൽ "കൂടിയ റിസ്ക്" ആയി കാണിക്കുന്നതായിരിക്കും.</li>
+            </ul>
+            
+            <h4 style="color:#fff;margin-top:1.5rem;margin-bottom:0.5rem;font-weight:700;">🔑 നിങ്ങളുടെ സ്വന്തം കീ സജ്ജീകരണം (BYOK)</h4>
+            <p>വോയ്‌സ് മോഡ് ഉപയോഗിക്കാനും ചോദ്യങ്ങൾ നിർമ്മിക്കാനും ആക്ടീവായ ഒരു എപിഐ കീ ആവശ്യമാണ്. സെറ്റപ്പ് സ്ക്രീനിലെ "Bring Your Own Key" എന്ന സെക്ഷൻ വികസിപ്പിച്ച് നിങ്ങളുടെ പ്രൊവൈഡർ (ഉദാഹരണത്തിന് ഗൂഗിൾ ജെമിനി) തിരഞ്ഞെടുത്ത് എപിഐ കീ നൽകുക. ഇത് നിങ്ങളുടെ ബ്രൗസറിൽ സുരക്ഷിതമായി സൂക്ഷിക്കുന്നതാണ്.</p>
+        `,
+        es: `
+            <h4 style="color:#fff;margin-top:0;margin-bottom:0.5rem;font-weight:700;">📝 Instrucciones Generales</h4>
+            <p>Bienvenido a la evaluación técnica de IA. Puede realizarla en <strong>Modo Texto</strong> o <strong>Modo Voz</strong>. El entrevistador de IA le hará 5 preguntas técnicas una por una. Cada pregunta tiene un tiempo límite de respuesta de 5 minutos.</p>
+            
+            <h4 style="color:#fff;margin-top:1.5rem;margin-bottom:0.5rem;font-weight:700;">🎤 Configuración de Audio y Micrófono</h4>
+            <p>Si selecciona el <strong>Modo Voz</strong>, haga clic en "Permitir" cuando el navegador solicite acceso al micrófono. Asegúrese de estar en una habitación silenciosa y hable con claridad. El entrevistador de IA utiliza transmisión conversacional en tiempo real y escuchará sus respuestas de forma natural.</p>
+            
+            <h4 style="color:#fff;margin-top:1.5rem;margin-bottom:0.5rem;font-weight:700;">🛡 Reglas de Supervisión por IA (Anti-Fraude)</h4>
+            <p>Para garantizar la integridad de la evaluación, si el reclutador ha activado la supervisión:</p>
+            <ul>
+                <li><strong>Sin Cambio de Pestañas:</strong> Salir de esta ventana del navegador o cambiar de pestaña se registrará como una infracción.</li>
+                <li><strong>Sin Copiar y Pegar:</strong> Pegar respuestas en el cuadro de texto está estrictamente deshabilitado y se registrará.</li>
+                <li>Las infracciones se guardarán y se marcarán como "Riesgo de fraude" en el panel del empleador.</li>
+            </ul>
+            
+            <h4 style="color:#fff;margin-top:1.5rem;margin-bottom:0.5rem;font-weight:700;">🔑 Traiga su propia clave (BYOK)</h4>
+            <p>Para utilizar el modo de voz, la plataforma requiere una clave API activa. Expanda la sección "Bring Your Own Key" en la pantalla de configuración, seleccione su proveedor (por ejemplo, Google Gemini) y pegue su clave API.</p>
+        `,
+        fr: `
+            <h4 style="color:#fff;margin-top:0;margin-bottom:0.5rem;font-weight:700;">📝 Instructions Générales</h4>
+            <p>Bienvenue dans l'évaluation technique par IA. L'évaluation peut être passée en <strong>Mode Texte</strong> ou en <strong>Mode Voix</strong>. L'intervieweur IA vous posera 5 questions techniques, une par une. Chaque question dispose d'un temps de réponse maximum de 5 minutes.</p>
+            
+            <h4 style="color:#fff;margin-top:1.5rem;margin-bottom:0.5rem;font-weight:700;">🎤 Configuration Audio & Microphone</h4>
+            <p>Si vous choisissez le <strong>Mode Voix</strong>, veuillez cliquer sur "Autoriser" lorsque le navigateur demande l'accès au microphone. Assuez-vous d'être dans une pièce calme et de parler clairement. L'intervieweur IA utilise le streaming conversationnel en temps réel.</p>
+            
+            <h4 style="color:#fff;margin-top:1.5rem;margin-bottom:0.5rem;font-weight:700;">🛡 Surveillance par IA & Règles Anti-Triche</h4>
+            <p>Pour garantir l'intégrité de l'évaluation, si le recruteur a activé la surveillance :</p>
+            <ul>
+                <li><strong>Pas de changement d'onglet:</strong> Quitter cette fenêtre ou changer d'onglet sera enregistré comme une infraction.</li>
+                <li><strong>Pas de Copier-Coller:</strong> Le copier-coller dans la zone de réponse est strictement désactivé et enregistré.</li>
+                <li>Les infractions sont enregistrées et signalées comme "Risque de triche" sur le tableau de bord de l'employeur.</li>
+            </ul>
+            
+            <h4 style="color:#fff;margin-top:1.5rem;margin-bottom:0.5rem;font-weight:700;">🔑 Apportez votre propre clé (BYOK)</h4>
+            <p>Pour utiliser le mode voix, la plateforme nécessite une clé API active. Développez la section "Bring Your Own Key" sur l'écran de configuration, sélectionnez votre fournisseur (ex: Google Gemini) et collez votre clé API.</p>
+        `,
+        de: `
+            <h4 style="color:#fff;margin-top:0;margin-bottom:0.5rem;font-weight:700;">📝 Allgemeine Anweisungen</h4>
+            <p>Willkommen beim technischen KI-Screening. Die Bewertung kann im <strong>Textmodus</strong> oder <strong>Sprachmodus</strong> durchgeführt werden. Der KI-Interviewer stellt Ihnen nacheinander 5 technische Fragen. Jede Frage erlaubt eine maximale Antwortzeit von 5 Minuten.</p>
+            
+            <h4 style="color:#fff;margin-top:1.5rem;margin-bottom:0.5rem;font-weight:700;">🎤 Audio- & Mikrofoneinstellung</h4>
+            <p>Wenn Sie den <strong>Sprachmodus</strong> wählen, klicken Sie auf "Zulassen", wenn der Browser den Mikrofonzugriff anfordert. Sprechen Sie deutlich. Der KI-Interviewer hört Ihren Antworten in Echtzeit zu.</p>
+            
+            <h4 style="color:#fff;margin-top:1.5rem;margin-bottom:0.5rem;font-weight:700;">🛡 KI-Proctoring & Anti-Cheat-Regeln</h4>
+            <p>Um die Integrität der Bewertung zu gewährleisten, falls der Rekrutierer das Proctoring aktiviert hat:</p>
+            <ul>
+                <li><strong>Kein Tab-Wechsel:</strong> Das Verlassen dieses Browserfensters oder das Wechseln von Tabs wird als Verstoß gewertet.</li>
+                <li><strong>Kein Kopieren und Einfügen:</strong> Das Einfügen von Antworten in das Textfeld ist deaktiviert und wird protokolliert.</li>
+                <li>Verstöße werden im Dashboard des Arbeitgebers als "Täuschungsrisiko" markiert.</li>
+            </ul>
+            
+            <h4 style="color:#fff;margin-top:1.5rem;margin-bottom:0.5rem;font-weight:700;">🔑 Bringen Sie Ihren eigenen Schlüssel mit (BYOK)</h4>
+            <p>Für den Sprachmodus benötigt die Plattform einen aktiven API-Schlüssel. Erweitern Sie den Bereich "Bring Your Own Key" im Setup-Bildschirm, wählen Sie Ihren Anbieter (z.B. Google Gemini) und fügen Sie Ihren API-Schlüssel ein.</p>
+        `,
+        it: `
+            <h4 style="color:#fff;margin-top:0;margin-bottom:0.5rem;font-weight:700;">📝 Istruzioni Generali</h4>
+            <p>Benvenuto nella valutazione tecnica IA. La valutazione può essere completata in <strong>Modalità Testo</strong> o <strong>Modalità Voce</strong>. L'intervistatore IA ti porrà 5 domande tecniche una alla volta. Per ciascuna domanda avrai a disposizione un massimo de 5 minuti per rispondere.</p>
+            
+            <h4 style="color:#fff;margin-top:1.5rem;margin-bottom:0.5rem;font-weight:700;">🎤 Configurazione Audio e Microfono</h4>
+            <p>Se selezioni la <strong>Modalità Voce</strong>, fai clic su "Consenti" quando il browser richiede l'accesso al microfono. Assicurati di essere in una stanza silenziosa e parla chiaramente nel microfono.</p>
+            
+            <h4 style="color:#fff;margin-top:1.5rem;margin-bottom:0.5rem;font-weight:700;">🛡 Regole di Supervisione IA & Anti-Copia</h4>
+            <p>Per garantire l'integrità della valutazione, se il recruiter ha abilitato la supervisione:</p>
+            <ul>
+                <li><strong>Nessun Cambio di Scheda:</strong> Uscire da questa finestra del browser o cambiare scheda sarà registrato come violazione.</li>
+                <li><strong>Nessun Copia-Incolla:</strong> L'incollamento delle risposte nella casella è disabilitato e registrato.</li>
+                <li>Le violazioni verranno segnalate come "Rischio Frode" nel dashboard del datore di lavoro.</li>
+            </ul>
+            
+            <h4 style="color:#fff;margin-top:1.5rem;margin-bottom:0.5rem;font-weight:700;">🔑 Usa la tua chiave (BYOK)</h4>
+            <p>Per la modalità voce, la piattaforma richiede una chiave API attiva. Espandi la sezione "Bring Your Own Key" nella schermata di configurazione, seleziona il tuo provider (es. Google Gemini) e incolla la chiave API.</p>
+        `,
+        pt: `
+            <h4 style="color:#fff;margin-top:0;margin-bottom:0.5rem;font-weight:700;">📝 Instruções Gerais</h4>
+            <p>Bem-vindo à avaliação técnica de IA. A avaliação pode ser realizada em <strong>Modo Texto</strong> ou <strong>Modo Voz</strong>. O entrevistador de IA fará 5 perguntas técnicas, uma por uma. Cada pergunta tem um tempo limite de resposta de 5 minutos.</p>
+            
+            <h4 style="color:#fff;margin-top:1.5rem;margin-bottom:0.5rem;font-weight:700;">🎤 Configuração de Áudio e Microfone</h4>
+            <p>Se escolher o <strong>Modo Voz</strong>, clique em "Permitir" quando o navegador solicitar acesso ao microfone. Fale com clareza. O entrevistador de IA usa transmissão de conversação em tempo real.</p>
+            
+            <h4 style="color:#fff;margin-top:1.5rem;margin-bottom:0.5rem;font-weight:700;">🛡 Supervisão de IA & Regras Anti-Cola</h4>
+            <p>Para garantir a integridade da avaliação, caso o recrutador tenha ativado a supervisão:</p>
+            <ul>
+                <li><strong>Nenhum Cambio de Aba:</strong> Sair desta janela do navegador ou mudar de aba será registrado como violação.</li>
+                <li><strong>Sem Copiar e Colar:</strong> Colar respostas na caixa de texto é estritamente desativado e registrado.</li>
+                <li>As violações são gravadas e sinalizadas como "Risco de cola" no painel do empregador.</li>
+            </ul>
+            
+            <h4 style="color:#fff;margin-top:1.5rem;margin-bottom:0.5rem;font-weight:700;">🔑 Traga sua própria chave (BYOK)</h4>
+            <p>Para o modo de voz, a plataforma exige uma chave API ativa. Expanda a seção "Bring Your Own Key" na tela de configuração, selecione seu provedor (ex: Google Gemini) e cole sua chave API.</p>
+        `
+    };
+
+    function openHelpModal() {
+        const modal = document.getElementById('helpModal');
+        if (modal) modal.style.display = 'flex';
+        changeHelpLanguage();
+    }
+    function closeHelpModal() {
+        const modal = document.getElementById('helpModal');
+        if (modal) modal.style.display = 'none';
+    }
+    function changeHelpLanguage() {
+        const lang = document.getElementById('help-lang-select').value;
+        const body = document.getElementById('help-modal-body');
+        if (body && HELP_TRANSLATIONS[lang]) {
+            body.innerHTML = HELP_TRANSLATIONS[lang];
+        }
     }
 
     // ── Gemini Multimodal Live API (WebSocket & Audio Engine) ──
@@ -2164,6 +2533,10 @@ Guidelines:
             `${state.role} — ${state.level.charAt(0).toUpperCase() + state.level.slice(1)}`;
 
         try {
+            if (_enableProctoring) {
+                cleanupProctoring();
+            }
+
             const report = await apiCall('/api/interview/report-from-transcript', {
                 sessionId: state.sessionId || crypto.randomUUID(),
                 role: state.role,
@@ -2171,7 +2544,9 @@ Guidelines:
                 transcript: state.liveTranscript,
                 candidate_name: _b2bCandidateName || null,
                 candidate_email: _b2bCandidateEmail || null,
-                mode: 'voice'
+                mode: 'voice',
+                proctoring_violations: _enableProctoring ? state.proctoringViolations : null,
+                resume_matching_report: _resumeAnalysis
             });
 
             state.answers = report.answers || [];
@@ -2843,8 +3218,43 @@ Guidelines:
             return;
         }
 
+        if (_requireResume && !_resumeText) {
+            showError('setup-error', 'Please upload your resume before starting the interview.');
+            return;
+        }
+
         const btn = document.getElementById('btn-start');
         btn.disabled = true;
+        btn.innerHTML = '<div class="spinner"></div> Processing Setup...';
+
+        if (_requireResume && _resumeText) {
+            btn.innerHTML = '<div class="spinner"></div> Pre-screening Resume...';
+            try {
+                const matchRes = await fetch(`${API_BASE}/api/interview/match-resume`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        ...getByokHeaders()
+                    },
+                    body: JSON.stringify({
+                        resume_text: _resumeText,
+                        role: role,
+                        level: level
+                    })
+                });
+                if (matchRes.ok) {
+                    _resumeAnalysis = await matchRes.json();
+                    console.log('Resume Pre-Screening Result:', _resumeAnalysis);
+                }
+            } catch(e) {
+                console.warn('Resume matching failed, continuing anyway:', e.message);
+            }
+        }
+
+        if (_enableProctoring) {
+            initProctoring();
+        }
+
         btn.innerHTML = '<div class="spinner"></div> Generating Questions...';
 
         if (mode === 'voice') {
@@ -3395,6 +3805,10 @@ Guidelines:
             `${state.role} — ${state.level.charAt(0).toUpperCase() + state.level.slice(1)}`;
 
         try {
+            if (_enableProctoring) {
+                cleanupProctoring();
+            }
+
             const report = await apiCall('/api/interview/report', {
                 sessionId: state.sessionId,
                 role: state.role,
@@ -3408,6 +3822,8 @@ Guidelines:
                     strengths: a.strengths,
                     improvements: a.improvements,
                 })),
+                proctoring_violations: _enableProctoring ? state.proctoringViolations : null,
+                resume_matching_report: _resumeAnalysis
             });
 
             renderReport(report);
