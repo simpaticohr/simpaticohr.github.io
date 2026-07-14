@@ -183,6 +183,7 @@
             </div>
             <div class="topbar-actions">
                 <button class="topbar-btn" onclick="refreshAll()"><i class="fas fa-sync-alt"></i> Refresh</button>
+                <button class="topbar-btn" onclick="window.open('invite-candidates.html','_blank')" style="background:linear-gradient(135deg,var(--primary),#818cf8);color:#fff;border:none;font-weight:700"><i class="fas fa-paper-plane"></i> Invite Candidates</button>
                 <button class="topbar-btn" onclick="window.open('register-interview.html','_blank')"><i class="fas fa-plus"></i> Register</button>
                 <button class="topbar-btn danger" onclick="doLogout()"><i class="fas fa-sign-out-alt"></i></button>
             </div>
@@ -193,6 +194,7 @@
                 <button class="tab active" onclick="switchTab('companies')"><i class="fas fa-building"></i> Companies</button>
                 <button class="tab" onclick="switchTab('sessions')"><i class="fas fa-video"></i> Sessions</button>
                 <button class="tab" onclick="switchTab('api-keys')"><i class="fas fa-key"></i> API Keys</button>
+                <button class="tab" onclick="switchTab('invitations')"><i class="fas fa-envelope"></i> Invitations</button>
             </div>
 
             <div class="stat-grid" id="statsGrid"></div>
@@ -324,7 +326,51 @@
         if (currentTab === 'companies') await loadCompanies();
         else if (currentTab === 'sessions') await loadSessions();
         else if (currentTab === 'api-keys') await loadApiKeys();
+        else if (currentTab === 'invitations') loadInvitations();
     }
+
+    // ── Invitations Tab (reads from localStorage, synced from invite-candidates page) ──
+    function loadInvitations() {
+        const el = document.getElementById('tabContent');
+        const stored = JSON.parse(localStorage.getItem('evalis_invitations') || '[]');
+
+        if (!stored.length) {
+            el.innerHTML = '<div class="table-card"><div class="empty-state"><i class="fas fa-envelope"></i>No invitations sent yet.<br>Use the <strong>Invite Candidates</strong> button to send interview invitations.</div></div>';
+            return;
+        }
+
+        // Sort by most recent
+        stored.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+
+        const now = new Date();
+        const rows = stored.map((inv, i) => {
+            const expired = new Date(inv.expiresAt) < now;
+            const status = expired ? '<span class="status-badge" style="background:rgba(239,68,68,.08);color:#ef4444;border:1px solid rgba(239,68,68,.15)">Expired</span>'
+                : '<span class="status-badge" style="background:rgba(16,185,129,.08);color:#10b981;border:1px solid rgba(16,185,129,.15)">Active</span>';
+            return '<tr>' +
+                '<td style="color:#fff;font-weight:500">' + esc(inv.name || '—') + '</td>' +
+                '<td>' + esc(inv.email) + '</td>' +
+                '<td>' + esc(inv.role || '—') + '</td>' +
+                '<td>' + status + '</td>' +
+                '<td style="font-size:.75rem;color:var(--text-dim)">' + new Date(inv.createdAt).toLocaleDateString() + '</td>' +
+                '<td><button class="topbar-btn" style="padding:4px 10px;font-size:.7rem" onclick="copyInvLink(' + i + ')"><i class="fas fa-copy"></i></button></td>' +
+                '</tr>';
+        }).join('');
+
+        el.innerHTML = '<div class="table-card">' +
+            '<div class="table-header"><span class="table-title"><i class="fas fa-envelope"></i> Sent Invitations</span><span class="table-count">' + stored.length + ' total</span></div>' +
+            '<div style="overflow-x:auto"><table><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Status</th><th>Sent</th><th></th></tr></thead><tbody>' + rows + '</tbody></table></div></div>';
+    }
+
+    function copyInvLink(index) {
+        const stored = JSON.parse(localStorage.getItem('evalis_invitations') || '[]');
+        stored.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+        if (stored[index] && stored[index].link) {
+            navigator.clipboard.writeText(stored[index].link);
+        }
+    }
+
+    function esc(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
 
     // ── Companies Tab ──
     async function loadCompanies() {
