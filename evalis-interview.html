@@ -1472,7 +1472,7 @@
                     <button class="btn btn-secondary" onclick="viewQuestionAgain()">
                         ← Review Question
                     </button>
-                    <button id="btn-next-question" class="btn btn-primary" onclick="nextQuestion()">
+                    <button id="btn-next-question" class="btn btn-primary" onclick="handleNextClick()">
                         Next Question →
                     </button>
                 </div>
@@ -3694,8 +3694,13 @@ Guidelines:
         }
 
         // Update next button
+        _pendingFollowUp = evaluation.followUp || '';
         const isLast = state.currentIndex >= state.questions.length - 1;
-        document.getElementById('btn-next-question').textContent = isLast ? 'View Report →' : 'Next Question →';
+        if (_pendingFollowUp && !state.inFollowUp) {
+            document.getElementById('btn-next-question').textContent = 'Answer Follow-up →';
+        } else {
+            document.getElementById('btn-next-question').textContent = isLast ? 'View Report →' : 'Next Question →';
+        }
 
         if (state.voiceMode) {
             let feedbackVoiceText = `Answer evaluated. You scored ${score} out of 100. `;
@@ -3775,6 +3780,33 @@ Guidelines:
     // ══════════════════════════════════════════
     //  NEXT QUESTION / GO TO REPORT
     // ══════════════════════════════════════════
+    let _pendingFollowUp = '';
+
+    function handleNextClick() {
+        if (state.inFollowUp || !_pendingFollowUp) {
+            state.inFollowUp = false;
+            _pendingFollowUp = '';
+            nextQuestion();
+        } else {
+            // Enter follow-up mode
+            state.inFollowUp = true;
+            state.currentFollowUpQuestion = _pendingFollowUp;
+            _pendingFollowUp = '';
+            
+            showScreen('screen-interview');
+            document.getElementById('q-text').textContent = `Follow-up: ${state.currentFollowUpQuestion}`;
+            
+            // Clear input & reset timer
+            const answerInput = document.getElementById('answer-input');
+            if (answerInput) {
+                answerInput.value = '';
+                answerInput.placeholder = 'Type your follow-up answer here...';
+                answerInput.focus();
+            }
+            startSpeakingTimer();
+        }
+    }
+
     function nextQuestion() {
         state.currentIndex++;
         if (state.currentIndex >= state.questions.length) {
