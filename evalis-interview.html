@@ -1275,16 +1275,15 @@
                             <div class="form-group">
                                 <label class="form-label" for="byok-provider">AI Provider</label>
                                 <select id="byok-provider" class="form-select" onchange="onByokProviderChange()">
-                                    <option value="">Default (Cloudflare AI — Free)</option>
                                     <option value="gemini">Google Gemini (Voice + Text)</option>
                                     <option value="nvidia">NVIDIA NIM</option>
                                     <option value="huggingface">Hugging Face</option>
                                     <option value="openai">OpenAI / Compatible</option>
                                 </select>
                             </div>
-                            <div class="form-group" id="byok-key-group" style="display:none">
+                            <div class="form-group" id="byok-key-group" style="display:block">
                                 <label class="form-label" for="byok-key">API Key</label>
-                                <input type="password" id="byok-key" class="form-input" placeholder="Paste your API key here...">
+                                <input type="password" id="byok-key" class="form-input" placeholder="Paste your API key here..." oninput="saveByokKey()">
                             </div>
                         </div>
                         <div id="byok-voice-hint" style="display:none;font-size:0.78rem;color:var(--accent-amber);margin-top:0.3rem;">
@@ -1572,7 +1571,7 @@
         if (nav) nav.style.display = 'none';
         if (footer) footer.style.display = 'none';
         document.querySelector('.main-content')?.style.setProperty('padding-top', '1rem');
-        // Auto-fill from URL params when setup screen loads
+        // Auto-fill from URL params and localStorage when setup screen loads
         window.addEventListener('DOMContentLoaded', () => {
             const roleInput = document.getElementById('role-input');
             const levelSelect = document.getElementById('level-select');
@@ -1580,6 +1579,33 @@
             if (roleInput && _urlParams.get('role')) roleInput.value = decodeURIComponent(_urlParams.get('role'));
             if (levelSelect && _urlParams.get('level')) levelSelect.value = _urlParams.get('level');
             if (modeSelect && _urlParams.get('mode')) modeSelect.value = _urlParams.get('mode');
+
+            // Load BYOK settings from localStorage
+            const savedProvider = localStorage.getItem('byok_provider');
+            const savedKey = localStorage.getItem('byok_key');
+            
+            const providerSelect = document.getElementById('byok-provider');
+            const keyInput = document.getElementById('byok-key');
+            
+            if (providerSelect) {
+                if (savedProvider) {
+                    providerSelect.value = savedProvider;
+                } else {
+                    providerSelect.value = 'gemini'; // Default to gemini
+                }
+                onByokProviderChange();
+            }
+            if (keyInput && savedKey) {
+                keyInput.value = savedKey;
+            }
+
+            // Expand BYOK panel by default if no saved key and not B2B
+            if (!_isB2B && !savedKey) {
+                const panel = document.getElementById('byok-panel');
+                const arrow = document.getElementById('byok-arrow');
+                if (panel) panel.style.display = 'block';
+                if (arrow) arrow.style.transform = 'rotate(180deg)';
+            }
         });
 
         // Fetch B2B company config for branding and avatar mode
@@ -1699,6 +1725,13 @@
         } else {
             voiceHint.style.display = 'none';
         }
+
+        // Save provider to localStorage
+        localStorage.setItem('byok_provider', provider);
+    }
+    function saveByokKey() {
+        const key = document.getElementById('byok-key')?.value?.trim() || '';
+        localStorage.setItem('byok_key', key);
     }
     function getByokHeaders() {
         const provider = document.getElementById('byok-provider')?.value || '';
@@ -2004,6 +2037,8 @@ Guidelines:
                 }
 
                 if (serverContent.modelTurn && serverContent.modelTurn.parts) {
+                    stopTimer(); // Pause countdown timer while AI is speaking
+
                     // Flush accumulated user transcription if model starts speaking
                     if (state.userSpeechTranscript) {
                         state.liveTranscript.push({ role: 'user', parts: [{ text: state.userSpeechTranscript }] });
@@ -2046,6 +2081,13 @@ Guidelines:
                     console.log("AI completed turn: " + state.aiSpokenTextBuffer);
                     
                     state.liveTranscript.push({ role: 'model', parts: [{ text: state.aiSpokenTextBuffer }] });
+                    
+                    // Update progress dynamically based on model turns
+                    const modelTurns = state.liveTranscript.filter(t => t.role === 'model').length;
+                    state.currentIndex = Math.min(4, Math.max(0, modelTurns - 1));
+                    updateProgress();
+                    document.getElementById('q-number').textContent = `Q${state.currentIndex + 1}`;
+
                     state.aiSpokenTextBuffer = '';
                     state.aiSpeakingActive = false;
 
@@ -2062,6 +2104,7 @@ Guidelines:
 
                     playChime('listening');
                     startSpeakingTimer();
+                    startTimer(); // Start/Reset 5-minute countdown for user to speak their answer
                     startWaveform();
                 }
             }
@@ -2790,6 +2833,13 @@ Guidelines:
         if (!role) {
             showError('setup-error', 'Please enter a target role.');
             document.getElementById('role-input').focus();
+            return;
+        }
+
+        const provider = document.getElementById('byok-provider')?.value || '';
+        const key = document.getElementById('byok-key')?.value?.trim() || '';
+        if (!_isB2B && (!provider || !key)) {
+            showError('setup-error', 'An AI Provider and API Key are required. Please expand "Bring Your Own Key" and configure.');
             return;
         }
 
