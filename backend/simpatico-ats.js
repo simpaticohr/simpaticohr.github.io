@@ -1177,6 +1177,8 @@ function matchRoute(method, path) {
 // Health & Meta (Trigger GH Action)
 route("GET", "/health", handleHealth);
 route("GET", "/version", handleVersion);
+route("GET", "/api/fix-rls", handleFixRLS);
+route("POST", "/users/ensure-profile", handleEnsureProfile);
 route("POST", "/webhooks/register", handleRegisterWebhook);
 
 // Employees & Identity
@@ -1811,6 +1813,134 @@ export default {
 // ==========================================================================================================================================
 
 // ── Health & Meta ──────────────────────────────────────────────────────────────
+
+async function resolveUserCompanyId(env, userId, email) {
+  if (email) {
+    try {
+      const compRes = await sbFetch(
+        env,
+        "GET",
+        `/rest/v1/companies?email=eq.${encodeURIComponent(email)}&select=id`,
+        null,
+        false,
+        "default"
+      );
+      const comps = await compRes.json();
+      if (comps && comps.length > 0) return comps[0].id;
+    } catch (e) {
+      console.warn("[ResolveCompany] Email check failed:", e.message);
+    }
+  }
+
+  // 2. Try email in employees table
+  if (email) {
+    try {
+      const empRes = await sbFetch(
+        env,
+        "GET",
+        `/rest/v1/employees?email=eq.${encodeURIComponent(email)}&select=tenant_id`,
+        null,
+        false,
+        "default"
+      );
+      const emps = await empRes.json();
+      if (emps && emps.length > 0) return emps[0].tenant_id;
+    } catch (e) {
+      console.warn("[ResolveCompany] Employees check failed:", e.message);
+    }
+  }
+
+  return null;
+}
+
+async function handleEnsureProfile(request, env, ctx) {
+  requireAuth(ctx);
+  const body = await safeJson(request);
+  const userId = ctx.actorId || body.auth_id;
+  const email = ctx.actorEmail || body.email;
+
+  if (!userId) throw new BadRequestError("Missing user ID");
+
+  // Step 1: Check if profile already exists
+  const checkRes = await sbFetch(
+    env,
+    "GET",
+    `/rest/v1/users?auth_id=eq.${userId}&select=*`,
+    null,
+    false,
+    "default"
+  );
+  const existing = await checkRes.json();
+  if (existing && existing.length > 0) {
+    // Profile exists — check if company_id is missing and try to resolve it
+    let profile = existing[0];
+    if (!profile.company_id) {
+      const resolvedCompanyId = await resolveUserCompanyId(env, userId, email);
+      if (resolvedCompanyId) {
+        const updateRes = await sbFetch(
+          env,
+          "PATCH",
+          `/rest/v1/users?auth_id=eq.${userId}`,
+          { company_id: resolvedCompanyId },
+          false,
+          "default"
+        );
+        const [updated] = await updateRes.json();
+        if (updated) profile = updated;
+      }
+    }
+    return apiResponse(profile);
+  }
+
+  // Step 2: Profile is missing — resolve company_id and insert it
+  const companyId = await resolveUserCompanyId(env, userId, email) || body.company_id || null;
+  const newProfile = {
+    auth_id: userId,
+    email: email || body.email || "",
+    full_name: body.full_name || email?.split("@")[0] || "User",
+    role: body.role || "hr",
+    is_active: true,
+    company_id: companyId,
+  };
+
+  const insertRes = await sbFetch(
+    env,
+    "POST",
+    "/rest/v1/users",
+    newProfile,
+    false,
+    "default"
+  );
+  const [created] = await insertRes.json();
+  return apiResponse(created || newProfile);
+}
+
+async function handleFixRLS(request, env, ctx) {
+  const sql = `
+    DROP POLICY IF EXISTS "tenant_read_own_company" ON public.companies;
+    CREATE POLICY "tenant_read_own_company" ON public.companies
+      FOR SELECT TO authenticated
+      USING (
+        id::text = COALESCE(
+          (auth.jwt()->'app_metadata'->>'tenant_id'),
+          (auth.jwt()->'app_metadata'->>'company_id'),
+          (auth.jwt()->'user_metadata'->>'tenant_id'),
+          (auth.jwt()->'user_metadata'->>'company_id'),
+          'SIMP_PRO_MAIN'
+        )
+        OR email = auth.jwt()->>'email'
+        OR id::text IN (SELECT company_id::text FROM public.users WHERE auth_id = auth.uid())
+      );
+  `;
+  try {
+    const res = await sbFetch(env, "POST", "/rest/v1/rpc/execute_sql", { query: sql, sql: sql }, false, "default");
+    const text = await res.text().catch(() => "ok");
+    return apiResponse({ status: "success", response: text });
+  } catch (e) {
+    console.error("[FixRLS] Failed:", e.message);
+    return apiResponse({ status: "error", message: e.message }, 500);
+  }
+}
 
 async function handleHealth(request, env, ctx) {
   const checks = await Promise.allSettled([

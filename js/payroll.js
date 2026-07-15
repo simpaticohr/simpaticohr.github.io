@@ -64,7 +64,7 @@ let allDeductions = [];
 
       // Strategy 3: companies table (user is owner)
       const { data: companies } = await client.from('companies')
-        .select('id').eq('owner_id', authUser.id).limit(1);
+        .select('id').eq('email', authUser.email).limit(1);
       if (companies?.[0]?.id) {
         patchLocalUser(companies[0].id);
         console.log('[payroll] ✅ Resolved tenant from companies table:', companies[0].id);

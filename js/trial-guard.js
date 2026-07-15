@@ -144,9 +144,6 @@
     // Remove any existing banner
     document.getElementById('trial-banner')?.remove();
 
-    const banner = document.createElement('div');
-    banner.id = 'trial-banner';
-
     if (info.status === 'trial_active') {
       const urgent = info.hoursLeft <= 12;
       const jobsUsed = usage.jobs || 0;
@@ -154,34 +151,51 @@
       const jobsLeft = Math.max(0, TRIAL_LIMITS.max_jobs - jobsUsed);
       const intLeft = Math.max(0, TRIAL_LIMITS.max_interviews - intUsed);
 
+      const banner = document.createElement('div');
+      banner.id = 'trial-banner';
+
+      banner.style.cssText = `
+        background: ${urgent ? 'linear-gradient(135deg, #dc2626 0%, #b91c1c 100%)' : 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)'};
+        color: white; padding: 10px 20px; display: flex; align-items: center; justify-content: center; gap: 16px;
+        font-size: 13px; font-weight: 600; position: fixed; top: 0; left: 0; right: 0; z-index: 99999;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.15); flex-wrap: wrap; height: 42px; box-sizing: border-box;
+      `;
+
       banner.innerHTML = `
-        <div style="
-          background: ${urgent ? 'linear-gradient(135deg, #dc2626 0%, #b91c1c 100%)' : 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)'};
-          color: white; padding: 10px 20px; display: flex; align-items: center; justify-content: center; gap: 16px;
-          font-size: 13px; font-weight: 600; position: fixed; top: 0; left: 0; right: 0; z-index: 99999;
-          box-shadow: 0 2px 8px rgba(0,0,0,0.15); flex-wrap: wrap;
-        ">
-          <span style="display:flex;align-items:center;gap:6px;">
-            ${urgent ? '⚠️' : '⏱️'} Trial: <strong>${info.hoursLeft <= 48 ? info.hoursLeft + 'h' : info.daysLeft + 'd'} left</strong>
-          </span>
-          <span style="opacity:0.8;font-size:12px;">
-            📋 Jobs: ${jobsUsed}/${TRIAL_LIMITS.max_jobs} &nbsp;|&nbsp; 🎙️ Interviews: ${intUsed}/${TRIAL_LIMITS.max_interviews}
-          </span>
-          <a href="/platform/pricing.html" style="
-            background: rgba(255,255,255,0.2); color: white; padding: 5px 16px; border-radius: 6px;
-            text-decoration: none; font-size: 12px; font-weight: 700; border: 1px solid rgba(255,255,255,0.3);
-            transition: all 0.2s;
-          " onmouseover="this.style.background='rgba(255,255,255,0.35)'" onmouseout="this.style.background='rgba(255,255,255,0.2)'">
-            Upgrade Now →
-          </a>
-          <button onclick="this.closest('#trial-banner').style.display='none';document.body.style.paddingTop='0'" style="
-            background: none; border: none; color: rgba(255,255,255,0.7); cursor: pointer; font-size: 16px; margin-left: 4px;
-          ">×</button>
-        </div>
+        <span style="display:flex;align-items:center;gap:6px;">
+          ${urgent ? '⚠️' : '⏱️'} Trial: <strong>${info.hoursLeft <= 48 ? info.hoursLeft + 'h' : info.daysLeft + 'd'} left</strong>
+        </span>
+        <span style="opacity:0.8;font-size:12px;">
+          📋 Jobs: ${jobsUsed}/${TRIAL_LIMITS.max_jobs} &nbsp;|&nbsp; 🎙️ Interviews: ${intUsed}/${TRIAL_LIMITS.max_interviews}
+        </span>
+        <a href="/platform/pricing.html" style="
+          background: rgba(255,255,255,0.2); color: white; padding: 5px 16px; border-radius: 6px;
+          text-decoration: none; font-size: 12px; font-weight: 700; border: 1px solid rgba(255,255,255,0.3);
+          transition: all 0.2s;
+        " onmouseover="this.style.background='rgba(255,255,255,0.35)'" onmouseout="this.style.background='rgba(255,255,255,0.2)'">
+          Upgrade Now →
+        </a>
+        <button onclick="document.getElementById('trial-banner')?.remove(); window.adjustTrialLayout(0);" style="
+          background: none; border: none; color: rgba(255,255,255,0.7); cursor: pointer; font-size: 16px; margin-left: 4px;
+        ">×</button>
       `;
 
       document.body.prepend(banner);
-      document.body.style.paddingTop = '42px';
+      
+      // Helper to adjust page layouts dynamically
+      window.adjustTrialLayout = function(offset) {
+        document.body.style.paddingTop = offset ? offset + 'px' : '0';
+        const sidebar = document.getElementById('sidebar') || document.querySelector('.sidebar');
+        if (sidebar) {
+          sidebar.style.top = offset ? offset + 'px' : '0';
+          sidebar.style.height = offset ? `calc(100vh - ${offset}px)` : '100vh';
+        }
+        document.querySelectorAll('.topbar').forEach(el => {
+          el.style.top = offset ? offset + 'px' : '0';
+        });
+      };
+
+      window.adjustTrialLayout(42);
     }
   }
 
@@ -191,33 +205,33 @@
 
     const overlay = document.createElement('div');
     overlay.id = 'trial-paywall';
+    overlay.style.cssText = `
+      position: fixed; inset: 0; z-index: 100000;
+      background: rgba(15, 23, 42, 0.85); backdrop-filter: blur(8px);
+      display: flex; align-items: center; justify-content: center;
+      animation: trialFadeIn 0.3s ease;
+    `;
     overlay.innerHTML = `
       <div style="
-        position: fixed; inset: 0; z-index: 100000;
-        background: rgba(15, 23, 42, 0.85); backdrop-filter: blur(8px);
-        display: flex; align-items: center; justify-content: center;
-        animation: trialFadeIn 0.3s ease;
+        background: white; border-radius: 20px; padding: 48px 40px;
+        max-width: 520px; width: 90%; text-align: center;
+        box-shadow: 0 25px 60px rgba(0,0,0,0.3);
+        animation: trialSlideUp 0.4s ease;
       ">
         <div style="
-          background: white; border-radius: 20px; padding: 48px 40px;
-          max-width: 520px; width: 90%; text-align: center;
-          box-shadow: 0 25px 60px rgba(0,0,0,0.3);
-          animation: trialSlideUp 0.4s ease;
-        ">
-          <div style="
-            width: 72px; height: 72px; margin: 0 auto 20px; border-radius: 50%;
-            background: linear-gradient(135deg, #fef3c7, #fde68a);
-            display: flex; align-items: center; justify-content: center;
-            font-size: 32px;
-          ">⏰</div>
+          width: 72px; height: 72px; margin: 0 auto 20px; border-radius: 50%;
+          background: linear-gradient(135deg, #fef3c7, #fde68a);
+          display: flex; align-items: center; justify-content: center;
+          font-size: 32px;
+        ">⏰</div>
 
-          <h2 style="font-size: 1.5rem; font-weight: 800; color: #0f172a; margin-bottom: 8px;">
-            Your Free Trial Has Ended
-          </h2>
-          <p style="color: #64748b; font-size: 0.95rem; line-height: 1.6; margin-bottom: 24px;">
-            Your ${TRIAL_DAYS}-day trial has expired. Upgrade to continue using all features including
-            AI recruitment, payroll, proctored interviews, and full HR automation.
-          </p>
+        <h2 style="font-size: 1.5rem; font-weight: 800; color: #0f172a; margin-bottom: 8px;">
+          Your Free Trial Has Ended
+        </h2>
+        <p style="color: #64748b; font-size: 0.95rem; line-height: 1.6; margin-bottom: 24px;">
+          Your ${TRIAL_DAYS}-day trial has expired. Upgrade to continue using all features including
+          AI recruitment, payroll, proctored interviews, and full HR automation.
+        </p>
 
           <div style="display: flex; flex-direction: column; gap: 10px; margin-bottom: 24px;">
             <div style="display:flex;align-items:center;gap:10px;padding:12px 16px;background:#f0fdf4;border-radius:10px;font-size:13px;color:#15803d;">

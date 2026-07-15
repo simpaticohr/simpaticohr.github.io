@@ -75,7 +75,7 @@ const THUMB_ICONS = { compliance: '🛡️', technical: '💻', leadership: '�
 
       // Strategy 3: Check companies table (user might be owner)
       const { data: companies } = await client.from('companies')
-        .select('id').eq('owner_id', authUser.id).limit(1);
+        .select('id').eq('email', authUser.email).limit(1);
       if (companies?.[0]?.id) {
         patchLocalUser(companies[0].id);
         console.log('[training] ✅ Resolved tenant from companies table:', companies[0].id);
