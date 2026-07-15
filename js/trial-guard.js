@@ -182,17 +182,10 @@
 
       document.body.prepend(banner);
       
-      // Helper to adjust page layouts dynamically
+      // Adjust all fixed/sticky layouts via CSS custom property
+      // The dashboard CSS references --trial-banner-height for sidebar, topbar, and main-content
       window.adjustTrialLayout = function(offset) {
-        document.body.style.paddingTop = offset ? offset + 'px' : '0';
-        const sidebar = document.getElementById('sidebar') || document.querySelector('.sidebar');
-        if (sidebar) {
-          sidebar.style.top = offset ? offset + 'px' : '0';
-          sidebar.style.height = offset ? `calc(100vh - ${offset}px)` : '100vh';
-        }
-        document.querySelectorAll('.topbar').forEach(el => {
-          el.style.top = offset ? offset + 'px' : '0';
-        });
+        document.documentElement.style.setProperty('--trial-banner-height', offset ? offset + 'px' : '0px');
       };
 
       window.adjustTrialLayout(42);
