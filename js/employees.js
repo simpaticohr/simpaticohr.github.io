@@ -90,18 +90,17 @@ async function loadDepartments() {
   const client = sb(); if (!client) return;
   const cid = getCompanyId();
   
-  let data = null, error = null;
-  if (cid) {
-    let res = await client.from('departments').select('id, name').eq('tenant_id', cid).order('name');
-    if (res.error) res = await client.from('departments').select('id, name').order('name');
-    data = res.data; error = res.error;
-  } else {
-    let res = await client.from('departments').select('id, name').order('name');
-    data = res.data; error = res.error;
+  if (!cid) {
+    console.warn('[employees] No company_id for departments — showing empty (strict isolation)');
+    departments = [];
+    return;
   }
 
-  if (error) { console.error('Departments load error:', error); }
-  departments = data || [];
+  let res = await client.from('departments').select('id, name').eq('tenant_id', cid).order('name');
+  if (res.error) res = await client.from('departments').select('id, name').eq('company_id', cid).order('name');
+  
+  if (res.error) { console.error('Departments load error:', res.error); }
+  departments = res.data || [];
 
   // populate department selects
   ['dept-filter', 'emp-dept'].forEach(id => {
@@ -141,21 +140,17 @@ async function loadEmployees() {
     // Attempt 2: company_id fallback
     if (res.error) res = await client.from('employees').select(complexQuery).eq('company_id', cid).order('first_name');
     
-    // Attempt 3: no tenant filter (table lacks tenant columns)
-    if (res.error) res = await client.from('employees').select(complexQuery).order('first_name');
-
-    // Attempt 4: basic select (relations missing)
+    // Attempt 3: basic select (relations missing)
     if (res.error) {
        res = await client.from('employees').select('*').eq('tenant_id', cid).order('first_name');
        if (res.error) res = await client.from('employees').select('*').eq('company_id', cid).order('first_name');
-       if (res.error) res = await client.from('employees').select('*').order('first_name');
     }
     
     data = res.data;
     error = res.error;
   } catch(e) {
     console.warn('[employees] Query exception, trying simple select:', e.message);
-    const simpleRes = await client.from('employees').select('*').order('first_name');
+    const simpleRes = await client.from('employees').select('*').eq('tenant_id', cid).order('first_name');
     data = simpleRes.data;
     error = simpleRes.error;
   }
@@ -411,6 +406,12 @@ async function renderProfilePage(id) {
 
   // TENANT ISOLATED: verify employee belongs to current company
   const profileCid = getCompanyId();
+  if (!profileCid) {
+    if (loading) loading.style.display = 'none';
+    if (content) { content.style.display='block'; content.innerHTML='<div class="hr-empty"><p>Access Denied: No active company session found.</p></div>'; }
+    return;
+  }
+  
   let profileQuery = client
     .from('employees')
     .select(`
@@ -421,8 +422,8 @@ async function renderProfilePage(id) {
       performance_reviews(id, period, score, status, created_at),
       training_enrollments(id, course_id, status, completed_at, training_courses(title))
     `)
-    .eq('id', id);
-  if (profileCid) profileQuery = profileQuery.eq('tenant_id', profileCid);
+    .eq('id', id)
+    .eq('tenant_id', profileCid);
   const { data: emp, error } = await profileQuery.single();
 
   if (loading) loading.style.display = 'none';
