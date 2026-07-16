@@ -7972,7 +7972,7 @@ async function handleManualCreateOrder(request, env, ctx) {
       account_number: env.DOMESTIC_ACCOUNT_NUMBER || "67326003131",
       ifsc_code: env.DOMESTIC_IFSC_CODE || "SBIN0070198",
       branch: env.DOMESTIC_BRANCH || "Perinthalmanna",
-      email: "info@simpaticohr.in",
+      email: "simpaticohrconsultancy@gmail.com",
       reference: orderId,
       note: `Please include order reference "${orderId}" in your payment note. Your subscription will activate within a few hours after payment verification.`,
     },
