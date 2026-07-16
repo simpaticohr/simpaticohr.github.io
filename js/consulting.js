@@ -2170,6 +2170,168 @@ Be professional, highly strategic, clear, and action-oriented. Support the custo
         addActivity('Exported Business Health Assessment PDF', 'report');
     };
 
+    window.generateAIBriefing = async function() {
+        showToast('Generating AI Briefing summary...', 'info');
+
+        const healthScore = cachedAssessment && cachedAssessment.answers ? 
+            Math.round((cachedAssessment.answers.reduce((acc, curr) => acc + (curr.val || 0), 0) / (cachedAssessment.answers.length * 4)) * 100) : 'N/A';
+        
+        const swotText = `Strengths: ${(cachedSwot.strengths || []).map(s=>s.text || s.content).join(', ') || 'None'}
+Weaknesses: ${(cachedSwot.weaknesses || []).map(s=>s.text || s.content).join(', ') || 'None'}
+Opportunities: ${(cachedSwot.opportunities || []).map(s=>s.text || s.content).join(', ') || 'None'}
+Threats: ${(cachedSwot.threats || []).map(s=>s.text || s.content).join(', ') || 'None'}`;
+
+        const projectsText = cachedProjects.map(p => `- ${p.name} (${p.type}): Stage=${p.stage}, Progress=${p.progress}%, Milestone=${p.milestone || 'None'}`).join('\n') || 'No active projects';
+
+        const kpisText = cachedKPIs.map(k => `- ${k.name}: Current=${k.current_value}${k.unit || ''}, Target=${k.target_value}${k.unit || ''}`).join('\n') || 'No KPIs tracked';
+
+        const promptText = `Please generate a structured, highly professional weekly executive briefing for our business consulting client.
+Client Strategic Health Index: ${healthScore}%
+SWOT Analysis:
+${swotText}
+
+Active Projects:
+${projectsText}
+
+KPI Progress:
+${kpisText}
+
+Provide an Executive Summary, Key Milestones & Risks, and clear Recommendations for next week. Keep it concise, professional, and actionable.`;
+
+        const configStr = localStorage.getItem('simpatico_byok_config');
+        let byokConfig = null;
+        if (configStr) {
+            try { byokConfig = JSON.parse(configStr); } catch(e) {}
+        }
+
+        const useByok = byokConfig && byokConfig.enabled && byokConfig.key;
+        let briefingText = '';
+
+        try {
+            const systemPrompt = "You are Simpatico's lead AI Business Consultant. You specialize in generating high-value executive summaries and strategic action items.";
+            
+            if (useByok) {
+                const key = byokConfig.key;
+                const provider = byokConfig.provider;
+                const model = byokConfig.model;
+
+                if (provider === 'gemini') {
+                    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            contents: [{ role: 'user', parts: [{ text: promptText }] }],
+                            systemInstruction: { parts: [{ text: systemPrompt }] }
+                        })
+                    });
+                    if (!response.ok) throw new Error('Gemini API request failed');
+                    const resData = await response.json();
+                    briefingText = resData.candidates?.[0]?.content?.parts?.[0]?.text;
+                } else if (provider === 'openai') {
+                    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${key}`
+                        },
+                        body: JSON.stringify({
+                            model: model,
+                            messages: [
+                                { role: 'system', content: systemPrompt },
+                                { role: 'user', content: promptText }
+                            ]
+                        })
+                    });
+                    if (!response.ok) throw new Error('OpenAI API request failed');
+                    const resData = await response.json();
+                    briefingText = resData.choices?.[0]?.message?.content;
+                }
+            } else {
+                const WORKER_URL = window.SIMPATICO_CONFIG?.workerUrl || 'https://simpatico-hr-ats.simpaticohrconsultancy.workers.dev';
+                const headers = { 'Content-Type': 'application/json', 'X-Tenant-ID': getTenantId() };
+                const token = localStorage.getItem('simpatico_token') || localStorage.getItem('sh_token');
+                if (token) headers['Authorization'] = 'Bearer ' + token;
+
+                const response = await fetch(`${WORKER_URL}/ai/chat`, {
+                    method: 'POST',
+                    headers: headers,
+                    body: JSON.stringify({
+                        messages: [
+                            { role: 'system', content: systemPrompt },
+                            { role: 'user', content: promptText }
+                        ]
+                    })
+                });
+                if (!response.ok) throw new Error('Backend AI Worker failed');
+                const resData = await response.json();
+                briefingText = resData.reply || resData.text || resData.choices?.[0]?.message?.content;
+            }
+
+            if (!briefingText) throw new Error('Empty AI response');
+            exportBriefingPDF(briefingText, healthScore);
+
+        } catch (err) {
+            console.error('[consulting] Briefing generation failed, using rule-based fallback:', err);
+            briefingText = `EXECUTIVE SUMMARY
+The client currently exhibits a Strategic Health Index of ${healthScore}%. We are tracking ${cachedProjects.filter(p => p.stage !== 'completed').length} active projects and ${cachedKPIs.length} KPIs.
+
+KEY MILESTONES & RISKS
+- Active projects include: ${cachedProjects.slice(0, 3).map(p=>p.name).join(', ') || 'None'}. Enforce milestones to prevent timeline drift.
+- SWOT Threats show crucial external variables requiring mitigation.
+
+RECOMMENDATIONS FOR NEXT WEEK
+1. Focus on finishing high-impact execution-stage tasks.
+2. Update KPI metrics to verify if the trend matches forecast targets.
+3. Review weaknesses identified in the assessment to build countermeasures.`;
+            exportBriefingPDF(briefingText, healthScore);
+        }
+    };
+
+    function exportBriefingPDF(text, healthScore) {
+        if (typeof window.jspdf === 'undefined') { showToast('PDF library loading...', 'info'); return; }
+        const jsPDF = window.jspdf.jsPDF;
+        const doc = new jsPDF();
+
+        doc.setFillColor(139, 92, 246);
+        doc.rect(0, 0, 210, 35, 'F');
+
+        doc.setTextColor(255, 255, 255);
+        doc.setFontSize(20);
+        doc.setFont('helvetica', 'bold');
+        doc.text('SIMPATICO CONSULTING', 15, 22);
+
+        doc.setFontSize(10);
+        doc.setFont('helvetica', 'normal');
+        doc.text('AI Executive Briefing & Action Plan', 15, 28);
+
+        doc.setTextColor(100, 100, 100);
+        doc.setFontSize(9);
+        const dateStr = new Date().toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
+        doc.text('Date: ' + dateStr, 150, 48);
+        doc.text('Health Index: ' + healthScore + '%', 150, 53);
+
+        doc.setTextColor(30, 30, 30);
+        doc.setFontSize(14);
+        doc.setFont('helvetica', 'bold');
+        doc.text('Executive Summary & Strategic Analysis', 15, 52);
+
+        doc.setDrawColor(220, 220, 220);
+        doc.setLineWidth(0.5);
+        doc.line(15, 56, 195, 56);
+
+        doc.setFontSize(10);
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(60, 60, 60);
+
+        const lines = doc.splitTextToSize(text, 180);
+        doc.text(lines, 15, 65);
+
+        const filename = `Simpatico_Executive_Briefing_${new Date().toISOString().split('T')[0]}.pdf`;
+        doc.save(filename);
+        showToast('AI Briefing PDF downloaded successfully!', 'success');
+        addActivity('Exported AI Executive Briefing PDF', 'report');
+    }
+
     // Export SWOT as PDF
     window.exportSwotPDF = function () {
         if (typeof window.jspdf === 'undefined') { showToast('PDF library loading...', 'info'); return; }
