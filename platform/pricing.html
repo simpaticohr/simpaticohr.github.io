@@ -334,12 +334,15 @@
         <div id="wiseBankFields">
           <!-- Dynamically populated by subscribe() based on detected currency -->
         </div>
-        <div class="row"><span class="label">Email</span><span class="value">info@simpaticohr.in</span></div>
+        <div class="row"><span class="label">Email</span><span class="value">simpaticohrconsultancy@gmail.com</span></div>
       </div>
       <p style="font-size:12px;color:#64748B;margin-bottom:8px;text-align:center">Include this reference in your transfer note:</p>
       <div class="wise-ref" id="wiseRef" onclick="navigator.clipboard.writeText(this.textContent);this.style.background='#DCFCE7';setTimeout(()=>this.style.background='#EEF2FF',1500)">—</div>
       <p class="wise-note">Transfer via <strong>wise.com</strong> for the lowest fees. Click any value to copy.<br>Your subscription activates within 1–2 business days after transfer confirmation.</p>
-      <button class="wise-close" onclick="document.getElementById('wiseModal').classList.remove('active')">Got it, I'll transfer now</button>
+      <div style="display:flex;gap:10px;margin-top:16px;">
+        <button class="wise-close" style="margin-top:0;background:#64748B;flex:1;" onclick="document.getElementById('wiseModal').classList.remove('active')">Close</button>
+        <button class="wise-close" id="btnVerifyWise" style="margin-top:0;background:#059669;flex:1;" onclick="verifyWisePayment()"><i class="fas fa-check-circle" style="margin-right:6px"></i>Verify Instantly</button>
+      </div>
     </div>
   </div>
 
@@ -583,6 +586,40 @@ function bankRow(label, value, copyable) {
   if (!value) return '';
   if (copyable) return `<div class="row"><span class="label">${label}</span><span class="value" style="cursor:pointer;color:#4F46E5" onclick="navigator.clipboard.writeText(this.textContent);this.style.color='#059669';setTimeout(()=>this.style.color='#4F46E5',1500)">${value}</span></div>`;
   return `<div class="row"><span class="label">${label}</span><span class="value">${value}</span></div>`;
+}
+
+async function verifyWisePayment() {
+  const orderId = document.getElementById('wiseRef').textContent;
+  if (!orderId || orderId === '—') return;
+
+  const btn = document.getElementById('btnVerifyWise');
+  const origText = btn.innerHTML;
+  btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Checking...';
+  btn.disabled = true;
+
+  try {
+    const res = await fetch(`${WORKER_URL}/billing/wise/verify`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}`, 'X-Tenant-ID': TENANT_ID },
+      body: JSON.stringify({ order_id: orderId }),
+    });
+    const json = await res.json();
+    if (!res.ok) throw new Error(json?.error?.message || 'Verification failed');
+    const data = json.data || json;
+
+    if (data.verified) {
+      alert(data.message || 'Payment verified successfully! Welcome to Simpatico HR.');
+      document.getElementById('wiseModal').classList.remove('active');
+      location.reload();
+    } else {
+      alert(data.message || 'We could not verify the transfer yet. Please make sure the Wise transfer is completed and includes the correct reference note.');
+    }
+  } catch (e) {
+    alert('Verification Error: ' + e.message);
+  } finally {
+    btn.innerHTML = origText;
+    btn.disabled = false;
+  }
 }
 
 // ── Handle payment=cancelled/failed URL params ──

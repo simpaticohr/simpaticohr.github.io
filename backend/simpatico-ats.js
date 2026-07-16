@@ -1331,7 +1331,7 @@ route("POST", "/billing/manual/create-order", handleManualCreateOrder);
 route("POST", "/billing/manual/confirm", handleConfirmPayment);
 route("POST", "/billing/wise/create-order", handleWiseCreateOrder);
 route("POST", "/billing/wise/confirm", handleConfirmPayment);
-route("POST", "/billing/wise/confirm", handleConfirmPayment);
+route("POST", "/billing/wise/verify", handleWiseVerifyPayment);
 route("GET", "/billing/wise/account-details", handleWiseAccountDetails);
 route("GET", "/billing/subscription", handleGetSubscription);
 route("POST", "/billing/cancel", handleCancelSubscription);
@@ -8092,107 +8092,139 @@ async function handleConfirmPayment(request, env, ctx) {
     return apiResponse({ already_confirmed: true, plan: tx.plan, order_id });
   }
 
-  // Mark as paid
+  await executeCompletePayment(env, tx, transaction_reference || "manual_confirm", ctx);
+
+  return apiResponse({ confirmed: true, plan: tx.plan, order_id });
+}
+
+/**
+ * Core helper to mark a payment transaction as paid, activate the corresponding subscription (if platform plan),
+ * and send emails/audits.
+ */
+async function executeCompletePayment(env, tx, gatewayPaymentId, ctx) {
+  const order_id = tx.gateway_order_id;
+  const companyId = tx.company_id;
+  const actorEmail = ctx.actorEmail || "system_auto";
+
+  // Mark transaction as paid
   const payRes = await fetch(`${env.SUPABASE_URL}/rest/v1/payment_transactions?gateway_order_id=eq.${order_id}`, {
     method: "PATCH", headers: {
       apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
       "Content-Type": "application/json", Prefer: "return=minimal",
     },
     body: JSON.stringify({
-      status: "paid", gateway_payment_id: transaction_reference || "manual_confirm",
+      status: "paid", gateway_payment_id: gatewayPaymentId || "auto_confirm",
       payment_method: tx.gateway === "wise" ? "bank_transfer" : (tx.gateway || "manual"),
-      metadata: { ...tx.metadata, confirmed_by: ctx.actorEmail, confirmed_at: new Date().toISOString(), transaction_reference },
+      metadata: { ...tx.metadata, confirmed_by: actorEmail, confirmed_at: new Date().toISOString(), transaction_reference: gatewayPaymentId },
     }),
   });
   if (!payRes.ok) throw new AppError("Failed to update transaction status", payRes.status, "DB_ERROR");
 
-  // Activate subscription
-  const companyId = tx.company_id;
-  const now = new Date();
-  const periodEnd = new Date(now);
-  periodEnd.setMonth(periodEnd.getMonth() + (tx.billing_cycle === "annual" ? 12 : 1));
+  const isConsultingInvoice = order_id.startsWith("CON_") || (tx.plan && tx.plan.includes("consulting") && tx.plan !== "consulting_monthly");
 
-  const deleteFilter = tx.plan === "consulting_monthly" 
-    ? `company_id=eq.${companyId}&plan=eq.consulting_monthly`
-    : `company_id=eq.${companyId}&plan=neq.consulting_monthly`;
+  if (!isConsultingInvoice) {
+    // Activate subscription
+    const now = new Date();
+    const periodEnd = new Date(now);
+    periodEnd.setMonth(periodEnd.getMonth() + (tx.billing_cycle === "annual" ? 12 : 1));
 
-  await fetch(`${env.SUPABASE_URL}/rest/v1/subscriptions?${deleteFilter}`, {
-    method: "DELETE", headers: { apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}` },
-  });
+    const deleteFilter = tx.plan === "consulting_monthly" 
+      ? `company_id=eq.${companyId}&plan=eq.consulting_monthly`
+      : `company_id=eq.${companyId}&plan=neq.consulting_monthly`;
 
-  const subRes = await fetch(`${env.SUPABASE_URL}/rest/v1/subscriptions`, {
-    method: "POST", headers: {
-      apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
-      "Content-Type": "application/json", Prefer: "return=minimal",
-    },
-    body: JSON.stringify({
-      company_id: companyId, plan: tx.plan || "starter", status: "active", gateway: tx.gateway || "manual",
-      gateway_subscription_id: order_id, amount: tx.amount, currency: tx.currency || "INR",
-      billing_cycle: tx.billing_cycle || "monthly",
-      current_period_start: now.toISOString(), current_period_end: periodEnd.toISOString(),
-    }),
-  });
-  if (!subRes.ok) {
-    const errText = await subRes.text().catch(() => "unknown");
-    throw new AppError(`Failed to create subscription: ${errText}`, subRes.status, "DB_ERROR");
-  }
+    await fetch(`${env.SUPABASE_URL}/rest/v1/subscriptions?${deleteFilter}`, {
+      method: "DELETE", headers: { apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}` },
+    });
 
-  if (tx.plan !== "consulting_monthly") {
-    const compRes = await fetch(`${env.SUPABASE_URL}/rest/v1/companies?id=eq.${companyId}`, {
-      method: "PATCH", headers: {
+    const subRes = await fetch(`${env.SUPABASE_URL}/rest/v1/subscriptions`, {
+      method: "POST", headers: {
         apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
         "Content-Type": "application/json", Prefer: "return=minimal",
       },
-      body: JSON.stringify({ subscription_plan: tx.plan || "starter" }),
+      body: JSON.stringify({
+        company_id: companyId, plan: tx.plan || "starter", status: "active", gateway: tx.gateway || "manual",
+        gateway_subscription_id: order_id, amount: tx.amount, currency: tx.currency || "INR",
+        billing_cycle: tx.billing_cycle || "monthly",
+        current_period_start: now.toISOString(), current_period_end: periodEnd.toISOString(),
+      }),
     });
-    if (!compRes.ok) console.error(`[Billing] Failed to update company plan: ${compRes.status}`);
+    if (!subRes.ok) {
+      const errText = await subRes.text().catch(() => "unknown");
+      throw new AppError(`Failed to create subscription: ${errText}`, subRes.status, "DB_ERROR");
+    }
+
+    if (tx.plan !== "consulting_monthly") {
+      const compRes = await fetch(`${env.SUPABASE_URL}/rest/v1/companies?id=eq.${companyId}`, {
+        method: "PATCH", headers: {
+          apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
+          "Content-Type": "application/json", Prefer: "return=minimal",
+        },
+        body: JSON.stringify({ subscription_plan: tx.plan || "starter" }),
+      });
+      if (!compRes.ok) console.error(`[Billing] Failed to update company plan: ${compRes.status}`);
+    }
+
+    // Notify customer
+    if (tx.customer_email) {
+      sendEmail(env, {
+        to: tx.customer_email,
+        subject: `🎉 Your Simpatico HR Subscription is Active!`,
+        html: `<div style="font-family:sans-serif;max-width:600px;margin:auto;padding:24px">
+          <h2 style="color:#1E40AF;margin-bottom:16px">Your Subscription is Now Active!</h2>
+          <p>Hi ${tx.customer_name || "there"},</p>
+          <p>Your payment has been confirmed and your <strong>${(tx.plan || "starter").charAt(0).toUpperCase() + (tx.plan || "starter").slice(1)}</strong> plan is now active.</p>
+          <table style="width:100%;border-collapse:collapse;font-size:14px;margin:16px 0">
+            <tr><td style="padding:8px 12px;font-weight:600;color:#374151;border-bottom:1px solid #E5E7EB">Plan</td><td style="padding:8px 12px;border-bottom:1px solid #E5E7EB">${(tx.plan || "starter").charAt(0).toUpperCase() + (tx.plan || "starter").slice(1)}</td></tr>
+            <tr><td style="padding:8px 12px;font-weight:600;color:#374151;border-bottom:1px solid #E5E7EB">Billing</td><td style="padding:8px 12px;border-bottom:1px solid #E5E7EB">${tx.billing_cycle || "monthly"}</td></tr>
+            <tr><td style="padding:8px 12px;font-weight:600;color:#374151">Valid Until</td><td style="padding:8px 12px;font-weight:700">${periodEnd.toLocaleDateString("en-IN", { year: "numeric", month: "long", day: "numeric" })}</td></tr>
+          </table>
+          <a href="https://simpaticohrconsultancy.com/dashboard/hr.html" style="display:inline-block;margin-top:12px;padding:12px 24px;background:#1E40AF;color:#fff;border-radius:8px;text-decoration:none;font-weight:600;font-size:14px">Go to Dashboard →</a>
+          <p style="margin-top:20px;font-size:13px;color:#6B7280">Thank you for choosing Simpatico HR! Need help? Reply to this email.</p>
+        </div>`,
+      }).catch(e => console.warn("[Billing] Customer activation email failed:", e.message));
+    }
+  } else {
+    // Notify customer about consulting invoice payment confirmation
+    if (tx.customer_email) {
+      sendEmail(env, {
+        to: tx.customer_email,
+        subject: `✅ Consulting Invoice Paid: ${order_id}`,
+        html: `<div style="font-family:sans-serif;max-width:600px;margin:auto;padding:24px">
+          <h2 style="color:#059669;margin-bottom:16px">Consulting Invoice Paid Successfully</h2>
+          <p>Hi ${tx.customer_name || "there"},</p>
+          <p>Your payment for invoice <strong>${order_id}</strong> has been received and verified.</p>
+          <table style="width:100%;border-collapse:collapse;font-size:14px;margin:16px 0">
+            <tr><td style="padding:8px 12px;font-weight:600;color:#374151;border-bottom:1px solid #E5E7EB">Invoice ID</td><td style="padding:8px 12px;border-bottom:1px solid #E5E7EB;font-family:monospace">${order_id}</td></tr>
+            <tr><td style="padding:8px 12px;font-weight:600;color:#374151;border-bottom:1px solid #E5E7EB">Amount</td><td style="padding:8px 12px;border-bottom:1px solid #E5E7EB">${tx.currency === "USD" ? "$" : "₹"}${tx.amount} ${tx.currency}</td></tr>
+            <tr><td style="padding:8px 12px;font-weight:600;color:#374151">Status</td><td style="padding:8px 12px;font-weight:700;color:#059669">PAID</td></tr>
+          </table>
+          <p>Our team is already working on your request. Thank you for choosing Simpatico HR!</p>
+        </div>`,
+      }).catch(e => console.warn("[Billing] Customer consulting confirmation email failed:", e.message));
+    }
   }
 
-  await audit(env, ctx, "billing.payment_confirmed", "payment_transactions", order_id, { plan: tx.plan, amount: tx.amount, gateway: tx.gateway });
-
-  // Notify admin about payment confirmation
+  // Notify admin
   const adminEmailConfirm = env.ADMIN_NOTIFICATION_EMAIL || "info@simpaticohr.in";
   const currencySymbol = tx.currency === "USD" ? "$" : "₹";
   sendEmail(env, {
     to: adminEmailConfirm,
-    subject: `✅ Payment Confirmed: ${(tx.plan || "starter").charAt(0).toUpperCase() + (tx.plan || "starter").slice(1)} — ${currencySymbol}${tx.amount} ${tx.currency || "INR"}`,
+    subject: `✅ Payment Confirmed: ${isConsultingInvoice ? "Consulting " : ""}${(tx.plan || "starter").charAt(0).toUpperCase() + (tx.plan || "starter").slice(1)} — ${currencySymbol}${tx.amount} ${tx.currency || "INR"}`,
     html: `<div style="font-family:sans-serif;max-width:600px;margin:auto;padding:24px">
-      <h2 style="color:#059669;margin-bottom:16px">✅ Payment Confirmed & Subscription Activated</h2>
+      <h2 style="color:#059669;margin-bottom:16px">✅ Payment Confirmed</h2>
       <table style="width:100%;border-collapse:collapse;font-size:14px">
-        <tr><td style="padding:8px 12px;font-weight:600;color:#374151;border-bottom:1px solid #E5E7EB">Order ID</td><td style="padding:8px 12px;border-bottom:1px solid #E5E7EB;font-family:monospace;color:#4F46E5">${order_id}</td></tr>
+        <tr><td style="padding:8px 12px;font-weight:600;color:#374151;border-bottom:1px solid #E5E7EB">Order/Invoice ID</td><td style="padding:8px 12px;border-bottom:1px solid #E5E7EB;font-family:monospace;color:#4F46E5">${order_id}</td></tr>
+        <tr><td style="padding:8px 12px;font-weight:600;color:#374151;border-bottom:1px solid #E5E7EB">Type</td><td style="padding:8px 12px;border-bottom:1px solid #E5E7EB">${isConsultingInvoice ? "One-time Consulting" : "Platform Subscription"}</td></tr>
         <tr><td style="padding:8px 12px;font-weight:600;color:#374151;border-bottom:1px solid #E5E7EB">Gateway</td><td style="padding:8px 12px;border-bottom:1px solid #E5E7EB">${tx.gateway === "wise" ? "Wise (International)" : "Manual (Domestic)"}</td></tr>
-        <tr><td style="padding:8px 12px;font-weight:600;color:#374151;border-bottom:1px solid #E5E7EB">Plan</td><td style="padding:8px 12px;border-bottom:1px solid #E5E7EB">${(tx.plan || "starter").charAt(0).toUpperCase() + (tx.plan || "starter").slice(1)} (${tx.billing_cycle || "monthly"})</td></tr>
+        <tr><td style="padding:8px 12px;font-weight:600;color:#374151;border-bottom:1px solid #E5E7EB">Plan</td><td style="padding:8px 12px;border-bottom:1px solid #E5E7EB">${(tx.plan || "starter").charAt(0).toUpperCase() + (tx.plan || "starter").slice(1)}</td></tr>
         <tr><td style="padding:8px 12px;font-weight:600;color:#374151;border-bottom:1px solid #E5E7EB">Amount</td><td style="padding:8px 12px;border-bottom:1px solid #E5E7EB;font-weight:700;color:#059669">${currencySymbol}${tx.amount} ${tx.currency || "INR"}</td></tr>
         <tr><td style="padding:8px 12px;font-weight:600;color:#374151;border-bottom:1px solid #E5E7EB">Customer</td><td style="padding:8px 12px;border-bottom:1px solid #E5E7EB">${tx.customer_name || "N/A"} (${tx.customer_email || "N/A"})</td></tr>
-        <tr><td style="padding:8px 12px;font-weight:600;color:#374151;border-bottom:1px solid #E5E7EB">Confirmed By</td><td style="padding:8px 12px;border-bottom:1px solid #E5E7EB">${ctx.actorEmail || "Admin"}</td></tr>
-        <tr><td style="padding:8px 12px;font-weight:600;color:#374151">Subscription Until</td><td style="padding:8px 12px;font-weight:700">${periodEnd.toLocaleDateString("en-IN", { year: "numeric", month: "long", day: "numeric" })}</td></tr>
+        <tr><td style="padding:8px 12px;font-weight:600;color:#374151">Confirmed By</td><td style="padding:8px 12px;border-bottom:1px solid #E5E7EB">${actorEmail}</td></tr>
       </table>
-      <p style="margin-top:16px;font-size:13px;color:#059669;font-weight:600">🎉 Subscription is now active!</p>
-      <a href="https://simpaticohrconsultancy.com/platform/super-admin.html" style="display:inline-block;margin-top:12px;padding:10px 20px;background:#1E40AF;color:#fff;border-radius:8px;text-decoration:none;font-size:13px">View in Admin Panel →</a>
     </div>`,
   }).catch(e => console.warn("[Billing] Admin notification failed for payment confirmation:", e.message));
 
-  // Notify the customer that their subscription is active
-  if (tx.customer_email) {
-    sendEmail(env, {
-      to: tx.customer_email,
-      subject: `🎉 Your Simpatico HR Subscription is Active!`,
-      html: `<div style="font-family:sans-serif;max-width:600px;margin:auto;padding:24px">
-        <h2 style="color:#1E40AF;margin-bottom:16px">Your Subscription is Now Active!</h2>
-        <p>Hi ${tx.customer_name || "there"},</p>
-        <p>Your payment has been confirmed and your <strong>${(tx.plan || "starter").charAt(0).toUpperCase() + (tx.plan || "starter").slice(1)}</strong> plan is now active.</p>
-        <table style="width:100%;border-collapse:collapse;font-size:14px;margin:16px 0">
-          <tr><td style="padding:8px 12px;font-weight:600;color:#374151;border-bottom:1px solid #E5E7EB">Plan</td><td style="padding:8px 12px;border-bottom:1px solid #E5E7EB">${(tx.plan || "starter").charAt(0).toUpperCase() + (tx.plan || "starter").slice(1)}</td></tr>
-          <tr><td style="padding:8px 12px;font-weight:600;color:#374151;border-bottom:1px solid #E5E7EB">Billing</td><td style="padding:8px 12px;border-bottom:1px solid #E5E7EB">${tx.billing_cycle || "monthly"}</td></tr>
-          <tr><td style="padding:8px 12px;font-weight:600;color:#374151">Valid Until</td><td style="padding:8px 12px;font-weight:700">${periodEnd.toLocaleDateString("en-IN", { year: "numeric", month: "long", day: "numeric" })}</td></tr>
-        </table>
-        <a href="https://simpaticohrconsultancy.com/dashboard/hr.html" style="display:inline-block;margin-top:12px;padding:12px 24px;background:#1E40AF;color:#fff;border-radius:8px;text-decoration:none;font-weight:600;font-size:14px">Go to Dashboard →</a>
-        <p style="margin-top:20px;font-size:13px;color:#6B7280">Thank you for choosing Simpatico HR! Need help? Reply to this email.</p>
-      </div>`,
-    }).catch(e => console.warn("[Billing] Customer activation email failed:", e.message));
-  }
-
-  return apiResponse({ confirmed: true, plan: tx.plan, order_id });
+  await audit(env, ctx, "billing.payment_confirmed", "payment_transactions", order_id, { plan: tx.plan, amount: tx.amount, gateway: tx.gateway });
 }
 
 /**
@@ -8232,21 +8264,11 @@ async function handlePayConsultingInvoice(request, env, ctx) {
 
   if (tx.company_id !== ctx.tenantId) throw new AppError("Forbidden", 403, "FORBIDDEN");
 
-  // Update status to awaiting_payment
-  const updateRes = await fetch(`${env.SUPABASE_URL}/rest/v1/payment_transactions?gateway_order_id=eq.${order_id}`, {
-    method: "PATCH",
-    headers: {
-      apikey: env.SUPABASE_SERVICE_KEY,
-      Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({
-      status: "awaiting_payment",
-      gateway_payment_id: reference || "client_paid",
-      metadata: { ...tx.metadata, client_reference: reference, paid_at: new Date().toISOString() }
-    })
-  });
-  if (!updateRes.ok) throw new AppError("Failed to update status", updateRes.status, "DB_ERROR");
+  if (tx.status === "paid") {
+    return apiResponse({ success: true, already_paid: true });
+  }
+
+  await executeCompletePayment(env, tx, "manual_verify", ctx);
 
   return apiResponse({ success: true });
 }
@@ -8318,21 +8340,137 @@ async function handleVerifyConsultingInvoice(request, env, ctx) {
   if (!txns?.length) throw new NotFoundError("Transaction");
   const tx = txns[0];
 
-  const updateRes = await fetch(`${env.SUPABASE_URL}/rest/v1/payment_transactions?gateway_order_id=eq.${order_id}`, {
-    method: "PATCH",
-    headers: {
-      apikey: env.SUPABASE_SERVICE_KEY,
-      Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({
-      status: "paid",
-      metadata: { ...tx.metadata, verified_by: ctx.actorEmail, verified_at: new Date().toISOString() }
-    })
-  });
-  if (!updateRes.ok) throw new AppError("Failed to verify", updateRes.status, "DB_ERROR");
+  if (tx.status === "paid") {
+    return apiResponse({ success: true, already_paid: true });
+  }
+
+  await executeCompletePayment(env, tx, "manual_verify", ctx);
 
   return apiResponse({ success: true });
+}
+
+/**
+ * POST /billing/wise/verify — Client triggers automated payment verification using Wise API.
+ * Body: { order_id }
+ */
+async function handleWiseVerifyPayment(request, env, ctx) {
+  requireAuth(ctx);
+  const body = await safeJson(request);
+  const { order_id } = body;
+  if (!order_id) throw new ValidationError("order_id required");
+
+  // 1. Fetch transaction
+  const txRes = await fetch(`${env.SUPABASE_URL}/rest/v1/payment_transactions?gateway_order_id=eq.${order_id}&limit=1`, {
+    headers: { apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}` },
+  });
+  if (!txRes.ok) throw new AppError("Failed to fetch transaction", txRes.status, "DB_ERROR");
+  const txns = await txRes.json();
+  if (!txns?.length) throw new NotFoundError("Transaction");
+  const tx = txns[0];
+
+  // Verify ownership
+  if (tx.company_id !== ctx.tenantId) {
+    throw new AppError("Cannot verify another company's transaction", 403, "FORBIDDEN");
+  }
+
+  // If already paid, return early
+  if (tx.status === "paid") {
+    return apiResponse({ verified: true, already_paid: true, plan: tx.plan, order_id });
+  }
+
+  // 2. Query Wise API for the transfer
+  const token = env.WISE_API_TOKEN;
+  if (!token) {
+    throw new AppError("Wise payment integration is not configured on this server.", 400, "CONFIG_ERROR");
+  }
+
+  const isSandbox = token.startsWith("scb-") || env.WISE_SANDBOX === "true";
+  const wiseHost = isSandbox ? "https://api.sandbox.transferwise.tech" : "https://api.wise.com";
+
+  async function fetchWise(endpoint) {
+    const res = await fetch(`${wiseHost}${endpoint}`, {
+      headers: {
+        "Authorization": `Bearer ${token}`,
+        "Content-Type": "application/json"
+      }
+    });
+    if (!res.ok) {
+      const errText = await res.text();
+      console.error(`[Wise API] Error on ${endpoint}:`, errText);
+      throw new AppError(`Wise API error: ${res.statusText || res.status}`, res.status, "GATEWAY_ERROR");
+    }
+    return res.json();
+  }
+
+  // a. Fetch Profile ID
+  const profiles = await fetchWise("/v1/profiles");
+  if (!profiles || !profiles.length) {
+    throw new AppError("No Wise profiles found.", 404, "NOT_FOUND");
+  }
+  const profile = profiles.find(p => p.type === "business") || profiles[0];
+  const profileId = profile.id;
+
+  // b. Fetch Borderless accounts
+  const borderlessAccounts = await fetchWise(`/v1/borderless-accounts?profileId=${profileId}`);
+  if (!borderlessAccounts || !borderlessAccounts.length) {
+    throw new AppError("No Wise borderless accounts found.", 404, "NOT_FOUND");
+  }
+  const borderlessAccountId = borderlessAccounts[0].id;
+
+  // c. Fetch Statement for the past 5 days to ensure timezone/clearing overlap
+  const currency = (tx.currency || "USD").toUpperCase();
+  const createdAt = tx.created_at ? new Date(tx.created_at) : new Date();
+  const start = new Date(createdAt.getTime() - 5 * 24 * 60 * 60 * 1000);
+  const end = new Date(Date.now() + 24 * 60 * 60 * 1000);
+
+  const queryParams = new URLSearchParams({
+    currency,
+    intervalStart: start.toISOString(),
+    intervalEnd: end.toISOString(),
+    type: "COMPACT"
+  });
+
+  const statement = await fetchWise(`/v3/profiles/${profileId}/borderless-accounts/${borderlessAccountId}/statement.json?${queryParams.toString()}`);
+  const transactions = statement.transactions || [];
+
+  // d. Match transaction by reference and amount
+  const targetAmount = parseFloat(tx.amount);
+  const orderIdLower = tx.gateway_order_id.toLowerCase();
+  const clientRefLower = (tx.metadata?.client_reference || "").toLowerCase();
+
+  let matchedTx = null;
+  for (const t of transactions) {
+    const txAmount = parseFloat(t.amount?.amount || t.amount?.value || 0);
+    const ref = (t.details?.reference || t.details?.description || "").toLowerCase();
+
+    const isCredit = t.type === "CREDIT" || txAmount > 0;
+    const isAmountMatch = Math.abs(txAmount - targetAmount) < 0.01;
+    const isRefMatch = (orderIdLower && ref.includes(orderIdLower)) ||
+                        (clientRefLower && ref.includes(clientRefLower)) ||
+                        (tx.gateway_payment_id && ref.includes(tx.gateway_payment_id.toLowerCase()));
+
+    if (isCredit && isAmountMatch && isRefMatch) {
+      matchedTx = t;
+      break;
+    }
+  }
+
+  if (!matchedTx) {
+    return apiResponse({
+      verified: false,
+      message: "Transfer not found yet. Please make sure the Wise transfer is completed and includes the correct reference note: " + tx.gateway_order_id
+    });
+  }
+
+  // 3. Mark as paid
+  const gatewayPaymentId = matchedTx.id || "wise_auto_" + Date.now();
+  await executeCompletePayment(env, tx, gatewayPaymentId, ctx);
+
+  return apiResponse({
+    verified: true,
+    message: "Payment successfully verified! Your subscription is now active.",
+    reference_id: gatewayPaymentId
+  });
 }
 
 /**

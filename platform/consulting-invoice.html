@@ -488,14 +488,20 @@
       <input type="text" id="modalPaymentRefInput" placeholder="e.g. UPI123456789 or Bank Ref" style="width:100%;padding:10px;border:1.5px solid var(--border);border-radius:8px;font-size:0.85rem;font-family:inherit;outline:none;background:#fff;">
     </div>
 
-    <div style="display:flex;gap:10px;">
-      <button class="tb-btn tb-btn-outline" style="flex:1;justify-content:center;" onclick="document.getElementById('paymentProofModal').classList.remove('active')">Cancel</button>
-      <button class="tb-btn tb-btn-primary" style="flex:1;justify-content:center;" onclick="submitInvoicePaymentProof()">Submit Proof</button>
+    <div style="display:flex;gap:10px;flex-direction:column;">
+      <div style="display:flex;gap:10px;">
+        <button class="tb-btn tb-btn-outline" style="flex:1;justify-content:center;" onclick="document.getElementById('paymentProofModal').classList.remove('active')">Cancel</button>
+        <button class="tb-btn tb-btn-primary" style="flex:1;justify-content:center;" onclick="submitInvoicePaymentProof()">Submit Proof</button>
+      </div>
+      <button id="btnVerifyWiseInvoice" class="tb-btn tb-btn-primary" style="background:#059669;display:none;justify-content:center;" onclick="verifyWiseInvoicePayment()">
+        <i class="fas fa-check-circle" style="margin-right:6px"></i>Verify Wise Payment Instantly
+      </button>
     </div>
   </div>
 </div>
 
 <script>
+const WORKER_URL = window.WORKER_URL || window.SIMPATICO_CONFIG?.workerUrl || 'https://simpatico-hr-ats.simpaticohrconsultancy.workers.dev';
 const SYMBOLS = { inr:'₹', usd:'$', gbp:'£', eur:'€', aed:'AED ', aud:'A$', cad:'C$' };
 let currentCurrency = 'inr';
 let currentEngagement = 'one-time';
@@ -776,6 +782,7 @@ window.openPaymentModal = function () {
   const isDomestic = currentCurrency === 'inr';
   document.getElementById('modalDomesticDetails').style.display = isDomestic ? 'block' : 'none';
   document.getElementById('modalWiseDetails').style.display = !isDomestic ? 'block' : 'none';
+  document.getElementById('btnVerifyWiseInvoice').style.display = !isDomestic ? 'inline-flex' : 'none';
   
   document.getElementById('paymentProofModal').classList.add('active');
 };
@@ -810,6 +817,45 @@ window.submitInvoicePaymentProof = async function () {
     setTimeout(() => location.reload(), 1500);
   } catch (e) {
     showToast('Submission error: ' + e.message, 'error');
+  }
+};
+
+window.verifyWiseInvoicePayment = async function () {
+  if (!activeInvoice) return;
+  const orderId = activeInvoice.gateway_order_id;
+
+  const btn = document.getElementById('btnVerifyWiseInvoice');
+  const origText = btn.innerHTML;
+  btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Verifying...';
+  btn.disabled = true;
+
+  const token = localStorage.getItem('simpatico_token') || localStorage.getItem('sh_token');
+  try {
+    const res = await fetch(`${WORKER_URL}/billing/wise/verify`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
+      body: JSON.stringify({ order_id: orderId })
+    });
+
+    const json = await res.json();
+    if (!res.ok) throw new Error(json?.error?.message || 'Verification failed');
+    const data = json.data || json;
+
+    if (data.verified) {
+      alert(data.message || 'Payment successfully verified and invoice marked as paid!');
+      document.getElementById('paymentProofModal').classList.remove('active');
+      location.reload();
+    } else {
+      alert(data.message || 'Payment not found yet. Please make sure the Wise transfer is completed and includes the correct reference note.');
+    }
+  } catch (e) {
+    alert('Verification Error: ' + e.message);
+  } finally {
+    btn.innerHTML = origText;
+    btn.disabled = false;
   }
 };
 
