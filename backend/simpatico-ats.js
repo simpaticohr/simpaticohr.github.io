@@ -1332,11 +1332,18 @@ route("POST", "/billing/manual/create-order", handleManualCreateOrder);
 route("POST", "/billing/manual/confirm", handleConfirmPayment);
 route("POST", "/billing/wise/create-order", handleWiseCreateOrder);
 route("POST", "/billing/wise/confirm", handleConfirmPayment);
+route("POST", "/billing/wise/confirm", handleConfirmPayment);
 route("GET", "/billing/wise/account-details", handleWiseAccountDetails);
 route("GET", "/billing/subscription", handleGetSubscription);
 route("POST", "/billing/cancel", handleCancelSubscription);
 route("GET", "/billing/transactions", handleListTransactions);
 route("GET", "/billing/detect-currency", handleDetectCurrency);
+
+// ── Consulting Billing & Invoices ──
+route("GET", "/api/consulting/invoices", handleGetConsultingInvoices);
+route("POST", "/api/consulting/pay", handlePayConsultingInvoice);
+route("POST", "/admin/consulting/invoice/create", handleCreateConsultingInvoice);
+route("POST", "/admin/consulting/invoice/verify", handleVerifyConsultingInvoice);
 
 // ── BYOK AI Diagnostics & Config ──
 route("GET", "/ai/byok-test", handleBYOKTest);
@@ -7799,6 +7806,10 @@ const PLAN_PRICING = {
     monthly: { inr: 0, usd: 0, gbp: 0, eur: 0, aud: 0, aed: 0, cad: 0 },
     annual: { inr: 0, usd: 0, gbp: 0, eur: 0, aud: 0, aed: 0, cad: 0 },
   },
+  consulting_monthly: {
+    monthly: { inr: 2500, usd: 40, gbp: 40, eur: 40, aud: 40, aed: 40, cad: 40 },
+    annual: { inr: 25000, usd: 400, gbp: 400, eur: 400, aud: 400, aed: 400, cad: 400 },
+  },
 };
 
 const WISE_BANK_DETAILS = {
@@ -8072,7 +8083,11 @@ async function handleConfirmPayment(request, env, ctx) {
   const periodEnd = new Date(now);
   periodEnd.setMonth(periodEnd.getMonth() + (tx.billing_cycle === "annual" ? 12 : 1));
 
-  await fetch(`${env.SUPABASE_URL}/rest/v1/subscriptions?company_id=eq.${companyId}`, {
+  const deleteFilter = tx.plan === "consulting_monthly" 
+    ? `company_id=eq.${companyId}&plan=eq.consulting_monthly`
+    : `company_id=eq.${companyId}&plan=neq.consulting_monthly`;
+
+  await fetch(`${env.SUPABASE_URL}/rest/v1/subscriptions?${deleteFilter}`, {
     method: "DELETE", headers: { apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}` },
   });
 
@@ -8093,14 +8108,16 @@ async function handleConfirmPayment(request, env, ctx) {
     throw new AppError(`Failed to create subscription: ${errText}`, subRes.status, "DB_ERROR");
   }
 
-  const compRes = await fetch(`${env.SUPABASE_URL}/rest/v1/companies?id=eq.${companyId}`, {
-    method: "PATCH", headers: {
-      apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
-      "Content-Type": "application/json", Prefer: "return=minimal",
-    },
-    body: JSON.stringify({ subscription_plan: tx.plan || "starter" }),
-  });
-  if (!compRes.ok) console.error(`[Billing] Failed to update company plan: ${compRes.status}`);
+  if (tx.plan !== "consulting_monthly") {
+    const compRes = await fetch(`${env.SUPABASE_URL}/rest/v1/companies?id=eq.${companyId}`, {
+      method: "PATCH", headers: {
+        apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
+        "Content-Type": "application/json", Prefer: "return=minimal",
+      },
+      body: JSON.stringify({ subscription_plan: tx.plan || "starter" }),
+    });
+    if (!compRes.ok) console.error(`[Billing] Failed to update company plan: ${compRes.status}`);
+  }
 
   await audit(env, ctx, "billing.payment_confirmed", "payment_transactions", order_id, { plan: tx.plan, amount: tx.amount, gateway: tx.gateway });
 
@@ -8147,6 +8164,146 @@ async function handleConfirmPayment(request, env, ctx) {
   }
 
   return apiResponse({ confirmed: true, plan: tx.plan, order_id });
+}
+
+/**
+ * GET /api/consulting/invoices — Fetch consulting invoices for client.
+ */
+async function handleGetConsultingInvoices(request, env, ctx) {
+  requireAuth(ctx);
+  const companyId = ctx.tenantId;
+  try {
+    const res = await fetch(`${env.SUPABASE_URL}/rest/v1/payment_transactions?company_id=eq.${companyId}&plan=ilike.*consulting*&order=created_at.desc`, {
+      headers: { apikey: env.SUPABASE_ANON_KEY, Authorization: `Bearer ${ctx.token}` },
+    });
+    const data = await res.json();
+    return apiResponse(data);
+  } catch (e) {
+    console.warn("handleGetConsultingInvoices error:", e.message);
+    return apiResponse([]);
+  }
+}
+
+/**
+ * POST /api/consulting/pay — Client submits payment proof / UTR reference.
+ */
+async function handlePayConsultingInvoice(request, env, ctx) {
+  requireAuth(ctx);
+  const body = await safeJson(request);
+  const { order_id, reference } = body;
+  if (!order_id) throw new ValidationError("order_id required");
+
+  // Fetch transaction
+  const txRes = await fetch(`${env.SUPABASE_URL}/rest/v1/payment_transactions?gateway_order_id=eq.${order_id}&limit=1`, {
+    headers: { apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}` },
+  });
+  const txns = await txRes.json();
+  if (!txns?.length) throw new NotFoundError("Transaction");
+  const tx = txns[0];
+
+  if (tx.company_id !== ctx.tenantId) throw new AppError("Forbidden", 403, "FORBIDDEN");
+
+  // Update status to awaiting_payment
+  const updateRes = await fetch(`${env.SUPABASE_URL}/rest/v1/payment_transactions?gateway_order_id=eq.${order_id}`, {
+    method: "PATCH",
+    headers: {
+      apikey: env.SUPABASE_SERVICE_KEY,
+      Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      status: "awaiting_payment",
+      gateway_payment_id: reference || "client_paid",
+      metadata: { ...tx.metadata, client_reference: reference, paid_at: new Date().toISOString() }
+    })
+  });
+  if (!updateRes.ok) throw new AppError("Failed to update status", updateRes.status, "DB_ERROR");
+
+  return apiResponse({ success: true });
+}
+
+/**
+ * POST /admin/consulting/invoice/create — Super Admin creates a consulting invoice.
+ */
+async function handleCreateConsultingInvoice(request, env, ctx) {
+  requireRole(ctx, "super_admin", "superadmin");
+  const body = await safeJson(request);
+  const { company_id, plan, amount, currency, billing_cycle = "one-time", description } = body;
+
+  if (!company_id || !amount || !plan) throw new ValidationError("Missing fields");
+
+  const orderId = `CON_${plan.toUpperCase()}_${crypto.randomUUID().replace(/-/g, "").substring(0, 12)}`;
+
+  // Fetch company name
+  const compRes = await fetch(`${env.SUPABASE_URL}/rest/v1/companies?id=eq.${company_id}&select=name`, {
+    headers: { apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}` },
+  });
+  const comp = await compRes.json();
+  const companyName = comp?.[0]?.name || "Client Company";
+
+  const txRes = await fetch(`${env.SUPABASE_URL}/rest/v1/payment_transactions`, {
+    method: "POST",
+    headers: {
+      apikey: env.SUPABASE_SERVICE_KEY,
+      Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
+      "Content-Type": "application/json",
+      Prefer: "return=representation"
+    },
+    body: JSON.stringify({
+      company_id,
+      company_name: companyName,
+      gateway: "manual",
+      gateway_order_id: orderId,
+      amount: parseFloat(amount),
+      currency: currency || "INR",
+      status: "pending",
+      plan: plan.includes("consulting") ? plan : `consulting_${plan}`,
+      billing_cycle,
+      tenant_id: company_id,
+      metadata: { description }
+    })
+  });
+
+  if (!txRes.ok) {
+    const errText = await txRes.text();
+    throw new AppError(`DB Error: ${errText}`, txRes.status, "DB_ERROR");
+  }
+
+  const tx = await txRes.json();
+  return apiResponse(tx[0] || tx);
+}
+
+/**
+ * POST /admin/consulting/invoice/verify — Super Admin marks invoice as paid.
+ */
+async function handleVerifyConsultingInvoice(request, env, ctx) {
+  requireRole(ctx, "super_admin", "superadmin");
+  const body = await safeJson(request);
+  const { order_id } = body;
+  if (!order_id) throw new ValidationError("order_id required");
+
+  const txRes = await fetch(`${env.SUPABASE_URL}/rest/v1/payment_transactions?gateway_order_id=eq.${order_id}&limit=1`, {
+    headers: { apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}` },
+  });
+  const txns = await txRes.json();
+  if (!txns?.length) throw new NotFoundError("Transaction");
+  const tx = txns[0];
+
+  const updateRes = await fetch(`${env.SUPABASE_URL}/rest/v1/payment_transactions?gateway_order_id=eq.${order_id}`, {
+    method: "PATCH",
+    headers: {
+      apikey: env.SUPABASE_SERVICE_KEY,
+      Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      status: "paid",
+      metadata: { ...tx.metadata, verified_by: ctx.actorEmail, verified_at: new Date().toISOString() }
+    })
+  });
+  if (!updateRes.ok) throw new AppError("Failed to verify", updateRes.status, "DB_ERROR");
+
+  return apiResponse({ success: true });
 }
 
 /**

@@ -130,6 +130,14 @@
     document.addEventListener('DOMContentLoaded', async function () {
         initUserAvatar();
         await initClientSelector();
+
+        // Subscription check
+        const isSubscribed = await checkConsultingSubscription();
+        if (!isSubscribed) {
+            showSubscriptionBlockedOverlay();
+            return;
+        }
+
         // Try to load from Supabase first, fall back to localStorage
         await Promise.all([
             loadProjects(),
@@ -140,6 +148,7 @@
             loadMeetings(),
             loadActivityLog(),
             loadNotifications(),
+            loadConsultingInvoices(),
         ]);
         initCalendar();
         updateOverviewStats();
@@ -2844,4 +2853,268 @@ Be professional, highly strategic, clear, and action-oriented. Keep your spoken 
         showToast('Switched client workspace', 'success');
     };
 
+    // ═══ BUSINESS CONSULTING SUBSCRIPTION & BILLING GUARD ═══
+    const WORKER_URL = window.SIMPATICO_CONFIG?.workerUrl || 'https://simpatico-hr-ats.simpaticohrconsultancy.workers.dev';
+    const SYMBOLS = { inr: '₹', usd: '$', gbp: '£', eur: '€', aed: 'AED ', aud: 'A$', cad: 'C$' };
+
+    async function checkConsultingSubscription() {
+        const user = JSON.parse(localStorage.getItem('simpatico_user') || '{}');
+        const isSuperAdmin = user.role === 'super_admin' || user.role === 'superadmin';
+        if (isSuperAdmin) return true;
+
+        const tenantId = getTenantId();
+        if (!tenantId) return false;
+
+        const client = sb();
+        if (!client) return false;
+
+        try {
+            const { data: subs, error } = await client
+                .from('subscriptions')
+                .select('*')
+                .eq('company_id', tenantId)
+                .eq('plan', 'consulting_monthly')
+                .eq('status', 'active')
+                .gt('current_period_end', new Date().toISOString())
+                .limit(1);
+
+            if (error) {
+                console.error('[consulting] Subscription query error:', error);
+                return false;
+            }
+
+            if (subs && subs.length > 0) {
+                return true;
+            }
+        } catch (e) {
+            console.error('[consulting] Subscription check exception:', e);
+        }
+        return false;
+    }
+
+    function showSubscriptionBlockedOverlay() {
+        if (document.getElementById('consultingSubscriptionOverlay')) return;
+
+        const overlay = document.createElement('div');
+        overlay.id = 'consultingSubscriptionOverlay';
+        overlay.style.cssText = 'position:fixed;inset:0;z-index:99999;background:rgba(15,23,42,0.96);backdrop-filter:blur(12px);display:flex;align-items:center;justify-content:center;color:#fff;font-family:\'Inter\',sans-serif;padding:20px;';
+
+        overlay.innerHTML = `
+            <div style="background:#1E293B;border:1px solid #334155;border-radius:20px;padding:40px;max-width:500px;width:100%;text-align:center;box-shadow:0 25px 50px -12px rgba(0,0,0,0.5);">
+                <div style="width:80px;height:80px;background:rgba(79,70,229,0.1);border:2px solid #4F46E5;border-radius:50%;display:flex;align-items:center;justify-content:center;margin:0 auto 24px;color:#818CF8;font-size:32px;animation:pulse 2s infinite;">
+                    <i class="fas fa-lock"></i>
+                </div>
+                <h1 style="font-size:1.5rem;font-weight:800;margin-bottom:12px;color:#F8FAFC;">Consulting Workspace Locked</h1>
+                <p style="font-size:0.88rem;color:#94A3B8;line-height:1.6;margin-bottom:24px;">
+                    Your monthly Business Consulting subscription is currently inactive. Please subscribe separately to unlock your strategic dashboard.
+                </p>
+                <div style="background:#0F172A;border-radius:12px;padding:18px;margin-bottom:28px;border:1px solid #1E293B;">
+                    <div style="display:flex;justify-content:space-between;font-size:0.82rem;color:#94A3B8;margin-bottom:6px;">
+                        <span>Subscription Plan</span>
+                        <span style="color:#F8FAFC;font-weight:600;">Business Consulting Monthly</span>
+                    </div>
+                    <div style="display:flex;justify-content:space-between;font-size:1.1rem;color:#F8FAFC;font-weight:800;border-top:1px dashed #334155;padding-top:10px;margin-top:6px;">
+                        <span>Price</span>
+                        <span id="overlayPriceDisplay">₹2,500 / mo</span>
+                    </div>
+                </div>
+                <div style="display:flex;gap:12px;">
+                    <button onclick="window.history.back()" style="flex:1;padding:12px;border-radius:10px;background:transparent;border:1.5px solid #475569;color:#F8FAFC;font-size:0.88rem;font-weight:600;cursor:pointer;transition:all 0.2s;">
+                        Back
+                    </button>
+                    <button id="btnSubscribeConsulting" onclick="subscribeToConsulting()" style="flex:1.5;padding:12px;border-radius:10px;background:#4F46E5;border:none;color:#fff;font-size:0.88rem;font-weight:700;cursor:pointer;box-shadow:0 10px 15px -3px rgba(79,70,229,0.4);transition:all 0.2s;">
+                        Subscribe Now
+                    </button>
+                </div>
+            </div>
+            <style>
+                @keyframes pulse {
+                    0%, 100% { transform:scale(1); opacity:1; }
+                    50% { transform:scale(1.05); opacity:0.8; }
+                }
+                #btnSubscribeConsulting:hover { background:#3730A3; transform:translateY(-1px); }
+            </style>
+        `;
+
+        document.body.appendChild(overlay);
+        detectAndSetOverlayPrice();
+    }
+
+    async function detectAndSetOverlayPrice() {
+        try {
+            const res = await fetch(`${WORKER_URL}/billing/detect-currency`);
+            if (res.ok) {
+                const data = await res.json();
+                const currency = (data.currency || 'INR').toLowerCase();
+                const display = currency === 'inr' ? '₹2,500 / mo' : `${SYMBOLS[currency] || '$'}40 / mo`;
+                const overlayPrice = document.getElementById('overlayPriceDisplay');
+                if (overlayPrice) overlayPrice.textContent = display;
+            }
+        } catch(e) {
+            console.warn('Currency detection failed:', e.message);
+        }
+    }
+
+    window.subscribeToConsulting = async function() {
+        const token = localStorage.getItem('simpatico_token') || localStorage.getItem('sh_token');
+        
+        try {
+            let currency = 'INR';
+            const geoRes = await fetch(`${WORKER_URL}/billing/detect-currency`);
+            if (geoRes.ok) {
+                const geoData = await geoRes.json();
+                currency = geoData.currency || 'INR';
+            }
+
+            const createOrderRes = await fetch(`${WORKER_URL}/billing/manual/create-order`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
+                body: JSON.stringify({
+                    plan: 'consulting_monthly',
+                    billing_cycle: 'monthly',
+                    currency: currency
+                })
+            });
+
+            if (!createOrderRes.ok) {
+                const err = await createOrderRes.json();
+                throw new Error(err.message || 'Failed to create order');
+            }
+
+            const order = await createOrderRes.json();
+            window.location.href = `../platform/consulting-invoice.html?id=${order.order_id}`;
+        } catch (e) {
+            alert('Failed to initiate subscription: ' + e.message);
+        }
+    };
+
+    async function loadConsultingInvoices() {
+        const token = localStorage.getItem('simpatico_token') || localStorage.getItem('sh_token');
+        const tenantId = getTenantId();
+        if (!tenantId) return;
+
+        try {
+            const res = await fetch(`${WORKER_URL}/api/consulting/invoices`, {
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'X-Tenant-ID': tenantId
+                }
+            });
+            if (!res.ok) throw new Error('Failed to load invoices');
+            const invoices = await res.json();
+            renderConsultingInvoices(invoices);
+        } catch (e) {
+            console.warn('[consulting] loadConsultingInvoices error:', e.message);
+        }
+    }
+
+    function renderConsultingInvoices(invoices) {
+        const tbody = document.getElementById('clientInvoiceTableBody');
+        if (!tbody) return;
+
+        if (!invoices || !invoices.length) {
+            tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--text-muted);">No invoices found.</td></tr>';
+            document.getElementById('clientOutstanding').textContent = '₹0';
+            document.getElementById('clientTotalPaid').textContent = '₹0';
+            return;
+        }
+
+        let outstanding = 0;
+        let totalPaid = 0;
+
+        let ms1Status = 'pending';
+        let ms2Status = 'pending';
+        let ms3Status = 'pending';
+
+        let html = '';
+        invoices.forEach(tx => {
+            const amt = tx.amount || 0;
+            const isPaid = tx.status === 'paid';
+            const isPending = tx.status === 'pending' || tx.status === 'sent';
+            const isAwaiting = tx.status === 'awaiting_payment';
+
+            if (isPaid) totalPaid += amt;
+            if (isPending || isAwaiting) outstanding += amt;
+
+            const statusBadge = isPaid 
+                ? '<span class="badge badge-active"><i class="fas fa-check-circle" style="margin-right:4px"></i>Paid</span>'
+                : isAwaiting
+                ? '<span class="badge badge-trial" style="background:#EEF2FF;color:#4F46E5;"><i class="fas fa-history" style="margin-right:4px"></i>Awaiting Verification</span>'
+                : '<span class="badge badge-trial"><i class="fas fa-clock" style="margin-right:4px"></i>Due</span>';
+
+            const actionBtn = isPaid
+                ? `<a href="../platform/consulting-invoice.html?id=${tx.gateway_order_id}" target="_blank" class="btn btn-sm btn-secondary"><i class="fas fa-eye"></i> View Receipt</a>`
+                : `<a href="../platform/consulting-invoice.html?id=${tx.gateway_order_id}" target="_blank" class="btn btn-sm btn-primary"><i class="fas fa-file-invoice"></i> Pay Now</a>`;
+
+            const desc = tx.metadata?.description || tx.metadata?.items?.[0]?.desc || tx.plan.replace('consulting_', '').toUpperCase();
+            const dueStr = tx.created_at ? new Date(new Date(tx.created_at).getTime() + 15 * 24 * 60 * 60 * 1000).toISOString().split('T')[0] : '—';
+
+            const symbol = tx.currency?.toLowerCase() === 'inr' ? '₹' : (SYMBOLS[tx.currency?.toLowerCase()] || '$');
+            const amountFormatted = symbol + amt.toLocaleString();
+
+            html += `
+                <tr>
+                    <td style="font-family:monospace;font-weight:600;font-size:12px">${tx.gateway_order_id}</td>
+                    <td style="font-weight:600">${desc}</td>
+                    <td style="font-weight:700;font-variant-numeric:tabular-nums">${amountFormatted}</td>
+                    <td>${statusBadge}</td>
+                    <td style="font-size:13px;color:#6B7280">${dueStr}</td>
+                    <td>${actionBtn}</td>
+                </tr>
+            `;
+        });
+
+        tbody.innerHTML = html;
+
+        const outstandingSymbol = invoices[0]?.currency?.toLowerCase() === 'inr' ? '₹' : (SYMBOLS[invoices[0]?.currency?.toLowerCase()] || '$');
+        document.getElementById('clientOutstanding').textContent = outstandingSymbol + outstanding.toLocaleString();
+        document.getElementById('clientTotalPaid').textContent = outstandingSymbol + totalPaid.toLocaleString();
+
+        const milestoneTxns = invoices.filter(tx => (tx.plan || '').toLowerCase().includes('milestone')).reverse();
+        if (milestoneTxns.length > 0) ms1Status = milestoneTxns[0].status;
+        if (milestoneTxns.length > 1) ms2Status = milestoneTxns[1].status;
+        if (milestoneTxns.length > 2) ms3Status = milestoneTxns[2].status;
+
+        updateMilestoneUi('clientMilestone1', ms1Status, 'Advance (40%)');
+        updateMilestoneUi('clientMilestone2', ms2Status, 'Mid-Project (30%)');
+        updateMilestoneUi('clientMilestone3', ms3Status, 'Completion (30%)');
+
+        let percent = 0;
+        if (ms1Status === 'paid') percent += 40;
+        if (ms2Status === 'paid') percent += 30;
+        if (ms3Status === 'paid') percent += 30;
+
+        const progressLabel = document.getElementById('milestonesProgressLabel');
+        const progressBar = document.getElementById('milestonesProgressBar');
+        if (progressLabel) progressLabel.textContent = percent + '%';
+        if (progressBar) progressBar.style.width = percent + '%';
+    }
+
+    function updateMilestoneUi(elId, status) {
+        const el = document.getElementById(elId);
+        if (!el) return;
+
+        if (status === 'paid') {
+            el.className = 'score-cat-val';
+            el.style.color = 'var(--success)';
+            el.innerHTML = '<i class="fas fa-check-circle"></i> Paid';
+        } else if (status === 'awaiting_payment') {
+            el.className = 'score-cat-val';
+            el.style.color = 'var(--primary)';
+            el.innerHTML = '<i class="fas fa-history"></i> Awaiting Verification';
+        } else if (status === 'pending' || status === 'sent') {
+            el.className = 'score-cat-val';
+            el.style.color = 'var(--warning)';
+            el.innerHTML = '<i class="fas fa-clock"></i> Due Now';
+        } else {
+            el.className = 'score-cat-val';
+            el.style.color = 'var(--text-muted)';
+            el.innerHTML = '<i class="fas fa-hourglass-start"></i> Pending';
+        }
+    }
+
+    // End block
 })();

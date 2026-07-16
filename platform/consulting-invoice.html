@@ -449,22 +449,369 @@
   </div>
 </div>
 
+<!-- ═══ PAYMENT PROOF MODAL ═══ -->
+<div class="wise-modal" id="paymentProofModal">
+  <div class="wise-card">
+    <h2><i class="fas fa-credit-card" style="color:var(--primary);margin-right:8px"></i>Submit Payment Proof</h2>
+    <div class="wise-detail">
+      <div class="row"><span class="label">Invoice #</span><span class="value" id="modalInvoiceNumber">—</span></div>
+      <div class="row"><span class="label">Amount</span><span class="value" id="modalAmount">—</span></div>
+      <div class="row"><span class="label">Plan / Milestone</span><span class="value" id="modalPlan">—</span></div>
+    </div>
+    
+    <!-- Domestic details -->
+    <div id="modalDomesticDetails" style="display:none;margin-bottom:16px;">
+      <p style="font-size:0.78rem;font-weight:700;color:var(--text-secondary);margin-bottom:6px;">Indian Bank Details (UPI / NEFT):</p>
+      <div style="font-size:0.75rem;color:var(--text-secondary);background:#F8FAFC;padding:12px;border-radius:8px;border:1px solid var(--border);line-height:1.5;">
+        <strong>UPI ID:</strong> simpaticohr@upi<br>
+        <strong>Account Name:</strong> FAISAL .K<br>
+        <strong>Bank:</strong> State Bank of India<br>
+        <strong>A/C No:</strong> 67326003131<br>
+        <strong>IFSC:</strong> SBIN0070198
+      </div>
+    </div>
+
+    <!-- International details -->
+    <div id="modalWiseDetails" style="display:none;margin-bottom:16px;">
+      <p style="font-size:0.78rem;font-weight:700;color:var(--text-secondary);margin-bottom:6px;">Wise (International):</p>
+      <div style="font-size:0.75rem;color:var(--text-secondary);background:#F8FAFC;padding:12px;border-radius:8px;border:1px solid var(--border);line-height:1.5;">
+        <strong>Recipient:</strong> Simpatico HR Consultancy<br>
+        <strong>Email:</strong> info@simpaticohr.in
+      </div>
+    </div>
+
+    <p style="font-size:11px;color:#64748B;margin-bottom:6px;text-align:center">Include this reference in your payment note:</p>
+    <div class="wise-ref" id="modalRefCode" onclick="navigator.clipboard.writeText(this.textContent);this.style.background='#DCFCE7';setTimeout(()=>this.style.background='#EEF2FF',1500)">—</div>
+
+    <div style="margin-bottom:20px;">
+      <label style="display:block;font-size:0.75rem;font-weight:700;color:var(--text-secondary);margin-bottom:6px;">Transaction Reference / UTR Number</label>
+      <input type="text" id="modalPaymentRefInput" placeholder="e.g. UPI123456789 or Bank Ref" style="width:100%;padding:10px;border:1.5px solid var(--border);border-radius:8px;font-size:0.85rem;font-family:inherit;outline:none;background:#fff;">
+    </div>
+
+    <div style="display:flex;gap:10px;">
+      <button class="tb-btn tb-btn-outline" style="flex:1;justify-content:center;" onclick="document.getElementById('paymentProofModal').classList.remove('active')">Cancel</button>
+      <button class="tb-btn tb-btn-primary" style="flex:1;justify-content:center;" onclick="submitInvoicePaymentProof()">Submit Proof</button>
+    </div>
+  </div>
+</div>
+
 <script>
 const SYMBOLS = { inr:'₹', usd:'$', gbp:'£', eur:'€', aed:'AED ', aud:'A$', cad:'C$' };
 let currentCurrency = 'inr';
 let currentEngagement = 'one-time';
 let lineCounter = 1;
+let activeInvoice = null;
 
-function init() {
-  const now = new Date();
-  const due = new Date(now); due.setDate(due.getDate() + 15);
-  document.getElementById('issueDate').textContent = formatDate(now);
-  document.getElementById('dueDate').textContent = formatDate(due);
-  const y = now.getFullYear(), m = String(now.getMonth()+1).padStart(2,'0');
-  document.getElementById('invoiceNumber').textContent = `SHR-BC-${y}${m}-${String(Math.floor(Math.random()*900)+100)}`;
-  recalculate();
-  updatePaymentVisibility();
+function sb() {
+  if (typeof getSupabaseClient === 'function') return getSupabaseClient();
+  if (window.supabase && window.SIMPATICO_CONFIG) {
+    if (!window._supabaseClient) {
+      window._supabaseClient = window.supabase.createClient(window.SIMPATICO_CONFIG.supabaseUrl, window.SIMPATICO_CONFIG.supabaseAnonKey);
+    }
+    return window._supabaseClient;
+  }
+  return null;
 }
+
+async function init() {
+  const urlParams = new URLSearchParams(window.location.search);
+  const invoiceId = urlParams.get('id');
+
+  const user = JSON.parse(localStorage.getItem('simpatico_user') || '{}');
+  const isSuperAdmin = user.role === 'super_admin' || user.role === 'superadmin';
+
+  if (invoiceId) {
+    await loadExistingInvoice(invoiceId, isSuperAdmin);
+  } else {
+    if (!isSuperAdmin) {
+      alert('Access Denied: Only platform administrators can generate new invoices.');
+      window.location.href = '../dashboard/consulting.html';
+      return;
+    }
+    const now = new Date();
+    const due = new Date(now); due.setDate(due.getDate() + 15);
+    document.getElementById('issueDate').textContent = formatDate(now);
+    document.getElementById('dueDate').textContent = formatDate(due);
+    const y = now.getFullYear(), m = String(now.getMonth()+1).padStart(2,'0');
+    document.getElementById('invoiceNumber').textContent = `CON_NEW_${y}${m}_${String(Math.floor(Math.random()*9000)+1000)}`;
+    
+    await populateClientDropdown();
+    
+    recalculate();
+    updatePaymentVisibility();
+  }
+}
+
+async function loadExistingInvoice(id, isSuperAdmin) {
+  const client = sb();
+  if (!client) return;
+
+  try {
+    const { data: txns, error } = await client
+      .from('payment_transactions')
+      .select('*')
+      .eq('gateway_order_id', id)
+      .limit(1);
+
+    if (error || !txns || !txns.length) {
+      alert('Invoice not found in system.');
+      return;
+    }
+
+    const tx = txns[0];
+    activeInvoice = tx;
+
+    document.getElementById('invoiceNumber').textContent = tx.gateway_order_id;
+    document.getElementById('issueDate').textContent = formatDate(new Date(tx.created_at));
+    
+    const due = new Date(tx.created_at); due.setDate(due.getDate() + 15);
+    document.getElementById('dueDate').textContent = formatDate(due);
+
+    document.getElementById('clientName').value = tx.company_name || 'Client Company';
+    document.getElementById('clientName').disabled = true;
+
+    const { data: comp } = await client.from('companies').select('*').eq('id', tx.company_id).limit(1);
+    if (comp?.[0]) {
+      document.getElementById('clientAddress').value = comp[0].address || '';
+      document.getElementById('clientEmail').value = comp[0].email || '';
+      document.getElementById('clientPhone').value = comp[0].phone || '';
+    }
+    document.getElementById('clientAddress').disabled = true;
+    document.getElementById('clientEmail').disabled = true;
+    document.getElementById('clientPhone').disabled = true;
+
+    currentCurrency = (tx.currency || 'INR').toLowerCase();
+    document.getElementById('currencySelect').value = currentCurrency;
+    document.getElementById('currencySelect').disabled = true;
+
+    const p = (tx.plan || '').toLowerCase();
+    currentEngagement = p.includes('milestone') ? 'milestone' : p.includes('retainer') ? 'retainer' : 'one-time';
+    document.getElementById('engagementType').value = currentEngagement;
+    document.getElementById('engagementType').disabled = true;
+    
+    const icons = { 'one-time':'fa-briefcase', 'milestone':'fa-flag-checkered', 'retainer':'fa-calendar-check' };
+    const labels = { 'one-time':'One-Time Project', 'milestone':'Milestone-Based (40/30/30)', 'retainer':'Monthly Retainer' };
+    document.getElementById('engagementBadge').innerHTML = `<i class="fas ${icons[currentEngagement]}"></i><span>${labels[currentEngagement]}</span>`;
+    document.getElementById('milestoneSection').style.display = currentEngagement === 'milestone' ? 'block' : 'none';
+
+    const status = tx.status || 'pending';
+    document.getElementById('statusSelect').value = status;
+    changeStatus(status);
+    if (!isSuperAdmin) {
+      document.getElementById('statusSelect').disabled = true;
+    }
+
+    const items = tx.metadata?.items || [
+      { desc: tx.metadata?.description || 'Consulting Services', qty: 1, rate: tx.amount }
+    ];
+    
+    const tbody = document.getElementById('lineItems');
+    tbody.innerHTML = '';
+    
+    items.forEach((item, idx) => {
+      const tr = document.createElement('tr');
+      const removeBtn = isSuperAdmin ? `<button class="remove-line" onclick="removeLine(this)" title="Remove"><i class="fas fa-times"></i></button>` : '';
+      
+      tr.innerHTML = `
+        <td>${idx+1}</td>
+        <td><input class="line-input" value="${item.desc}" ${!isSuperAdmin ? 'disabled' : ''} onchange="recalculate()"></td>
+        <td><input class="line-input line-input-num" type="number" value="${item.qty}" ${!isSuperAdmin ? 'disabled' : ''} min="0" step="0.5" onchange="recalculate()"></td>
+        <td><input class="line-input line-input-num" type="number" value="${item.rate}" ${!isSuperAdmin ? 'disabled' : ''} min="0" onchange="recalculate()"></td>
+        <td class="line-amount">${formatCurrency(item.qty * item.rate)}</td>
+        <td>${removeBtn}</td>
+      `;
+      tbody.appendChild(tr);
+    });
+
+    lineCounter = items.length;
+
+    const gstMode = tx.metadata?.gst === '18' ? '18' : 'exempt';
+    document.getElementById('gstSelect').value = gstMode;
+    document.getElementById('gstSelect').disabled = true;
+    toggleGST(gstMode);
+
+    recalculate();
+    updatePaymentVisibility();
+
+    if (!isSuperAdmin) {
+      document.getElementById('btnSaveInvoice').style.display = 'none';
+      document.querySelector('.tb-btn-success').style.display = 'none';
+      document.querySelector('button[onclick="resetInvoice()"]').style.display = 'none';
+      document.querySelector('.config-bar').style.display = 'none';
+      
+      if (status === 'pending' || status === 'sent' || status === 'awaiting_payment') {
+        document.getElementById('btnPayInvoice').style.display = 'inline-flex';
+      }
+    }
+
+  } catch (e) {
+    console.error('Failed to load existing invoice:', e);
+  }
+}
+
+async function populateClientDropdown() {
+  const client = sb();
+  if (!client) return;
+
+  try {
+    const { data: companies, error } = await client
+      .from('companies')
+      .select('id, name, address, email, phone')
+      .order('name');
+
+    if (error || !companies || !companies.length) return;
+
+    const select = document.getElementById('clientCompanySelect');
+    const wrapper = document.getElementById('clientSelectWrapper');
+    const input = document.getElementById('clientName');
+
+    if (!select || !wrapper || !input) return;
+
+    window._cachedClientCompanies = companies;
+
+    let options = '<option value="">-- Select Client Company --</option>';
+    companies.forEach(c => {
+      options += `<option value="${c.id}">${c.name}</option>`;
+    });
+
+    select.innerHTML = options;
+    input.style.display = 'none';
+    wrapper.style.display = 'block';
+  } catch (e) {
+    console.warn('Failed to load client companies list:', e);
+  }
+}
+
+window.onClientCompanyChange = function (companyId) {
+  if (!companyId) return;
+  const companies = window._cachedClientCompanies || [];
+  const comp = companies.find(c => c.id === companyId);
+  if (!comp) return;
+
+  document.getElementById('clientAddress').value = comp.address || '';
+  document.getElementById('clientEmail').value = comp.email || '';
+  document.getElementById('clientPhone').value = comp.phone || '';
+};
+
+async function saveConsultingInvoice() {
+  const token = localStorage.getItem('simpatico_token') || localStorage.getItem('sh_token');
+  
+  const select = document.getElementById('clientCompanySelect');
+  const companyId = select ? select.value : '';
+  if (!companyId) {
+    alert('Please select a client company.');
+    return;
+  }
+
+  const items = [];
+  for (const row of document.getElementById('lineItems').children) {
+    const inputs = row.querySelectorAll('input');
+    const desc = inputs[0]?.value;
+    const qty = parseFloat(inputs[1]?.value) || 0;
+    const rate = parseFloat(inputs[2]?.value) || 0;
+    if (desc) {
+      items.push({ desc, qty, rate });
+    }
+  }
+
+  if (!items.length) {
+    alert('Please add at least one line item.');
+    return;
+  }
+
+  let subtotal = items.reduce((s, i) => s + (i.qty * i.rate), 0);
+  const gstMode = document.getElementById('gstSelect').value;
+  let tax = gstMode === '18' ? Math.round(subtotal * 0.18) : 0;
+  const total = subtotal + tax;
+
+  const plan = document.getElementById('engagementType').value;
+  const currency = document.getElementById('currencySelect').value.toUpperCase();
+  const description = items.map(i => i.desc).join(', ');
+
+  try {
+    showToast('Saving invoice...', 'info');
+    
+    const response = await fetch(`${WORKER_URL}/admin/consulting/invoice/create`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
+      body: JSON.stringify({
+        company_id: companyId,
+        plan: `consulting_${plan}`,
+        amount: total,
+        currency,
+        billing_cycle: plan === 'retainer' ? 'monthly' : 'one-time',
+        description,
+        metadata: { items, gst: gstMode }
+      })
+    });
+
+    if (!response.ok) {
+      const err = await response.json();
+      throw new Error(err.message || 'Failed to save');
+    }
+
+    const data = await response.json();
+    showToast('Invoice created successfully!', 'success');
+    
+    setTimeout(() => {
+      window.location.href = `consulting-invoice.html?id=${data.gateway_order_id}`;
+    }, 1500);
+  } catch (e) {
+    showToast('Save failed: ' + e.message, 'error');
+  }
+}
+
+window.openPaymentModal = function () {
+  if (!activeInvoice) return;
+  
+  document.getElementById('modalInvoiceNumber').textContent = activeInvoice.gateway_order_id;
+  document.getElementById('modalAmount').textContent = formatCurrency(activeInvoice.amount);
+  document.getElementById('modalPlan').textContent = activeInvoice.plan.replace('consulting_', '').toUpperCase();
+  
+  document.getElementById('modalRefCode').textContent = activeInvoice.gateway_order_id;
+  
+  const isDomestic = currentCurrency === 'inr';
+  document.getElementById('modalDomesticDetails').style.display = isDomestic ? 'block' : 'none';
+  document.getElementById('modalWiseDetails').style.display = !isDomestic ? 'block' : 'none';
+  
+  document.getElementById('paymentProofModal').classList.add('active');
+};
+
+window.submitInvoicePaymentProof = async function () {
+  const reference = document.getElementById('modalPaymentRefInput').value.trim();
+  if (!reference) {
+    alert('Please enter your transaction reference / UTR number.');
+    return;
+  }
+
+  const token = localStorage.getItem('simpatico_token') || localStorage.getItem('sh_token');
+  try {
+    showToast('Submitting payment proof...', 'info');
+    const res = await fetch(`${WORKER_URL}/api/consulting/pay`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
+      body: JSON.stringify({
+        order_id: activeInvoice.gateway_order_id,
+        reference
+      })
+    });
+
+    if (!res.ok) throw new Error('Submission failed');
+
+    showToast('Proof submitted! Awaiting verification.', 'success');
+    document.getElementById('paymentProofModal').classList.remove('active');
+    
+    setTimeout(() => location.reload(), 1500);
+  } catch (e) {
+    showToast('Submission error: ' + e.message, 'error');
+  }
+};
 
 function formatDate(d) {
   return ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()] + ' ' + d.getDate() + ', ' + d.getFullYear();
@@ -500,8 +847,8 @@ function changeEngagement(val) {
 
 function changeStatus(val) {
   const pill = document.getElementById('statusPill');
-  const c = { draft:'pill-draft', sent:'pill-sent', paid:'pill-paid', overdue:'pill-overdue' };
-  const l = { draft:'DRAFT', sent:'SENT', paid:'PAID', overdue:'OVERDUE' };
+  const c = { draft:'pill-draft', sent:'pill-sent', paid:'pill-paid', overdue:'pill-overdue', awaiting_payment:'pill-sent' };
+  const l = { draft:'DRAFT', sent:'SENT', paid:'PAID', overdue:'OVERDUE', awaiting_payment:'AWAITING VERIFICATION' };
   pill.className = 'status-pill ' + c[val];
   pill.innerHTML = '<i class="fas fa-circle" style="font-size:6px"></i> ' + l[val];
 }
@@ -581,7 +928,7 @@ function resetInvoice() { if (confirm('Reset invoice? All data will be cleared.'
 
 function copyLink() {
   const n = document.getElementById('invoiceNumber').textContent;
-  navigator.clipboard.writeText('Simpatico HR Invoice: ' + n + '\nhttps://simpaticohr.in/platform/consulting-invoice.html').then(() => showToast('Link copied!', 'info'));
+  navigator.clipboard.writeText('Simpatico HR Invoice: ' + n + '\n' + window.location.href).then(() => showToast('Link copied!', 'info'));
 }
 
 function showToast(msg, type) {
