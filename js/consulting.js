@@ -23,14 +23,10 @@
 
     function getTenantId() {
         try {
-            const activeTenant = sessionStorage.getItem('active_consulting_tenant');
-            if (activeTenant) return activeTenant;
-
-            if (window.SIMPATICO_CONFIG && window.SIMPATICO_CONFIG.tenantId) return window.SIMPATICO_CONFIG.tenantId;
             if (typeof getCompanyId === 'function' && getCompanyId()) return getCompanyId();
             const user = JSON.parse(localStorage.getItem('simpatico_user') || '{}');
-            return user.company_id || 'SIMP_PRO_MAIN';
-        } catch { return 'SIMP_PRO_MAIN'; }
+            return user.company_id || null;
+        } catch { return null; }
     }
 
     function getUserInfo() {
@@ -79,7 +75,7 @@
         const cid = getTenantId();
         if (!client) return null;
         try {
-            let q = client.from(table).select('*').eq('tenant_id', cid);
+            let q = client.from(table).select('*').eq('company_id', cid);
             if (orderBy) q = q.order(orderBy.col, { ascending: orderBy.asc !== false });
             const { data, error } = await q;
             if (error) {
@@ -247,7 +243,7 @@
         const user = getUserInfo();
         const cid = getTenantId();
         const record = {
-            tenant_id: cid,
+            company_id: cid,
             user_id: user.id,
             user_name: user.name,
             action: title,
@@ -353,7 +349,7 @@
         const cid = getTenantId();
         if (client) {
             try {
-                await client.from(TABLES.activity).update({ read: true }).eq('tenant_id', cid).eq('read', false);
+                await client.from(TABLES.activity).update({ read: true }).eq('company_id', cid).eq('read', false);
             } catch (e) { console.warn('[consulting] markAllRead error:', e); }
         }
         cachedActivity.forEach(a => a.read = true);
@@ -506,7 +502,7 @@
     const assessmentQuestionsTranslations = {
         hi: [
             { category: 'Strategy', q: 'आपकी कंपनी की 3-5 साल की व्यावसायिक रणनीति कितनी स्पष्ट रूप से परिभाषित है?', opts: ['कोई औपचारिक रणनीति मौजूद नहीं है', 'बुनियादी योजना है लेकिन शायद ही कभी संदर्भित की जाती है', 'दस्तावेज है लेकिन अपडेट करने की आवश्यकता है', 'स्पष्ट रणनीति जिसकी वार्षिक समीक्षा की जाती है', 'तिमाही समीक्षाओं के साथ व्यापक रणनीति'] },
-            { category: 'Strategy', q: 'आपकी टीम आपके प्रतिस्पर्धी लाभ को कितनी अच्छी तरह समझती है?', opts: ['परिभाषित नहीं है', 'अस्पष्ट रूप से समझा गया', 'कुछ हद तक स्पष्ट', 'नेतृत्व द्वारा अच्छी तरह से समझा गया', 'सभी स्तरों पर बिल्कुल स्पष्ट'] },
+            { category: 'Strategy', q: 'आपकी टीम आपके प्रतिस्पर्धी लाभ को कितनी अच्छी तरह समझती है?', opts: ['परिभाषित नहीं है', 'अस्पष्ट रूप से समझा गया', 'कुछ हद तक स्पष्ट', 'नेतृत्व द्वारा अच्छी तरह से समझा गय���', 'सभी स्तरों पर बिल्कुल स्पष्ट'] },
             { category: 'Operations', q: 'आपकी मुख्य व्यावसायिक प्रक्रियाएं कितनी कुशल हैं?', opts: ['ज्यादातर मैन्युअल और अव्यवस्थित', 'कुछ प्रक्रियाएं परिभाषित हैं', 'प्रमुख प्रक्रियाएं दस्तावेज में हैं', 'कुछ स्वचालन के साथ अच्छी तरह से अनुकूलित', 'पूरी तरह से अनुकूलित और निरंतर सुधारित'] },
             { category: 'Operations', q: 'आप अपनी आपूर्ति श्रृंखला या सेवा वितरण को कितने प्रभावी ढंग से प्रबंधित करते हैं?', opts: ['बार-बार व्यवधान', 'बुनियादी प्रबंधन', 'सुधार की गुंजाइश के साथ पर्याप्त', 'KPIs के साथ अच्छी तरह से प्रबंधित', 'वास्तविक समय की निगरानी के साथ सर्वश्रेष्ठ वितरण'] },
             { category: 'Finance', q: 'आपकी वित्तीय योजना और पूर्वानुमान कितना मजबूत है?', opts: ['कोई औपचारिक वित्तीय योजना नहीं', 'केवल बुनियादी बजट', 'कुछ पूर्वानुमान के साथ वार्षिक बजट', 'तिमाही रूप से अपडेट किए गए विस्तृत वित्तीय मॉडल', 'परिदृश्य योजना के साथ वास्तविक समय वित्तीय डैशबोर्ड'] },
@@ -533,7 +529,7 @@
             { category: 'Strategy', q: 'നിങ്ങളുടെ മത്സരാധിഷ്ഠിത നേട്ടത്തെക്കുറിച്ച് നിങ്ങളുടെ ടീം എത്രത്തോളം മനസ്സിലാക്കുന്നുണ്ട്?', opts: ['നിർവചിക്കപ്പെട്ടിട്ടില്ല', 'വ്യക്തമല്ലാത്ത ധാരണ', 'ഒരു പരിധി വരെ വ്യക്തമാണ്', 'നേതൃത്വത്തിന് വ്യക്തമായ ധാരണയുണ്ട്', 'എല്ലാ തലങ്ങളിലും തികച്ചും വ്യക്തമാണ്'] },
             { category: 'Operations', q: 'നിങ്ങളുടെ പ്രധാന ബിസിനസ്സ് പ്രക്രിയകൾ എത്രത്തോളം കാര്യക്ഷമമാണ്?', opts: ['ഭൂരിഭാഗവും മാനുവൽ ആണ്', 'ചില പ്രക്രിയകൾ നിർവചിക്കപ്പെട്ടിട്ടുണ്ട്', 'പ്രധാന പ്രക്രിയകൾ രേഖപ്പെടുത്തപ്പെട്ടിട്ടുണ്ട്', 'ചില ഓട്ടോമേഷനുകളോടെ നന്നായി ക്രമീകരിച്ചിരിക്കുന്നു', 'പൂർണ്ണമായും ഒപ്റ്റിമൈസ് ചെയ്തതും നിരന്തരം മെച്ചപ്പെടുത്തുന്നതുമാണ്'] },
             { category: 'Operations', q: 'നിങ്ങളുടെ സപ്ലൈ ചെയിൻ അല്ലെങ്കിൽ സേവന വിതരണം എത്രത്തോളം ഫലപ്രദമായി നിങ്ങൾ കൈകാര്യം ചെയ്യുന്നു?', opts: ['പലപ്പോഴും തടസ്സങ്ങൾ ഉണ്ടാകുന്നു', 'അടിസ്ഥാനപരമായ മാനേജ്മെന്റ്', 'മെച്ചപ്പെടുത്താൻ അവസരമുള്ള തരത്തിൽ തൃപ്തികരമാണ്', 'KPI-കൾ ഉപയോഗിച്ച് നന്നായി കൈകാര്യം ചെയ്യുന്നു', 'തത്സമയ നിരീക്ഷണത്തോടെ മികച്ച സേവന വിതരണം'] },
-            { category: 'Finance', q: 'നിങ്ങളുടെ സാമ്പത്തിക ആസൂത്രണവും പ്രവചനവും എത്രത്തോളം ശക്തമാണ്?', opts: ['ഔപചാരികമായ സാമ്പത്തിക ആസൂത്രണം ഇല്ല', 'അടിസ്ഥാന ബജറ്റിംഗ് മാത്രം', 'ചില പ്രവചനങ്ങളോടെയുള്ള വാർഷിക ബജറ്റുകൾ', 'ത്രൈമാസ അടിസ്ഥാനത്തിൽ പുതുക്കുന്ന വിശദമായ സാമ്പത്തിക മോഡലുകൾ', 'തത്സമയ ധനകാര്യ ഡാഷ്‌ബോർഡുകൾ'] },
+            { category: 'Finance', q: 'നിങ്ങളുടെ സാമ്പത്തിക ആസൂത്രണവും പ്രവചനവും എത്രത്തോളം ശക്തമാണ്?', opts: ['ഔപചാരികമായ സാമ്പത്തിക ആസൂത്രണം ഇല്ല', 'അടിസ്ഥാന ബജറ്റിംഗ് മാത്രം', 'ചില പ്രവചനങ്ങളോട���യുള്ള വാർഷിക ബജറ്റുകൾ', 'ത്രൈമാസ അടിസ്ഥാനത്തിൽ പുതുക്കുന്ന വിശദമായ സാമ്പത്തിക മോഡലുകൾ', 'തത്സമയ ധനകാര്യ ഡാഷ്‌ബോർഡുകൾ'] },
             { category: 'Finance', q: 'നിക്ഷേപങ്ങളിലും പ്രോജക്റ്റുകളിലും ലഭിക്കുന്ന ലാഭം (ROI) നിങ്ങൾ എത്രത്തോളം ട്രാക്ക് ചെയ്യുന്നുണ്ട്?', opts: ['ROI ഒരിക്കലും അളക്കാറില്ല', 'അപൂർവ്വമായി അവലോകനം ചെയ്യുന്നു', 'വലിയ നിക്ഷേപങ്ങൾക്ക് മാത്രം അളക്കുന്നു', 'മിക്ക പ്രോജക്റ്റുകൾക്കും വ്യവസ്ഥാപിതമായി ട്രാക്ക് ചെയ്യുന്നു', 'എല്ലാ പദ്ധതികൾക്കും സമഗ്രമായ ROI ചട്ടക്കൂട്'] },
             { category: 'Digital Maturity', q: 'നിങ്ങളുടെ ഡിജിറ്റൽ പുരോഗതിയുടെ നിലവാരം എത്രയാണ്?', opts: ['ഭൂരിഭാഗവും പേപ്പർ അടിസ്ഥാനമാക്കിയുള്ള പ്രവർത്തനങ്ങൾ', 'അടിസ്ഥാന ഡിജിറ്റൽ ഉപകരണങ്ങൾ (ഇമെയിൽ, സ്പ്രെഡ്ഷീറ്റുകൾ)', 'ചില ക്ലൗഡ് സോഫ്റ്റ്‌വെയറുകൾ ഉപയോഗിക്കുന്നു', 'ഡിജിറ്റൽ മുൻഗണന നൽകുന്ന സംയോജിത സിസ്റ്റങ്ങൾ', 'ആധുനിക അനലിറ്റിക്സോടെയുള്ള AI/ഓട്ടോമേഷൻ അധിഷ്ഠിത പ്രവർത്തനം'] },
             { category: 'Digital Maturity', q: 'തീരുമാനങ്ങൾ എടുക്കുന്നതിന് നിങ്ങൾ ഡാറ്റ എത്രത്തോളം ഫലപ്രദമായി ഉപയോഗിക്കുന്നു?', opts: ['തീരുമാനങ്ങൾ പൂർണ്ണമായും ഊഹങ്ങളെ അടിസ്ഥാനമാക്കിയുള്ളതാണ്', 'അടിസ്ഥാന ഡാറ്റ ശേഖരിക്കുന്നുണ്ടെങ്കിലും അപൂർവ്വമായി മാത്രമേ ഉപയോഗിക്കുന്നുള്ളൂ', 'ചില റിപ്പോർട്ടുകൾ ഇടയ്ക്കിടെ തയ്യാറാക്കുന്നു', 'നേതൃത്വ തലത്തിൽ ഡാറ്റ അടിസ്ഥാനമാക്കിയുള്ള തീരുമാനങ്ങൾ', 'ഓർഗനൈസേഷനിലുടനീളം ഡാറ്റ അടിസ്ഥാനമാക്കിയുള്ള സംസ്കാരം'] },
@@ -705,7 +701,7 @@
 
         // Save to Supabase
         const dbRecord = {
-            tenant_id: getTenantId(),
+            company_id: getTenantId(),
             created_by: getUserInfo().id,
             overall_score: overall,
             category_scores: categoryScores,
@@ -882,7 +878,7 @@
             const { data, error } = await client
                 .from('consulting_kpi_history')
                 .select('*')
-                .eq('tenant_id', cid)
+                .eq('company_id', cid)
                 .order('recorded_at', { ascending: true });
             if (error) throw error;
             cachedKPIHistory = data || [];
@@ -908,7 +904,7 @@
         if (!name) { showToast('KPI name is required', 'error'); return; }
 
         const kpi = {
-            tenant_id: getTenantId(),
+            company_id: getTenantId(),
             created_by: getUserInfo().id,
             name: name,
             current_value: parseFloat(document.getElementById('kpiCurrent').value) || 0,
@@ -923,7 +919,7 @@
             if (client) {
                 try {
                     await client.from('consulting_kpi_history').insert({
-                        tenant_id: getTenantId(),
+                        company_id: getTenantId(),
                         kpi_id: result[0].id,
                         value: kpi.current_value,
                         recorded_at: new Date().toISOString()
@@ -969,7 +965,7 @@
                 const { error: histErr } = await client
                     .from('consulting_kpi_history')
                     .insert({
-                        tenant_id: getTenantId(),
+                        company_id: getTenantId(),
                         kpi_id: id,
                         value: val,
                         recorded_at: new Date().toISOString()
@@ -1101,7 +1097,7 @@
         } else {
             cachedProjects = (lsLoad(LS_KEYS.projects) || []).map(p => ({
                 ...p, id: p.id || crypto.randomUUID(),
-                tenant_id: getTenantId(),
+                company_id: getTenantId(),
             }));
         }
         renderProjects();
@@ -1112,7 +1108,7 @@
         if (!name) { showToast('Project name is required', 'error'); return; }
 
         const project = {
-            tenant_id: getTenantId(),
+            company_id: getTenantId(),
             created_by: getUserInfo().id,
             name: name,
             type: document.getElementById('projType').value,
@@ -1205,7 +1201,7 @@
                     .from('consulting_projects')
                     .update({ stage: targetStage, updated_at: new Date().toISOString() })
                     .eq('id', id)
-                    .eq('tenant_id', getTenantId());
+                    .eq('company_id', getTenantId());
 
                 if (error) throw error;
                 showToast(`Project moved to ${targetStage.toUpperCase()}`, 'success');
@@ -1341,7 +1337,7 @@
         if (!val) return;
 
         const record = {
-            tenant_id: getTenantId(),
+            company_id: getTenantId(),
             created_by: getUserInfo().id,
             type: key,
             content: val,
@@ -1391,7 +1387,7 @@
         if (!name) { showToast('Document name is required', 'error'); return; }
 
         const doc = {
-            tenant_id: getTenantId(),
+            company_id: getTenantId(),
             created_by: getUserInfo().id,
             name: name,
             category: document.getElementById('docCategory').value,
@@ -1552,7 +1548,7 @@
         if (!title || !date) { showToast('Title and date are required', 'error'); return; }
 
         const meeting = {
-            tenant_id: getTenantId(),
+            company_id: getTenantId(),
             created_by: getUserInfo().id,
             title: title,
             date: date,
@@ -2583,7 +2579,7 @@ RECOMMENDATIONS FOR NEXT WEEK
             recStrategy: 'ത്രൈമാസ അവലോകനങ്ങളോടെയുള്ള 3-5 വർഷത്തെ തന്ത്രപരമായ പ്ലാൻ തയ്യാറാക്കുക.',
             recOperations: 'പ്രധാന പ്രവർത്തനങ്ങൾ ഡോക്യുമെന്റ് ചെയ്യുകയും ഒപ്റ്റിമൈസ് ചെയ്യുകയും ചെയ്യുക.',
             recFinance: 'സാമ്പത്തിക ഡാഷ്‌ബോർഡുകളും ROI ട്രാക്കിംഗും നടപ്പിലാക്കുക.',
-            recDigital: 'ഡിജിറ്റൽ പുരോഗതിക്ക് മുൻഗണന നൽകുക — ക്ലൗഡ് മൈഗ്രേഷനിലൂടെ ആരംഭിക്കുക.',
+            recDigital: 'ഡിജിറ്റൽ പുരോഗതിക്ക് മുൻഗണന നൽകു�� — ക്ലൗഡ് മൈഗ്രേഷനിലൂടെ ആരംഭിക്കുക.',
             recHR: 'ജീവനക്കാരുടെ തൃപ്തി വർദ്ധിപ്പിക്കുന്ന പ്രോഗ്രാമുകളിൽ നിക്ഷേപിക്കുക.',
             Strategy: 'തന്ത്രം', Operations: 'പ്രവർത്തനങ്ങൾ', Finance: 'ധനകാര്യം', 'Digital Maturity': 'ഡിജിറ്റൽ പുരോഗതി', 'HR & Culture': 'HR & സംസ്കാരം',
             navDashboard: 'ഡാഷ്‌ബോർഡ്', navManagement: 'മാനേജ്‌മെന്റ്', navIntelligence: 'ഇന്റലിജൻസ്', navLinks: 'ലിങ്കുകൾ',
@@ -3270,7 +3266,7 @@ Be professional, highly strategic, clear, and action-oriented. Keep your spoken 
 
     // ═══════════════════════════════════════════════════════════
     // § UTILITIES
-    // ═══════════════════════════════════════════════════════════
+    // ═══════════════════════════════════════════���═══════════════
     function escHtml(str) {
         if (str === null || str === undefined) return '';
         const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
@@ -3332,7 +3328,7 @@ Be professional, highly strategic, clear, and action-oriented. Keep your spoken 
             collabChannel = client.channel('consulting-collaboration')
                 .on('postgres_changes', { event: '*', schema: 'public', table: 'consulting_projects' }, (payload) => {
                     const row = payload.new || payload.old;
-                    if (row && row.tenant_id === cid) {
+                    if (row && row.company_id === cid) {
                         loadProjects().then(() => {
                             renderProjects();
                             updateVisualAnalytics();
@@ -3341,13 +3337,13 @@ Be professional, highly strategic, clear, and action-oriented. Keep your spoken 
                 })
                 .on('postgres_changes', { event: '*', schema: 'public', table: 'consulting_kpis' }, (payload) => {
                     const row = payload.new || payload.old;
-                    if (row && row.tenant_id === cid) {
+                    if (row && row.company_id === cid) {
                         loadKPIs();
                     }
                 })
                 .on('postgres_changes', { event: '*', schema: 'public', table: 'consulting_kpi_history' }, (payload) => {
                     const row = payload.new || payload.old;
-                    if (row && row.tenant_id === cid) {
+                    if (row && row.company_id === cid) {
                         loadKPIHistory().then(() => {
                             renderKPIs();
                             updateVisualAnalytics();
@@ -3356,7 +3352,7 @@ Be professional, highly strategic, clear, and action-oriented. Keep your spoken 
                 })
                 .on('postgres_changes', { event: '*', schema: 'public', table: 'consulting_swot' }, (payload) => {
                     const row = payload.new || payload.old;
-                    if (row && row.tenant_id === cid) {
+                    if (row && row.company_id === cid) {
                         loadSwot().then(() => renderSwot());
                     }
                 })

@@ -138,5 +138,28 @@ CREATE POLICY users_self_update ON public.users FOR UPDATE TO authenticated USIN
 CREATE POLICY companies_own_select ON public.companies FOR SELECT TO authenticated USING (id = public.current_company_id());
 CREATE POLICY companies_admin_update ON public.companies FOR UPDATE TO authenticated USING (id = public.current_company_id() AND public.current_user_is_company_admin()) WITH CHECK (id = public.current_company_id());
 
+-- Prevent a child row from referencing a KPI owned by another company.
+ALTER TABLE public.consulting_kpi_history
+  DROP CONSTRAINT IF EXISTS consulting_kpi_history_kpi_id_fkey;
+ALTER TABLE public.consulting_kpis
+  ADD CONSTRAINT consulting_kpis_id_company_unique UNIQUE (id, company_id);
+ALTER TABLE public.consulting_kpi_history
+  ADD CONSTRAINT consulting_kpi_history_kpi_company_fkey
+  FOREIGN KEY (kpi_id, company_id)
+  REFERENCES public.consulting_kpis(id, company_id)
+  ON DELETE CASCADE;
+CREATE INDEX IF NOT EXISTS idx_consulting_kpi_history_kpi_company
+  ON public.consulting_kpi_history(kpi_id, company_id);
+
+-- Anonymous clients receive no direct table privileges. Authenticated grants remain
+-- subject to the forced RLS policies above.
+REVOKE ALL ON ALL TABLES IN SCHEMA public FROM anon;
+REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM anon;
+GRANT USAGE ON SCHEMA public TO authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO authenticated;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE ALL ON TABLES FROM anon;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public
+  GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO authenticated;
+
 NOTIFY pgrst, 'reload schema';
 COMMIT;
