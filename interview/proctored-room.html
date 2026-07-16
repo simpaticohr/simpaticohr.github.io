@@ -1825,6 +1825,48 @@
                 display: none;
             }
         }
+
+        /* Custom toggle switch styling */
+        .switch-container {
+            position: relative;
+            display: inline-block;
+            width: 44px;
+            height: 24px;
+            cursor: pointer;
+        }
+        .switch-container input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+        .switch-slider {
+            position: absolute;
+            inset: 0;
+            background-color: #2f2f4a;
+            border-radius: 34px;
+            transition: all 0.3s;
+        }
+        .switch-slider::before {
+            content: "";
+            position: absolute;
+            height: 18px;
+            width: 18px;
+            left: 3px;
+            bottom: 3px;
+            background-color: white;
+            border-radius: 50%;
+            transition: all 0.3s;
+        }
+        .switch-container input:checked + .switch-slider {
+            background-color: var(--primary);
+        }
+        .switch-container input:checked + .switch-slider::before {
+            transform: translateX(20px);
+        }
+        .switch-container input:disabled + .switch-slider {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
     </style>
 </head>
 
@@ -1892,6 +1934,20 @@
                 <i class="fas fa-headset"></i>
                 <div><strong>Natural voice conversation.</strong> Speak naturally as if talking to a human interviewer.
                     The AI adapts questions based on your responses in real-time.</div>
+            </div>
+
+            <div id="setupVoiceToggleCard" class="setup-option-card" style="background:var(--bg-surface); border:1px solid var(--border); border-radius:12px; padding:15px; margin-bottom:20px; display:flex; align-items:center; justify-content:space-between; transition:all 0.2s;">
+                <div style="display:flex; align-items:center; gap:12px; text-align:left; width:80%;">
+                    <div style="width:36px; height:36px; border-radius:50%; background:rgba(99,102,241,0.1); color:var(--primary); display:flex; align-items:center; justify-content:center; font-size:1.1rem; flex-shrink:0;"><i class="fas fa-microphone-alt"></i></div>
+                    <div>
+                        <div style="font-size:0.85rem; font-weight:700; color:var(--text);">Full-Duplex AI Voice (BYOK)</div>
+                        <div id="setupVoiceToggleSub" style="font-size:0.72rem; color:var(--text-dim);">Talk naturally & interrupt Aisha in real-time</div>
+                    </div>
+                </div>
+                <label class="switch-container" id="voiceToggleSwitch" style="position:relative; display:none; width:44px; height:24px; cursor:pointer;">
+                    <input type="checkbox" id="voiceDuplexToggle">
+                    <span class="switch-slider" style="position:absolute; inset:0; background-color:#2f2f4a; border-radius:34px; transition:all 0.3s;"></span>
+                </label>
             </div>
 
             <button class="btn-begin" id="btnBegin" disabled onclick="startSession()">
@@ -2136,6 +2192,17 @@
                 micSource: null,
                 vizBars: [],
                 volumeHistory: [],
+            },
+            duplex: {
+                active: false,
+                socket: null,
+                audioCtx: null,
+                analyser: null,
+                micStream: null,
+                scriptNode: null,
+                playbackTime: 0,
+                audioQueue: [],
+                lastUserTranscript: '',
             },
             face: {
                 lastDetection: Date.now(),
@@ -2790,6 +2857,7 @@ ${config.rules}
             state.voice.synth.onvoiceschanged = loadVoices;
 
             await setupMedia();
+            checkVoiceDuplexSupport();
         }
 
         function generateParticles() {
@@ -3106,6 +3174,64 @@ ${config.rules}
         // Track whether TTS has been unlocked by a user gesture
         let _ttsUnlocked = false;
         async function startSession() {
+            const duplexToggled = document.getElementById('voiceDuplexToggle')?.checked;
+            if (duplexToggled) {
+                // Get Gemini Key
+                const configStr = localStorage.getItem('simpatico_byok_config');
+                let key = '';
+                if (configStr) {
+                    try {
+                        const config = JSON.parse(configStr);
+                        if (config.provider === 'gemini') key = config.key || '';
+                    } catch(e) {}
+                }
+                const tempKey = document.getElementById('tempGeminiKey')?.value.trim();
+                if (tempKey) key = tempKey;
+
+                if (!key || key.length < 5) {
+                    showSetupError('A valid Gemini API Key is required to start the Full-Duplex Voice session.');
+                    return;
+                }
+
+                // Request screen share first since it is required
+                if (!state.media.screen) {
+                    try {
+                        state.media.screen = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
+                        setChk('c-screen', 'pass');
+                        state.media.screenShared = true;
+                        document.getElementById('vcScreen').classList.add('active-mic');
+
+                        state.media.screen.getVideoTracks()[0].addEventListener('ended', () => {
+                            state.media.screenShared = false;
+                            document.getElementById('vcScreen').classList.remove('active-mic');
+                            document.getElementById('vcScreen').classList.add('off');
+                            state.session.trust = Math.max(0, state.session.trust - 20);
+                            addProcLog('danger', 'Screen sharing stopped');
+                            logProcEvent('screen_share_stopped', 'critical');
+                            showToast('danger', '⚠️ Screen sharing stopped! Please share again.');
+                            document.getElementById('topbar').classList.add('violation');
+                        });
+                    } catch (e) {
+                        showSetupError('Screen sharing is required to proceed with this proctored interview.');
+                        setChk('c-screen', 'fail');
+                        return;
+                    }
+                }
+
+                document.getElementById('setupOverlay').style.display = 'none';
+                document.getElementById('interviewApp').style.display = 'flex';
+                document.getElementById('selfVid').srcObject = state.media.stream;
+                document.getElementById('screenVid').srcObject = state.media.screen;
+
+                state.session.started = true;
+                state.session.timerInt = setInterval(tick, 1000);
+                startProctoring();
+                initCodeEditor();
+
+                await startLiveVoiceCallDuplex(key);
+                return;
+            }
+
             // STEP 1: UNLOCK TTS ENGINE ON USER GESTURE (synchronous)
             // Chrome requires speak() during a click handler callback.
             // CRITICAL: NO synth.cancel() before speak() - it kills the engine
@@ -3286,6 +3412,10 @@ ${config.rules}
 
         function aiSpeak(text) {
             return new Promise(async (resolve) => {
+                if (state.duplex && state.duplex.active) {
+                    resolve();
+                    return;
+                }
                 state.voice.isSpeaking = true;
                 state.voice.activeResolve = resolve;
 
@@ -3484,6 +3614,7 @@ ${config.rules}
         // SPEECH RECOGNITION
         // ══════════════════════════════════════════════════════════════
         function startListening() {
+            if (state.duplex && state.duplex.active) return;
             if (!state.voice.recognition || state.voice.isProcessing) {
                 console.log('[Listen] startListening blocked: recognition=' + !!state.voice.recognition +
                     ' isProcessing=' + state.voice.isProcessing);
@@ -4374,6 +4505,405 @@ ${config.rules}
                 console.log('[Emergency] Partial results saved (keepalive fetch)');
             } catch (e) {
                 console.warn('[Emergency] Save failed:', e.message);
+            }
+        }
+
+        // Fire on tab close, navigation away, or app switch
+        window.addEventListener('beforeunload', (e) => {
+            if (state.session.started && !state.session.ended) {
+                emergencySave();
+            }
+        });
+
+        window.addEventListener('pagehide', () => {
+            emergencySave();
+        });
+
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'hidden' && state.session.started && !state.session.ended) {
+                emergencySave();
+            }
+        });
+
+        // ══════════════════════════════════════════════════════════════
+        // GEMINI FULL-DUPLEX VOICE SESSION (BYOK)
+        // ══════════════════════════════════════════════════════════════
+        
+        function checkVoiceDuplexSupport() {
+            const configStr = localStorage.getItem('simpatico_byok_config');
+            let hasGemini = false;
+            if (configStr) {
+                try {
+                    const config = JSON.parse(configStr);
+                    if (config.enabled && config.key && config.provider === 'gemini') {
+                        hasGemini = true;
+                    }
+                } catch(e) {}
+            }
+            
+            const toggleSub = document.getElementById('setupVoiceToggleSub');
+            const toggleSwitch = document.getElementById('voiceToggleSwitch');
+            const card = document.getElementById('setupVoiceToggleCard');
+            
+            if (hasGemini) {
+                if (toggleSwitch) toggleSwitch.style.display = 'inline-block';
+                if (toggleSub) toggleSub.innerHTML = 'Talk naturally & interrupt Aisha in real-time (Active)';
+                const check = document.getElementById('voiceDuplexToggle');
+                if (check) check.checked = true;
+            } else {
+                if (toggleSub) toggleSub.innerHTML = '<span style="color:var(--warning);"><i class="fas fa-exclamation-triangle"></i> Gemini BYOK Key required. Enter below or set in Settings:</span>' +
+                    `<input type="password" id="tempGeminiKey" placeholder="Enter Gemini API Key..." style="width:100%; margin-top:8px; padding:6px 12px; font-size:0.8rem; border-radius:6px; border:1px solid var(--border); background:var(--bg-input); color:var(--text); outline:none;" oninput="document.getElementById('voiceDuplexToggle').checked = this.value.length > 5; document.getElementById('voiceDuplexToggle').disabled = this.value.length <= 5;">`;
+                if (card) card.style.opacity = '1';
+                const check = document.getElementById('voiceDuplexToggle');
+                if (check) {
+                    check.disabled = true;
+                    check.checked = false;
+                }
+                if (toggleSwitch) toggleSwitch.style.display = 'inline-block';
+            }
+        }
+
+        async function startLiveVoiceCallDuplex(apiKey) {
+            console.log('[Duplex] Starting Gemini Live Full-Duplex Session...');
+            state.duplex.active = true;
+            state.duplex.playbackTime = 0;
+            state.duplex.audioQueue = [];
+            state.duplex.lastUserTranscript = '';
+
+            try {
+                // Initialize AudioContext
+                const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+                state.duplex.audioCtx = new AudioContextClass({ sampleRate: 16000 });
+                
+                // Get Microphone Access
+                state.duplex.micStream = await navigator.mediaDevices.getUserMedia({
+                    audio: {
+                        echoCancellation: true,
+                        noiseSuppression: true,
+                        autoGainControl: true
+                    }
+                });
+                const source = state.duplex.audioCtx.createMediaStreamSource(state.duplex.micStream);
+
+                // Create Analyser for Avatar Engine Lip Sync
+                state.duplex.analyser = state.duplex.audioCtx.createAnalyser();
+                state.duplex.analyser.fftSize = 512;
+                state.duplex.analyser.smoothingTimeConstant = 0.55;
+                state.duplex.analyser.connect(state.duplex.audioCtx.destination);
+                
+                // Attach to AvatarEngine
+                if (window.AvatarEngine) {
+                    AvatarEngine.setAnalyser(state.duplex.analyser);
+                    AvatarEngine.setState('listening');
+                }
+
+                // Connect WebSocket
+                const wsUrl = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent?key=${apiKey}`;
+                state.duplex.socket = new WebSocket(wsUrl);
+
+                state.duplex.socket.onopen = () => {
+                    console.log('[Duplex] WebSocket connection established.');
+                    setOrbState('listening');
+                    document.getElementById('voQuality').textContent = "Full-Duplex AI Session Active";
+
+                    // System instruction config
+                    const jobTitle = state.meta.job?.title || 'Candidate';
+                    const skills = (engine.skillsToProbe || []).join(', ') || 'general problem solving';
+                    
+                    const systemPrompt = `You are Aisha, the lead AI interviewer for Simpatico HR.
+Today's interview is for the position of: ${jobTitle}.
+Skills to evaluate: ${skills}.
+Maximum questions: ${engine.maxQuestions}.
+
+RULES:
+1. Speak warmly, professionally, and naturally.
+2. Ask exactly ONE question at a time.
+3. Keep your spoken responses concise (1-3 sentences maximum).
+4. If the candidate answers, respond briefly to their answer and transition to the next question.
+5. Start the interview now by greeting the candidate, introducing yourself as Aisha, and asking the first interview question to get started.`;
+
+                    const setupMsg = {
+                        setup: {
+                            model: "models/gemini-2.0-flash-exp",
+                            generationConfig: {
+                                responseModalities: ["AUDIO"],
+                                speechConfig: {
+                                    voiceConfig: {
+                                        prebuiltVoiceConfig: {
+                                            voiceName: "Kore"
+                                        }
+                                    }
+                                }
+                            },
+                            systemInstruction: {
+                                parts: [{ text: systemPrompt }]
+                            }
+                        }
+                    };
+                    state.duplex.socket.send(JSON.stringify(setupMsg));
+                    startRecordingAudioDuplex(source);
+                };
+
+                state.duplex.socket.onmessage = (event) => {
+                    try {
+                        const data = JSON.parse(event.data);
+
+                        // Candidate interrupts Aisha
+                        if (data.interrupted) {
+                            console.log('[Duplex] Interrupted by candidate.');
+                            clearDuplexPlaybackQueue();
+                            setOrbState('listening');
+                            if (window.AvatarEngine) AvatarEngine.setState('listening');
+                            return;
+                        }
+
+                        const serverContent = data.serverContent;
+                        if (serverContent) {
+                            // User Transcription (Real-time STT)
+                            if (serverContent.inputTranscription && serverContent.inputTranscription.text) {
+                                const txt = serverContent.inputTranscription.text;
+                                const transEl = document.getElementById('liveTranscript');
+                                if (transEl) {
+                                    transEl.textContent = txt;
+                                    transEl.classList.add('active');
+                                }
+                                state.duplex.lastUserTranscript = txt;
+                            }
+
+                            // Aisha Response Chunks
+                            if (serverContent.modelTurn && serverContent.modelTurn.parts) {
+                                setOrbState('speaking');
+                                if (window.AvatarEngine) AvatarEngine.setState('speaking');
+
+                                serverContent.modelTurn.parts.forEach(part => {
+                                    // Audio chunk for speaker playback + lip sync
+                                    if (part.inlineData && part.inlineData.data) {
+                                        const base64Data = part.inlineData.data;
+                                        const sampleRate = part.inlineData.mimeType.includes('rate=') ? 
+                                            parseInt(part.inlineData.mimeType.split('rate=')[1]) : 24000;
+                                        
+                                        playIncomingAudioChunkDuplex(base64Data, sampleRate);
+                                    }
+
+                                    // Subtitle text transcript
+                                    if (part.text) {
+                                        const subtitle = document.getElementById('aiSubtitleText');
+                                        if (subtitle) {
+                                            subtitle.textContent += part.text;
+                                            subtitle.classList.add('show');
+                                        }
+                                    }
+                                });
+                            }
+
+                            // Turn complete (candidate finished answering and AI finished asking)
+                            if (serverContent.turnComplete) {
+                                console.log('[Duplex] Turn complete.');
+                                setOrbState('listening');
+                                if (window.AvatarEngine) AvatarEngine.setState('listening');
+
+                                // Submit user answer if accumulated
+                                if (state.duplex.lastUserTranscript.trim().length > 5) {
+                                    submitVoiceAnswerDuplex(state.duplex.lastUserTranscript);
+                                    state.duplex.lastUserTranscript = '';
+                                    // Reset transcript box display
+                                    setTimeout(() => {
+                                        const transEl = document.getElementById('liveTranscript');
+                                        if (transEl) transEl.textContent = '';
+                                    }, 2000);
+                                }
+                                
+                                // Clear subtitle text buffer for next question
+                                const subtitle = document.getElementById('aiSubtitleText');
+                                if (subtitle) {
+                                    setTimeout(() => { subtitle.textContent = ''; }, 3000);
+                                }
+                            }
+                        }
+                    } catch (e) {
+                        console.error('[Duplex] message parsing error:', e);
+                    }
+                };
+
+                state.duplex.socket.onerror = (err) => {
+                    console.error('[Duplex] WebSocket error:', err);
+                    showToast('Connection error, closing voice session', 'danger');
+                    endLiveVoiceCallDuplex();
+                };
+
+                state.duplex.socket.onclose = () => {
+                    console.log('[Duplex] WebSocket closed.');
+                    endLiveVoiceCallDuplex();
+                };
+
+            } catch (err) {
+                console.error('[Duplex] failed initialization:', err);
+                showToast('Microphone access denied or connection error.', 'danger');
+                endLiveVoiceCallDuplex();
+            }
+        }
+
+        function endLiveVoiceCallDuplex() {
+            if (!state.duplex.active) return;
+            console.log('[Duplex] Ending voice session...');
+            state.duplex.active = false;
+
+            if (state.duplex.socket) {
+                try { state.duplex.socket.close(); } catch(e){}
+                state.duplex.socket = null;
+            }
+
+            if (state.duplex.micStream) {
+                state.duplex.micStream.getTracks().forEach(t => t.stop());
+                state.duplex.micStream = null;
+            }
+
+            clearDuplexPlaybackQueue();
+
+            if (state.duplex.scriptNode) {
+                try { state.duplex.scriptNode.disconnect(); } catch(e){}
+                state.duplex.scriptNode = null;
+            }
+
+            if (state.duplex.audioCtx) {
+                try { state.duplex.audioCtx.close(); } catch(e){}
+                state.duplex.audioCtx = null;
+            }
+
+            setOrbState('thinking');
+            if (window.AvatarEngine) AvatarEngine.setState('idle');
+        }
+
+        function startRecordingAudioDuplex(source) {
+            state.duplex.scriptNode = state.duplex.audioCtx.createScriptProcessor(2048, 1, 1);
+            source.connect(state.duplex.scriptNode);
+            state.duplex.scriptNode.connect(state.duplex.audioCtx.destination);
+
+            state.duplex.scriptNode.onaudioprocess = (e) => {
+                if (!state.duplex.active || !state.duplex.socket || state.duplex.socket.readyState !== WebSocket.OPEN) return;
+                
+                const inputData = e.inputBuffer.getChannelData(0);
+                const pcmData = new Int16Array(inputData.length);
+                for (let i = 0; i < inputData.length; i++) {
+                    const s = Math.max(-1, Math.min(1, inputData[i]));
+                    pcmData[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+                }
+
+                const base64Audio = arrayBufferToBase64(pcmData.buffer);
+                const mediaMsg = {
+                    realtimeInput: {
+                        mediaChunks: [{
+                            mimeType: "audio/pcm;rate=16000",
+                            data: base64Audio
+                        }]
+                    }
+                };
+                state.duplex.socket.send(JSON.stringify(mediaMsg));
+            };
+        }
+
+        function playIncomingAudioChunkDuplex(base64Data, sampleRate) {
+            if (!state.duplex.audioCtx || !state.duplex.active) return;
+
+            const buffer = base64ToArrayBuffer(base64Data);
+            const int16Array = new Int16Array(buffer);
+            const float32Array = new Float32Array(int16Array.length);
+
+            for (let i = 0; i < int16Array.length; i++) {
+                float32Array[i] = int16Array[i] / 32768.0;
+            }
+
+            const audioBuffer = state.duplex.audioCtx.createBuffer(1, float32Array.length, sampleRate || 24000);
+            audioBuffer.copyToChannel(float32Array, 0);
+
+            const sourceNode = state.duplex.audioCtx.createBufferSource();
+            sourceNode.buffer = audioBuffer;
+            
+            // Connect to analyser so lip sync works, and analyser feeds destination
+            sourceNode.connect(state.duplex.analyser);
+
+            state.duplex.audioQueue.push(sourceNode);
+            sourceNode.onended = () => {
+                const idx = state.duplex.audioQueue.indexOf(sourceNode);
+                if (idx > -1) state.duplex.audioQueue.splice(idx, 1);
+            };
+
+            const currentTime = state.duplex.audioCtx.currentTime;
+            if (state.duplex.playbackTime < currentTime) {
+                state.duplex.playbackTime = currentTime;
+            }
+
+            sourceNode.start(state.duplex.playbackTime);
+            state.duplex.playbackTime += audioBuffer.duration;
+        }
+
+        function clearDuplexPlaybackQueue() {
+            if (state.duplex.audioQueue.length > 0) {
+                state.duplex.audioQueue.forEach(node => {
+                    try { node.stop(); } catch(e){}
+                });
+                state.duplex.audioQueue = [];
+            }
+            state.duplex.playbackTime = 0;
+        }
+
+        function sendDuplexControlMessage(text) {
+            if (!state.duplex.socket || state.duplex.socket.readyState !== WebSocket.OPEN) return;
+            const msg = {
+                clientContent: {
+                    turns: [{
+                        role: "user",
+                        parts: [{ text: text }]
+                    }],
+                    turnComplete: true
+                }
+            };
+            state.duplex.socket.send(JSON.stringify(msg));
+        }
+
+        async function submitVoiceAnswerDuplex(text) {
+            if (!text || text.trim().length < 5) return;
+            
+            const words = text.split(/\s+/).filter(Boolean).length;
+            const analysis = analyzeAnswer(text);
+
+            if (analysis.detectedSkill) {
+                engine.recordSkillAssessment(analysis.detectedSkill, analysis.score, analysis.techHits > 0 ? 2 : 1);
+            } else {
+                const currentSkill = engine.skillsToProbe[Math.min(engine.questionCount - 1, engine.skillsToProbe.length - 1)];
+                if (currentSkill) engine.recordSkillAssessment(currentSkill, analysis.score, analysis.techHits > 0 ? 2 : 1);
+            }
+
+            // Save answer to Supabase
+            if (state.meta.interview?.id) {
+                sbInsert('interview_answers', {
+                    interview_id: state.meta.interview.id,
+                    question_number: engine.questionCount,
+                    answer_text: text,
+                    score: analysis.score,
+                    word_count: words,
+                    flags: analysis.flags,
+                    phase: engine.phase,
+                    detected_skill: analysis.detectedSkill || '',
+                }).catch(() => { });
+            }
+
+            // Update UI Counters
+            engine.questionCount++;
+            engine.updatePhase(analysis);
+            
+            document.getElementById('qCounter').innerHTML = `Q <strong>${engine.questionCount}</strong> / ~${engine.maxQuestions}`;
+            document.getElementById('qTrackerNum').textContent = engine.questionCount;
+            const progress = Math.min(100, (engine.questionCount / engine.maxQuestions) * 100);
+            document.getElementById('qProgressFill').style.width = progress + '%';
+
+            // Check if max questions reached
+            if (engine.questionCount >= engine.maxQuestions) {
+                sendDuplexControlMessage("Wrap up the interview now. Say goodbye and announce that the interview is completed.");
+                setTimeout(() => {
+                    endLiveVoiceCallDuplex();
+                    endSession();
+                }, 8000);
             }
         }
 
