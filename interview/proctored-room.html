@@ -1936,11 +1936,11 @@
                     The AI adapts questions based on your responses in real-time.</div>
             </div>
 
-            <div id="setupVoiceToggleCard" class="setup-option-card" style="background:var(--bg-surface); border:1px solid var(--border); border-radius:12px; padding:15px; margin-bottom:20px; display:flex; align-items:center; justify-content:space-between; transition:all 0.2s;">
+            <div id="setupVoiceToggleCard" class="setup-option-card" style="background:var(--bg-surface); border:1px solid var(--border); border-radius:12px; padding:15px; margin-bottom:20px; display:none; align-items:center; justify-content:space-between; transition:all 0.2s;">
                 <div style="display:flex; align-items:center; gap:12px; text-align:left; width:80%;">
                     <div style="width:36px; height:36px; border-radius:50%; background:rgba(99,102,241,0.1); color:var(--primary); display:flex; align-items:center; justify-content:center; font-size:1.1rem; flex-shrink:0;"><i class="fas fa-microphone-alt"></i></div>
                     <div>
-                        <div style="font-size:0.85rem; font-weight:700; color:var(--text);">Full-Duplex AI Voice (BYOK)</div>
+                        <div style="font-size:0.85rem; font-weight:700; color:var(--text);">Full-Duplex AI Voice</div>
                         <div id="setupVoiceToggleSub" style="font-size:0.72rem; color:var(--text-dim);">Talk naturally & interrupt Aisha in real-time</div>
                     </div>
                 </div>
@@ -2011,6 +2011,7 @@
                             <div class="orb-bars" id="orbBars"></div>
                             <div class="ai-orb" id="aiOrb"><i class="fas fa-robot"></i></div>
                         </div>
+                        <canvas id="avatarCanvas" style="display:none; width:220px; height:220px; border-radius:50%; border:3px solid var(--primary); box-shadow:0 0 30px rgba(139,92,246,0.3);"></canvas>
                         <div class="ai-status-text" id="aiStatusText">CONNECTING</div>
                         <div class="ai-subtitle-text" id="aiSubtitleText"></div>
                     </div>
@@ -2114,6 +2115,7 @@
     <script src="../js/shared-utils.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.45.0/min/vs/loader.min.js"></script>
     <script src="../js/supabase-client.js"></script>
+    <script src="avatar-engine.js"></script>
     <script>
         'use strict';
 
@@ -3176,20 +3178,11 @@ ${config.rules}
         async function startSession() {
             const duplexToggled = document.getElementById('voiceDuplexToggle')?.checked;
             if (duplexToggled) {
-                // Get Gemini Key
-                const configStr = localStorage.getItem('simpatico_byok_config');
-                let key = '';
-                if (configStr) {
-                    try {
-                        const config = JSON.parse(configStr);
-                        if (config.provider === 'gemini') key = config.key || '';
-                    } catch(e) {}
-                }
-                const tempKey = document.getElementById('tempGeminiKey')?.value.trim();
-                if (tempKey) key = tempKey;
+                // Get Gemini Key from company BYOK config (fetched from server during init)
+                const key = state.duplex.companyApiKey || '';
 
                 if (!key || key.length < 5) {
-                    showSetupError('A valid Gemini API Key is required to start the Full-Duplex Voice session.');
+                    showSetupError('Full-Duplex Voice is not available. Your company has not configured a Gemini API key in Dashboard Settings.');
                     return;
                 }
 
@@ -4526,40 +4519,44 @@ ${config.rules}
         });
 
         // ══════════════════════════════════════════════════════════════
-        // GEMINI FULL-DUPLEX VOICE SESSION (BYOK)
+        // GEMINI FULL-DUPLEX VOICE SESSION
+        // Key is fetched from the company's dashboard BYOK settings
         // ══════════════════════════════════════════════════════════════
         
-        function checkVoiceDuplexSupport() {
-            const configStr = localStorage.getItem('simpatico_byok_config');
-            let hasGemini = false;
-            if (configStr) {
-                try {
-                    const config = JSON.parse(configStr);
-                    if (config.enabled && config.key && config.provider === 'gemini') {
-                        hasGemini = true;
-                    }
-                } catch(e) {}
-            }
-            
+        async function checkVoiceDuplexSupport() {
             const toggleSub = document.getElementById('setupVoiceToggleSub');
             const toggleSwitch = document.getElementById('voiceToggleSwitch');
             const card = document.getElementById('setupVoiceToggleCard');
             
-            if (hasGemini) {
-                if (toggleSwitch) toggleSwitch.style.display = 'inline-block';
-                if (toggleSub) toggleSub.innerHTML = 'Talk naturally & interrupt Aisha in real-time (Active)';
-                const check = document.getElementById('voiceDuplexToggle');
-                if (check) check.checked = true;
-            } else {
-                if (toggleSub) toggleSub.innerHTML = '<span style="color:var(--warning);"><i class="fas fa-exclamation-triangle"></i> Gemini BYOK Key required. Enter below or set in Settings:</span>' +
-                    `<input type="password" id="tempGeminiKey" placeholder="Enter Gemini API Key..." style="width:100%; margin-top:8px; padding:6px 12px; font-size:0.8rem; border-radius:6px; border:1px solid var(--border); background:var(--bg-input); color:var(--text); outline:none;" oninput="document.getElementById('voiceDuplexToggle').checked = this.value.length > 5; document.getElementById('voiceDuplexToggle').disabled = this.value.length <= 5;">`;
-                if (card) card.style.opacity = '1';
-                const check = document.getElementById('voiceDuplexToggle');
-                if (check) {
-                    check.disabled = true;
-                    check.checked = false;
+            // Fetch company's AI config from the Worker using the interview token
+            if (!magicToken) return;
+            
+            try {
+                const res = await fetch(`${API}/api/interview/ai-config?token=${encodeURIComponent(magicToken)}`);
+                if (!res.ok) throw new Error('Failed to fetch AI config');
+                const data = await res.json();
+                
+                if (data.available && data.provider === 'gemini' && data.apiKey) {
+                    // Store the key securely in state (never shown to candidate)
+                    state.duplex.companyApiKey = data.apiKey;
+                    state.duplex.companyModel = data.model || 'gemini-3.1-flash';
+                    
+                    // Show the toggle card and auto-enable
+                    if (card) card.style.display = 'flex';
+                    if (toggleSwitch) toggleSwitch.style.display = 'inline-block';
+                    if (toggleSub) toggleSub.innerHTML = 'Talk naturally & interrupt Aisha in real-time';
+                    const check = document.getElementById('voiceDuplexToggle');
+                    if (check) check.checked = true;
+                    
+                    console.log('[Duplex] Company Gemini config loaded, full-duplex available.');
+                } else {
+                    // Company doesn't have Gemini configured — hide the toggle entirely
+                    if (card) card.style.display = 'none';
+                    console.log('[Duplex] Company does not have Gemini configured, full-duplex hidden.');
                 }
-                if (toggleSwitch) toggleSwitch.style.display = 'inline-block';
+            } catch (e) {
+                console.warn('[Duplex] Could not fetch company AI config:', e.message);
+                if (card) card.style.display = 'none';
             }
         }
 
@@ -4593,6 +4590,21 @@ ${config.rules}
                 
                 // Attach to AvatarEngine
                 if (window.AvatarEngine) {
+                    // Initialize avatar with canvas and interviewer portrait
+                    const avatarCanvas = document.getElementById('avatarCanvas');
+                    const avatarImg = new Image();
+                    avatarImg.crossOrigin = 'anonymous';
+                    avatarImg.src = 'avatar/interviewer.png';
+                    avatarImg.onload = () => {
+                        AvatarEngine.init({
+                            canvas: avatarCanvas,
+                            image: avatarImg,
+                            fallbackEl: document.getElementById('aiOrbWrapper'),
+                        });
+                        // Show avatar canvas, hide orb
+                        avatarCanvas.style.display = 'block';
+                        document.getElementById('aiOrbWrapper').style.display = 'none';
+                    };
                     AvatarEngine.setAnalyser(state.duplex.analyser);
                     AvatarEngine.setState('listening');
                 }
@@ -4624,7 +4636,7 @@ RULES:
 
                     const setupMsg = {
                         setup: {
-                            model: "models/gemini-2.0-flash-exp",
+                            model: "models/" + (state.duplex.companyModel || "gemini-3.1-flash"),
                             generationConfig: {
                                 responseModalities: ["AUDIO"],
                                 speechConfig: {
@@ -4772,6 +4784,11 @@ RULES:
 
             setOrbState('thinking');
             if (window.AvatarEngine) AvatarEngine.setState('idle');
+            // Restore orb, hide avatar canvas
+            const avatarCanvas = document.getElementById('avatarCanvas');
+            if (avatarCanvas) avatarCanvas.style.display = 'none';
+            const orbWrapper = document.getElementById('aiOrbWrapper');
+            if (orbWrapper) orbWrapper.style.display = '';
         }
 
         function startRecordingAudioDuplex(source) {

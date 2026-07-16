@@ -1352,6 +1352,9 @@ route("POST", "/ai/byok-config", handleBYOKConfigSave);
 route("GET", "/ai/byok-config", handleBYOKConfigGet);
 route("POST", "/ai/byok-validate", handleBYOKValidate);
 
+// ── Interview AI Config (no auth — uses interview token) ──
+route("GET", "/api/interview/ai-config", handleInterviewAIConfig);
+
 route("POST", "/attendance/records/upsert", handleUpsertAttendance);
 
 // ===============================================================
@@ -8608,6 +8611,79 @@ async function handleBYOKConfigSave(request, env, ctx) {
     provider: updates.ai_provider,
     model: updates.ai_model,
     rows_updated: rows?.length || 0,
+  });
+}
+
+/**
+ * GET /api/interview/ai-config — Fetch company's Gemini BYOK config for an interview session.
+ * Query: ?token=<interview_token>
+ * No auth required — validates via interview token.
+ * Returns: { available, provider?, model?, apiKey? }
+ * Only returns the key if the company has Gemini configured.
+ */
+async function handleInterviewAIConfig(request, env, ctx, params, url) {
+  const interviewToken = url.searchParams.get("token");
+  if (!interviewToken || interviewToken.length < 5) {
+    return apiResponse({ available: false, error: "Missing or invalid interview token" });
+  }
+
+  // 1. Validate interview token
+  const ivUrl = `${env.SUPABASE_URL}/rest/v1/interviews?token=eq.${encodeURIComponent(interviewToken)}&select=id,client_id,status,expires_at&limit=1`;
+  const ivRes = await fetch(ivUrl, {
+    headers: {
+      apikey: env.SUPABASE_SERVICE_KEY,
+      Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
+    },
+  });
+  if (!ivRes.ok) {
+    return apiResponse({ available: false, error: "Failed to validate interview" });
+  }
+  const interviews = await ivRes.json();
+  const interview = interviews?.[0];
+  if (!interview) {
+    return apiResponse({ available: false, error: "Interview not found" });
+  }
+  if (interview.status === "completed") {
+    return apiResponse({ available: false, error: "Interview already completed" });
+  }
+  if (interview.expires_at && new Date(interview.expires_at) < new Date()) {
+    return apiResponse({ available: false, error: "Interview link expired" });
+  }
+
+  const companyId = interview.client_id;
+  if (!companyId) {
+    return apiResponse({ available: false, error: "No company associated with this interview" });
+  }
+
+  // 2. Fetch company AI config using service key
+  const cfgUrl = `${env.SUPABASE_URL}/rest/v1/companies?id=eq.${companyId}&select=ai_provider,ai_api_key,ai_model&limit=1`;
+  const cfgRes = await fetch(cfgUrl, {
+    headers: {
+      apikey: env.SUPABASE_SERVICE_KEY,
+      Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
+    },
+  });
+  if (!cfgRes.ok) {
+    return apiResponse({ available: false, error: "Failed to read company config" });
+  }
+  const companies = await cfgRes.json();
+  const company = companies?.[0];
+
+  if (!company || !company.ai_provider || !company.ai_api_key) {
+    return apiResponse({ available: false });
+  }
+
+  // 3. Only return config if provider supports Live API (gemini)
+  const provider = company.ai_provider.toLowerCase();
+  if (provider !== "gemini" && provider !== "google") {
+    return apiResponse({ available: false, reason: "Company AI provider is not Gemini" });
+  }
+
+  return apiResponse({
+    available: true,
+    provider: "gemini",
+    model: company.ai_model || "gemini-3.1-flash",
+    apiKey: company.ai_api_key,
   });
 }
 
