@@ -140,8 +140,13 @@
             const client = window.getSupabaseClient ? window.getSupabaseClient() : window.supabase?.createClient(SIMPATICO_CONFIG.supabaseUrl, SIMPATICO_CONFIG.supabaseAnonKey);
             if (!client) { showToast('Database connection failed', 'error'); return; }
 
-            // Fetch course
-            const { data: course, error } = await client.from('training_courses').select('*').eq('id', courseId).single();
+            // Fetch course - isolated by tenant
+            const tenantId = getTenantId();
+            let query = client.from('training_courses').select('*').eq('id', courseId);
+            if (tenantId) {
+                query = query.eq('tenant_id', tenantId);
+            }
+            const { data: course, error } = await query.single();
             if (error || !course) {
                 document.getElementById('app').innerHTML = `<div style="text-align:center;padding:40px"><h2>Could not load course</h2><p>${error?.message || ''}</p><a href="hr.html">Go back</a></div>`;
                 return;
@@ -230,6 +235,14 @@
             try {
                 const u = JSON.parse(localStorage.getItem('simpatico_user') || '{}');
                 return u.employee_id || null;
+            } catch(e) { return null; }
+        }
+
+        // Helper to get tenant ID of logged in user
+        function getTenantId() {
+            try {
+                const u = JSON.parse(localStorage.getItem('simpatico_user') || '{}');
+                return u.tenant_id || u.company_id || sessionStorage.getItem('tenant_id') || sessionStorage.getItem('company_id') || null;
             } catch(e) { return null; }
         }
 

@@ -1527,6 +1527,11 @@
                 <div class="page-title" id="pageTitle">Risk Overview</div>
                 <div class="page-title-sub">Business Operations Command Center</div>
             </div>
+            <!-- Client Selector for Super Admins -->
+            <div id="tenantSelectorContainer" style="margin-left: 24px; display: none; align-items: center; gap: 8px;">
+                <span style="font-size: 0.78rem; font-weight: 600; color: var(--text-secondary); display: inline-flex; align-items: center; gap: 4px;"><i class="fas fa-building" style="color: var(--primary);"></i> Client:</span>
+                <select id="tenantSelect" style="padding: 6px 12px; font-size: 0.8rem; border-radius: 8px; width: 220px; background: white; border: 1px solid var(--border); color: var(--text-primary); outline: none; cursor: pointer;" onchange="switchClientTenant(this.value)"></select>
+            </div>
         </div>
         <div class="topbar-right">
             <div class="country-selector" id="countrySelector">
@@ -2082,12 +2087,85 @@ let allItems = [];
 
 function getTenantId() {
     try {
+        const activeTenant = sessionStorage.getItem('active_consulting_tenant');
+        if (activeTenant) return activeTenant;
+
         if (window.SIMPATICO_CONFIG && window.SIMPATICO_CONFIG.tenantId) return window.SIMPATICO_CONFIG.tenantId;
         if (typeof getCompanyId === 'function' && getCompanyId()) return getCompanyId();
         const user = JSON.parse(localStorage.getItem('simpatico_user') || '{}');
         return user.company_id || 'SIMP_PRO_MAIN';
     } catch(e) { return 'SIMP_PRO_MAIN'; }
 }
+
+function sb() {
+    if (typeof getSupabaseClient === 'function') return getSupabaseClient();
+    if (window.supabase && window.SIMPATICO_CONFIG) {
+        if (!window._supabaseClient) {
+            window._supabaseClient = window.supabase.createClient(window.SIMPATICO_CONFIG.supabaseUrl, window.SIMPATICO_CONFIG.supabaseAnonKey);
+        }
+        return window._supabaseClient;
+    }
+    return null;
+}
+
+async function initClientSelector() {
+    const user = JSON.parse(localStorage.getItem('simpatico_user') || '{}');
+    const role = user.role || '';
+    const isSuperAdmin = role === 'super_admin' || role === 'superadmin';
+
+    if (!isSuperAdmin) return;
+
+    const client = sb();
+    if (!client) return;
+
+    try {
+        const { data: companies, error } = await client
+            .from('companies')
+            .select('id, name')
+            .order('name');
+
+        if (error || !companies || !companies.length) return;
+
+        const select = document.getElementById('tenantSelect');
+        const container = document.getElementById('tenantSelectorContainer');
+        if (!select || !container) return;
+
+        const activeTenant = sessionStorage.getItem('active_consulting_tenant') || '';
+        let options = '<option value="">-- Active Workspace (Self) --</option>';
+        companies.forEach(c => {
+            const selected = activeTenant === c.id ? ' selected' : '';
+            options += `<option value="${c.id}"${selected}>${c.name}</option>`;
+        });
+
+        select.innerHTML = options;
+        container.style.display = 'inline-flex';
+    } catch (e) {
+        console.warn('[command-center] Failed to init client selector:', e);
+    }
+}
+
+window.switchClientTenant = function (tenantId) {
+    if (!tenantId) {
+        sessionStorage.removeItem('active_consulting_tenant');
+    } else {
+        sessionStorage.setItem('active_consulting_tenant', tenantId);
+    }
+
+    // Reload compliance data
+    loadData();
+    generateComplianceItems();
+    renderAll();
+    renderCalendar();
+    updateBadges();
+
+    // Reload financial data
+    if (typeof loadFinancialData === 'function') {
+        loadFinancialData();
+        renderFinMonth();
+    }
+
+    showToast('Switched client workspace', 'success');
+};
 
 // ─── COUNTRY-SPECIFIC COMPLIANCE DATA ───
 const complianceDB = {
@@ -2156,6 +2234,7 @@ const complianceDB = {
 
 // ─── INITIALIZE ───
 document.addEventListener('DOMContentLoaded', function() {
+    initClientSelector();
     loadData();
     generateComplianceItems();
     renderAll();

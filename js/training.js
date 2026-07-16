@@ -151,9 +151,11 @@ async function loadCourses() {
     console.warn('[training] Worker loadCourses failed, falling back to Supabase:', workerErr.message);
     // Supabase fallback
     const client = sb(); if (!client) return;
-    let query = client.from('training_courses')
-      .select('*')
-      .order('created_at', { ascending: false });
+    let query = client.from('training_courses').select('*');
+    if (cid) {
+      query = query.eq('tenant_id', cid);
+    }
+    query = query.order('created_at', { ascending: false });
     let { data, error } = await query;
     if (error) { console.error(error); return; }
     allCourses = data || [];
@@ -409,6 +411,11 @@ window.saveCourse = async function () {
       console.warn('[training] Worker insert failed, falling back to Supabase:', workerErr.message);
       const client = sb();
       if (!client) throw new Error('Database not connected');
+      const cid = sessionStorage.getItem('company_id') || sessionStorage.getItem('tenant_id') || (typeof getCompanyId === 'function' ? getCompanyId() : null);
+      if (cid) {
+        payload.tenant_id = cid;
+        payload.company_id = cid;
+      }
       const { error } = await client.from('training_courses').insert([payload]);
       if (error) throw new Error(error.message);
     }
@@ -645,7 +652,7 @@ async function loadAIRecommendations() {
   ] = await Promise.all([
     client.from('employees').select('id, first_name, last_name, job_title, departments(name)').eq('tenant_id', cid).eq('status','active'),
     client.from('performance_reviews').select('employee_id, score, status').eq('tenant_id', cid).eq('status','completed'),
-    client.from('training_courses').select('id, title, category')
+    client.from('training_courses').select('id, title, category').eq('tenant_id', cid)
   ]);
 
   if (!activeEmps || !courses || activeEmps.length === 0) {

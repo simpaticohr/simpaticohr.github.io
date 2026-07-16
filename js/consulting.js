@@ -23,6 +23,9 @@
 
     function getTenantId() {
         try {
+            const activeTenant = sessionStorage.getItem('active_consulting_tenant');
+            if (activeTenant) return activeTenant;
+
             if (window.SIMPATICO_CONFIG && window.SIMPATICO_CONFIG.tenantId) return window.SIMPATICO_CONFIG.tenantId;
             if (typeof getCompanyId === 'function' && getCompanyId()) return getCompanyId();
             const user = JSON.parse(localStorage.getItem('simpatico_user') || '{}');
@@ -126,6 +129,7 @@
     // ═══════════════════════════════════════════════════════════
     document.addEventListener('DOMContentLoaded', async function () {
         initUserAvatar();
+        await initClientSelector();
         // Try to load from Supabase first, fall back to localStorage
         await Promise.all([
             loadProjects(),
@@ -2777,5 +2781,67 @@ Be professional, highly strategic, clear, and action-oriented. Keep your spoken 
         const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
         return String(str).replace(/[&<>"']/g, c => map[c]);
     }
+
+    async function initClientSelector() {
+        const user = JSON.parse(localStorage.getItem('simpatico_user') || '{}');
+        const role = user.role || '';
+        const isSuperAdmin = role === 'super_admin' || role === 'superadmin';
+
+        if (!isSuperAdmin) return;
+
+        const client = sb();
+        if (!client) return;
+
+        try {
+            // Fetch all companies
+            const { data: companies, error } = await client
+                .from('companies')
+                .select('id, name')
+                .order('name');
+
+            if (error || !companies || !companies.length) return;
+
+            const select = document.getElementById('tenantSelect');
+            const container = document.getElementById('tenantSelectorContainer');
+            if (!select || !container) return;
+
+            // Populate select dropdown
+            const activeTenant = sessionStorage.getItem('active_consulting_tenant') || '';
+            let options = '<option value="">-- Active Workspace (Self) --</option>';
+            companies.forEach(c => {
+                const selected = activeTenant === c.id ? ' selected' : '';
+                options += `<option value="${c.id}"${selected}>${c.name}</option>`;
+            });
+
+            select.innerHTML = options;
+            container.style.display = 'inline-flex';
+        } catch (e) {
+            console.warn('[consulting] Failed to init client selector:', e);
+        }
+    }
+
+    window.switchClientTenant = async function (tenantId) {
+        if (!tenantId) {
+            sessionStorage.removeItem('active_consulting_tenant');
+        } else {
+            sessionStorage.setItem('active_consulting_tenant', tenantId);
+        }
+
+        // Reload all data
+        await Promise.all([
+            loadProjects(),
+            loadAssessment(),
+            loadSwot(),
+            loadKPIs(),
+            loadDocuments(),
+            loadMeetings(),
+            loadActivityLog(),
+            loadNotifications(),
+        ]);
+
+        initCalendar();
+        updateOverviewStats();
+        showToast('Switched client workspace', 'success');
+    };
 
 })();

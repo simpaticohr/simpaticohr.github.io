@@ -1931,6 +1931,40 @@ async function handleFixRLS(request, env, ctx) {
         OR email = auth.jwt()->>'email'
         OR id::text IN (SELECT company_id::text FROM public.users WHERE auth_id = auth.uid())
       );
+
+    -- Allow superadmin to select all companies
+    DROP POLICY IF EXISTS "superadmin_select_all_companies" ON public.companies;
+    CREATE POLICY "superadmin_select_all_companies" ON public.companies
+      FOR SELECT TO authenticated
+      USING (
+        EXISTS (
+          SELECT 1 FROM public.users 
+          WHERE auth_id = auth.uid() 
+          AND role IN ('super_admin', 'superadmin')
+        )
+      );
+
+    -- Fix training_courses RLS policy
+    DROP POLICY IF EXISTS "auth_rw_training_courses" ON public.training_courses;
+    CREATE POLICY "auth_rw_training_courses" ON public.training_courses
+      FOR ALL TO authenticated
+      USING (company_id::text = public.get_my_tenant_id())
+      WITH CHECK (company_id::text = public.get_my_tenant_id());
+
+    -- Fix performance_reviews RLS policy
+    DROP POLICY IF EXISTS "auth_rw_performance_reviews" ON public.performance_reviews;
+    CREATE POLICY "auth_rw_performance_reviews" ON public.performance_reviews
+      FOR ALL TO authenticated
+      USING (
+        employee_id IN (
+          SELECT id FROM public.employees WHERE tenant_id::text = public.get_my_tenant_id()
+        )
+      )
+      WITH CHECK (
+        employee_id IN (
+          SELECT id FROM public.employees WHERE tenant_id::text = public.get_my_tenant_id()
+        )
+      );
   `;
   try {
     const res = await sbFetch(env, "POST", "/rest/v1/rpc/execute_sql", { query: sql, sql: sql }, false, "default");
