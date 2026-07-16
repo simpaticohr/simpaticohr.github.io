@@ -8008,7 +8008,7 @@ async function handleConfirmPayment(request, env, ctx) {
   const tx = txns[0];
 
   // Security: Verify the caller owns this transaction (unless super_admin)
-  const isSuperAdmin = ctx.role === "super_admin" || ctx.role === "superadmin";
+  const isSuperAdmin = (ctx.actorRole || "").toLowerCase().replace(/_/g, "") === "superadmin";
   if (!isSuperAdmin && tx.company_id !== ctx.tenantId) {
     throw new AppError("Cannot confirm another company's transaction", 403, "FORBIDDEN");
   }
