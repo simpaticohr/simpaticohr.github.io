@@ -153,6 +153,7 @@
         initCalendar();
         updateOverviewStats();
         initKanbanDragDrop();
+        setupRealtimeCollaboration();
         if (typeof window.loadByokSettings === 'function') window.loadByokSettings();
         if (typeof initVoiceSettings === 'function') initVoiceSettings();
     });
@@ -3313,6 +3314,57 @@ Be professional, highly strategic, clear, and action-oriented. Keep your spoken 
         }
     }
 
+    let collabChannel = null;
+
+    function setupRealtimeCollaboration() {
+        const client = sb();
+        if (!client || typeof client.channel !== 'function') return;
+
+        if (collabChannel) {
+            try { client.removeChannel(collabChannel); } catch(e) {}
+        }
+
+        const cid = getTenantId();
+        if (!cid) return;
+
+        try {
+            collabChannel = client.channel('consulting-collaboration')
+                .on('postgres_changes', { event: '*', schema: 'public', table: 'consulting_projects' }, (payload) => {
+                    const row = payload.new || payload.old;
+                    if (row && row.tenant_id === cid) {
+                        loadProjects().then(() => {
+                            renderProjects();
+                            updateVisualAnalytics();
+                        });
+                    }
+                })
+                .on('postgres_changes', { event: '*', schema: 'public', table: 'consulting_kpis' }, (payload) => {
+                    const row = payload.new || payload.old;
+                    if (row && row.tenant_id === cid) {
+                        loadKPIs();
+                    }
+                })
+                .on('postgres_changes', { event: '*', schema: 'public', table: 'consulting_kpi_history' }, (payload) => {
+                    const row = payload.new || payload.old;
+                    if (row && row.tenant_id === cid) {
+                        loadKPIHistory().then(() => {
+                            renderKPIs();
+                            updateVisualAnalytics();
+                        });
+                    }
+                })
+                .on('postgres_changes', { event: '*', schema: 'public', table: 'consulting_swot' }, (payload) => {
+                    const row = payload.new || payload.old;
+                    if (row && row.tenant_id === cid) {
+                        loadSwot().then(() => renderSwot());
+                    }
+                })
+                .subscribe();
+        } catch (e) {
+            console.warn('[realtime] Subscription error:', e.message);
+        }
+    }
+
     window.switchClientTenant = async function (tenantId) {
         if (!tenantId) {
             sessionStorage.removeItem('active_consulting_tenant');
@@ -3334,6 +3386,7 @@ Be professional, highly strategic, clear, and action-oriented. Keep your spoken 
 
         initCalendar();
         updateOverviewStats();
+        setupRealtimeCollaboration();
         showToast('Switched client workspace', 'success');
     };
 
