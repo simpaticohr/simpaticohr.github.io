@@ -819,7 +819,6 @@
             ctx.lineWidth = 1;
             ctx.stroke();
         });
-
         for (let i = 0; i < n; i++) {
             const angle = startAngle + i * angleStep;
             ctx.beginPath();
@@ -869,6 +868,225 @@
             ctx.fillText(t(name), lx, ly + 4);
         });
     }
+
+    let cachedKPIs = [];
+    let cachedKPIHistory = [];
+
+    async function loadKPIHistory() {
+        const client = sb();
+        if (!client) return;
+        const cid = getTenantId();
+        if (!cid) return;
+        try {
+            const { data, error } = await client
+                .from('consulting_kpi_history')
+                .select('*')
+                .eq('tenant_id', cid)
+                .order('recorded_at', { ascending: true });
+            if (error) throw error;
+            cachedKPIHistory = data || [];
+        } catch(e) {
+            console.error('[consulting] loadKPIHistory error:', e);
+            cachedKPIHistory = [];
+        }
+    }
+
+    async function loadKPIs() {
+        const dbData = await dbFetch(TABLES.kpis, { col: 'created_at', asc: false });
+        if (dbData) {
+            cachedKPIs = dbData;
+        } else {
+            cachedKPIs = lsLoad(LS_KEYS.kpis) || [];
+        }
+        await loadKPIHistory();
+        renderKPIs();
+    }
+
+    window.saveKPI = async function () {
+        const name = document.getElementById('kpiName').value.trim();
+        if (!name) { showToast('KPI name is required', 'error'); return; }
+
+        const kpi = {
+            tenant_id: getTenantId(),
+            created_by: getUserInfo().id,
+            name: name,
+            current_value: parseFloat(document.getElementById('kpiCurrent').value) || 0,
+            target_value: parseFloat(document.getElementById('kpiTarget').value) || 100,
+            unit: document.getElementById('kpiUnit').value.trim() || '',
+        };
+
+        const result = await dbInsert(TABLES.kpis, kpi);
+        if (result && result[0]) {
+            cachedKPIs.unshift(result[0]);
+            const client = sb();
+            if (client) {
+                try {
+                    await client.from('consulting_kpi_history').insert({
+                        tenant_id: getTenantId(),
+                        kpi_id: result[0].id,
+                        value: kpi.current_value,
+                        recorded_at: new Date().toISOString()
+                    });
+                } catch(e) {
+                    console.warn('[consulting] Failed to log initial KPI history:', e.message);
+                }
+            }
+        } else {
+            kpi.id = crypto.randomUUID();
+            cachedKPIs.unshift(kpi);
+        }
+
+        lsSave(LS_KEYS.kpis, cachedKPIs);
+
+        document.getElementById('kpiName').value = '';
+        document.getElementById('kpiCurrent').value = '0';
+        document.getElementById('kpiTarget').value = '100';
+        document.getElementById('kpiUnit').value = '';
+        closeModal('kpiModal');
+        await loadKPIs();
+        addActivity('Added KPI: ' + name, 'kpi');
+        showToast('KPI added', 'success');
+    };
+
+    window.updateKPIValue = async function (id) {
+        const kpi = cachedKPIs.find(k => k.id === id);
+        if (!kpi) return;
+        const valStr = prompt(`Enter new value for ${kpi.name} (${kpi.unit || ''}):`, kpi.current_value);
+        if (valStr === null) return;
+        const val = parseFloat(valStr);
+        if (isNaN(val)) { showToast('Please enter a valid number', 'error'); return; }
+
+        const client = sb();
+        if (client) {
+            try {
+                const { error: kpiErr } = await client
+                    .from('consulting_kpis')
+                    .update({ current_value: val, updated_at: new Date().toISOString() })
+                    .eq('id', id);
+                if (kpiErr) throw kpiErr;
+
+                const { error: histErr } = await client
+                    .from('consulting_kpi_history')
+                    .insert({
+                        tenant_id: getTenantId(),
+                        kpi_id: id,
+                        value: val,
+                        recorded_at: new Date().toISOString()
+                    });
+                if (histErr) throw histErr;
+
+                kpi.current_value = val;
+                showToast('KPI value updated', 'success');
+                addActivity('Updated KPI value: ' + kpi.name + ' to ' + val + (kpi.unit || ''), 'kpi');
+                await loadKPIs();
+                updateOverviewStats();
+            } catch(e) {
+                console.error('[consulting] updateKPIValue failed:', e);
+                showToast('Failed to update KPI value', 'error');
+            }
+        } else {
+            kpi.current_value = val;
+            lsSave(LS_KEYS.kpis, cachedKPIs);
+            renderKPIs();
+        }
+    };
+
+    function calculateKPIForecast(kpi) {
+        const current = kpi.current_value || 0;
+        const target = kpi.target_value || 0;
+        if (current >= target) return '<span style="color:var(--success); font-weight:600;"><i class="fas fa-check-circle"></i> Target reached!</span>';
+
+        const history = cachedKPIHistory.filter(h => h.kpi_id === kpi.id);
+        if (history.length < 2) {
+            return '<span style="color:var(--text-muted);"><i class="fas fa-chart-line"></i> Forecast: Add more data points</span>';
+        }
+
+        const sorted = [...history].sort((a, b) => new Date(a.recorded_at) - new Date(b.recorded_at));
+        const t0 = new Date(sorted[0].recorded_at).getTime() / (24 * 60 * 60 * 1000);
+        const pts = sorted.map(h => ({
+            x: (new Date(h.recorded_at).getTime() / (24 * 60 * 60 * 1000)) - t0,
+            y: parseFloat(h.value) || 0
+        }));
+
+        const N = pts.length;
+        let sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0;
+        pts.forEach(p => {
+            sumX += p.x;
+            sumY += p.y;
+            sumXY += p.x * p.y;
+            sumX2 += p.x * p.x;
+        });
+
+        const denom = N * sumX2 - sumX * sumX;
+        if (denom === 0) return '<span style="color:var(--text-muted);"><i class="fas fa-chart-line"></i> Forecast: Stable</span>';
+
+        const m = (N * sumXY - sumX * sumY) / denom;
+        const c = (sumY - m * sumX) / N;
+
+        if (m <= 0) {
+            return '<span style="color:var(--danger);"><i class="fas fa-chart-line"></i> Forecast: Flat or declining trend</span>';
+        }
+
+        const xTarget = (target - c) / m;
+        const targetTimeMs = (xTarget + t0) * 24 * 60 * 60 * 1000;
+        const projectedDate = new Date(targetTimeMs);
+
+        if (isNaN(projectedDate.getTime()) || targetTimeMs < Date.now()) {
+            return '<span style="color:var(--danger);"><i class="fas fa-chart-line"></i> Forecast: Unachievable on current trend</span>';
+        }
+
+        const dateStr = projectedDate.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+        return `<span style="color:var(--primary); font-weight:600;"><i class="fas fa-magic"></i> Forecast: Hits target by ${dateStr}</span>`;
+    }
+
+    function renderKPIs() {
+        const grid = document.getElementById('kpiGrid');
+        const empty = document.getElementById('kpiEmpty');
+
+        if (!cachedKPIs.length) {
+            if (empty) empty.style.display = 'block';
+            if (grid) grid.innerHTML = '';
+            return;
+        }
+        if (empty) empty.style.display = 'none';
+
+        grid.innerHTML = cachedKPIs.map(k => {
+            const current = k.current_value || k.current || 0;
+            const target = k.target_value || k.target || 100;
+            const pct = target > 0 ? Math.min(100, Math.round((current / target) * 100)) : 0;
+            const color = pct >= 75 ? 'var(--success)' : pct >= 40 ? 'var(--warning)' : 'var(--danger)';
+            const forecastHtml = calculateKPIForecast(k);
+
+            return `
+                <div class="kpi-item" style="background:var(--bg-elevated); border:1px solid var(--border); border-radius:12px; padding:20px; margin-bottom:16px; transition:all 0.2s;">
+                    <div class="kpi-item-header" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+                        <span class="kpi-name" style="font-weight:700; color:var(--text-primary); font-size:.9rem;">${escHtml(k.name)}</span>
+                        <div style="display:flex; align-items:center; gap:8px;">
+                            <span class="kpi-values" style="font-size:.8rem; font-weight:600; color:var(--text-secondary);">${current}${escHtml(k.unit || '')} / ${target}${escHtml(k.unit || '')} (${pct}%)</span>
+                            <button onclick="updateKPIValue('${k.id}')" class="btn btn-sm btn-secondary" style="padding:4px 8px; font-size:.7rem; border-radius:6px;"><i class="fas fa-edit"></i> Update</button>
+                            <i class="fas fa-trash" style="cursor:pointer; color:var(--danger); font-size:.8rem; margin-left:4px;" onclick="deleteKPI('${k.id}')"></i>
+                        </div>
+                    </div>
+                    <div class="kpi-bar" style="height:8px; background:var(--border); border-radius:4px; overflow:hidden; margin-bottom:10px;">
+                        <div class="kpi-fill" style="width:${pct}%; height:100%; background:${color}; border-radius:4px;"></div>
+                    </div>
+                    <div style="font-size:.75rem; margin-top:8px; display:flex; justify-content:space-between; align-items:center;">
+                        ${forecastHtml}
+                    </div>
+                </div>
+            `;
+        }).join('');
+    }
+
+    window.deleteKPI = async function (id) {
+        if (!confirm('Delete this KPI?')) return;
+        await dbDelete(TABLES.kpis, id);
+        cachedKPIs = cachedKPIs.filter(k => k.id !== id);
+        lsSave(LS_KEYS.kpis, cachedKPIs);
+        renderKPIs();
+        updateOverviewStats();
+        showToast('KPI deleted', 'success');
+    };
 
     // ═══════════════════════════════════════════════════════════
     // § PROJECT TRACKER (Supabase-backed)
@@ -1149,88 +1367,7 @@
         renderSwot();
     };
 
-    // ═══════════════════════════════════════════════════════════
-    // § KPI TRACKER (Supabase-backed)
-    // ═══════════════════════════════════════════════════════════
-    let cachedKPIs = [];
 
-    async function loadKPIs() {
-        const dbData = await dbFetch(TABLES.kpis, { col: 'created_at', asc: false });
-        if (dbData) {
-            cachedKPIs = dbData;
-        } else {
-            cachedKPIs = lsLoad(LS_KEYS.kpis) || [];
-        }
-        renderKPIs();
-    }
-
-    window.saveKPI = async function () {
-        const name = document.getElementById('kpiName').value.trim();
-        if (!name) { showToast('KPI name is required', 'error'); return; }
-
-        const kpi = {
-            tenant_id: getTenantId(),
-            created_by: getUserInfo().id,
-            name: name,
-            current_value: parseFloat(document.getElementById('kpiCurrent').value) || 0,
-            target_value: parseFloat(document.getElementById('kpiTarget').value) || 100,
-            unit: document.getElementById('kpiUnit').value.trim() || '',
-        };
-
-        const result = await dbInsert(TABLES.kpis, kpi);
-        if (result && result[0]) {
-            cachedKPIs.unshift(result[0]);
-        } else {
-            kpi.id = crypto.randomUUID();
-            cachedKPIs.unshift(kpi);
-        }
-
-        lsSave(LS_KEYS.kpis, cachedKPIs);
-
-        document.getElementById('kpiName').value = '';
-        document.getElementById('kpiCurrent').value = '0';
-        document.getElementById('kpiTarget').value = '100';
-        document.getElementById('kpiUnit').value = '';
-        closeModal('kpiModal');
-        renderKPIs();
-        addActivity('Added KPI: ' + name, 'kpi');
-        showToast('KPI added', 'success');
-    };
-
-    function renderKPIs() {
-        const grid = document.getElementById('kpiGrid');
-        const empty = document.getElementById('kpiEmpty');
-
-        if (!cachedKPIs.length) {
-            if (empty) empty.style.display = 'block';
-            return;
-        }
-        if (empty) empty.style.display = 'none';
-
-        grid.innerHTML = cachedKPIs.map(k => {
-            const current = k.current_value || k.current || 0;
-            const target = k.target_value || k.target || 100;
-            const pct = target > 0 ? Math.min(100, Math.round((current / target) * 100)) : 0;
-            const color = pct >= 75 ? 'var(--success)' : pct >= 40 ? 'var(--warning)' : 'var(--danger)';
-            return '<div class="kpi-item">' +
-                '<div class="kpi-item-header">' +
-                '<span class="kpi-name">' + escHtml(k.name) + '</span>' +
-                '<span class="kpi-values">' + current + (k.unit ? k.unit : '') + ' / ' + target + (k.unit ? k.unit : '') + ' (' + pct + '%)' +
-                '  <i class="fas fa-trash" style="cursor:pointer;color:var(--danger);margin-left:8px;font-size:.7rem;" onclick="deleteKPI(\'' + k.id + '\')"></i></span>' +
-                '</div>' +
-                '<div class="kpi-bar"><div class="kpi-fill" style="width:' + pct + '%;background:' + color + ';"></div></div>' +
-                '</div>';
-        }).join('');
-    }
-
-    window.deleteKPI = async function (id) {
-        if (!confirm('Delete this KPI?')) return;
-        await dbDelete(TABLES.kpis, id);
-        cachedKPIs = cachedKPIs.filter(k => k.id !== id);
-        lsSave(LS_KEYS.kpis, cachedKPIs);
-        renderKPIs();
-        showToast('KPI deleted', 'success');
-    };
 
     // ═══════════════════════════════════════════════════════════
     // § DOCUMENT HUB (Supabase-backed)
