@@ -3407,6 +3407,7 @@ Be professional, highly strategic, clear, and action-oriented. Keep your spoken 
         if (!client) return false;
 
         try {
+            // 1. Check for active consulting subscription
             const { data: subs, error } = await client
                 .from('subscriptions')
                 .select('*')
@@ -3416,16 +3417,29 @@ Be professional, highly strategic, clear, and action-oriented. Keep your spoken 
                 .gt('current_period_end', new Date().toISOString())
                 .limit(1);
 
-            if (error) {
-                console.error('[consulting] Subscription query error:', error);
-                return false;
-            }
-
             if (subs && subs.length > 0) {
                 return true;
             }
+
+            // 2. Check 2-day free trial guard (from company registration/subscription_start)
+            const { data: company, error: compError } = await client
+                .from('companies')
+                .select('subscription_start, created_at')
+                .eq('id', tenantId)
+                .maybeSingle();
+
+            if (company) {
+                const startStr = company.subscription_start || company.created_at;
+                if (startStr) {
+                    const startDate = new Date(startStr);
+                    const trialEndDate = new Date(startDate.getTime() + 2 * 24 * 60 * 60 * 1000);
+                    if (new Date() < trialEndDate) {
+                        return true;
+                    }
+                }
+            }
         } catch (e) {
-            console.error('[consulting] Subscription check exception:', e);
+            console.error('[consulting] Subscription/trial check exception:', e);
         }
         return false;
     }
@@ -3495,6 +3509,7 @@ Be professional, highly strategic, clear, and action-oriented. Keep your spoken 
 
     window.subscribeToConsulting = async function() {
         const token = localStorage.getItem('simpatico_token') || localStorage.getItem('sh_token');
+        const user = JSON.parse(localStorage.getItem('simpatico_user') || '{}');
         
         try {
             let currency = 'INR';
@@ -3513,7 +3528,9 @@ Be professional, highly strategic, clear, and action-oriented. Keep your spoken 
                 body: JSON.stringify({
                     plan: 'consulting_monthly',
                     billing_cycle: 'monthly',
-                    currency: currency
+                    currency: currency,
+                    customer_email: user.email || '',
+                    customer_name: user.name || user.full_name || ''
                 })
             });
 

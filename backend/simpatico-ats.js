@@ -7907,7 +7907,10 @@ async function handleManualCreateOrder(request, env, ctx) {
   const { plan, billing_cycle = "monthly", customer_name, customer_email, customer_phone } = body;
 
   if (!plan || !PLAN_PRICING[plan]) throw new ValidationError("Invalid plan");
-  if (!customer_email) throw new ValidationError("customer_email required");
+
+  const emailVal = customer_email || ctx.actorEmail;
+  if (!emailVal) throw new ValidationError("customer_email required");
+  const nameVal = customer_name || ctx.actor?.user_metadata?.full_name || ctx.actor?.user_metadata?.name || emailVal.split("@")[0];
 
   const pricing = PLAN_PRICING[plan][billing_cycle];
   if (!pricing || !pricing.inr) throw new ValidationError("Invalid billing cycle or plan");
@@ -7920,7 +7923,7 @@ async function handleManualCreateOrder(request, env, ctx) {
     txRes = await sbFetch(env, "POST", "/rest/v1/payment_transactions", {
       company_id: companyId, gateway: "manual", gateway_order_id: orderId,
       amount: pricing.inr, currency: "INR", status: "awaiting_payment", plan, billing_cycle,
-      customer_email, customer_name, is_international: false,
+      customer_email: emailVal, customer_name: nameVal, is_international: false,
       metadata: { internal_order_id: orderId, instructions: "UPI or Bank Transfer" },
     }, false, companyId);
   } catch (err) {
@@ -7950,8 +7953,8 @@ async function handleManualCreateOrder(request, env, ctx) {
         <tr><td style="padding:8px 12px;font-weight:600;color:#374151;border-bottom:1px solid #E5E7EB">Gateway</td><td style="padding:8px 12px;border-bottom:1px solid #E5E7EB">Manual (UPI / Bank Transfer)</td></tr>
         <tr><td style="padding:8px 12px;font-weight:600;color:#374151;border-bottom:1px solid #E5E7EB">Plan</td><td style="padding:8px 12px;border-bottom:1px solid #E5E7EB">${plan.charAt(0).toUpperCase() + plan.slice(1)} (${billing_cycle})</td></tr>
         <tr><td style="padding:8px 12px;font-weight:600;color:#374151;border-bottom:1px solid #E5E7EB">Amount</td><td style="padding:8px 12px;border-bottom:1px solid #E5E7EB;font-weight:700;color:#059669">₹${pricing.inr.toLocaleString()} INR</td></tr>
-        <tr><td style="padding:8px 12px;font-weight:600;color:#374151;border-bottom:1px solid #E5E7EB">Customer</td><td style="padding:8px 12px;border-bottom:1px solid #E5E7EB">${customer_name || "N/A"}</td></tr>
-        <tr><td style="padding:8px 12px;font-weight:600;color:#374151;border-bottom:1px solid #E5E7EB">Email</td><td style="padding:8px 12px;border-bottom:1px solid #E5E7EB">${customer_email}</td></tr>
+        <tr><td style="padding:8px 12px;font-weight:600;color:#374151;border-bottom:1px solid #E5E7EB">Customer</td><td style="padding:8px 12px;border-bottom:1px solid #E5E7EB">${nameVal}</td></tr>
+        <tr><td style="padding:8px 12px;font-weight:600;color:#374151;border-bottom:1px solid #E5E7EB">Email</td><td style="padding:8px 12px;border-bottom:1px solid #E5E7EB">${emailVal}</td></tr>
         <tr><td style="padding:8px 12px;font-weight:600;color:#374151">Company ID</td><td style="padding:8px 12px">${companyId}</td></tr>
       </table>
       <p style="margin-top:16px;font-size:13px;color:#DC2626;font-weight:600">⏳ Awaiting payment — check your UPI/bank account and confirm once received.</p>
