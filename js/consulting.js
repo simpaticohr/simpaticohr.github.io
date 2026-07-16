@@ -152,6 +152,7 @@
         ]);
         initCalendar();
         updateOverviewStats();
+        initKanbanDragDrop();
         if (typeof window.loadByokSettings === 'function') window.loadByokSettings();
         if (typeof initVoiceSettings === 'function') initVoiceSettings();
     });
@@ -378,6 +379,121 @@
         document.getElementById('statAssessments').textContent = cachedAssessment ? '1' : '0';
         document.getElementById('statDocuments').textContent = cachedDocuments.length;
         document.getElementById('statMeetings').textContent = cachedMeetings.filter(m => m.status === 'scheduled').length;
+        updateVisualAnalytics();
+    }
+
+    function updateVisualAnalytics() {
+        // 1. Health Index Gauge
+        const gaugeRing = document.getElementById('healthGaugeRing');
+        const gaugeVal = document.getElementById('healthGaugeValue');
+        const gaugeStatus = document.getElementById('healthGaugeStatus');
+        
+        let score = 0;
+        let statusText = 'No Data';
+        
+        if (cachedAssessment && cachedAssessment.answers) {
+            const answers = cachedAssessment.answers;
+            const total = answers.reduce((acc, curr) => acc + (curr.val || 0), 0);
+            const maxScore = answers.length * 4; // max score per q is 4
+            score = maxScore > 0 ? Math.round((total / maxScore) * 100) : 0;
+            
+            if (score >= 80) statusText = 'Excellent';
+            else if (score >= 60) statusText = 'Good';
+            else if (score >= 40) statusText = 'Average';
+            else statusText = 'Critical';
+        }
+        
+        if (gaugeRing) {
+            const offset = 440 - (440 * score / 100);
+            gaugeRing.style.strokeDashoffset = offset;
+        }
+        if (gaugeVal) gaugeVal.textContent = score + '%';
+        if (gaugeStatus) gaugeStatus.textContent = statusText;
+
+        // 2. Funnel pipeline
+        const stages = ['discovery', 'strategy', 'execution', 'review', 'completed'];
+        stages.forEach(stage => {
+            const count = cachedProjects.filter(p => p.stage === stage).length;
+            const id = 'funnelCount' + stage.charAt(0).toUpperCase() + stage.slice(1);
+            const el = document.getElementById(id);
+            if (el) el.textContent = count;
+        });
+
+        // 3. Benchmarks
+        renderBenchmarking();
+    }
+
+    function renderBenchmarking() {
+        const container = document.getElementById('benchmarkContainer');
+        if (!container) return;
+
+        if (!cachedAssessment || !cachedAssessment.answers) {
+            container.innerHTML = '<div style="font-size: .75rem; color: var(--text-muted); text-align: center; padding: 20px;"><i class="fas fa-info-circle" style="margin-right:4px"></i>No benchmark data available. Complete the assessment to view comparisons.</div>';
+            return;
+        }
+
+        const categories = ['Strategy', 'Operations', 'Finance', 'Digital Maturity', 'HR & Culture'];
+        
+        // Calculate average score per category (0-100)
+        const scores = {};
+        categories.forEach(cat => {
+            const catAns = cachedAssessment.answers.filter(a => a.category === cat);
+            if (catAns.length > 0) {
+                const total = catAns.reduce((acc, curr) => acc + (curr.val || 0), 0);
+                scores[cat] = Math.round((total / (catAns.length * 4)) * 100);
+            } else {
+                scores[cat] = 0;
+            }
+        });
+
+        // Mock industry average and top quartile benchmarks
+        const industryAverages = {
+            'Strategy': 55,
+            'Operations': 60,
+            'Finance': 65,
+            'Digital Maturity': 50,
+            'HR & Culture': 70
+        };
+        const topQuartiles = {
+            'Strategy': 80,
+            'Operations': 85,
+            'Finance': 85,
+            'Digital Maturity': 75,
+            'HR & Culture': 90
+        };
+
+        let html = '';
+        categories.forEach(cat => {
+            const score = scores[cat] || 0;
+            const indAvg = industryAverages[cat];
+            const topQ = topQuartiles[cat];
+
+            html += `
+                <div style="margin-bottom: 8px;">
+                    <div style="display:flex; justify-content:space-between; font-size:.75rem; margin-bottom:2px; font-weight:500;">
+                        <span style="color:var(--text-primary);">${cat}</span>
+                        <span style="color:var(--primary); font-weight:700;">${score}%</span>
+                    </div>
+                    <div style="position:relative; height:10px; background:var(--border); border-radius:5px; margin-bottom:8px; overflow:visible;">
+                        <!-- Client progress -->
+                        <div style="position:absolute; left:0; top:0; height:100%; width:${score}%; background:linear-gradient(90deg, var(--primary-light), var(--primary)); border-radius:5px;"></div>
+                        <!-- Industry average indicator -->
+                        <div style="position:absolute; left:${indAvg}%; top:-3px; width:16px; height:16px; background:#fff; border:3px solid #3b82f6; border-radius:50%; transform:translateX(-50%);" title="Industry Average: ${indAvg}%"></div>
+                        <!-- Top Quartile indicator -->
+                        <div style="position:absolute; left:${topQ}%; top:-3px; width:16px; height:16px; background:#fff; border:3px solid #10b981; border-radius:50%; transform:translateX(-50%);" title="Top Quartile (25%): ${topQ}%"></div>
+                    </div>
+                </div>
+            `;
+        });
+
+        html += `
+            <div style="display:flex; justify-content:center; gap:16px; margin-top:8px; font-size:.68rem; color:var(--text-secondary); font-weight:500; border-top:1px dashed var(--border); padding-top:8px;">
+                <div style="display:flex; align-items:center; gap:4px;"><span style="display:inline-block; width:8px; height:8px; background:#fff; border:2.5px solid #3b82f6; border-radius:50%;"></span> Industry Avg</div>
+                <div style="display:flex; align-items:center; gap:4px;"><span style="display:inline-block; width:8px; height:8px; background:#fff; border:2.5px solid #10b981; border-radius:50%;"></span> Top Quartile (25%)</div>
+            </div>
+        `;
+
+        container.innerHTML = html;
     }
 
     // ═══════════════════════════════════════════════════════════
@@ -823,7 +939,7 @@
             }
 
             container.innerHTML = stageProjects.map(p =>
-                '<div class="kanban-card" onclick="editProjectStage(\'' + p.id + '\')">' +
+                '<div class="kanban-card" draggable="true" ondragstart="window.drag(event, \'' + p.id + '\')" ondragend="window.dragEnd(event)" onclick="editProjectStage(\'' + p.id + '\')">' +
                 '<div class="kanban-card-type">' + escHtml(p.type) + '</div>' +
                 '<div class="kanban-card-title">' + escHtml(p.name) + '</div>' +
                 '<div class="kanban-card-progress"><div class="kanban-card-progress-fill" style="width:' + p.progress + '%;"></div></div>' +
@@ -834,6 +950,75 @@
                 (p.milestone ? '<div style="font-size:.7rem;color:var(--primary);margin-top:6px;"><i class="fas fa-flag"></i> ' + escHtml(p.milestone) + '</div>' : '') +
                 '</div>'
             ).join('');
+        });
+    }
+
+    // Drag & Drop Kanban Handlers
+    window.drag = function(ev, id) {
+        ev.dataTransfer.setData("text/plain", id);
+        const card = ev.target;
+        if (card) card.classList.add('dragging');
+    };
+
+    window.dragEnd = function(ev) {
+        const card = ev.target;
+        if (card) card.classList.remove('dragging');
+    };
+
+    window.drop = async function(ev, targetStage) {
+        ev.preventDefault();
+        const id = ev.dataTransfer.getData("text/plain");
+        const project = cachedProjects.find(p => p.id === id);
+        if (!project || project.stage === targetStage) return;
+
+        const oldStage = project.stage;
+        project.stage = targetStage;
+
+        // Visual update immediately for responsiveness
+        renderProjects();
+        updateVisualAnalytics();
+
+        // Update database
+        const client = sb();
+        if (client) {
+            try {
+                const { error } = await client
+                    .from('consulting_projects')
+                    .update({ stage: targetStage, updated_at: new Date().toISOString() })
+                    .eq('id', id);
+
+                if (error) throw error;
+                showToast(`Project moved to ${targetStage.toUpperCase()}`, 'success');
+                addActivity('Moved project to ' + targetStage + ': ' + project.name, 'project', id);
+            } catch (e) {
+                console.error('[consulting] Drag drop DB update failed:', e);
+                // Rollback on error
+                project.stage = oldStage;
+                renderProjects();
+                updateVisualAnalytics();
+                showToast('Failed to update stage in database', 'error');
+            }
+        }
+    };
+
+    function initKanbanDragDrop() {
+        const containers = document.querySelectorAll('.kanban-cards');
+        containers.forEach(container => {
+            const stage = container.getAttribute('data-stage');
+            container.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                container.classList.add('drag-over');
+            });
+            container.addEventListener('dragleave', () => {
+                container.classList.remove('drag-over');
+            });
+            container.addEventListener('drop', (e) => {
+                container.classList.remove('drag-over');
+                const id = e.dataTransfer.getData("text/plain");
+                if (id) {
+                    window.drop({ preventDefault: () => e.preventDefault(), dataTransfer: e.dataTransfer }, stage);
+                }
+            });
         });
     }
 
