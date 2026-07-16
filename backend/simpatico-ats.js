@@ -575,7 +575,6 @@ const DEPRECATED_MODELS = {
   "gemini-1.5-pro": "gemini-2.5-pro",
   "gemini-1.0-pro": "gemini-2.5-flash",
   "gemini-pro": "gemini-2.5-flash",
-  "gemini-3.5-flash": "gemini-2.5-flash",       // Not a real model — auto-correct
   "gemini-2.0-flash-exp": "gemini-2.0-flash",    // Experimental → stable
   "gpt-4-turbo-preview": "gpt-4o-mini",
   "gpt-3.5-turbo": "gpt-4o-mini",
@@ -8744,7 +8743,7 @@ async function handleBYOKValidate(request, env, ctx) {
 
   const RECOMMENDED = {
     openai: ["gpt-4o", "gpt-4o-mini", "gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano", "o4-mini"],
-    gemini: ["gemini-3.5-flash", "gemini-3.5-pro", "gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.0-flash"],
+    gemini: ["gemini-3.5-flash", "gemini-3.5-pro", "gemini-3.1-flash", "gemini-3.1-pro", "gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.0-flash"],
     anthropic: ["claude-sonnet-4-20250514", "claude-3-5-sonnet-20241022", "claude-3-haiku-20240307"],
     deepseek: ["deepseek-chat", "deepseek-reasoner"],
     kimi: ["kimi-k2-0520", "moonshot-v1-128k", "moonshot-v1-32k"],
@@ -8771,6 +8770,7 @@ async function handleBYOKValidate(request, env, ctx) {
       // Exclude: gemma (local models), embedding, AQA, imagen, preview/experimental builds
       const GEMINI_CHAT_VERIFIED = [
         "gemini-3.5-flash", "gemini-3.5-pro",
+        "gemini-3.1-flash", "gemini-3.1-pro",
         "gemini-2.5-flash", "gemini-2.5-pro",
         "gemini-2.0-flash", "gemini-2.0-flash-lite",
         "gemini-1.5-flash", "gemini-1.5-pro",
@@ -8815,6 +8815,22 @@ async function handleBYOKValidate(request, env, ctx) {
         {
           id: "gemini-3.5-pro",
           name: "Gemini 3.5 Pro (Advanced Reasoning)",
+          context_window: 2097152,
+          output_limit: 8192,
+          recommended: false,
+          verified: true
+        },
+        {
+          id: "gemini-3.1-flash",
+          name: "Gemini 3.1 Flash (Next-Gen Fast)",
+          context_window: 1048576,
+          output_limit: 8192,
+          recommended: true,
+          verified: true
+        },
+        {
+          id: "gemini-3.1-pro",
+          name: "Gemini 3.1 Pro (Next-Gen Reasoning)",
           context_window: 2097152,
           output_limit: 8192,
           recommended: false,
