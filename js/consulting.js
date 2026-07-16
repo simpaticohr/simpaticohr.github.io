@@ -1204,7 +1204,8 @@
                 const { error } = await client
                     .from('consulting_projects')
                     .update({ stage: targetStage, updated_at: new Date().toISOString() })
-                    .eq('id', id);
+                    .eq('id', id)
+                    .eq('tenant_id', getTenantId());
 
                 if (error) throw error;
                 showToast(`Project moved to ${targetStage.toUpperCase()}`, 'success');
