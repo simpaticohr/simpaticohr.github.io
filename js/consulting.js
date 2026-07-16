@@ -370,7 +370,7 @@
 
     // ═══════════════════════════════════════════════════════════
     // § OVERVIEW STATS
-    // ═══════════════════════════════════════════════════════════
+    // ═══════════��═══════════════════════════════════════════════
     function updateOverviewStats() {
         document.getElementById('statProjects').textContent = cachedProjects.filter(p => p.stage !== 'completed').length;
         document.getElementById('statAssessments').textContent = cachedAssessment ? '1' : '0';
@@ -493,7 +493,7 @@
         container.innerHTML = html;
     }
 
-    // ═══════════════════════════════════════════════════════════
+    // ════════════════════════════════════════════════════════��══
     // § BUSINESS HEALTH ASSESSMENT
     // ═══════════════════════════════════════════════════════════
     // ═══════════════════════════════════════════════════════════
@@ -529,7 +529,7 @@
             { category: 'Strategy', q: 'നിങ്ങളുടെ മത്സരാധിഷ്ഠിത നേട്ടത്തെക്കുറിച്ച് നിങ്ങളുടെ ടീം എത്രത്തോളം മനസ്സിലാക്കുന്നുണ്ട്?', opts: ['നിർവചിക്കപ്പെട്ടിട്ടില്ല', 'വ്യക്തമല്ലാത്ത ധാരണ', 'ഒരു പരിധി വരെ വ്യക്തമാണ്', 'നേതൃത്വത്തിന് വ്യക്തമായ ധാരണയുണ്ട്', 'എല്ലാ തലങ്ങളിലും തികച്ചും വ്യക്തമാണ്'] },
             { category: 'Operations', q: 'നിങ്ങളുടെ പ്രധാന ബിസിനസ്സ് പ്രക്രിയകൾ എത്രത്തോളം കാര്യക്ഷമമാണ്?', opts: ['ഭൂരിഭാഗവും മാനുവൽ ആണ്', 'ചില പ്രക്രിയകൾ നിർവചിക്കപ്പെട്ടിട്ടുണ്ട്', 'പ്രധാന പ്രക്രിയകൾ രേഖപ്പെടുത്തപ്പെട്ടിട്ടുണ്ട്', 'ചില ഓട്ടോമേഷനുകളോടെ നന്നായി ക്രമീകരിച്ചിരിക്കുന്നു', 'പൂർണ്ണമായും ഒപ്റ്റിമൈസ് ചെയ്തതും നിരന്തരം മെച്ചപ്പെടുത്തുന്നതുമാണ്'] },
             { category: 'Operations', q: 'നിങ്ങളുടെ സപ്ലൈ ചെയിൻ അല്ലെങ്കിൽ സേവന വിതരണം എത്രത്തോളം ഫലപ്രദമായി നിങ്ങൾ കൈകാര്യം ചെയ്യുന്നു?', opts: ['പലപ്പോഴും തടസ്സങ്ങൾ ഉണ്ടാകുന്നു', 'അടിസ്ഥാനപരമായ മാനേജ്മെന്റ്', 'മെച്ചപ്പെടുത്താൻ അവസരമുള്ള തരത്തിൽ തൃപ്തികരമാണ്', 'KPI-കൾ ഉപയോഗിച്ച് നന്നായി കൈകാര്യം ചെയ്യുന്നു', 'തത്സമയ നിരീക്ഷണത്തോടെ മികച്ച സേവന വിതരണം'] },
-            { category: 'Finance', q: 'നിങ്ങളുടെ സാമ്പത്തിക ആസൂത്രണവും പ്രവചനവും എത്രത്തോളം ശക്തമാണ്?', opts: ['ഔപചാരികമായ സാമ്പത്തിക ആസൂത്രണം ഇല്ല', 'അടിസ്ഥാന ബജറ്റിംഗ് മാത്രം', 'ചില പ്രവചനങ്ങളോട���യുള്ള വാർഷിക ബജറ്റുകൾ', 'ത്രൈമാസ അടിസ്ഥാനത്തിൽ പുതുക്കുന്ന വിശദമായ സാമ്പത്തിക മോഡലുകൾ', 'തത്സമയ ധനകാര്യ ഡാഷ്‌ബോർഡുകൾ'] },
+            { category: 'Finance', q: 'നിങ്ങളുടെ സാമ്പത്തിക ആസൂത്രണവും പ്രവചനവും എത്രത്തോളം ശക്തമാണ്?', opts: ['ഔപചാരികമായ സാമ്പത്തിക ആസൂത്രണം ഇല്ല', 'അടിസ്ഥാന ബജറ്റിംഗ് മാത്രം', 'ചില പ്രവചനങ്ങളോട���യുള്ള വാർഷിക ബജറ്റുകൾ', 'ത്രൈമാസ അടിസ്ഥാനത്തിൽ പുതുക്കുന്ന വിശദമായ സാമ്പത്തിക മോഡലുകൾ', 'തത്സമയ ധന��ാര്യ ഡാഷ്‌ബോർഡുകൾ'] },
             { category: 'Finance', q: 'നിക്ഷേപങ്ങളിലും പ്രോജക്റ്റുകളിലും ലഭിക്കുന്ന ലാഭം (ROI) നിങ്ങൾ എത്രത്തോളം ട്രാക്ക് ചെയ്യുന്നുണ്ട്?', opts: ['ROI ഒരിക്കലും അളക്കാറില്ല', 'അപൂർവ്വമായി അവലോകനം ചെയ്യുന്നു', 'വലിയ നിക്ഷേപങ്ങൾക്ക് മാത്രം അളക്കുന്നു', 'മിക്ക പ്രോജക്റ്റുകൾക്കും വ്യവസ്ഥാപിതമായി ട്രാക്ക് ചെയ്യുന്നു', 'എല്ലാ പദ്ധതികൾക്കും സമഗ്രമായ ROI ചട്ടക്കൂട്'] },
             { category: 'Digital Maturity', q: 'നിങ്ങളുടെ ഡിജിറ്റൽ പുരോഗതിയുടെ നിലവാരം എത്രയാണ്?', opts: ['ഭൂരിഭാഗവും പേപ്പർ അടിസ്ഥാനമാക്കിയുള്ള പ്രവർത്തനങ്ങൾ', 'അടിസ്ഥാന ഡിജിറ്റൽ ഉപകരണങ്ങൾ (ഇമെയിൽ, സ്പ്രെഡ്ഷീറ്റുകൾ)', 'ചില ക്ലൗഡ് സോഫ്റ്റ്‌വെയറുകൾ ഉപയോഗിക്കുന്നു', 'ഡിജിറ്റൽ മുൻഗണന നൽകുന്ന സംയോജിത സിസ്റ്റങ്ങൾ', 'ആധുനിക അനലിറ്റിക്സോടെയുള്ള AI/ഓട്ടോമേഷൻ അധിഷ്ഠിത പ്രവർത്തനം'] },
             { category: 'Digital Maturity', q: 'തീരുമാനങ്ങൾ എടുക്കുന്നതിന് നിങ്ങൾ ഡാറ്റ എത്രത്തോളം ഫലപ്രദമായി ഉപയോഗിക്കുന്നു?', opts: ['തീരുമാനങ്ങൾ പൂർണ്ണമായും ഊഹങ്ങളെ അടിസ്ഥാനമാക്കിയുള്ളതാണ്', 'അടിസ്ഥാന ഡാറ്റ ശേഖരിക്കുന്നുണ്ടെങ്കിലും അപൂർവ്വമായി മാത്രമേ ഉപയോഗിക്കുന്നുള്ളൂ', 'ചില റിപ്പോർട്ടുകൾ ഇടയ്ക്കിടെ തയ്യാറാക്കുന്നു', 'നേതൃത്വ തലത്തിൽ ഡാറ്റ അടിസ്ഥാനമാക്കിയുള്ള തീരുമാനങ്ങൾ', 'ഓർഗനൈസേഷനിലുടനീളം ഡാറ്റ അടിസ്ഥാനമാക്കിയുള്ള സംസ്കാരം'] },
@@ -1289,7 +1289,7 @@
         showToast('Project deleted', 'success');
     };
 
-    // ═══════════════════════════════════════════════════════════
+    // ════════════════════════════════════��══════════════════════
     // § SWOT ANALYSIS (Supabase-backed)
     // ═══════════════════════════════════════════════════════════
     let cachedSwot = { strengths: [], weaknesses: [], opportunities: [], threats: [] };
@@ -1628,9 +1628,9 @@
         showToast('Meeting deleted', 'success');
     };
 
-    // ═══════════════════════════════════════════════════════════
+    // ══════════════════════════════════════════════════��════════
     // § AI BUSINESS ADVISOR
-    // ═══════════════════════════════════════════════════════════
+    // ═══════════════════════════════════════════���═══════════════
     const advisorResponsesTranslations = {
         hi: {
             swot: `**SWOT विश्लेषण गाइड:**\n\n**ताकत (Strengths)** — आपकी ताकत क्या है?\n**कमजोरियां (Weaknesses)** — आपकी कमजोरियां क्या हैं?\n**अवसर (Opportunities)** — क्या बाजार के अवसर हैं?\n**खतरे (Threats)** — क्या बाहरी खतरे हैं?\n\n💡 अपनी SWOT देखने के लिए रणनीति स्कोरकार्ड पर जाएं!`,
@@ -1657,7 +1657,7 @@
             cost_reduction: `**ചെലവ് കുറയ്ക്കാനുള്ള വഴികൾ:**\n\n1. പ്രവർത്തനങ്ങളുടെ ഓട്ടോമേഷൻ\n2. വെണ്ടർ ഒപ്റ്റിമൈസേഷൻ\n3. റിമോട്ട്/ഹൈബ്രിഡ് ജോലിരീതി\n4. കാര്യക്ഷമമായ വിഭവ വിനിയോഗം`,
             kpi: `**പ്രധാന ബിസിനസ്സ് KPI-കൾ:**\n\n• വരുമാന വളർച്ചാ നിരക്ക്\n• ലാഭത്തിന്റെ അളവ്\n• കസ്റ്റമർ റിട്ടൻഷൻ റേറ്റ്\n• ഉൽപ്പാദനക്ഷമത നിരക്ക്`,
             digital: `**ഡിജിറ്റൽ പുരോഗതിയുടെ ഘട്ടങ്ങൾ:**\n\n1. സിസ്റ്റം ഓഡിറ്റ്\n2. ക്ലൗഡ് സോഫ്റ്റ്‌വെയറുകൾ\n3. ഡാറ്റാ അനലിറ്റിക്സ്\n4. പുതിയ സാങ്കേതിക വിദ്യകൾ`,
-            default: `വളരെ നല്ലൊരു ചോദ്യം! സ്ട്രാറ്റജിക് പ്ലാനിംഗ്, ഗൾഫ് മാർക്കറ്റ് എൻട്രി, ഡിജിറ്റൽ ട്രാൻസ്ഫർമേഷൻ എന്നിവയിൽ സഹായിക്കാൻ സിംപാറ്റിക്കോ കൺസൾട്ടന്റുമാർ ലഭ്യമാണ്. കൂടുതൽ വിവരങ്ങൾക്ക്: info@simpaticohr.in`
+            default: `വളരെ നല്ലൊരു ചോദ്യം! സ്ട്രാറ്റജിക് പ്ലാനിംഗ്, ഗൾഫ് മാർക്കറ്റ് എൻട്രി, ഡിജിറ്റൽ ട്രാൻസ്ഫർമേഷൻ എന്നിവയിൽ സഹായിക്കാൻ സിംപാറ്റിക്ക�� കൺസൾട്ടന്റുമാർ ലഭ്യമാണ്. കൂടുതൽ വിവരങ്ങൾക്ക്: info@simpaticohr.in`
         }
     };
 
@@ -2031,7 +2031,7 @@ Be professional, highly strategic, clear, and action-oriented. Support the custo
             .replace(/\n/g, '<br>');
     }
 
-    // ═══════════════════════════════════════════════════════════
+    // ═══════════════════════════════════��═══════════════════════
     // § PDF EXPORT (jsPDF)
     // ═══════════════════════════════════════════════════════════
     window.exportAssessmentPDF = function () {
@@ -2580,7 +2580,7 @@ RECOMMENDATIONS FOR NEXT WEEK
             recOperations: 'പ്രധാന പ്രവർത്തനങ്ങൾ ഡോക്യുമെന്റ് ചെയ്യുകയും ഒപ്റ്റിമൈസ് ചെയ്യുകയും ചെയ്യുക.',
             recFinance: 'സാമ്പത്തിക ഡാഷ്‌ബോർഡുകളും ROI ട്രാക്കിംഗും നടപ്പിലാക്കുക.',
             recDigital: 'ഡിജിറ്റൽ പുരോഗതിക്ക് മുൻഗണന നൽകു�� — ക്ലൗഡ് മൈഗ്രേഷനിലൂടെ ആരംഭിക്കുക.',
-            recHR: 'ജീവനക്കാരുടെ തൃപ്തി വർദ്ധിപ്പിക്കുന്ന പ്രോഗ്രാമുകളിൽ നിക്ഷേപിക്കുക.',
+            recHR: 'ജീവനക്കാരുടെ തൃപ്തി വർദ്ധിപ്പിക്കുന്ന പ്രോഗ്രാമ��കളിൽ നിക്ഷേപിക്കുക.',
             Strategy: 'തന്ത്രം', Operations: 'പ്രവർത്തനങ്ങൾ', Finance: 'ധനകാര്യം', 'Digital Maturity': 'ഡിജിറ്റൽ പുരോഗതി', 'HR & Culture': 'HR & സംസ്കാരം',
             navDashboard: 'ഡാഷ്‌ബോർഡ്', navManagement: 'മാനേജ്‌മെന്റ്', navIntelligence: 'ഇന്റലിജൻസ്', navLinks: 'ലിങ്കുകൾ',
             chatPlaceholder: 'ഒരു ബിസിനസ്സ് ചോദ്യം ചോദിക്കുക...', chatStatus: 'സിംപാറ്റിക്കോ ഇന്റലിജൻസ് നൽകുന്നത്'
@@ -3274,41 +3274,10 @@ Be professional, highly strategic, clear, and action-oriented. Keep your spoken 
     }
 
     async function initClientSelector() {
-        const user = JSON.parse(localStorage.getItem('simpatico_user') || '{}');
-        const role = user.role || '';
-        const isSuperAdmin = role === 'super_admin' || role === 'superadmin';
-
-        if (!isSuperAdmin) return;
-
-        const client = sb();
-        if (!client) return;
-
-        try {
-            // Fetch all companies
-            const { data: companies, error } = await client
-                .from('companies')
-                .select('id, name')
-                .order('name');
-
-            if (error || !companies || !companies.length) return;
-
-            const select = document.getElementById('tenantSelect');
-            const container = document.getElementById('tenantSelectorContainer');
-            if (!select || !container) return;
-
-            // Populate select dropdown
-            const activeTenant = sessionStorage.getItem('active_consulting_tenant') || '';
-            let options = '<option value="">-- Active Workspace (Self) --</option>';
-            companies.forEach(c => {
-                const selected = activeTenant === c.id ? ' selected' : '';
-                options += `<option value="${c.id}"${selected}>${c.name}</option>`;
-            });
-
-            select.innerHTML = options;
-            container.style.display = 'inline-flex';
-        } catch (e) {
-            console.warn('[consulting] Failed to init client selector:', e);
-        }
+        // Tenant impersonation from browser-controlled state is intentionally disabled.
+        // Cross-company support access must use a separately audited server-side flow.
+        const container = document.getElementById('tenantSelectorContainer');
+        if (container) container.style.display = 'none';
     }
 
     let collabChannel = null;
@@ -3362,29 +3331,8 @@ Be professional, highly strategic, clear, and action-oriented. Keep your spoken 
         }
     }
 
-    window.switchClientTenant = async function (tenantId) {
-        if (!tenantId) {
-            sessionStorage.removeItem('active_consulting_tenant');
-        } else {
-            sessionStorage.setItem('active_consulting_tenant', tenantId);
-        }
-
-        // Reload all data
-        await Promise.all([
-            loadProjects(),
-            loadAssessment(),
-            loadSwot(),
-            loadKPIs(),
-            loadDocuments(),
-            loadMeetings(),
-            loadActivityLog(),
-            loadNotifications(),
-        ]);
-
-        initCalendar();
-        updateOverviewStats();
-        setupRealtimeCollaboration();
-        showToast('Switched client workspace', 'success');
+    window.switchClientTenant = async function () {
+        showToast('Client workspace switching requires an audited support session.', 'error');
     };
 
     // ═══ BUSINESS CONSULTING SUBSCRIPTION & BILLING GUARD ═══
