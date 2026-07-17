@@ -3549,19 +3549,26 @@ Be professional, highly strategic, clear, and action-oriented. Keep your spoken 
                 currency = geoData.currency || 'INR';
             }
 
-            const createOrderRes = await fetch(`${WORKER_URL}/billing/manual/create-order`, {
+            const isDomestic = currency.toLowerCase() === 'inr';
+            const endpoint = isDomestic 
+                ? `${WORKER_URL}/billing/manual/create-order`
+                : `${WORKER_URL}/billing/wise/create-order`;
+
+            const bodyParams = {
+                plan: 'consulting_monthly',
+                billing_cycle: 'monthly',
+                currency: currency.toUpperCase(),
+                customer_email: user.email || '',
+                customer_name: user.name || user.full_name || ''
+            };
+
+            const createOrderRes = await fetch(endpoint, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                     'Authorization': `Bearer ${token}`
                 },
-                body: JSON.stringify({
-                    plan: 'consulting_monthly',
-                    billing_cycle: 'monthly',
-                    currency: currency,
-                    customer_email: user.email || '',
-                    customer_name: user.name || user.full_name || ''
-                })
+                body: JSON.stringify(bodyParams)
             });
 
             if (!createOrderRes.ok) {

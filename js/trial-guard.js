@@ -146,10 +146,9 @@
 
     if (info.status === 'trial_active') {
       const urgent = info.hoursLeft <= 12;
+      const isConsulting = window.location.pathname.includes('consulting');
       const jobsUsed = usage.jobs || 0;
       const intUsed = usage.interviews || 0;
-      const jobsLeft = Math.max(0, TRIAL_LIMITS.max_jobs - jobsUsed);
-      const intLeft = Math.max(0, TRIAL_LIMITS.max_interviews - intUsed);
 
       const banner = document.createElement('div');
       banner.id = 'trial-banner';
@@ -161,20 +160,37 @@
         box-shadow: 0 2px 8px rgba(0,0,0,0.15); flex-wrap: wrap; height: 42px; box-sizing: border-box;
       `;
 
+      let limitsSpan = '';
+      if (!isConsulting) {
+        limitsSpan = `
+          <span style="opacity:0.8;font-size:12px;">
+            📋 Jobs: ${jobsUsed}/${TRIAL_LIMITS.max_jobs} &nbsp;|&nbsp; 🎙️ Interviews: ${intUsed}/${TRIAL_LIMITS.max_interviews}
+          </span>
+        `;
+      }
+
+      const upgradeLink = isConsulting 
+        ? `<a href="#" onclick="if(window.subscribeToConsulting){window.subscribeToConsulting()}else{window.location.href='/platform/pricing.html'};return false;" style="
+            background: rgba(255,255,255,0.2); color: white; padding: 5px 16px; border-radius: 6px;
+            text-decoration: none; font-size: 12px; font-weight: 700; border: 1px solid rgba(255,255,255,0.3);
+            transition: all 0.2s;
+          " onmouseover="this.style.background='rgba(255,255,255,0.35)'" onmouseout="this.style.background='rgba(255,255,255,0.2)'">
+            Upgrade Now →
+          </a>`
+        : `<a href="/platform/pricing.html" style="
+            background: rgba(255,255,255,0.2); color: white; padding: 5px 16px; border-radius: 6px;
+            text-decoration: none; font-size: 12px; font-weight: 700; border: 1px solid rgba(255,255,255,0.3);
+            transition: all 0.2s;
+          " onmouseover="this.style.background='rgba(255,255,255,0.35)'" onmouseout="this.style.background='rgba(255,255,255,0.2)'">
+            Upgrade Now →
+          </a>`;
+
       banner.innerHTML = `
         <span style="display:flex;align-items:center;gap:6px;">
           ${urgent ? '⚠️' : '⏱️'} Trial: <strong>${info.hoursLeft <= 48 ? info.hoursLeft + 'h' : info.daysLeft + 'd'} left</strong>
         </span>
-        <span style="opacity:0.8;font-size:12px;">
-          📋 Jobs: ${jobsUsed}/${TRIAL_LIMITS.max_jobs} &nbsp;|&nbsp; 🎙️ Interviews: ${intUsed}/${TRIAL_LIMITS.max_interviews}
-        </span>
-        <a href="/platform/pricing.html" style="
-          background: rgba(255,255,255,0.2); color: white; padding: 5px 16px; border-radius: 6px;
-          text-decoration: none; font-size: 12px; font-weight: 700; border: 1px solid rgba(255,255,255,0.3);
-          transition: all 0.2s;
-        " onmouseover="this.style.background='rgba(255,255,255,0.35)'" onmouseout="this.style.background='rgba(255,255,255,0.2)'">
-          Upgrade Now →
-        </a>
+        ${limitsSpan}
+        ${upgradeLink}
         <button onclick="document.getElementById('trial-banner')?.remove(); window.adjustTrialLayout(0);" style="
           background: none; border: none; color: rgba(255,255,255,0.7); cursor: pointer; font-size: 16px; margin-left: 4px;
         ">×</button>
@@ -196,6 +212,7 @@
   function showExpiredPaywall() {
     document.getElementById('trial-paywall')?.remove();
 
+    const isConsulting = window.location.pathname.includes('consulting');
     const overlay = document.createElement('div');
     overlay.id = 'trial-paywall';
     overlay.style.cssText = `
@@ -204,6 +221,65 @@
       display: flex; align-items: center; justify-content: center;
       animation: trialFadeIn 0.3s ease;
     `;
+
+    const description = isConsulting
+      ? `Your ${TRIAL_DAYS}-day trial has expired. Upgrade to continue using all features including SWOT analysis, strategy scorecard, project tracker, and AI Business Advisor.`
+      : `Your ${TRIAL_DAYS}-day trial has expired. Upgrade to continue using all features including AI recruitment, payroll, proctored interviews, and full HR automation.`;
+
+    const featuresList = isConsulting
+      ? `
+          <div style="display: flex; flex-direction: column; gap: 10px; margin-bottom: 24px;">
+            <div style="display:flex;align-items:center;gap:10px;padding:12px 16px;background:#f0fdf4;border-radius:10px;font-size:13px;color:#15803d;">
+              <span style="font-size:16px">✓</span> Unlimited Project Tracking & Strategy Scorecards
+            </div>
+            <div style="display:flex;align-items:center;gap:10px;padding:12px 16px;background:#eff6ff;border-radius:10px;font-size:13px;color:#1d4ed8;">
+              <span style="font-size:16px">✓</span> Interactive SWOT Analysis & KPI Tracking
+            </div>
+            <div style="display:flex;align-items:center;gap:10px;padding:12px 16px;background:#faf5ff;border-radius:10px;font-size:13px;color:#7c3aed;">
+              <span style="font-size:16px">✓</span> AI Business Advisor & Document Hub
+            </div>
+          </div>
+        `
+      : `
+          <div style="display: flex; flex-direction: column; gap: 10px; margin-bottom: 24px;">
+            <div style="display:flex;align-items:center;gap:10px;padding:12px 16px;background:#f0fdf4;border-radius:10px;font-size:13px;color:#15803d;">
+              <span style="font-size:16px">✓</span> Unlimited Job Postings & AI Screening
+            </div>
+            <div style="display:flex;align-items:center;gap:10px;padding:12px 16px;background:#eff6ff;border-radius:10px;font-size:13px;color:#1d4ed8;">
+              <span style="font-size:16px">✓</span> Unlimited Proctored Interviews
+            </div>
+            <div style="display:flex;align-items:center;gap:10px;padding:12px 16px;background:#faf5ff;border-radius:10px;font-size:13px;color:#7c3aed;">
+              <span style="font-size:16px">✓</span> Full HR Suite: Payroll, Attendance, Training
+            </div>
+          </div>
+        `;
+
+    const upgradeButton = isConsulting
+      ? `
+          <a href="#" onclick="if(window.subscribeToConsulting){window.subscribeToConsulting()}else{window.location.href='/platform/pricing.html'};return false;" style="
+            flex: 1; padding: 14px; border-radius: 12px;
+            background: linear-gradient(135deg, #4f46e5, #7c3aed);
+            color: white; text-decoration: none; font-weight: 700; font-size: 15px;
+            display: flex; align-items: center; justify-content: center; gap: 8px;
+            transition: all 0.2s; box-shadow: 0 4px 12px rgba(79,70,229,0.3);
+          " onmouseover="this.style.transform='translateY(-2px)';this.style.boxShadow='0 8px 24px rgba(79,70,229,0.4)'"
+             onmouseout="this.style.transform='none';this.style.boxShadow='0 4px 12px rgba(79,70,229,0.3)'">
+            🚀 Upgrade to Business Consulting
+          </a>
+        `
+      : `
+          <a href="/platform/pricing.html" style="
+            flex: 1; padding: 14px; border-radius: 12px;
+            background: linear-gradient(135deg, #4f46e5, #7c3aed);
+            color: white; text-decoration: none; font-weight: 700; font-size: 15px;
+            display: flex; align-items: center; justify-content: center; gap: 8px;
+            transition: all 0.2s; box-shadow: 0 4px 12px rgba(79,70,229,0.3);
+          " onmouseover="this.style.transform='translateY(-2px)';this.style.boxShadow='0 8px 24px rgba(79,70,229,0.4)'"
+             onmouseout="this.style.transform='none';this.style.boxShadow='0 4px 12px rgba(79,70,229,0.3)'">
+            🚀 View Plans & Upgrade
+          </a>
+        `;
+
     overlay.innerHTML = `
       <div style="
         background: white; border-radius: 20px; padding: 48px 40px;
@@ -222,44 +298,23 @@
           Your Free Trial Has Ended
         </h2>
         <p style="color: #64748b; font-size: 0.95rem; line-height: 1.6; margin-bottom: 24px;">
-          Your ${TRIAL_DAYS}-day trial has expired. Upgrade to continue using all features including
-          AI recruitment, payroll, proctored interviews, and full HR automation.
+          ${description}
         </p>
 
-          <div style="display: flex; flex-direction: column; gap: 10px; margin-bottom: 24px;">
-            <div style="display:flex;align-items:center;gap:10px;padding:12px 16px;background:#f0fdf4;border-radius:10px;font-size:13px;color:#15803d;">
-              <span style="font-size:16px">✓</span> Unlimited Job Postings & AI Screening
-            </div>
-            <div style="display:flex;align-items:center;gap:10px;padding:12px 16px;background:#eff6ff;border-radius:10px;font-size:13px;color:#1d4ed8;">
-              <span style="font-size:16px">✓</span> Unlimited Proctored Interviews
-            </div>
-            <div style="display:flex;align-items:center;gap:10px;padding:12px 16px;background:#faf5ff;border-radius:10px;font-size:13px;color:#7c3aed;">
-              <span style="font-size:16px">✓</span> Full HR Suite: Payroll, Attendance, Training
-            </div>
-          </div>
+        ${featuresList}
 
-          <div style="display: flex; gap: 10px;">
-            <a href="/platform/pricing.html" style="
-              flex: 1; padding: 14px; border-radius: 12px;
-              background: linear-gradient(135deg, #4f46e5, #7c3aed);
-              color: white; text-decoration: none; font-weight: 700; font-size: 15px;
-              display: flex; align-items: center; justify-content: center; gap: 8px;
-              transition: all 0.2s; box-shadow: 0 4px 12px rgba(79,70,229,0.3);
-            " onmouseover="this.style.transform='translateY(-2px)';this.style.boxShadow='0 8px 24px rgba(79,70,229,0.4)'"
-               onmouseout="this.style.transform='none';this.style.boxShadow='0 4px 12px rgba(79,70,229,0.3)'">
-              🚀 View Plans & Upgrade
-            </a>
-          </div>
+        <div style="display: flex; gap: 10px;">
+          ${upgradeButton}
+        </div>
 
-          <div style="margin-top: 16px; display: flex; justify-content: center; gap: 20px; font-size: 12px; color: #94a3b8;">
-            <a href="mailto:simpaticohrconsultancy@gmail.com" style="color: #64748b; text-decoration: none;">
-              📧 Contact Sales
-            </a>
-            <span>|</span>
-            <a href="#" onclick="document.getElementById('trial-paywall').remove();return false;" style="color: #64748b; text-decoration: none;">
-              Browse in Read-Only
-            </a>
-          </div>
+        <div style="margin-top: 16px; display: flex; justify-content: center; gap: 20px; font-size: 12px; color: #94a3b8;">
+          <a href="mailto:simpaticohrconsultancy@gmail.com" style="color: #64748b; text-decoration: none;">
+            📧 Contact Sales
+          </a>
+          <span>|</span>
+          <a href="#" onclick="document.getElementById('trial-paywall').remove();return false;" style="color: #64748b; text-decoration: none;">
+            Browse in Read-Only
+          </a>
         </div>
       </div>
 
