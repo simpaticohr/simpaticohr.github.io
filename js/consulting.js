@@ -3527,8 +3527,9 @@ Be professional, highly strategic, clear, and action-oriented. Keep your spoken 
             const res = await fetch(`${WORKER_URL}/billing/detect-currency`);
             if (res.ok) {
                 const data = await res.json();
-                const currency = (data.currency || 'INR').toLowerCase();
-                const display = currency === 'inr' ? '₹2,500 / mo' : `${SYMBOLS[currency] || '$'}40 / mo`;
+                const currency = (data.currency || 'inr').toLowerCase();
+                const symbols = { inr: '₹', usd: '$', gbp: '£', eur: '€', aud: 'A$', aed: 'AED ', cad: 'C$' };
+                const display = currency === 'inr' ? '₹2,500 / mo' : `${symbols[currency] || '$'}40 / mo`;
                 const overlayPrice = document.getElementById('overlayPriceDisplay');
                 if (overlayPrice) overlayPrice.textContent = display;
             }

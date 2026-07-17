@@ -170,7 +170,7 @@
       }
 
       const upgradeLink = isConsulting 
-        ? `<a href="#" onclick="if(window.subscribeToConsulting){window.subscribeToConsulting()}else{window.location.href='/platform/pricing.html'};return false;" style="
+        ? `<a href="#" onclick="if(window.subscribeToConsulting){window.subscribeToConsulting()}else{window.location.href='/platform/pricing.html?type=consulting'};return false;" style="
             background: rgba(255,255,255,0.2); color: white; padding: 5px 16px; border-radius: 6px;
             text-decoration: none; font-size: 12px; font-weight: 700; border: 1px solid rgba(255,255,255,0.3);
             transition: all 0.2s;
@@ -256,7 +256,7 @@
 
     const upgradeButton = isConsulting
       ? `
-          <a href="#" onclick="if(window.subscribeToConsulting){window.subscribeToConsulting()}else{window.location.href='/platform/pricing.html'};return false;" style="
+          <a href="#" onclick="if(window.subscribeToConsulting){window.subscribeToConsulting()}else{window.location.href='/platform/pricing.html?type=consulting'};return false;" style="
             flex: 1; padding: 14px; border-radius: 12px;
             background: linear-gradient(135deg, #4f46e5, #7c3aed);
             color: white; text-decoration: none; font-weight: 700; font-size: 15px;

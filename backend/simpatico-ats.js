@@ -8527,15 +8527,23 @@ async function handleWiseAccountDetails(request, env, ctx) {
 
 
 /**
- * GET /billing/subscription — Get current subscription status.
- */
 async function handleGetSubscription(request, env, ctx) {
   requireAuth(ctx);
   const companyId = ctx.tenantId;
+  const url = new URL(request.url);
+  const planParam = url.searchParams.get("plan");
+
+  let query = `/rest/v1/subscriptions?company_id=eq.${companyId}`;
+  if (planParam) {
+    query += `&plan=eq.${planParam}`;
+  } else {
+    query += `&plan=neq.consulting_monthly`;
+  }
+  query += `&limit=1`;
 
   const res = await sbFetch(
     env, "GET",
-    `/rest/v1/subscriptions?company_id=eq.${companyId}&select=*&limit=1`,
+    query,
     null, false, companyId,
   );
 

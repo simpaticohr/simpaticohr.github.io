@@ -271,6 +271,31 @@
         <i class="fas fa-envelope" style="margin-right:6px"></i>Contact Sales
       </a>
     </div>
+
+    <!-- Business Consulting Monthly (Conditional) -->
+    <div class="plan-card popular" id="card-consulting" style="display:none; max-width: 460px; margin: 0 auto;">
+      <div id="badge-consulting_monthly"></div>
+      <div class="plan-name">Business Consulting</div>
+      <div class="plan-price">
+        <span class="amount" id="price-consulting_monthly">₹2,500</span>
+        <span class="period">/month</span>
+        <span class="original" id="original-consulting_monthly" style="display:none"></span>
+      </div>
+      <p class="plan-desc">Full access to strategic business tools and AI advisory engine.</p>
+      <ul class="plan-features">
+        <li><i class="fas fa-check check"></i> SWOT Analysis Builder</li>
+        <li><i class="fas fa-check check"></i> Strategy Scorecard (KPI Tracking)</li>
+        <li><i class="fas fa-check check"></i> Project Tracker (Kanban Board)</li>
+        <li><i class="fas fa-check check"></i> Meeting Scheduler (Consulting Sessions)</li>
+        <li><i class="fas fa-check check"></i> AI Business Advisor (70B Llama Model)</li>
+        <li><i class="fas fa-check check"></i> Document Hub (Reports & Deliverables)</li>
+        <li><i class="fas fa-check check"></i> Multi-Tenant Workspace Switching</li>
+      </ul>
+      <button class="plan-btn plan-btn-primary" id="btn-consulting_monthly" onclick="subscribe('consulting_monthly')">
+        <i class="fas fa-rocket" style="margin-right:6px"></i>Subscribe Now
+      </button>
+      <div class="gateway-row" id="gw-consulting_monthly"><i class="fas fa-shield-halved" style="font-size:10px"></i> <span class="gw-label">UPI • Cards • Netbanking • Wise</span></div>
+    </div>
   </div>
 
   <div class="faq-section">
@@ -380,9 +405,13 @@ async function refreshSession() {
 let billingCycle = 'monthly';
 let currentPlan = null;
 
+const params = new URLSearchParams(window.location.search);
+const isConsultingFlow = params.get('type') === 'consulting' || params.get('plan') === 'consulting' || window.location.hash === '#consulting';
+
 const PRICES = {
   starter:      { monthly: { inr: 1999, usd: 29, gbp: 23, eur: 27, aud: 45, aed: 109, cad: 39 },  annual: { inr: 19990, usd: 290, gbp: 230, eur: 270, aud: 450, aed: 1090, cad: 390 } },
   professional: { monthly: { inr: 3999, usd: 49, gbp: 39, eur: 45, aud: 75, aed: 179, cad: 69 }, annual: { inr: 39990, usd: 490, gbp: 390, eur: 450, aud: 750, aed: 1790, cad: 690 } },
+  consulting_monthly: { monthly: { inr: 2500, usd: 40, gbp: 40, eur: 40, aud: 40, aed: 40, cad: 40 }, annual: { inr: 25000, usd: 400, gbp: 400, eur: 400, aud: 400, aed: 400, cad: 400 } }
 };
 
 const SYMBOLS = { inr: '₹', usd: '$', gbp: '£', eur: '€', aud: 'A$', aed: 'AED ', cad: 'C$' };
@@ -429,6 +458,27 @@ async function fetchDetectedCurrency() {
 document.addEventListener('DOMContentLoaded', async () => {
   const select = document.getElementById('currencySelect');
   if (select) select.value = detectedCurrency;
+  
+  if (isConsultingFlow) {
+    // Hide standard plans
+    document.getElementById('card-starter').style.display = 'none';
+    document.getElementById('card-professional').style.display = 'none';
+    document.getElementById('card-enterprise').style.display = 'none';
+    
+    // Show consulting plan
+    document.getElementById('card-consulting').style.display = 'block';
+    
+    // Specialize titles and description
+    document.querySelector('.pricing-header h1').textContent = 'Business Consulting Subscription';
+    document.querySelector('.pricing-header p').textContent = 'Start with a 2-day free trial. No credit card required. Upgrade to unlock the full power of strategic advisory.';
+    
+    const backBtn = document.querySelector('.back-link');
+    if (backBtn) {
+      backBtn.href = '/dashboard/consulting.html';
+      backBtn.innerHTML = '<i class="fas fa-arrow-left"></i> Back to Consulting';
+    }
+  }
+
   fetchDetectedCurrency();
   await refreshSession();
   await loadCurrentPlan();
@@ -452,7 +502,9 @@ function formatPrice(amount, cur) {
 
 function updatePrices() {
   const cur = detectedCurrency;
-  ['starter', 'professional'].forEach(plan => {
+  const activePlans = isConsultingFlow ? ['consulting_monthly'] : ['starter', 'professional'];
+  
+  activePlans.forEach(plan => {
     const p = PRICES[plan][billingCycle];
     const el = document.getElementById(`price-${plan}`);
     const origEl = document.getElementById(`original-${plan}`);
@@ -475,7 +527,11 @@ async function loadCurrentPlan() {
   await refreshSession();
   if (!token || !TENANT_ID) return;
   try {
-    const res = await fetch(`${WORKER_URL}/billing/subscription`, {
+    const url = isConsultingFlow 
+      ? `${WORKER_URL}/billing/subscription?plan=consulting_monthly`
+      : `${WORKER_URL}/billing/subscription`;
+      
+    const res = await fetch(url, {
       headers: { 'Authorization': `Bearer ${token}`, 'X-Tenant-ID': TENANT_ID },
     });
     const json = await res.json();
