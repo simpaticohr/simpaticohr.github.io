@@ -8386,7 +8386,7 @@ async function handleWiseVerifyPayment(request, env, ctx) {
   }
 
   const isSandbox = token.startsWith("scb-") || env.WISE_SANDBOX === "true";
-  const wiseHost = isSandbox ? "https://api.sandbox.transferwise.tech" : "https://api.wise.com";
+  const wiseHost = isSandbox ? "https://api.wise-sandbox.com" : "https://api.wise.com";
 
   async function fetchWise(endpoint) {
     const res = await fetch(`${wiseHost}${endpoint}`, {
@@ -8404,7 +8404,7 @@ async function handleWiseVerifyPayment(request, env, ctx) {
   }
 
   // a. Fetch Profile ID
-  const profiles = await fetchWise("/v1/profiles");
+  const profiles = await fetchWise("/v2/profiles");
   if (!profiles || !profiles.length) {
     throw new AppError("No Wise profiles found.", 404, "NOT_FOUND");
   }
