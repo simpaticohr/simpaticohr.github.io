@@ -221,6 +221,14 @@
         setTimeout(() => { toast.style.opacity = '0'; toast.style.transform = 'translateX(40px)'; setTimeout(() => toast.remove(), 300); }, 3000);
     };
 
+    function checkReadonly() {
+        if (window._simpaticoTrialInfo && window._simpaticoTrialInfo.status === 'expired') {
+            window.showToast('Action not allowed in Read-Only mode. Please upgrade your plan.', 'error');
+            return true;
+        }
+        return false;
+    }
+
     // ═══════════════════════════════════════════════════════════
     // § MODALS
     // ═══════════════════════════════════════════════════════════
@@ -677,6 +685,7 @@
     }
 
     async function finishAssessment() {
+        if (checkReadonly()) return;
         const categories = {};
         assessmentQuestions.forEach((q, i) => {
             if (!categories[q.category]) categories[q.category] = [];
@@ -774,6 +783,7 @@
     }
 
     window.retakeAssessment = async function () {
+        if (checkReadonly()) return;
         // Delete from Supabase
         if (cachedAssessment && cachedAssessment.dbId) {
             await dbDelete(TABLES.assessments, cachedAssessment.dbId);
@@ -904,6 +914,7 @@
     }
 
     window.saveKPI = async function () {
+        if (checkReadonly()) return;
         const name = document.getElementById('kpiName').value.trim();
         if (!name) { showToast('KPI name is required', 'error'); return; }
 
@@ -950,6 +961,7 @@
     };
 
     window.updateKPIValue = async function (id) {
+        if (checkReadonly()) return;
         const kpi = cachedKPIs.find(k => k.id === id);
         if (!kpi) return;
         const valStr = prompt(`Enter new value for ${kpi.name} (${kpi.unit || ''}):`, kpi.current_value);
@@ -1080,6 +1092,7 @@
     }
 
     window.deleteKPI = async function (id) {
+        if (checkReadonly()) return;
         if (!confirm('Delete this KPI?')) return;
         await dbDelete(TABLES.kpis, id);
         cachedKPIs = cachedKPIs.filter(k => k.id !== id);
@@ -1108,6 +1121,7 @@
     }
 
     window.saveProject = async function () {
+        if (checkReadonly()) return;
         const name = document.getElementById('projName').value.trim();
         if (!name) { showToast('Project name is required', 'error'); return; }
 
@@ -1185,6 +1199,7 @@
     };
 
     window.drop = async function(ev, targetStage) {
+        if (checkReadonly()) return;
         ev.preventDefault();
         const id = ev.dataTransfer.getData("text/plain");
         const project = cachedProjects.find(p => p.id === id);
@@ -1243,6 +1258,7 @@
     }
 
     window.editProjectStage = async function (id) {
+        if (checkReadonly()) return;
         const project = cachedProjects.find(p => p.id === id);
         if (!project) return;
 
@@ -1282,6 +1298,7 @@
     };
 
     window.deleteProject = async function (id) {
+        if (checkReadonly()) return;
         if (!confirm('Delete this project?')) return;
         const proj = cachedProjects.find(p => p.id === id);
         await dbDelete(TABLES.projects, id);
@@ -1337,6 +1354,7 @@
     }
 
     window.addSwotItem = async function (key, inputEl) {
+        if (checkReadonly()) return;
         const val = inputEl.value.trim();
         if (!val) return;
 
@@ -1361,6 +1379,7 @@
     };
 
     window.removeSwotItem = async function (key, index) {
+        if (checkReadonly()) return;
         const item = cachedSwot[key][index];
         if (item && item.id) {
             await dbDelete(TABLES.swot, item.id);
@@ -1387,6 +1406,7 @@
     }
 
     window.saveDocument = async function () {
+        if (checkReadonly()) return;
         const name = document.getElementById('docName').value.trim();
         if (!name) { showToast('Document name is required', 'error'); return; }
 
@@ -1469,6 +1489,7 @@
     }
 
     window.deleteDocument = async function (id) {
+        if (checkReadonly()) return;
         if (!confirm('Remove this document?')) return;
         await dbDelete(TABLES.documents, id);
         cachedDocuments = cachedDocuments.filter(d => d.id !== id);
@@ -1547,6 +1568,7 @@
     }
 
     window.saveMeeting = async function () {
+        if (checkReadonly()) return;
         const title = document.getElementById('meetTitle').value.trim();
         const date = document.getElementById('meetDate').value;
         if (!title || !date) { showToast('Title and date are required', 'error'); return; }
@@ -1622,6 +1644,7 @@
     }
 
     window.deleteMeeting = async function (id) {
+        if (checkReadonly()) return;
         if (!confirm('Delete this meeting?')) return;
         await dbDelete(TABLES.meetings, id);
         cachedMeetings = cachedMeetings.filter(m => m.id !== id);
@@ -1827,6 +1850,7 @@
     };
 
     window.sendChatMessage = async function () {
+        if (checkReadonly()) return;
         const input = document.getElementById('chatInput');
         const text = input.value.trim();
         if (!text) return;
@@ -2173,6 +2197,7 @@ Be professional, highly strategic, clear, and action-oriented. Support the custo
     };
 
     window.generateAIBriefing = async function() {
+        if (checkReadonly()) return;
         showToast('Generating AI Briefing summary...', 'info');
 
         const healthScore = cachedAssessment && cachedAssessment.answers ? 
@@ -3041,6 +3066,7 @@ RECOMMENDATIONS FOR NEXT WEEK
     };
 
     window.toggleLiveVoiceCall = async function () {
+        if (checkReadonly()) return;
         if (isLiveCallActive) {
             window.endLiveVoiceCall();
             return;
@@ -3424,16 +3450,28 @@ Be professional, highly strategic, clear, and action-oriented. Keep your spoken 
             // 2. Check 2-day free trial guard (from company registration/subscription_start)
             const { data: company, error: compError } = await client
                 .from('companies')
-                .select('subscription_start, created_at')
+                .select('subscription_plan, subscription_start, created_at')
                 .eq('id', tenantId)
                 .maybeSingle();
 
             if (company) {
+                const plan = (company.subscription_plan || 'trial').toLowerCase();
+                const isPaidPlatform = ['starter', 'professional', 'enterprise', 'pro', 'business', 'premium'].includes(plan);
+
                 const startStr = company.subscription_start || company.created_at;
                 if (startStr) {
                     const startDate = new Date(startStr);
                     const trialEndDate = new Date(startDate.getTime() + 2 * 24 * 60 * 60 * 1000);
-                    if (new Date() < trialEndDate) {
+                    const isTrialActive = new Date() < trialEndDate;
+
+                    if (isTrialActive) {
+                        return true; // Trial is still active
+                    }
+
+                    if (!isPaidPlatform) {
+                        // Trial is expired, but not a paid platform plan either.
+                        // Allow loading the page so trial-guard.js can show the expired paywall overlay
+                        // with "Browse in Read-Only" support.
                         return true;
                     }
                 }
