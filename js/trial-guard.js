@@ -347,6 +347,15 @@
 
   // ── Main init ──
   async function initTrialGuard() {
+    try {
+      const u = JSON.parse(localStorage.getItem('simpatico_user') || '{}');
+      if (u.role === 'super_admin' || u.role === 'superadmin') {
+        window._simpaticoTrialInfo = { status: 'paid', plan: 'enterprise', remaining: Infinity };
+        console.log('[trial-guard] Superadmin bypass activated');
+        return;
+      }
+    } catch(e) {}
+
     const company = await checkTrialStatus();
     if (!company) return; // No company data — skip (probably no auth yet)
 
