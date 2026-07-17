@@ -8397,8 +8397,8 @@ async function handleWiseVerifyPayment(request, env, ctx) {
     });
     if (!res.ok) {
       const errText = await res.text();
-      console.error(`[Wise API] Error on ${endpoint}:`, errText);
-      throw new AppError(`Wise API error: ${res.statusText || res.status}`, res.status, "GATEWAY_ERROR");
+      console.error(`[Wise API] Error on ${endpoint}: ${res.status}`, errText);
+      throw new AppError(`Wise API error: ${res.status} ${res.statusText} — ${errText.substring(0, 200)}`, res.status, "GATEWAY_ERROR");
     }
     return res.json();
   }
@@ -8527,6 +8527,8 @@ async function handleWiseAccountDetails(request, env, ctx) {
 
 
 /**
+ * GET /billing/subscription — Get current subscription.
+ */
 async function handleGetSubscription(request, env, ctx) {
   requireAuth(ctx);
   const companyId = ctx.tenantId;
