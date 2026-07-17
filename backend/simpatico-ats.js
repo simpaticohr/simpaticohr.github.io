@@ -1366,6 +1366,7 @@ export default {
     const method = request.method;
     const path = url.pathname;
 
+
     // Preflight
     if (method === "OPTIONS")
       return new Response(null, {

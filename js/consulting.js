@@ -67,10 +67,22 @@
     };
 
     function lsLoad(key) {
-        try { return JSON.parse(localStorage.getItem(key)) || null; } catch { return null; }
+        try {
+            const tenantKey = key + '_' + getTenantId();
+            return JSON.parse(localStorage.getItem(tenantKey)) || null;
+        } catch { return null; }
     }
     function lsSave(key, data) {
-        localStorage.setItem(key, JSON.stringify(data));
+        const tenantKey = key + '_' + getTenantId();
+        localStorage.setItem(tenantKey, JSON.stringify(data));
+    }
+
+    /** Clear all consulting localStorage keys for the current tenant */
+    function clearConsultingCache() {
+        const tid = getTenantId();
+        Object.values(LS_KEYS).forEach(key => {
+            try { localStorage.removeItem(key + '_' + tid); } catch {}
+        });
     }
 
     // Generic Supabase fetch with fallback
@@ -293,7 +305,7 @@
                 read: a.read,
             }));
         } else {
-            cachedActivity = lsLoad(LS_KEYS.activity) || [];
+            cachedActivity = [];
         }
         renderActivity();
     }
@@ -594,13 +606,9 @@
             answers = cachedAssessment.answers;
             showResults(cachedAssessment);
         } else {
-            cachedAssessment = lsLoad(LS_KEYS.assessment);
-            if (cachedAssessment) {
-                answers = cachedAssessment.answers || [];
-                showResults(cachedAssessment);
-            } else {
-                buildQuestions();
-            }
+            cachedAssessment = null;
+            answers = [];
+            buildQuestions();
         }
     }
 
@@ -904,11 +912,7 @@
 
     async function loadKPIs() {
         const dbData = await dbFetch(TABLES.kpis, { col: 'created_at', asc: false });
-        if (dbData) {
-            cachedKPIs = dbData;
-        } else {
-            cachedKPIs = lsLoad(LS_KEYS.kpis) || [];
-        }
+        cachedKPIs = dbData || [];
         await loadKPIHistory();
         renderKPIs();
     }
@@ -1109,14 +1113,7 @@
 
     async function loadProjects() {
         const dbData = await dbFetch(TABLES.projects, { col: 'created_at', asc: false });
-        if (dbData) {
-            cachedProjects = dbData;
-        } else {
-            cachedProjects = (lsLoad(LS_KEYS.projects) || []).map(p => ({
-                ...p, id: p.id || crypto.randomUUID(),
-                tenant_id: getTenantId(),
-            }));
-        }
+        cachedProjects = dbData || [];
         renderProjects();
     }
 
@@ -1325,15 +1322,7 @@
                 }
             });
         } else {
-            const ls = lsLoad(LS_KEYS.swot);
-            if (ls) {
-                cachedSwot = {
-                    strengths: (ls.strengths || []).map(s => ({ id: crypto.randomUUID(), content: s })),
-                    weaknesses: (ls.weaknesses || []).map(s => ({ id: crypto.randomUUID(), content: s })),
-                    opportunities: (ls.opportunities || []).map(s => ({ id: crypto.randomUUID(), content: s })),
-                    threats: (ls.threats || []).map(s => ({ id: crypto.randomUUID(), content: s })),
-                };
-            }
+            cachedSwot = { strengths: [], weaknesses: [], opportunities: [], threats: [] };
         }
         renderSwot();
     }
@@ -1397,11 +1386,7 @@
 
     async function loadDocuments() {
         const dbData = await dbFetch(TABLES.documents, { col: 'created_at', asc: false });
-        if (dbData) {
-            cachedDocuments = dbData;
-        } else {
-            cachedDocuments = lsLoad(LS_KEYS.documents) || [];
-        }
+        cachedDocuments = dbData || [];
         renderDocuments();
     }
 
@@ -1511,11 +1496,7 @@
 
     async function loadMeetings() {
         const dbData = await dbFetch(TABLES.meetings, { col: 'date', asc: true });
-        if (dbData) {
-            cachedMeetings = dbData;
-        } else {
-            cachedMeetings = lsLoad(LS_KEYS.meetings) || [];
-        }
+        cachedMeetings = dbData || [];
         renderMeetings();
     }
 
@@ -3399,7 +3380,18 @@ Be professional, highly strategic, clear, and action-oriented. Keep your spoken 
             sessionStorage.setItem('active_consulting_tenant', tenantId);
         }
 
-        // Reload all data
+        // Clear all cached data to prevent cross-tenant data leakage
+        cachedProjects = [];
+        cachedAssessment = null;
+        cachedSwot = { strengths: [], weaknesses: [], opportunities: [], threats: [] };
+        cachedKPIs = [];
+        cachedKPIHistory = [];
+        cachedDocuments = [];
+        cachedMeetings = [];
+        cachedActivity = [];
+        unreadCount = 0;
+
+        // Reload all data from DB for the new tenant
         await Promise.all([
             loadProjects(),
             loadAssessment(),
