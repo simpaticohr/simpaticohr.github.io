@@ -102,7 +102,14 @@ window.newChat = function() {
   renderConversationList();
 };
 
-// ── Send message (Updated for v5.0 Enterprise Engine) ──
+// ── Send message (v6.0 — streaming via SSE with non-streaming fallback) ──
+let streamAbort = null;      // AbortController for the active stream
+let userScrolledUp = false;  // pause auto-scroll when the user scrolls up
+
+window.stopGenerating = function() {
+  if (streamAbort) streamAbort.abort();
+};
+
 window.sendMessage = async function() {
   const input = document.getElementById('ai-input');
   const text  = input?.value.trim();
@@ -125,101 +132,81 @@ window.sendMessage = async function() {
 
   const typingId = showTyping();
   isStreaming = true;
+  userScrolledUp = false;
   const btn = document.getElementById('send-btn');
   if (btn) btn.disabled = true;
 
   try {
-    // 1. Build the HR context and Auth headers
     const systemContext = await buildHRContext();
     const headers = await authHeaders();
-
-    // 2. Format the messages for the v5.0 Worker
     const apiMessages = [
       { role: 'system', content: systemContext },
       ...messages.slice(-12).map(m => ({ role: m.role, content: m.content }))
     ];
-
-    // 3. Ensure we use the correct Config URL
     const targetUrl = window.SIMPATICO_CONFIG?.workerUrl || AI_CONFIG.workerUrl;
+    const reqHeaders = {
+      'Content-Type': 'application/json',
+      'X-Tenant-ID': typeof getCompanyId === 'function' ? getCompanyId() : 'SIMP_PRO_MAIN',
+      ...headers
+    };
 
-    // 4. Fetch the data
-    const response = await fetch(`${targetUrl}/ai/chat`, {
-      method: 'POST',
-      headers: { 
-        'Content-Type': 'application/json', 
-        'X-Tenant-ID': typeof getCompanyId === 'function' ? getCompanyId() : 'SIMP_PRO_MAIN',
-        ...headers 
-      },
-      body: JSON.stringify({ messages: apiMessages }),
-    });
+    let aiReply = '';
+    let streamed = false;
 
-    // 5. Read the response exactly ONCE
-    const responseText = await response.text();
-    removeTyping(typingId);
-
-    if (!response.ok) {
-      throw new Error(`Worker Error: ${response.status} - ${responseText}`);
-    }
-
-    // 6. Safely parse the JSON and extract the AI's reply
-    const data = JSON.parse(responseText);
-    let aiReply = data.data ? data.data.response : data.response;
-
-    // 6.5. Process auto-actions (like create_job)
-    const actionMatch = aiReply.match(/```json\s*(\{[\s\S]*?"action"\s*:\s*"(?:create_job|add_employee|schedule_interview)"[\s\S]*?\})\s*```/);
-    if (actionMatch) {
-      try {
-        const actionObj = JSON.parse(actionMatch[1]);
-        const client = sb();
-        const cid = typeof getCompanyId === 'function' ? getCompanyId() : null;
-        
-        if (client && cid && actionObj.data) {
-          if (actionObj.action === 'create_job') {
-            const newJob = {
-              title: actionObj.data.title || 'Untitled',
-              department: actionObj.data.department || 'General',
-              location: actionObj.data.location || 'Remote',
-              description: actionObj.data.description || '',
-              status: 'active', is_active: true, company_id: cid, created_at: new Date().toISOString()
-            };
-            const { error: err } = await client.from('jobs').insert([newJob]);
-            aiReply = aiReply.replace(actionMatch[0], !err ? '\n\n✅ **Success! I have posted this job to your ATS.**' : '\n\n❌ **Failed to post job:** ' + err.message);
-          } else if (actionObj.action === 'add_employee') {
-            const newEmp = {
-              first_name: actionObj.data.first_name || 'New',
-              last_name: actionObj.data.last_name || 'Employee',
-              email: actionObj.data.email || 'no-email@company.com',
-              job_title: actionObj.data.job_title || 'Employee',
-              status: 'active', company_id: cid, start_date: new Date().toISOString().split('T')[0], created_at: new Date().toISOString()
-            };
-            const { error: err } = await client.from('employees').insert([newEmp]);
-            aiReply = aiReply.replace(actionMatch[0], !err ? '\n\n✅ **Success! I have added the new employee.**' : '\n\n❌ **Failed to add employee:** ' + err.message);
-          } else if (actionObj.action === 'schedule_interview') {
-            const newInt = {
-              candidate_name: actionObj.data.candidate_name || 'Unknown Candidate',
-              position: actionObj.data.position || 'Open Role',
-              date: actionObj.data.date || new Date().toISOString().split('T')[0],
-              status: 'scheduled', company_id: cid, created_at: new Date().toISOString()
-            };
-            const { error: err } = await client.from('interviews').insert([newInt]);
-            aiReply = aiReply.replace(actionMatch[0], !err ? '\n\n✅ **Success! I have scheduled the interview.**' : '\n\n❌ **Failed to schedule interview:** ' + err.message);
-          }
-        }
-      } catch (e) {
-        console.warn('Action parse error', e);
+    // ── Attempt 1: SSE streaming endpoint ──
+    try {
+      aiReply = await streamChat(targetUrl, reqHeaders, apiMessages, typingId);
+      streamed = true;
+    } catch (streamErr) {
+      if (streamErr.name === 'AbortError') {
+        // User pressed Stop — keep whatever partial text we captured
+        aiReply = streamErr.partialText || '';
+        streamed = true;
+        if (!aiReply) aiReply = '_Generation stopped._';
+      } else {
+        console.warn('Streaming failed, falling back to /ai/chat:', streamErr.message);
       }
     }
 
-    // 7. Add AI message to UI
-    const assistantMsg = { role: 'assistant', content: aiReply || 'No response.', timestamp: new Date().toISOString() };
+    // ── Attempt 2: fallback to the blocking endpoint ──
+    if (!streamed) {
+      const response = await fetch(`${targetUrl}/ai/chat`, {
+        method: 'POST',
+        headers: reqHeaders,
+        body: JSON.stringify({ messages: apiMessages }),
+      });
+      const responseText = await response.text();
+      removeTyping(typingId);
+      if (!response.ok) throw new Error(`Worker Error: ${response.status} - ${responseText}`);
+      const data = JSON.parse(responseText);
+      aiReply = data.data ? data.data.response : data.response;
+    }
+
+    // ── Auto-actions run on the COMPLETE reply (streamed or not) ──
+    aiReply = await processAutoActions(aiReply || 'No response.');
+
+    // ── Finalize the message ──
+    const assistantMsg = { role: 'assistant', content: aiReply, timestamp: new Date().toISOString() };
     messages.push(assistantMsg);
-    
-    const el = appendMessageEl(assistantMsg);
-    const bubble = el?.querySelector('.msg-bubble');
-    if (bubble) bubble.innerHTML = markdownToHtml(assistantMsg.content);
+
+    const streamEl = document.getElementById('streaming-msg');
+    if (streamEl) {
+      // Patch the live streamed bubble with the final (action-processed) content
+      streamEl.id = `msg-${Date.now()}`;
+      const bubble = streamEl.querySelector('.msg-bubble');
+      if (bubble) {
+        bubble.classList.remove('ds-stream-cursor');
+        bubble.innerHTML = markdownToHtml(assistantMsg.content);
+      }
+    } else {
+      const el = appendMessageEl(assistantMsg);
+      const bubble = el?.querySelector('.msg-bubble');
+      if (bubble) bubble.innerHTML = markdownToHtml(assistantMsg.content);
+    }
 
   } catch (err) {
     removeTyping(typingId);
+    document.getElementById('streaming-msg')?.remove();
     console.error(err);
     const errorMsg = {
       role: 'assistant',
@@ -227,20 +214,196 @@ window.sendMessage = async function() {
       timestamp: new Date().toISOString()
     };
     messages.push(errorMsg);
-    
     const el = appendMessageEl(errorMsg);
     const bubble = el?.querySelector('.msg-bubble');
     if (bubble) bubble.innerHTML = markdownToHtml(errorMsg.content);
   } finally {
     isStreaming = false;
+    streamAbort = null;
+    hideStopButton();
     if (btn) btn.disabled = false;
     const conv = conversations.find(c => c.id === currentConvId);
     if (conv) { conv.messages = messages; conv.updated_at = new Date().toISOString(); }
     saveConversations();
     renderConversationList();
-    scrollToBottom();
+    scrollToBottom(true);
   }
 };
+
+// ── SSE streaming client ──
+// Handles both frame formats the Worker may emit:
+//   1. {"response":"token"}                          (clean object)
+//   2. {"0":100,"1":97,...}                          (JSON-stringified Uint8Array
+//      containing nested "data: {...}" SSE bytes from Workers AI)
+async function streamChat(targetUrl, reqHeaders, apiMessages, typingId) {
+  streamAbort = new AbortController();
+
+  const response = await fetch(`${targetUrl}/ai/chat/stream`, {
+    method: 'POST',
+    headers: reqHeaders,
+    body: JSON.stringify({ messages: apiMessages }),
+    signal: streamAbort.signal,
+  });
+
+  if (!response.ok || !response.body) {
+    throw new Error(`Stream endpoint returned ${response.status}`);
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let fullText = '';
+  let bubbleEl = null;
+
+  const ensureBubble = () => {
+    if (bubbleEl) return bubbleEl;
+    removeTyping(typingId);
+    const el = appendMessageEl({ role: 'assistant', content: '', timestamp: new Date().toISOString() }, true);
+    if (el) {
+      el.id = 'streaming-msg';
+      bubbleEl = el.querySelector('.msg-bubble');
+      bubbleEl?.classList.add('ds-stream-cursor');
+    }
+    showStopButton();
+    return bubbleEl;
+  };
+
+  const appendText = (t) => {
+    if (!t) return;
+    fullText += t;
+    const bubble = ensureBubble();
+    if (bubble) {
+      bubble.innerHTML = markdownToHtml(fullText);
+      scrollToBottom();
+    }
+  };
+
+  // Extract "response" tokens from a decoded chunk of nested SSE text
+  const extractNested = (nestedText) => {
+    nestedText.split('\n').forEach(line => {
+      const l = line.trim();
+      if (!l.startsWith('data:')) return;
+      const p = l.slice(5).trim();
+      if (!p || p === '[DONE]') return;
+      try {
+        const obj = JSON.parse(p);
+        if (typeof obj.response === 'string') appendText(obj.response);
+      } catch(e) { /* partial nested frame — ignore */ }
+    });
+  };
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+
+      // SSE frames are separated by \n\n
+      const frames = buffer.split('\n\n');
+      buffer = frames.pop(); // keep the trailing partial frame
+
+      for (const frame of frames) {
+        const line = frame.trim();
+        if (!line.startsWith('data:')) continue;
+        const payload = line.slice(5).trim();
+        if (payload === '[DONE]') continue;
+
+        let obj;
+        try { obj = JSON.parse(payload); } catch(e) { continue; }
+
+        if (obj && typeof obj.error === 'string') {
+          if (!fullText) throw new Error(obj.error);
+          continue; // already have partial text — keep it
+        }
+        if (obj && typeof obj.response === 'string') {
+          appendText(obj.response);
+        } else if (obj && typeof obj === 'object' && obj['0'] !== undefined) {
+          // Numeric-keyed byte object → rebuild Uint8Array → decode nested SSE
+          const keys = Object.keys(obj);
+          const bytes = new Uint8Array(keys.length);
+          for (let i = 0; i < keys.length; i++) bytes[i] = obj[i];
+          extractNested(new TextDecoder().decode(bytes));
+        }
+      }
+    }
+  } catch (err) {
+    if (err.name === 'AbortError') {
+      err.partialText = fullText;
+      throw err;
+    }
+    if (!fullText) throw err;
+    // Stream broke mid-way but we have text — return what we got
+  }
+
+  if (!fullText) throw new Error('Stream produced no text');
+  return fullText;
+}
+
+// ── Stop-generating button ──
+function showStopButton() {
+  let el = document.getElementById('stop-gen-btn');
+  if (!el) {
+    el = document.createElement('button');
+    el.id = 'stop-gen-btn';
+    el.className = 'ds-stop-btn';
+    el.innerHTML = '<i class="fas fa-stop" aria-hidden="true"></i> Stop generating';
+    el.onclick = () => window.stopGenerating();
+    el.style.cssText = 'position:sticky;bottom:8px;margin:8px auto 0;display:flex;z-index:5;';
+    document.getElementById('messages-container')?.appendChild(el);
+  }
+  el.style.display = 'inline-flex';
+}
+
+function hideStopButton() {
+  document.getElementById('stop-gen-btn')?.remove();
+}
+
+// ── Auto-actions (create_job / add_employee / schedule_interview) ──
+async function processAutoActions(aiReply) {
+  const actionMatch = aiReply.match(/```json\s*(\{[\s\S]*?"action"\s*:\s*"(?:create_job|add_employee|schedule_interview)"[\s\S]*?\})\s*```/);
+  if (!actionMatch) return aiReply;
+  try {
+    const actionObj = JSON.parse(actionMatch[1]);
+    const client = sb();
+    const cid = typeof getCompanyId === 'function' ? getCompanyId() : null;
+
+    if (client && cid && actionObj.data) {
+      if (actionObj.action === 'create_job') {
+        const newJob = {
+          title: actionObj.data.title || 'Untitled',
+          department: actionObj.data.department || 'General',
+          location: actionObj.data.location || 'Remote',
+          description: actionObj.data.description || '',
+          status: 'active', is_active: true, company_id: cid, created_at: new Date().toISOString()
+        };
+        const { error: err } = await client.from('jobs').insert([newJob]);
+        aiReply = aiReply.replace(actionMatch[0], !err ? '\n\n✅ **Success! I have posted this job to your ATS.**' : '\n\n❌ **Failed to post job:** ' + err.message);
+      } else if (actionObj.action === 'add_employee') {
+        const newEmp = {
+          first_name: actionObj.data.first_name || 'New',
+          last_name: actionObj.data.last_name || 'Employee',
+          email: actionObj.data.email || 'no-email@company.com',
+          job_title: actionObj.data.job_title || 'Employee',
+          status: 'active', company_id: cid, start_date: new Date().toISOString().split('T')[0], created_at: new Date().toISOString()
+        };
+        const { error: err } = await client.from('employees').insert([newEmp]);
+        aiReply = aiReply.replace(actionMatch[0], !err ? '\n\n✅ **Success! I have added the new employee.**' : '\n\n❌ **Failed to add employee:** ' + err.message);
+      } else if (actionObj.action === 'schedule_interview') {
+        const newInt = {
+          candidate_name: actionObj.data.candidate_name || 'Unknown Candidate',
+          position: actionObj.data.position || 'Open Role',
+          date: actionObj.data.date || new Date().toISOString().split('T')[0],
+          status: 'scheduled', company_id: cid, created_at: new Date().toISOString()
+        };
+        const { error: err } = await client.from('interviews').insert([newInt]);
+        aiReply = aiReply.replace(actionMatch[0], !err ? '\n\n✅ **Success! I have scheduled the interview.**' : '\n\n❌ **Failed to schedule interview:** ' + err.message);
+      }
+    }
+  } catch (e) {
+    console.warn('Action parse error', e);
+  }
+  return aiReply;
+}
 // ── Context builder — TENANT ISOLATED ──
 async function buildHRContext() {
   const client = sb();
@@ -408,10 +571,23 @@ function renderMessages() {
   messages.forEach(m => appendMessageEl(m));
 }
 
-function scrollToBottom() {
+function scrollToBottom(force = false) {
   const c = document.getElementById('messages-container');
-  if (c) c.scrollTop = c.scrollHeight;
+  if (!c) return;
+  if (force) userScrolledUp = false;
+  if (userScrolledUp) return;
+  c.scrollTop = c.scrollHeight;
 }
+
+// Track manual scrolling to pause auto-scroll during streaming
+document.addEventListener('DOMContentLoaded', () => {
+  const c = document.getElementById('messages-container');
+  if (!c) return;
+  c.addEventListener('scroll', () => {
+    const nearBottom = c.scrollHeight - c.scrollTop - c.clientHeight < 60;
+    userScrolledUp = !nearBottom;
+  }, { passive: true });
+});
 
 // ── Context toggles ──
 window.toggleContext = function(ctx) {
