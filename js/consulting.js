@@ -3507,9 +3507,9 @@ Be professional, highly strategic, clear, and action-oriented. Keep your spoken 
                     <button onclick="window.history.back()" style="flex:1;padding:12px;border-radius:10px;background:transparent;border:1.5px solid #475569;color:#F8FAFC;font-size:0.88rem;font-weight:600;cursor:pointer;transition:all 0.2s;">
                         Back
                     </button>
-                    <button id="btnSubscribeConsulting" onclick="subscribeToConsulting()" style="flex:1.5;padding:12px;border-radius:10px;background:#4F46E5;border:none;color:#fff;font-size:0.88rem;font-weight:700;cursor:pointer;box-shadow:0 10px 15px -3px rgba(79,70,229,0.4);transition:all 0.2s;">
+                    <a href="/platform/pricing.html?type=consulting" id="btnSubscribeConsulting" style="flex:1.5;padding:12px;border-radius:10px;background:#4F46E5;border:none;color:#fff;font-size:0.88rem;font-weight:700;cursor:pointer;box-shadow:0 10px 15px -3px rgba(79,70,229,0.4);transition:all 0.2s;text-decoration:none;text-align:center;display:flex;align-items:center;justify-content:center;">
                         Subscribe Now
-                    </button>
+                    </a>
                 </div>
             </div>
             <style>
