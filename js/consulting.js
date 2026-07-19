@@ -3476,10 +3476,12 @@ Be professional, highly strategic, clear, and action-oriented. Keep your spoken 
 
     function showSubscriptionBlockedOverlay() {
         if (document.getElementById('consultingSubscriptionOverlay')) return;
+        // Don't show if trial-guard paywall is already covering the page
+        if (document.getElementById('trial-paywall')) return;
 
         const overlay = document.createElement('div');
         overlay.id = 'consultingSubscriptionOverlay';
-        overlay.style.cssText = 'position:fixed;inset:0;z-index:99999;background:rgba(15,23,42,0.96);backdrop-filter:blur(12px);display:flex;align-items:center;justify-content:center;color:#fff;font-family:\'Inter\',sans-serif;padding:20px;';
+        overlay.style.cssText = 'position:fixed;inset:0;z-index:100001;background:rgba(15,23,42,0.96);backdrop-filter:blur(12px);display:flex;align-items:center;justify-content:center;color:#fff;font-family:\'Inter\',sans-serif;padding:20px;';
 
         overlay.innerHTML = `
             <div style="background:#1E293B;border:1px solid #334155;border-radius:20px;padding:40px;max-width:500px;width:100%;text-align:center;box-shadow:0 25px 50px -12px rgba(0,0,0,0.5);">
@@ -3507,9 +3509,9 @@ Be professional, highly strategic, clear, and action-oriented. Keep your spoken 
                     <button onclick="window.history.back()" style="flex:1;padding:12px;border-radius:10px;background:transparent;border:1.5px solid #475569;color:#F8FAFC;font-size:0.88rem;font-weight:600;cursor:pointer;transition:all 0.2s;">
                         Back
                     </button>
-                    <a href="/platform/pricing.html?type=consulting" id="btnSubscribeConsulting" style="flex:1.5;padding:12px;border-radius:10px;background:#4F46E5;border:none;color:#fff;font-size:0.88rem;font-weight:700;cursor:pointer;box-shadow:0 10px 15px -3px rgba(79,70,229,0.4);transition:all 0.2s;text-decoration:none;text-align:center;display:flex;align-items:center;justify-content:center;">
+                    <button id="btnSubscribeConsulting" onclick="window.location.href='/platform/pricing.html?type=consulting'" style="flex:1.5;padding:12px;border-radius:10px;background:#4F46E5;border:none;color:#fff;font-size:0.88rem;font-weight:700;cursor:pointer;box-shadow:0 10px 15px -3px rgba(79,70,229,0.4);transition:all 0.2s;">
                         Subscribe Now
-                    </a>
+                    </button>
                 </div>
             </div>
             <style>
