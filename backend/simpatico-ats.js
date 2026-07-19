@@ -8102,7 +8102,7 @@ const PLAN_PRICING = {
 
 const WISE_BANK_DETAILS = {
   USD: {
-    recipient_name: "Faisal Farooq Khan",
+    recipient_name: "Faisal",
     routing_number: "084009519",
     account_number: "456698023905672",
     swift_bic: "TRWIUS35XXX",
@@ -8111,7 +8111,7 @@ const WISE_BANK_DETAILS = {
     transfer_type: "Wire / ACH Transfer",
   },
   GBP: {
-    recipient_name: "Faisal Farooq Khan",
+    recipient_name: "Faisal",
     sort_code: "60-84-64",
     account_number: "76832092",
     iban: "GB12 TRWI 6084 6476 8320 92",
@@ -8121,7 +8121,7 @@ const WISE_BANK_DETAILS = {
     transfer_type: "UK Bank Transfer / SWIFT",
   },
   EUR: {
-    recipient_name: "Faisal Farooq Khan",
+    recipient_name: "Faisal",
     iban: "BE22 9058 3690 0647",
     swift_bic: "TRWIBEB1XXX",
     bank_name: "Wise",
@@ -8129,7 +8129,7 @@ const WISE_BANK_DETAILS = {
     transfer_type: "SEPA Transfer / SWIFT",
   },
   AUD: {
-    recipient_name: "Faisal Farooq Khan",
+    recipient_name: "Faisal",
     bsb_code: "774-001",
     account_number: "245166757",
     swift_bic: "TRWIAUS1XXX",
@@ -8138,7 +8138,7 @@ const WISE_BANK_DETAILS = {
     transfer_type: "AU Bank Transfer / SWIFT",
   },
   AED: {
-    recipient_name: "Faisal Farooq Khan",
+    recipient_name: "Faisal",
     iban: "GB12 TRWI 6084 6476 8320 92",
     swift_bic: "TRWIGB2LXXX",
     bank_name: "Wise Payments Limited",
@@ -8146,7 +8146,7 @@ const WISE_BANK_DETAILS = {
     transfer_type: "SWIFT Transfer",
   },
   CAD: {
-    recipient_name: "Faisal Farooq Khan",
+    recipient_name: "Faisal",
     institution_number: "621",
     transit_number: "16001",
     account_number: "200117737341",
