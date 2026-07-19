@@ -252,6 +252,7 @@
     <button class="tb-btn tb-btn-outline" onclick="copyLink()"><i class="fas fa-link"></i> Copy Link</button>
     <button class="tb-btn tb-btn-primary" onclick="window.print()"><i class="fas fa-file-pdf"></i> Export PDF</button>
     <button class="tb-btn tb-btn-success" onclick="markAsSent()"><i class="fas fa-paper-plane"></i> Mark Sent</button>
+    <button class="tb-btn tb-btn-primary" id="btnPayInvoice" style="display:none;background:#059669;" onclick="openPaymentModal()"><i class="fas fa-credit-card"></i> Pay Invoice Now</button>
   </div>
 </div>
 
@@ -461,9 +462,18 @@
     
     <!-- Domestic details -->
     <div id="modalDomesticDetails" style="display:none;margin-bottom:16px;">
-      <p style="font-size:0.78rem;font-weight:700;color:var(--text-secondary);margin-bottom:6px;">Indian Bank Details (UPI / NEFT):</p>
-      <div style="font-size:0.75rem;color:var(--text-secondary);background:#F8FAFC;padding:12px;border-radius:8px;border:1px solid var(--border);line-height:1.5;">
-        <strong>UPI ID:</strong> faisalkkod@okhdfcbank<br>
+      <div style="text-align:center;margin-bottom:12px;padding:12px;background:#F8FAFC;border:1px solid var(--border);border-radius:10px;">
+        <p style="font-size:0.75rem;font-weight:700;color:var(--text-secondary);margin-bottom:8px;">Scan or Tap to Pay with GPay / PhonePe / Paytm</p>
+        <div id="consultingUpiQrContainer" style="display:inline-block;padding:6px;background:#FFF;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,0.1)"></div>
+        <div style="margin-top:8px;">
+          <a id="consultingUpiDeepLink" href="#" style="display:inline-flex;align-items:center;gap:6px;background:#059669;color:#FFF;padding:6px 14px;border-radius:6px;font-size:0.75rem;font-weight:700;text-decoration:none">
+            <i class="fas fa-mobile-alt"></i> Open UPI App & Pay
+          </a>
+        </div>
+      </div>
+
+      <div style="font-size:0.75rem;color:var(--text-secondary);background:#F8FAFC;padding:12px;border-radius:8px;border:1px solid var(--border);line-height:1.6;">
+        <strong>UPI ID:</strong> <a id="consultingUpiIdLink" href="#" style="color:var(--primary);text-decoration:none;font-weight:600">faisalkkod@okhdfcbank</a><br>
         <strong>Account Name:</strong> FAISAL .K<br>
         <strong>Bank:</strong> State Bank of India<br>
         <strong>A/C No:</strong> 67326003131<br>
@@ -473,10 +483,13 @@
 
     <!-- International details -->
     <div id="modalWiseDetails" style="display:none;margin-bottom:16px;">
-      <p style="font-size:0.78rem;font-weight:700;color:var(--text-secondary);margin-bottom:6px;">Wise (International):</p>
-      <div style="font-size:0.75rem;color:var(--text-secondary);background:#F8FAFC;padding:12px;border-radius:8px;border:1px solid var(--border);line-height:1.5;">
-        <strong>Recipient:</strong> Simpatico HR Consultancy<br>
-        <strong>Email:</strong> simpaticohrconsultancy@gmail.com
+      <div style="text-align:center;margin-bottom:12px;padding:12px;background:#F0FDF4;border:1px solid #BBF7D0;border-radius:10px;">
+        <a id="consultingWisePayLink" href="https://wise.com" target="_blank" style="display:inline-flex;align-items:center;gap:6px;background:#059669;color:#FFF;padding:8px 16px;border-radius:8px;font-size:0.78rem;font-weight:700;text-decoration:none">
+          <i class="fas fa-external-link-alt"></i> Open Wise & Transfer
+        </a>
+      </div>
+      <div id="modalWiseDetailsContent" style="font-size:0.75rem;color:var(--text-secondary);background:#F8FAFC;padding:12px;border-radius:8px;border:1px solid var(--border);line-height:1.5;display:flex;flex-direction:column;gap:4px;">
+        Loading Wise details...
       </div>
     </div>
 
@@ -770,7 +783,7 @@ async function saveConsultingInvoice() {
   }
 }
 
-window.openPaymentModal = function () {
+window.openPaymentModal = async function () {
   if (!activeInvoice) return;
   
   document.getElementById('modalInvoiceNumber').textContent = activeInvoice.gateway_order_id;
@@ -783,6 +796,59 @@ window.openPaymentModal = function () {
   document.getElementById('modalDomesticDetails').style.display = isDomestic ? 'block' : 'none';
   document.getElementById('modalWiseDetails').style.display = !isDomestic ? 'block' : 'none';
   document.getElementById('btnVerifyWiseInvoice').style.display = !isDomestic ? 'inline-flex' : 'none';
+  
+  if (isDomestic) {
+    const upiId = 'faisalkkod@okhdfcbank';
+    const upiUrl = `upi://pay?pa=${encodeURIComponent(upiId)}&pn=${encodeURIComponent('FAISAL .K')}&am=${activeInvoice.amount}&cu=INR&tn=${encodeURIComponent(activeInvoice.gateway_order_id)}`;
+    const qrApiUrl = `https://api.qrserver.com/v1/create-qr-code/?size=140x140&data=${encodeURIComponent(upiUrl)}`;
+    
+    const qrContainer = document.getElementById('consultingUpiQrContainer');
+    if (qrContainer) {
+      qrContainer.innerHTML = `<a href="${upiUrl}"><img src="${qrApiUrl}" alt="UPI QR" style="width:130px;height:130px;display:block;margin:auto" /></a>`;
+    }
+    const deepBtn = document.getElementById('consultingUpiDeepLink');
+    if (deepBtn) deepBtn.href = upiUrl;
+
+    const upiLink = document.getElementById('consultingUpiIdLink');
+    if (upiLink) upiLink.href = upiUrl;
+  } else {
+    const wiseLink = `https://wise.com/pay/me/faisalk139?amount=${activeInvoice.amount}&currency=${currentCurrency.toUpperCase()}&reference=${encodeURIComponent(activeInvoice.gateway_order_id)}`;
+    const wiseBtn = document.getElementById('consultingWisePayLink');
+    if (wiseBtn) wiseBtn.href = wiseLink;
+
+    const container = document.getElementById('modalWiseDetailsContent');
+    if (container) {
+      container.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Loading Wise details...';
+      try {
+        const token = localStorage.getItem('simpatico_token') || localStorage.getItem('sh_token');
+        const res = await fetch(`${WORKER_URL}/billing/wise/account-details?currency=${currentCurrency.toUpperCase()}`, {
+          headers: {
+            'Authorization': `Bearer ${token}`
+          }
+        });
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const json = await res.json();
+        const wd = json.data || json;
+        
+        let html = `<div><strong>Recipient Name:</strong> ${wd.recipient_name || 'Faisal'}</div>`;
+        if (wd.email) html += `<div><strong>Email:</strong> ${wd.email}</div>`;
+        if (wd.routing_number) html += `<div><strong>Routing Number:</strong> ${wd.routing_number}</div>`;
+        if (wd.sort_code) html += `<div><strong>Sort Code:</strong> ${wd.sort_code}</div>`;
+        if (wd.bsb_code) html += `<div><strong>BSB Code:</strong> ${wd.bsb_code}</div>`;
+        if (wd.iban) html += `<div><strong>IBAN:</strong> ${wd.iban}</div>`;
+        if (wd.institution_number) html += `<div><strong>Institution Number:</strong> ${wd.institution_number}</div>`;
+        if (wd.transit_number) html += `<div><strong>Transit Number:</strong> ${wd.transit_number}</div>`;
+        if (wd.account_number) html += `<div><strong>Account Number:</strong> ${wd.account_number}</div>`;
+        if (wd.swift_bic) html += `<div><strong>SWIFT/BIC:</strong> ${wd.swift_bic}</div>`;
+        if (wd.bank_name) html += `<div><strong>Bank Name:</strong> ${wd.bank_name}</div>`;
+        if (wd.bank_address) html += `<div><strong>Bank Address:</strong> ${wd.bank_address}</div>`;
+        if (wd.transfer_type) html += `<div><strong>Transfer Type:</strong> ${wd.transfer_type}</div>`;
+        container.innerHTML = html;
+      } catch (err) {
+        container.innerHTML = `<span style="color:#EF4444">Failed to load details: ${err.message}</span>`;
+      }
+    }
+  }
   
   document.getElementById('paymentProofModal').classList.add('active');
 };

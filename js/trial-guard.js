@@ -18,6 +18,38 @@
     max_interviews: 1,
   };
 
+  // ── Consulting pricing per currency (mirrors backend PLAN_PRICING.consulting_monthly) ──
+  const CONSULTING_PLAN_PRICES = {
+    inr: 2500, usd: 40, gbp: 40, eur: 40, aud: 40, aed: 40, cad: 40
+  };
+  const CUR_SYMBOLS = { inr: '₹', usd: '$', gbp: '£', eur: '€', aud: 'A$', aed: 'AED ', cad: 'C$' };
+  const CUR_FLAGS = { inr: '🇮🇳', usd: '🇺🇸', gbp: '🇬🇧', eur: '🇪🇺', aud: '🇦🇺', aed: '🇦🇪', cad: '🇨🇦' };
+  let _trialGuardCurrency = null; // populated via geo-IP
+
+  function _formatTrialPrice(cur) {
+    const c = (cur || 'usd').toLowerCase();
+    const sym = CUR_SYMBOLS[c] || '$';
+    const amt = CONSULTING_PLAN_PRICES[c] || 40;
+    return c === 'inr' ? `${sym}${amt.toLocaleString('en-IN')}` : `${sym}${amt}`;
+  }
+
+  async function _detectTrialCurrency() {
+    if (_trialGuardCurrency) return _trialGuardCurrency;
+    try {
+      const cfg = window.SIMPATICO_CONFIG || {};
+      const workerUrl = cfg.workerUrl || 'https://simpatico-hr-ats.simpaticohrconsultancy.workers.dev';
+      const res = await fetch(`${workerUrl}/billing/detect-currency`);
+      if (res.ok) {
+        const raw = await res.json();
+        const data = raw.data || raw;
+        _trialGuardCurrency = (data.currency || 'usd').toLowerCase();
+      }
+    } catch(e) {
+      console.warn('[trial-guard] Currency detection failed:', e.message);
+    }
+    return _trialGuardCurrency || 'usd';
+  }
+
   function sb() {
     if (typeof getSupabaseClient === 'function') return getSupabaseClient();
     if (window._supabaseClient) return window._supabaseClient;
@@ -169,13 +201,28 @@
         `;
       }
 
+      // For consulting, show a price hint in the banner
+      const priceHintId = 'trial-banner-price-hint';
+      let priceHint = '';
+      if (isConsulting) {
+        priceHint = `<span id="${priceHintId}" style="opacity:0.85;font-size:11px;font-weight:600;"></span>`;
+        // Async price detection (updates the span once resolved)
+        _detectTrialCurrency().then(cur => {
+          const el = document.getElementById(priceHintId);
+          if (el) {
+            const flag = CUR_FLAGS[cur] || '🌍';
+            el.textContent = `${flag} ${_formatTrialPrice(cur)}/mo`;
+          }
+        });
+      }
+
       const upgradeLink = isConsulting 
         ? `<a href="#" onclick="if(window.subscribeToConsulting){window.subscribeToConsulting()}else{window.location.href='/platform/pricing.html?type=consulting'};return false;" style="
             background: rgba(255,255,255,0.2); color: white; padding: 5px 16px; border-radius: 6px;
             text-decoration: none; font-size: 12px; font-weight: 700; border: 1px solid rgba(255,255,255,0.3);
-            transition: all 0.2s;
+            transition: all 0.2s; display:inline-flex; align-items:center; gap:6px;
           " onmouseover="this.style.background='rgba(255,255,255,0.35)'" onmouseout="this.style.background='rgba(255,255,255,0.2)'">
-            Upgrade Now →
+            Upgrade ${priceHint} →
           </a>`
         : `<a href="/platform/pricing.html" style="
             background: rgba(255,255,255,0.2); color: white; padding: 5px 16px; border-radius: 6px;
@@ -254,6 +301,21 @@
           </div>
         `;
 
+    // Consulting paywall: show localized pricing badge + direct subscribe
+    const consultingPriceBadge = isConsulting
+      ? `<div id="trial-paywall-price" style="
+            background: linear-gradient(135deg, #eef2ff, #e0e7ff); border: 1px solid #c7d2fe;
+            border-radius: 12px; padding: 16px; margin-bottom: 20px;
+          ">
+            <div style="font-size: 11px; font-weight: 700; color: #6366f1; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 6px;">Business Consulting Monthly</div>
+            <div style="display: flex; align-items: baseline; justify-content: center; gap: 6px;">
+              <span id="trial-paywall-price-amount" style="font-size: 2rem; font-weight: 800; color: #312e81;">...</span>
+              <span style="font-size: 0.85rem; color: #6366f1; font-weight: 600;">/ month</span>
+            </div>
+            <div id="trial-paywall-price-region" style="font-size: 11px; color: #818cf8; margin-top: 4px; font-weight: 600;"></div>
+          </div>`
+      : '';
+
     const upgradeButton = isConsulting
       ? `
           <a href="#" onclick="if(window.subscribeToConsulting){window.subscribeToConsulting()}else{window.location.href='/platform/pricing.html?type=consulting'};return false;" style="
@@ -264,7 +326,7 @@
             transition: all 0.2s; box-shadow: 0 4px 12px rgba(79,70,229,0.3);
           " onmouseover="this.style.transform='translateY(-2px)';this.style.boxShadow='0 8px 24px rgba(79,70,229,0.4)'"
              onmouseout="this.style.transform='none';this.style.boxShadow='0 4px 12px rgba(79,70,229,0.3)'">
-            🚀 Upgrade to Business Consulting
+            🚀 Upgrade & Pay Now
           </a>
         `
       : `
@@ -301,6 +363,7 @@
           ${description}
         </p>
 
+        ${consultingPriceBadge}
         ${featuresList}
 
         <div style="display: flex; gap: 10px;">
@@ -325,6 +388,19 @@
     `;
 
     document.body.appendChild(overlay);
+
+    // Async: fill in the localized price for consulting paywall
+    if (isConsulting) {
+      _detectTrialCurrency().then(cur => {
+        const amtEl = document.getElementById('trial-paywall-price-amount');
+        const regionEl = document.getElementById('trial-paywall-price-region');
+        if (amtEl) amtEl.textContent = _formatTrialPrice(cur);
+        if (regionEl) {
+          const flag = CUR_FLAGS[cur] || '🌍';
+          regionEl.textContent = `${flag} ${cur.toUpperCase()} · Auto-detected from your location`;
+        }
+      });
+    }
   }
 
   // ── Show limit-hit modal (blocks the action, not the whole page) ──

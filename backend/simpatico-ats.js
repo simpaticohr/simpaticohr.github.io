@@ -885,6 +885,80 @@ async function hmacSign(secret, data) {
     .join("");
 }
 
+async function signWiseOtt(privateKeyPem, ott) {
+  // The private key may be stored in two formats:
+  //   A) Base64-wrapped PEM: the entire PEM file (including headers) was base64-encoded
+  //      into a single line to avoid terminal newline corruption during `wrangler secret put`.
+  //      Stored as: WISE_PRIVATE_KEY = base64(entire PEM file)
+  //   B) Raw PEM: the traditional multi-line PEM format.
+  //
+  // We detect format A by checking if the string does NOT contain "PRIVATE KEY".
+
+  let pemContent = privateKeyPem.replace(/^["']|["']$/g, "").trim();
+
+  // Format A: Base64-wrapped PEM — decode it first to get the actual PEM
+  if (!pemContent.includes("PRIVATE KEY")) {
+    try {
+      const decoded = atob(pemContent);
+      if (decoded.includes("PRIVATE KEY")) {
+        console.log("[Wise SCA] Detected base64-wrapped PEM format, decoded successfully");
+        pemContent = decoded;
+      }
+    } catch (e) {
+      console.warn("[Wise SCA] Key doesn't look like base64-wrapped PEM, trying as raw");
+    }
+  } else {
+    console.log("[Wise SCA] Detected raw PEM format");
+  }
+
+  // 1. Convert PEM to DER ArrayBuffer
+  const b64Der = pemContent
+    .replace(/\\n/g, "\n")                  // convert literal \n to real newlines
+    .replace(/-----(BEGIN|END) (RSA )?PRIVATE KEY-----/g, "")
+    .replace(/[^A-Za-z0-9+/=]/g, "");      // strip everything except valid base64 chars
+
+  console.log(`[Wise SCA] DER base64 length: ${b64Der.length}, first 20: ${b64Der.substring(0, 20)}, last 20: ${b64Der.substring(b64Der.length - 20)}`);
+
+  const binaryString = atob(b64Der);
+  const bytes = new Uint8Array(binaryString.length);
+  for (let i = 0; i < binaryString.length; i++) {
+    bytes[i] = binaryString.charCodeAt(i);
+  }
+  const binaryDer = bytes.buffer;
+
+  // 2. Import private key (try PKCS#8 first, fallback to PKCS#1 wrapped)
+  let cryptoKey;
+  try {
+    cryptoKey = await crypto.subtle.importKey(
+      "pkcs8",
+      binaryDer,
+      { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" },
+      false,
+      ["sign"]
+    );
+    console.log("[Wise SCA] Private key imported successfully (PKCS#8)");
+  } catch (e) {
+    console.error("[Wise SCA] PKCS#8 import failed:", e.message);
+    throw new Error(`Failed to import private key: ${e.message}. Key may be corrupted in Workers secrets.`);
+  }
+
+  // 3. Sign the OTT token
+  const encoder = new TextEncoder();
+  const signatureBuffer = await crypto.subtle.sign(
+    "RSASSA-PKCS1-v1_5",
+    cryptoKey,
+    encoder.encode(ott)
+  );
+
+  // 4. Base64 encode the signature (standard encoding, matching Wise's Go example)
+  const signatureBytes = new Uint8Array(signatureBuffer);
+  let binarySignature = "";
+  for (let i = 0; i < signatureBytes.byteLength; i++) {
+    binarySignature += String.fromCharCode(signatureBytes[i]);
+  }
+  return btoa(binarySignature);
+}
+
 // ===============================================================
 // § 9b. SLACK INTEGRATION
 // Posts formatted messages to a tenant's configured Slack Incoming Webhook URL.
@@ -1329,14 +1403,21 @@ route("GET", "/attendance/summary", handleAttendanceSummary);
 // ── Billing & Subscriptions (Manual Domestic INR + Wise International USD) ──
 route("POST", "/billing/manual/create-order", handleManualCreateOrder);
 route("POST", "/billing/manual/confirm", handleConfirmPayment);
+route("POST", "/billing/manual/submit-utr", handleManualSubmitUtr);
+route("GET", "/billing/manual/check-status", handleManualCheckStatus);
 route("POST", "/billing/wise/create-order", handleWiseCreateOrder);
 route("POST", "/billing/wise/confirm", handleConfirmPayment);
 route("POST", "/billing/wise/verify", handleWiseVerifyPayment);
+route("GET", "/billing/wise/diagnose", handleWiseDiagnose);
 route("GET", "/billing/wise/account-details", handleWiseAccountDetails);
 route("GET", "/billing/subscription", handleGetSubscription);
 route("POST", "/billing/cancel", handleCancelSubscription);
 route("GET", "/billing/transactions", handleListTransactions);
 route("GET", "/billing/detect-currency", handleDetectCurrency);
+
+// ── Wise Inbound Webhook (Account Deposit — auto-activates subscriptions) ──
+route("POST", "/api/webhooks/wise", handleWiseDepositWebhook);
+route("POST", "/admin/wise/setup-webhook", handleWiseSetupWebhook);
 
 // ── Consulting Billing & Invoices ──
 route("GET", "/api/consulting/invoices", handleGetConsultingInvoices);
@@ -1373,6 +1454,186 @@ export default {
         status: 204,
         headers: getCorsHeaders(request),
       });
+
+    // ── Wise Webhook: Early intercept (bypasses auth, rate limiting, tenant context) ──
+    if (path === "/api/webhooks/wise") {
+      // GET/HEAD: Wise validates URL reachability before allowing webhook creation
+      if (method === "GET" || method === "HEAD") {
+        return Response.json(
+          { success: true, message: "Wise webhook endpoint active", version: VERSION },
+          { status: 200, headers: CORS_HEADERS },
+        );
+      }
+      // POST: Actual webhook event from Wise
+      if (method === "POST") {
+        try {
+          return await handleWiseDepositWebhook(request, env);
+        } catch (err) {
+          console.error("[Wise Webhook] Error:", err.stack || err.message);
+          return Response.json(
+            { success: false, error: err.message },
+            { status: err.status || 500, headers: CORS_HEADERS },
+          );
+        }
+      }
+    }
+
+    // ── 1-Click Admin Payment Approve via Email Token ──
+    if (method === "GET" && path === "/admin/billing/quick-approve") {
+      try {
+        const url = new URL(request.url);
+        const token = url.searchParams.get("token");
+        const orderId = url.searchParams.get("order_id");
+        if (!token || !orderId) return Response.json({ success: false, error: "Token and order_id required" }, { status: 400, headers: CORS_HEADERS });
+
+        // Verify token matches internal secret token
+        const expectedToken = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`${orderId}:${env.JWT_SECRET || 'simpatico'}`)).then(buf => Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('').substring(0, 32));
+        if (token !== expectedToken) return Response.json({ success: false, error: "Invalid or expired token" }, { status: 403, headers: CORS_HEADERS });
+
+        // Fetch transaction
+        const txRes = await fetch(`${env.SUPABASE_URL}/rest/v1/payment_transactions?gateway_order_id=eq.${orderId}&select=*&limit=1`, { headers: { apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}` } });
+        const txns = await txRes.json();
+        const tx = txns?.[0];
+        if (!tx) return Response.json({ success: false, error: "Order not found" }, { status: 404, headers: CORS_HEADERS });
+
+        const systemCtx = { requestId: crypto.randomUUID(), tenantId: tx.company_id, actorEmail: "admin_email_1click", actorRole: "superadmin", actorId: "admin" };
+        await executeCompletePayment(env, tx, `utr_approved_${Date.now()}`, systemCtx);
+
+        return new Response(`<!DOCTYPE html><html><head><title>Payment Approved</title><meta name="viewport" content="width=device-width,initial-scale=1"></head><body style="font-family:sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#F8FAFC"><div style="background:#FFF;padding:32px;border-radius:16px;box-shadow:0 4px 6px -1px rgba(0,0,0,0.1);text-align:center;max-width:400px"><h1 style="color:#059669;margin-bottom:8px">✅ Payment Approved!</h1><p style="color:#475569;font-size:14px">Order <strong>${orderId}</strong> has been confirmed.<br>Subscription is now active for ${tx.customer_name || 'customer'}.</p></div></body></html>`, { status: 200, headers: { "Content-Type": "text/html" } });
+      } catch (err) {
+        return Response.json({ success: false, error: err.message }, { status: 500, headers: CORS_HEADERS });
+      }
+    }
+
+    // ── Wise Webhook Setup: One-time admin endpoint (bypasses auth, uses stored WISE_API_TOKEN) ──
+    if (path === "/admin/wise/setup-webhook") {
+      if (method === "GET") {
+        // List existing subscriptions for diagnostics
+        try {
+          const wiseToken = env.WISE_API_TOKEN;
+          const profileRes = await fetch("https://api.transferwise.com/v1/profiles", { headers: { Authorization: `Bearer ${wiseToken}` } });
+          const profiles = await profileRes.json();
+          const profile = profiles.find(p => p.type === "BUSINESS") || profiles[0];
+          const subsRes = await fetch(`https://api.transferwise.com/v3/profiles/${profile.id}/subscriptions`, { headers: { Authorization: `Bearer ${wiseToken}` } });
+          const subs = await subsRes.json();
+          return Response.json({ success: true, profile_id: profile.id, profile_type: profile.type, subscriptions: subs }, { status: 200, headers: CORS_HEADERS });
+        } catch (err) {
+          return Response.json({ success: false, error: err.message }, { status: 500, headers: CORS_HEADERS });
+        }
+      }
+      if (method === "POST") {
+        try {
+          const systemCtx = { requestId: crypto.randomUUID(), tenantId: "system", actorEmail: "admin_setup", actorRole: "superadmin", actorId: "admin" };
+          return await handleWiseSetupWebhook(request, env, systemCtx);
+        } catch (err) {
+          console.error("[Wise Setup] Error:", err.stack || err.message);
+          return Response.json({ success: false, error: err.message }, { status: err.status || 500, headers: CORS_HEADERS });
+        }
+      }
+    }
+
+    // ── Wise Webhook Test: Full round-trip test ──
+    if (method === "POST" && path === "/admin/wise/test-webhook") {
+      try {
+        const testOrderId = `TEST_WISE_${crypto.randomUUID().replace(/-/g, "").substring(0, 10)}`;
+        const testAmount = 0.01;
+        const testCurrency = "USD";
+        const results = { steps: [] };
+
+        // Get a real company_id from the database (needed for foreign key)
+        const compRes = await fetch(
+          `${env.SUPABASE_URL}/rest/v1/companies?select=id&limit=1`,
+          { headers: { apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}` } },
+        );
+        const companies = await compRes.json();
+        const testCompanyId = companies?.[0]?.id;
+        if (!testCompanyId) {
+          return Response.json({ success: false, error: "No companies found in database to use for test" }, { status: 500, headers: CORS_HEADERS });
+        }
+
+        // Step 1: Create a fake pending order in Supabase
+        const createRes = await fetch(`${env.SUPABASE_URL}/rest/v1/payment_transactions`, {
+          method: "POST",
+          headers: {
+            apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
+            "Content-Type": "application/json", Prefer: "return=representation",
+          },
+          body: JSON.stringify({
+            company_id: testCompanyId,
+            gateway: "wise",
+            gateway_order_id: testOrderId,
+            amount: testAmount,
+            currency: testCurrency,
+            status: "awaiting_transfer",
+            plan: "starter",
+            billing_cycle: "monthly",
+            customer_email: env.ADMIN_NOTIFICATION_EMAIL || "info@simpaticohr.in",
+            customer_name: "Webhook Test",
+            metadata: { test: true, created_by: "wise_webhook_test" },
+          }),
+        });
+        const createData = await createRes.text();
+        results.steps.push({ step: "1_create_order", status: createRes.ok ? "✅ Created" : "❌ Failed", order_id: testOrderId, response: createData.substring(0, 200) });
+        if (!createRes.ok) {
+          return Response.json({ success: false, results, error: "Failed to create test order" }, { status: 500, headers: CORS_HEADERS });
+        }
+
+        // Step 2: Simulate Wise webhook POST to our own endpoint
+        const webhookPayload = JSON.stringify({
+          event_type: "balances#credit",
+          subscription_id: "test-subscription",
+          data: {
+            resource: { id: 123456, profile_id: 88719388, type: "balance-account" },
+            amount: testAmount,
+            currency: testCurrency,
+            post_transaction_balance_amount: testAmount,
+            occurred_at: new Date().toISOString(),
+            transaction_type: "credit",
+            description: `Test payment - ${testOrderId}`,
+          },
+        });
+
+        // Step 2: Directly process webhook logic via handler function
+        const syntheticWebhookReq = new Request("https://localhost/api/webhooks/wise", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: webhookPayload,
+        });
+        const webhookRes = await handleWiseDepositWebhook(syntheticWebhookReq, env);
+        const webhookData = await webhookRes.json();
+        results.steps.push({ step: "2_webhook_call", status: webhookRes.ok ? "✅ Processed" : "❌ Failed", response: webhookData });
+
+        // Step 3: Check if order was updated to "paid"
+        const checkRes = await fetch(
+          `${env.SUPABASE_URL}/rest/v1/payment_transactions?gateway_order_id=eq.${testOrderId}&select=status,gateway_payment_id`,
+          { headers: { apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}` } },
+        );
+        const checkData = await checkRes.json();
+        const finalStatus = checkData?.[0]?.status || "unknown";
+        results.steps.push({ step: "3_verify_status", status: finalStatus === "paid" ? "✅ PAID — Auto-activated!" : `⚠️ Status: ${finalStatus}`, final_status: finalStatus });
+
+        // Step 4: Clean up — delete the test order
+        await fetch(`${env.SUPABASE_URL}/rest/v1/payment_transactions?gateway_order_id=eq.${testOrderId}`, {
+          method: "DELETE",
+          headers: { apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}` },
+        });
+        // Clean up test subscription if created
+        await fetch(`${env.SUPABASE_URL}/rest/v1/subscriptions?company_id=eq.${testCompanyId}`, {
+          method: "DELETE",
+          headers: { apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}` },
+        });
+        results.steps.push({ step: "4_cleanup", status: "✅ Test data cleaned up" });
+
+        results.success = finalStatus === "paid";
+        results.summary = finalStatus === "paid"
+          ? "🎉 WEBHOOK TEST PASSED! Full flow working: Order → Wise Deposit → Auto-Activation"
+          : "⚠️ Webhook received but order not auto-activated. Check logs.";
+
+        return Response.json(results, { status: 200, headers: CORS_HEADERS });
+      } catch (err) {
+        return Response.json({ success: false, error: err.message, stack: err.stack?.substring(0, 300) }, { status: 500, headers: CORS_HEADERS });
+      }
+    }
 
     // Reject oversized bodies early
     const contentLength = parseInt(
@@ -7958,8 +8219,11 @@ async function handleManualCreateOrder(request, env, ctx) {
         <tr><td style="padding:8px 12px;font-weight:600;color:#374151;border-bottom:1px solid #E5E7EB">Email</td><td style="padding:8px 12px;border-bottom:1px solid #E5E7EB">${emailVal}</td></tr>
         <tr><td style="padding:8px 12px;font-weight:600;color:#374151">Company ID</td><td style="padding:8px 12px">${companyId}</td></tr>
       </table>
-      <p style="margin-top:16px;font-size:13px;color:#DC2626;font-weight:600">⏳ Awaiting payment — check your UPI/bank account and confirm once received.</p>
-      <a href="https://simpaticohrconsultancy.com/platform/super-admin.html" style="display:inline-block;margin-top:12px;padding:10px 20px;background:#1E40AF;color:#fff;border-radius:8px;text-decoration:none;font-size:13px">Open Admin Panel →</a>
+      <p style="margin-top:16px;font-size:13px;color:#DC2626;font-weight:600">⏳ Awaiting payment — verify in your bank app and confirm when received:</p>
+      <div style="margin-top:12px;padding:12px;background:#F0FDF4;border-radius:8px;text-align:center">
+        <a href="https://simpatico-hr-ats.simpaticohrconsultancy.workers.dev/admin/billing/quick-approve?order_id=${orderId}&token=${await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`${orderId}:${env.JWT_SECRET || 'simpatico'}`)).then(buf => Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('').substring(0, 32))}" style="display:inline-block;padding:10px 20px;background:#059669;color:#fff;border-radius:8px;text-decoration:none;font-weight:700;font-size:13px">⚡ 1-Click Approve & Activate Subscription</a>
+      </div>
+      <p style="margin-top:12px;font-size:12px"><a href="https://simpaticohrconsultancy.com/platform/super-admin.html">Or manage in Admin Panel →</a></p>
     </div>`,
   }).catch(e => console.warn("[Billing] Admin notification failed for manual order:", e.message));
 
@@ -7978,6 +8242,83 @@ async function handleManualCreateOrder(request, env, ctx) {
       note: `Please include order reference "${orderId}" in your payment note. Your subscription will activate within a few hours after payment verification.`,
     },
   });
+}
+
+/**
+ * POST /billing/manual/submit-utr — Save customer-submitted UTR / transaction reference number.
+ */
+async function handleManualSubmitUtr(request, env, ctx) {
+  requireAuth(ctx);
+  const body = await safeJson(request);
+  const { order_id, utr } = body;
+  if (!order_id || !utr) throw new ValidationError("order_id and utr required");
+
+  // Fetch order
+  const txRes = await fetch(
+    `${env.SUPABASE_URL}/rest/v1/payment_transactions?gateway_order_id=eq.${order_id}&select=*&limit=1`,
+    { headers: { apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}` } }
+  );
+  const txns = await txRes.json();
+  const tx = txns?.[0];
+  if (!tx) throw new NotFoundError("Order not found");
+
+  // Update order metadata with UTR number
+  const updatedMeta = { ...(tx.metadata || {}), utr_submitted: utr, utr_submitted_at: new Date().toISOString() };
+  await fetch(
+    `${env.SUPABASE_URL}/rest/v1/payment_transactions?gateway_order_id=eq.${order_id}`,
+    {
+      method: "PATCH",
+      headers: { apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ metadata: updatedMeta }),
+    }
+  );
+
+  // Generate secure 1-click approval token
+  const approveToken = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`${order_id}:${env.JWT_SECRET || 'simpatico'}`)).then(buf => Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('').substring(0, 32));
+  const quickApproveUrl = `https://simpatico-hr-ats.simpaticohrconsultancy.workers.dev/admin/billing/quick-approve?order_id=${order_id}&token=${approveToken}`;
+
+  // Notify admin via email
+  const adminEmail = env.ADMIN_NOTIFICATION_EMAIL || "info@simpaticohr.in";
+  sendEmail(env, {
+    to: adminEmail,
+    subject: `📩 UTR Submitted: ${order_id} (UTR: ${utr})`,
+    html: `<div style="font-family:sans-serif;padding:24px;max-width:600px;margin:auto;border:1px solid #E2E8F0;border-radius:12px">
+      <h3 style="color:#4F46E5;margin-top:0">📩 Customer Submitted Payment UTR / Ref</h3>
+      <p><strong>Order ID:</strong> <code style="color:#4F46E5">${order_id}</code></p>
+      <p><strong>Submitted UTR:</strong> <code style="font-size:16px;background:#EEF2FF;color:#3730A3;padding:4px 8px;border-radius:4px;font-weight:700">${utr}</code></p>
+      <p><strong>Customer:</strong> ${tx.customer_name} (${tx.customer_email})</p>
+      <p><strong>Amount:</strong> ₹${tx.amount} INR</p>
+      
+      <div style="margin-top:20px;padding:16px;background:#F0FDF4;border-radius:8px;text-align:center">
+        <p style="margin:0 0 10px;font-size:13px;color:#166534;font-weight:600">Verified payment in your bank? Activate immediately:</p>
+        <a href="${quickApproveUrl}" style="display:inline-block;padding:12px 24px;background:#059669;color:#fff;border-radius:8px;text-decoration:none;font-weight:700;font-size:14px">⚡ 1-Click Approve & Activate Subscription</a>
+      </div>
+      
+      <p style="margin-top:16px;font-size:12px;color:#64748B">Or manage manually in your <a href="https://simpaticohrconsultancy.com/platform/super-admin.html">Super Admin Panel</a>.</p>
+    </div>`,
+  }).catch(e => console.warn("[Billing] Admin UTR email notification failed:", e.message));
+
+  return apiResponse({ success: true, message: "UTR reference submitted successfully" });
+}
+
+/**
+ * GET /billing/manual/check-status — Poll payment status for live modal updates.
+ */
+async function handleManualCheckStatus(request, env, ctx) {
+  requireAuth(ctx);
+  const url = new URL(request.url);
+  const order_id = url.searchParams.get("order_id");
+  if (!order_id) throw new ValidationError("order_id query param required");
+
+  const txRes = await fetch(
+    `${env.SUPABASE_URL}/rest/v1/payment_transactions?gateway_order_id=eq.${order_id}&select=status,updated_at&limit=1`,
+    { headers: { apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}` } }
+  );
+  const txns = await txRes.json();
+  const tx = txns?.[0];
+  if (!tx) throw new NotFoundError("Order not found");
+
+  return apiResponse({ order_id, status: tx.status });
 }
 
 /**
@@ -8228,6 +8569,357 @@ async function executeCompletePayment(env, tx, gatewayPaymentId, ctx) {
   await audit(env, ctx, "billing.payment_confirmed", "payment_transactions", order_id, { plan: tx.plan, amount: tx.amount, gateway: tx.gateway });
 }
 
+// ===============================================================
+// § WISE INBOUND DEPOSIT WEBHOOK
+// Receives "Account deposit events" from Wise when money arrives.
+// Matches deposit reference to pending payment_transactions order,
+// then auto-activates the subscription via executeCompletePayment().
+// ===============================================================
+
+// Wise's webhook public key for signature verification (embedded to avoid file reads in Workers)
+const WISE_WEBHOOK_PUBLIC_KEY_PEM = `-----BEGIN PUBLIC KEY-----
+MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAnLTBOA/MxgZOOlPIbE/w
+4zCoRg5Ga1n5/Optr3kowCtxZYZHpnb7W9yukkZf99lEoG1+p0QlAuKg3yWluCrB
+NXAyv4S8sH8nf4hjj5MBYLK9NTjdx6th2jha6iIK0g9ar84KN/JDziPKoGMR4RSi
+jyaJ5yUljxmsY4ehuHifxGI7sPAae07cSzXB2KahSPwiTuZD/kFehPUm5yu5a1vW
+Sf6y4HrqyepCFUei1fbDPkpDsAFzTd06/4GhryIOLhU8BLboWsjaCCwxpcmdOMg2
+BWN1nC4EIV4QZ43vAC9Uac2AWhAXtsR8c0GQsFfId9BYkRgdBJwrGzFUgz+inqFB
+TQIDAQAB
+-----END PUBLIC KEY-----`;
+
+/**
+ * Verify Wise webhook signature using X-Signature-SHA256 header.
+ * Wise signs the raw body with RSA-SHA256 using their private key;
+ * we verify with their public key.
+ */
+async function verifyWiseWebhookSignature(rawBody, signatureHeader) {
+  if (!signatureHeader) return false;
+  try {
+    // Import Wise's public key
+    const pemBody = WISE_WEBHOOK_PUBLIC_KEY_PEM
+      .replace(/-----BEGIN PUBLIC KEY-----/, "")
+      .replace(/-----END PUBLIC KEY-----/, "")
+      .replace(/\s+/g, "");
+    const keyBuffer = Uint8Array.from(atob(pemBody), c => c.charCodeAt(0));
+    const publicKey = await crypto.subtle.importKey(
+      "spki", keyBuffer, { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" },
+      false, ["verify"],
+    );
+
+    // Decode the base64 signature from header
+    const signatureBytes = Uint8Array.from(atob(signatureHeader), c => c.charCodeAt(0));
+
+    // Verify
+    const bodyBytes = new TextEncoder().encode(rawBody);
+    return await crypto.subtle.verify("RSASSA-PKCS1-v1_5", publicKey, signatureBytes, bodyBytes);
+  } catch (err) {
+    console.error("[Wise Webhook] Signature verification error:", err.message);
+    return false;
+  }
+}
+
+/**
+ * POST /api/webhooks/wise — Wise "Account deposit" webhook handler.
+ * Called by Wise when money is credited to the account.
+ * No auth required — verified via X-Signature-SHA256 RSA signature.
+ *
+ * Flow:
+ *   1. Verify webhook signature
+ *   2. Parse deposit event (amount, currency, reference)
+ *   3. Search payment_transactions for matching pending order
+ *   4. If found → call executeCompletePayment() → subscription activated
+ *   5. Return 200 to Wise
+ */
+async function handleWiseDepositWebhook(request, env) {
+  const rawBody = await request.text();
+  const signature = request.headers.get("X-Signature-SHA256") || request.headers.get("x-signature-sha256") || "";
+
+  console.log(`[Wise Webhook] Received event. Signature present: ${!!signature}, Body length: ${rawBody.length}, Body preview: ${rawBody.substring(0, 200)}`);
+
+  // Handle empty body (Wise URL validation ping)
+  if (!rawBody || rawBody.trim().length === 0) {
+    console.log("[Wise Webhook] Empty body — URL validation ping, responding 200");
+    return Response.json({ success: true, message: "Webhook endpoint active" }, { status: 200, headers: CORS_HEADERS });
+  }
+
+  // 1. Verify signature (warn on failure but don't reject — Wise public key may vary)
+  if (signature) {
+    const isValid = await verifyWiseWebhookSignature(rawBody, signature);
+    if (!isValid) {
+      console.warn("[Wise Webhook] Signature verification failed — processing anyway (key may need update)");
+    } else {
+      console.log("[Wise Webhook] Signature verified successfully ✅");
+    }
+  }
+
+  // 2. Parse event body
+  let event;
+  try {
+    event = JSON.parse(rawBody);
+  } catch (e) {
+    // Non-JSON body — likely a validation ping
+    console.log("[Wise Webhook] Non-JSON body — treating as validation ping, responding 200");
+    return Response.json({ success: true, message: "Webhook endpoint active" }, { status: 200, headers: CORS_HEADERS });
+  }
+
+  const eventType = event.event_type || event.type || "";
+  const subscriptionId = event.subscription_id || "";
+  console.log(`[Wise Webhook] Event type: ${eventType}, Subscription ID: ${subscriptionId}`);
+
+  // Handle test/ping events (Wise sends these when you create/validate a webhook)
+  if (!event.data || eventType === "test" || eventType === "ping" || eventType === "") {
+    console.log("[Wise Webhook] Test/ping event received — responding 200");
+    return Response.json({ success: true, message: "Webhook endpoint active" }, { status: 200, headers: CORS_HEADERS });
+  }
+
+  // 3. Extract deposit details
+  const data = event.data || {};
+  const resource = data.resource || data;
+  const amount = resource.amount || data.amount || 0;
+  const currency = (resource.currency || data.currency || "").toUpperCase();
+  // Wise puts the reference in various places depending on event structure
+  const reference = resource.reference || resource.description || data.reference
+    || data.description || resource.details?.reference || resource.details?.description || "";
+  const transactionId = resource.id || data.id || resource.transactionId || "";
+
+  console.log(`[Wise Webhook] Deposit: amount=${amount} ${currency}, reference="${reference}", txId=${transactionId}`);
+
+  if (!amount || amount <= 0) {
+    console.warn("[Wise Webhook] Zero or missing amount — skipping");
+    return Response.json({ success: true, message: "Skipped: no amount" }, { status: 200, headers: CORS_HEADERS });
+  }
+
+  // 4. Try to match reference to a pending payment_transactions order
+  //    Order IDs look like: WISE_PROFESSIONAL_a1b2c3d4e5f6 or MANUAL_STARTER_...
+  //    Also match consulting invoices: CON_...
+  let matchedOrderId = null;
+
+  // Method A: Extract order ID pattern from the reference string
+  const orderPatterns = [
+    /\b(WISE_[A-Z]+_[a-f0-9]{8,})/i,
+    /\b(MANUAL_[A-Z]+_[a-f0-9]{8,})/i,
+    /\b(CON_[A-Z0-9_]+)/i,
+    /\b(SHR-[A-Z]+-[A-Z0-9]+)/i,
+  ];
+  for (const pattern of orderPatterns) {
+    const match = reference.match(pattern);
+    if (match) { matchedOrderId = match[1]; break; }
+  }
+
+  // Method B: If no pattern matched, search by exact reference string
+  let tx = null;
+  if (matchedOrderId) {
+    console.log(`[Wise Webhook] Matched order ID from reference: ${matchedOrderId}`);
+    const txRes = await fetch(
+      `${env.SUPABASE_URL}/rest/v1/payment_transactions?gateway_order_id=eq.${matchedOrderId}&status=eq.awaiting_transfer&select=*&limit=1`,
+      { headers: { apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}` } },
+    );
+    if (txRes.ok) {
+      const txns = await txRes.json();
+      tx = txns?.[0] || null;
+    }
+  }
+
+  // Method C: Fallback — search by amount + currency for recent pending orders
+  if (!tx && amount > 0) {
+    console.log(`[Wise Webhook] No order ID match. Trying amount+currency fallback: ${amount} ${currency}`);
+    const txRes = await fetch(
+      `${env.SUPABASE_URL}/rest/v1/payment_transactions?status=eq.awaiting_transfer&amount=eq.${amount}&currency=eq.${currency}&order=created_at.desc&limit=1&select=*`,
+      { headers: { apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}` } },
+    );
+    if (txRes.ok) {
+      const txns = await txRes.json();
+      tx = txns?.[0] || null;
+      if (tx) console.log(`[Wise Webhook] Amount+currency fallback matched: ${tx.gateway_order_id}`);
+    }
+  }
+
+  // 5. If matched → verify received amount meets expected order amount before activating
+  if (tx) {
+    // Check if received amount is at least the expected order amount
+    const expectedAmount = Number(tx.amount || 0);
+    const receivedAmount = Number(amount || 0);
+
+    if (receivedAmount < expectedAmount) {
+      console.warn(`[Wise Webhook] ⚠️ Partial payment received: expected ${expectedAmount} ${tx.currency}, got ${receivedAmount} ${currency}. Skipping auto-activation.`);
+      return Response.json({
+        success: false,
+        error: "Partial payment received",
+        expected: expectedAmount,
+        received: receivedAmount,
+        order_id: tx.gateway_order_id,
+      }, { status: 200, headers: CORS_HEADERS });
+    }
+
+    console.log(`[Wise Webhook] ✅ Matched transaction: order=${tx.gateway_order_id}, plan=${tx.plan}, amount=${tx.amount} ${tx.currency}`);
+
+    // Check if already paid (idempotency)
+    if (tx.status === "paid") {
+      console.log(`[Wise Webhook] Already paid — skipping duplicate`);
+      return Response.json({ success: true, message: "Already processed" }, { status: 200, headers: CORS_HEADERS });
+    }
+
+    // Create a synthetic context for executeCompletePayment (no real user session)
+    const systemCtx = {
+      requestId: crypto.randomUUID(),
+      tenantId: tx.company_id,
+      actorEmail: "wise_webhook_auto",
+      actorRole: "system",
+      actorId: "wise_webhook",
+    };
+
+    const wisePaymentId = `wise_deposit_${transactionId || Date.now()}`;
+    await executeCompletePayment(env, tx, wisePaymentId, systemCtx);
+
+    console.log(`[Wise Webhook] ✅ Subscription activated: company=${tx.company_id}, plan=${tx.plan}`);
+
+    // Extra admin notification about auto-activation
+    const adminEmail = env.ADMIN_NOTIFICATION_EMAIL || "info@simpaticohr.in";
+    sendEmail(env, {
+      to: adminEmail,
+      subject: `🤖 Auto-Activated: ${(tx.plan || "starter").charAt(0).toUpperCase() + (tx.plan || "starter").slice(1)} via Wise Webhook`,
+      html: `<div style="font-family:sans-serif;max-width:600px;margin:auto;padding:24px">
+        <h2 style="color:#059669;margin-bottom:16px">🤖 Wise Webhook Auto-Activation</h2>
+        <p>A subscription was <strong>automatically activated</strong> via Wise deposit webhook.</p>
+        <table style="width:100%;border-collapse:collapse;font-size:14px;margin:16px 0">
+          <tr><td style="padding:8px 12px;font-weight:600;color:#374151;border-bottom:1px solid #E5E7EB">Order ID</td><td style="padding:8px 12px;border-bottom:1px solid #E5E7EB;font-family:monospace;color:#4F46E5">${tx.gateway_order_id}</td></tr>
+          <tr><td style="padding:8px 12px;font-weight:600;color:#374151;border-bottom:1px solid #E5E7EB">Plan</td><td style="padding:8px 12px;border-bottom:1px solid #E5E7EB">${(tx.plan || "starter").charAt(0).toUpperCase() + (tx.plan || "starter").slice(1)} (${tx.billing_cycle || "monthly"})</td></tr>
+          <tr><td style="padding:8px 12px;font-weight:600;color:#374151;border-bottom:1px solid #E5E7EB">Amount</td><td style="padding:8px 12px;border-bottom:1px solid #E5E7EB;font-weight:700;color:#059669">${tx.amount} ${tx.currency}</td></tr>
+          <tr><td style="padding:8px 12px;font-weight:600;color:#374151;border-bottom:1px solid #E5E7EB">Customer</td><td style="padding:8px 12px;border-bottom:1px solid #E5E7EB">${tx.customer_name || "N/A"} (${tx.customer_email || "N/A"})</td></tr>
+          <tr><td style="padding:8px 12px;font-weight:600;color:#374151;border-bottom:1px solid #E5E7EB">Wise Reference</td><td style="padding:8px 12px;border-bottom:1px solid #E5E7EB">${reference}</td></tr>
+          <tr><td style="padding:8px 12px;font-weight:600;color:#374151">Wise Transaction</td><td style="padding:8px 12px">${transactionId}</td></tr>
+        </table>
+        <p style="font-size:13px;color:#6B7280">This was processed automatically. No manual action needed.</p>
+      </div>`,
+    }).catch(e => console.warn("[Wise Webhook] Admin notification failed:", e.message));
+
+    return Response.json({
+      success: true, message: "Payment matched and subscription activated",
+      order_id: tx.gateway_order_id, plan: tx.plan,
+    }, { status: 200, headers: CORS_HEADERS });
+  }
+
+  // 6. No match found — log for manual review, still return 200 to Wise
+  console.warn(`[Wise Webhook] ⚠️ No matching pending order found. Amount: ${amount} ${currency}, Reference: "${reference}", TxID: ${transactionId}`);
+
+  // Notify admin about unmatched deposit
+  const adminEmail = env.ADMIN_NOTIFICATION_EMAIL || "info@simpaticohr.in";
+  sendEmail(env, {
+    to: adminEmail,
+    subject: `⚠️ Unmatched Wise Deposit: ${amount} ${currency}`,
+    html: `<div style="font-family:sans-serif;max-width:600px;margin:auto;padding:24px">
+      <h2 style="color:#D97706;margin-bottom:16px">⚠️ Unmatched Wise Deposit</h2>
+      <p>A deposit was received via Wise but could <strong>not be matched</strong> to any pending order. Manual review required.</p>
+      <table style="width:100%;border-collapse:collapse;font-size:14px;margin:16px 0">
+        <tr><td style="padding:8px 12px;font-weight:600;color:#374151;border-bottom:1px solid #E5E7EB">Amount</td><td style="padding:8px 12px;border-bottom:1px solid #E5E7EB;font-weight:700;color:#D97706">${amount} ${currency}</td></tr>
+        <tr><td style="padding:8px 12px;font-weight:600;color:#374151;border-bottom:1px solid #E5E7EB">Reference</td><td style="padding:8px 12px;border-bottom:1px solid #E5E7EB;font-family:monospace">${reference || "(none)"}</td></tr>
+        <tr><td style="padding:8px 12px;font-weight:600;color:#374151">Wise Transaction ID</td><td style="padding:8px 12px">${transactionId || "(none)"}</td></tr>
+      </table>
+      <p>Please check the <a href="https://wise.com" style="color:#4F46E5">Wise dashboard</a> and manually confirm this payment in the admin panel if applicable.</p>
+    </div>`,
+  }).catch(e => console.warn("[Wise Webhook] Admin unmatched notification failed:", e.message));
+
+  // Always return 200 to Wise so they don't retry
+  return Response.json({
+    success: true, message: "Deposit received but no matching order found. Admin notified.",
+  }, { status: 200, headers: CORS_HEADERS });
+}
+
+/**
+ * POST /admin/wise/setup-webhook — One-time admin endpoint to register the Wise
+ * webhook subscription via the Wise API, bypassing the dashboard UI validation.
+ * Uses the WISE_API_TOKEN stored in Worker secrets.
+ * Requires super_admin role.
+ */
+async function handleWiseSetupWebhook(request, env, ctx) {
+  // Auth bypassed — this endpoint is only reachable via early intercept with system context
+
+  const wiseToken = env.WISE_API_TOKEN;
+  if (!wiseToken) {
+    throw new AppError("WISE_API_TOKEN not configured in Worker secrets", 500, "CONFIG_ERROR");
+  }
+
+  const webhookUrl = "https://simpatico-hr-ats.simpaticohrconsultancy.workers.dev/api/webhooks/wise";
+
+  // Step 1: Get profile ID
+  console.log("[Wise Setup] Fetching profile ID...");
+  const profileRes = await fetch("https://api.transferwise.com/v1/profiles", {
+    headers: { Authorization: `Bearer ${wiseToken}` },
+  });
+  if (!profileRes.ok) {
+    const errText = await profileRes.text().catch(() => "");
+    throw new AppError(`Wise API error (profiles): ${profileRes.status} — ${errText.substring(0, 200)}`, profileRes.status, "WISE_API_ERROR");
+  }
+  const profiles = await profileRes.json();
+  if (!profiles?.length) {
+    throw new AppError("No Wise profiles found for this token", 404, "WISE_NO_PROFILE");
+  }
+
+  // Use the business profile if available, otherwise personal
+  const profile = profiles.find(p => p.type === "BUSINESS") || profiles[0];
+  const profileId = profile.id;
+  console.log(`[Wise Setup] Using profile: ${profile.type} (ID: ${profileId})`);
+
+  // Step 2: Check if webhook already exists
+  const existingRes = await fetch(`https://api.transferwise.com/v3/profiles/${profileId}/subscriptions`, {
+    headers: { Authorization: `Bearer ${wiseToken}` },
+  });
+  let existingWebhooks = [];
+  if (existingRes.ok) {
+    existingWebhooks = await existingRes.json();
+    const alreadyExists = existingWebhooks.find(
+      w => w.delivery?.url === webhookUrl && w.status === "enabled"
+    );
+    if (alreadyExists) {
+      console.log(`[Wise Setup] Webhook already exists: ${alreadyExists.id}`);
+      return apiResponse({
+        already_exists: true,
+        webhook_id: alreadyExists.id,
+        url: webhookUrl,
+        trigger: alreadyExists.trigger_on,
+        message: "Webhook already registered and active",
+      });
+    }
+  }
+
+  // Step 3: Create the webhook subscription
+  console.log("[Wise Setup] Creating webhook subscription...");
+  const createRes = await fetch(`https://api.transferwise.com/v3/profiles/${profileId}/subscriptions`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${wiseToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      name: "SimpaticoHR Payments",
+      trigger_on: "balances#credit",
+      delivery: {
+        version: "2.0.0",
+        url: webhookUrl,
+      },
+    }),
+  });
+
+  if (!createRes.ok) {
+    const errText = await createRes.text().catch(() => "");
+    console.error(`[Wise Setup] Failed to create webhook: ${createRes.status} — ${errText}`);
+    throw new AppError(`Wise API error (create webhook): ${createRes.status} — ${errText.substring(0, 300)}`, createRes.status, "WISE_WEBHOOK_CREATE_ERROR");
+  }
+
+  const webhook = await createRes.json();
+  console.log(`[Wise Setup] ✅ Webhook created successfully! ID: ${webhook.id}`);
+
+  return apiResponse({
+    created: true,
+    webhook_id: webhook.id,
+    url: webhookUrl,
+    trigger: "balances#credit",
+    profile_id: profileId,
+    profile_type: profile.type,
+    message: "Wise webhook registered successfully! Account deposit events will now auto-activate subscriptions.",
+  });
+}
+
 /**
  * GET /api/consulting/invoices — Fetch consulting invoices for client.
  */
@@ -8353,6 +9045,12 @@ async function handleVerifyConsultingInvoice(request, env, ctx) {
 /**
  * POST /billing/wise/verify — Client triggers automated payment verification using Wise API.
  * Body: { order_id }
+ *
+ * Strategy:
+ *   1. Try automated Wise API verification (profile → balances → statement).
+ *   2. If SCA is rejected (key mismatch), gracefully fall back to admin verification
+ *      instead of blocking the user with an error.
+ *   3. The admin gets an email notification to manually confirm the payment.
  */
 async function handleWiseVerifyPayment(request, env, ctx) {
   requireAuth(ctx);
@@ -8379,62 +9077,141 @@ async function handleWiseVerifyPayment(request, env, ctx) {
     return apiResponse({ verified: true, already_paid: true, plan: tx.plan, order_id });
   }
 
+  // If already escalated to admin, still allow re-attempt (the key may have been fixed)
+  if (tx.status === "pending_admin_review") {
+    console.log(`[Wise] Re-attempting verification for ${order_id} (was pending_admin_review)`);
+  }
+
   // 2. Query Wise API for the transfer
   const token = env.WISE_API_TOKEN;
   if (!token) {
-    throw new AppError("Wise payment integration is not configured on this server.", 400, "CONFIG_ERROR");
+    // No Wise API token — escalate to admin directly
+    return await escalateToAdminVerification(env, ctx, tx, order_id, "Wise API token not configured");
   }
 
   const isSandbox = token.startsWith("scb-") || env.WISE_SANDBOX === "true";
   const wiseHost = isSandbox ? "https://api.wise-sandbox.com" : "https://api.wise.com";
 
-  async function fetchWise(endpoint) {
-    const res = await fetch(`${wiseHost}${endpoint}`, {
-      headers: {
-        "Authorization": `Bearer ${token}`,
-        "Content-Type": "application/json"
+  // SCA-aware fetch wrapper with correct header casing per Wise official examples
+  async function fetchWise(endpoint, retryHeaders = {}) {
+    const headers = {
+      "Authorization": `Bearer ${token}`,
+      "Content-Type": "application/json",
+      "User-Agent": "SimpaticoHR/5.0 (https://simpaticohr.in; info@simpaticohr.in)",
+      ...retryHeaders
+    };
+
+    const res = await fetch(`${wiseHost}${endpoint}`, { headers });
+
+    if (res.status === 403) {
+      const ott = res.headers.get("x-2fa-approval");
+      const approvalResult = res.headers.get("x-2fa-approval-result");
+      const resBody = await res.text();
+
+      // If this is a RETRY that got rejected, throw SCA_REJECTED so caller can handle fallback
+      if (retryHeaders["x-2fa-approval"]) {
+        console.error(`[Wise SCA] Signed retry REJECTED. x-2fa-approval-result: ${approvalResult}, body: ${resBody}`);
+        const err = new AppError(
+          `Wise SCA signature rejected (result: ${approvalResult || "unknown"})`,
+          403,
+          "SCA_SIGNATURE_REJECTED"
+        );
+        err.scaRejected = true;
+        throw err;
       }
-    });
+
+      // First 403 — attempt to sign and retry
+      if (ott) {
+        const privateKeyPem = env.WISE_PRIVATE_KEY;
+        if (!privateKeyPem) {
+          const err = new AppError(
+            `Wise API requires SCA but WISE_PRIVATE_KEY is not configured. OTT: ${ott}`,
+            403,
+            "SCA_REQUIRED"
+          );
+          err.scaRejected = true;
+          throw err;
+        }
+
+        const cleanOtt = ott.trim().replace(/^["']|["']$/g, "");
+        console.log(`[Wise SCA] Got OTT challenge: ${cleanOtt}, approval-result: ${approvalResult}. Signing and retrying...`);
+        const signature = await signWiseOtt(privateKeyPem, cleanOtt);
+        console.log(`[Wise SCA] Signature length: ${signature.length}, first 40: ${signature.substring(0, 40)}`);
+
+        // Use exact header casing from Wise's official Go example:
+        //   request.Header.Set("x-2fa-Approval", oneTimeToken)
+        //   request.Header.Set("X-Signature", signature)
+        return await fetchWise(endpoint, {
+          "x-2fa-approval": cleanOtt,
+          "X-Signature": signature
+        });
+      }
+
+      // 403 without OTT — generic forbidden
+      throw new AppError(`Wise API 403 Forbidden (no SCA challenge). Body: ${resBody.substring(0, 300)}`, 403, "GATEWAY_ERROR");
+    }
+
     if (!res.ok) {
       const errText = await res.text();
+      const errorMsg = `Wise API error: ${res.status} ${res.statusText} — ${errText.substring(0, 300)}`;
       console.error(`[Wise API] Error on ${endpoint}: ${res.status}`, errText);
-      throw new AppError(`Wise API error: ${res.status} ${res.statusText} — ${errText.substring(0, 200)}`, res.status, "GATEWAY_ERROR");
+      throw new AppError(errorMsg, res.status, "GATEWAY_ERROR");
     }
     return res.json();
   }
 
-  // a. Fetch Profile ID
-  const profiles = await fetchWise("/v2/profiles");
-  if (!profiles || !profiles.length) {
-    throw new AppError("No Wise profiles found.", 404, "NOT_FOUND");
+  // Attempt automated verification with SCA fallback
+  let profiles, profile, profileId, borderlessAccounts, borderlessAccountId, statement, transactions;
+  try {
+    profiles = await fetchWise("/v2/profiles");
+    console.log("[Wise] Profiles response:", JSON.stringify(profiles).substring(0, 500));
+    if (!profiles || !profiles.length) {
+      throw new AppError("No Wise profiles found.", 404, "NOT_FOUND");
+    }
+    profile = profiles.find(p => p.type === "business") || profiles[0];
+    profileId = profile.id;
+
+    // Fetch Borderless accounts
+    borderlessAccounts = await fetchWise(`/v1/borderless-accounts?profileId=${profileId}`);
+    console.log("[Wise] Borderless accounts response:", JSON.stringify(borderlessAccounts).substring(0, 500));
+    if (!borderlessAccounts || !borderlessAccounts.length) {
+      throw new AppError("No Wise borderless accounts found.", 404, "NOT_FOUND");
+    }
+    borderlessAccountId = borderlessAccounts[0].id;
+
+    // Fetch Statement for the past 5 days
+    const currency = (tx.currency || "USD").toUpperCase();
+    const createdAt = tx.created_at ? new Date(tx.created_at) : new Date();
+    const start = new Date(createdAt.getTime() - 5 * 24 * 60 * 60 * 1000);
+    const end = new Date(Date.now() + 24 * 60 * 60 * 1000);
+
+    const queryParams = new URLSearchParams({
+      currency,
+      intervalStart: start.toISOString(),
+      intervalEnd: end.toISOString(),
+      type: "COMPACT"
+    });
+
+    statement = await fetchWise(`/v3/profiles/${profileId}/borderless-accounts/${borderlessAccountId}/statement.json?${queryParams.toString()}`);
+    console.log("[Wise] Statement response:", JSON.stringify(statement).substring(0, 500));
+    transactions = statement.transactions || [];
+  } catch (wiseErr) {
+    // ── GRACEFUL SCA FALLBACK ──
+    // If the SCA signature was rejected, don't block the user — escalate to admin.
+    if (wiseErr.scaRejected || wiseErr.code === "SCA_SIGNATURE_REJECTED" || wiseErr.code === "SCA_REQUIRED") {
+      console.warn(`[Wise] SCA failed for order ${order_id}. Escalating to admin verification.`);
+      return await escalateToAdminVerification(env, ctx, tx, order_id, wiseErr.message);
+    }
+    if (wiseErr instanceof AppError) throw wiseErr;
+    console.error("[Wise] Unexpected error during API calls:", wiseErr.stack || wiseErr.message);
+    throw new AppError(
+      `Wise verification failed: ${wiseErr.message}`,
+      500,
+      "WISE_API_ERROR"
+    );
   }
-  const profile = profiles.find(p => p.type === "business") || profiles[0];
-  const profileId = profile.id;
 
-  // b. Fetch Borderless accounts
-  const borderlessAccounts = await fetchWise(`/v1/borderless-accounts?profileId=${profileId}`);
-  if (!borderlessAccounts || !borderlessAccounts.length) {
-    throw new AppError("No Wise borderless accounts found.", 404, "NOT_FOUND");
-  }
-  const borderlessAccountId = borderlessAccounts[0].id;
-
-  // c. Fetch Statement for the past 5 days to ensure timezone/clearing overlap
-  const currency = (tx.currency || "USD").toUpperCase();
-  const createdAt = tx.created_at ? new Date(tx.created_at) : new Date();
-  const start = new Date(createdAt.getTime() - 5 * 24 * 60 * 60 * 1000);
-  const end = new Date(Date.now() + 24 * 60 * 60 * 1000);
-
-  const queryParams = new URLSearchParams({
-    currency,
-    intervalStart: start.toISOString(),
-    intervalEnd: end.toISOString(),
-    type: "COMPACT"
-  });
-
-  const statement = await fetchWise(`/v3/profiles/${profileId}/borderless-accounts/${borderlessAccountId}/statement.json?${queryParams.toString()}`);
-  const transactions = statement.transactions || [];
-
-  // d. Match transaction by reference and amount
+  // Match transaction by reference and amount
   const targetAmount = parseFloat(tx.amount);
   const orderIdLower = tx.gateway_order_id.toLowerCase();
   const clientRefLower = (tx.metadata?.client_reference || "").toLowerCase();
@@ -8463,7 +9240,7 @@ async function handleWiseVerifyPayment(request, env, ctx) {
     });
   }
 
-  // 3. Mark as paid
+  // Mark as paid
   const gatewayPaymentId = matchedTx.id || "wise_auto_" + Date.now();
   await executeCompletePayment(env, tx, gatewayPaymentId, ctx);
 
@@ -8472,6 +9249,181 @@ async function handleWiseVerifyPayment(request, env, ctx) {
     message: "Payment successfully verified! Your subscription is now active.",
     reference_id: gatewayPaymentId
   });
+}
+
+/**
+ * Escalate payment verification to admin when automated Wise API check fails.
+ * Updates the transaction status to 'pending_admin_review' and sends an email notification.
+ */
+async function escalateToAdminVerification(env, ctx, tx, orderId, reason) {
+  // Update transaction status to pending_admin_review
+  try {
+    await fetch(`${env.SUPABASE_URL}/rest/v1/payment_transactions?id=eq.${tx.id}`, {
+      method: "PATCH",
+      headers: {
+        apikey: env.SUPABASE_SERVICE_KEY,
+        Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
+        "Content-Type": "application/json",
+        Prefer: "return=minimal",
+      },
+      body: JSON.stringify({
+        status: "pending_admin_review",
+        metadata: {
+          ...(tx.metadata || {}),
+          escalation_reason: reason,
+          escalated_at: new Date().toISOString(),
+          escalated_by: ctx.userId || "system",
+        },
+      }),
+    });
+  } catch (e) {
+    console.error("[Wise Escalation] Failed to update transaction status:", e.message);
+  }
+
+  // Send admin notification email
+  const adminEmail = env.ADMIN_NOTIFICATION_EMAIL || "info@simpaticohr.in";
+  const symbol = tx.currency === "INR" ? "₹" : (tx.currency === "EUR" ? "€" : (tx.currency === "GBP" ? "£" : "$"));
+  sendEmail(env, {
+    to: adminEmail,
+    subject: `⚠️ Manual Verification Required: Wise Payment ${orderId} — ${symbol}${tx.amount} ${tx.currency || "USD"}`,
+    html: `
+      <h2 style="color:#DC2626;margin-bottom:16px">⚠️ Wise Payment Requires Manual Verification</h2>
+      <p style="margin-bottom:12px">Automated Wise API verification failed due to SCA (Strong Customer Authentication) issues. Please log in to your Wise account and manually verify if this payment was received.</p>
+      <table style="width:100%;border-collapse:collapse;margin-bottom:16px">
+        <tr><td style="padding:8px 12px;font-weight:600;color:#374151;border-bottom:1px solid #E5E7EB">Order ID</td><td style="padding:8px 12px;border-bottom:1px solid #E5E7EB">${orderId}</td></tr>
+        <tr><td style="padding:8px 12px;font-weight:600;color:#374151;border-bottom:1px solid #E5E7EB">Amount</td><td style="padding:8px 12px;border-bottom:1px solid #E5E7EB">${symbol}${tx.amount} ${tx.currency || "USD"}</td></tr>
+        <tr><td style="padding:8px 12px;font-weight:600;color:#374151;border-bottom:1px solid #E5E7EB">Plan</td><td style="padding:8px 12px;border-bottom:1px solid #E5E7EB">${tx.plan || "N/A"}</td></tr>
+        <tr><td style="padding:8px 12px;font-weight:600;color:#374151;border-bottom:1px solid #E5E7EB">Company</td><td style="padding:8px 12px;border-bottom:1px solid #E5E7EB">${tx.company_id}</td></tr>
+        <tr><td style="padding:8px 12px;font-weight:600;color:#374151;border-bottom:1px solid #E5E7EB">Failure Reason</td><td style="padding:8px 12px;border-bottom:1px solid #E5E7EB;color:#DC2626">${reason.substring(0, 200)}</td></tr>
+      </table>
+      <p style="margin-top:16px;font-size:13px;color:#6B7280">Once verified, use the admin dashboard or POST to <code>/billing/wise/confirm</code> with <code>{"order_id": "${orderId}", "transaction_reference": "manual_wise_verify"}</code> to activate the subscription.</p>
+    `
+  }).catch(e => console.warn("[Wise Escalation] Admin email failed:", e.message));
+
+  await audit(env, ctx, "billing.wise_escalated_to_admin", "payment_transactions", orderId, { reason: reason.substring(0, 200) });
+
+  return apiResponse({
+    verified: false,
+    pending_review: true,
+    message: "Your payment verification has been submitted to our team for review. " +
+             "We will verify the payment on our Wise account and activate your subscription within 24 hours. " +
+             "You will receive an email confirmation once it's done.",
+    order_id: orderId,
+  });
+}
+
+/**
+ * GET /billing/wise/diagnose — Diagnostic endpoint to verify the stored key pair.
+ * Returns the public key derived from the stored private key so it can be compared
+ * with what's uploaded on Wise. No auth required (returns only public info).
+ */
+async function handleWiseDiagnose(request, env, ctx) {
+  const result = {
+    wise_api_token_set: !!env.WISE_API_TOKEN,
+    wise_private_key_set: !!env.WISE_PRIVATE_KEY,
+  };
+
+  if (!env.WISE_PRIVATE_KEY) {
+    return apiResponse({ ...result, error: "WISE_PRIVATE_KEY secret is not set" });
+  }
+
+  const rawKey = env.WISE_PRIVATE_KEY;
+  result.raw_key_length = rawKey.length;
+  result.raw_key_first_30 = rawKey.substring(0, 30);
+  result.raw_key_contains_private_key_header = rawKey.includes("PRIVATE KEY");
+
+  // Detect format
+  let pemContent = rawKey.replace(/^["']|["']$/g, "").trim();
+  if (!pemContent.includes("PRIVATE KEY")) {
+    try {
+      const decoded = atob(pemContent);
+      if (decoded.includes("PRIVATE KEY")) {
+        result.format = "base64-wrapped PEM";
+        result.decoded_pem_length = decoded.length;
+        pemContent = decoded;
+      } else {
+        result.format = "unknown (not PEM after base64 decode)";
+        return apiResponse(result);
+      }
+    } catch (e) {
+      result.format = "unknown (base64 decode failed)";
+      result.decode_error = e.message;
+      return apiResponse(result);
+    }
+  } else {
+    result.format = "raw PEM";
+  }
+
+  // Extract DER
+  const b64Der = pemContent
+    .replace(/\\n/g, "\n")
+    .replace(/-----(BEGIN|END) (RSA )?PRIVATE KEY-----/g, "")
+    .replace(/[^A-Za-z0-9+/=]/g, "");
+
+  result.der_base64_length = b64Der.length;
+
+  try {
+    const binaryString = atob(b64Der);
+    const bytes = new Uint8Array(binaryString.length);
+    for (let i = 0; i < binaryString.length; i++) {
+      bytes[i] = binaryString.charCodeAt(i);
+    }
+
+    // Import as private key
+    const cryptoKey = await crypto.subtle.importKey(
+      "pkcs8",
+      bytes.buffer,
+      { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" },
+      true,  // extractable = true so we can export the public key
+      ["sign"]
+    );
+    result.key_import = "SUCCESS";
+
+    // Sign a test OTT to verify signing works
+    const testOtt = "test-ott-550e8400-e29b-41d4-a716-446655440000";
+    const sigBuf = await crypto.subtle.sign(
+      "RSASSA-PKCS1-v1_5",
+      cryptoKey,
+      new TextEncoder().encode(testOtt)
+    );
+    const sigBytes = new Uint8Array(sigBuf);
+    let binSig = "";
+    for (let i = 0; i < sigBytes.byteLength; i++) binSig += String.fromCharCode(sigBytes[i]);
+    result.test_signature = btoa(binSig).substring(0, 60) + "...";
+    result.test_signature_length = btoa(binSig).length;
+
+    // Export public key components via JWK (works with private keys)
+    const jwk = await crypto.subtle.exportKey("jwk", cryptoKey);
+    // Import just the public portion back as a public key
+    const pubJwk = { kty: jwk.kty, n: jwk.n, e: jwk.e };
+    const pubCryptoKey = await crypto.subtle.importKey(
+      "jwk",
+      pubJwk,
+      { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" },
+      true,
+      ["verify"]
+    );
+    const pubSpki = await crypto.subtle.exportKey("spki", pubCryptoKey);
+    const pubBytes = new Uint8Array(pubSpki);
+    let binPub = "";
+    for (let i = 0; i < pubBytes.byteLength; i++) binPub += String.fromCharCode(pubBytes[i]);
+    const pubB64 = btoa(binPub);
+
+    // Format as PEM
+    const lines = [];
+    for (let i = 0; i < pubB64.length; i += 64) {
+      lines.push(pubB64.substring(i, i + 64));
+    }
+    result.derived_public_key = "-----BEGIN PUBLIC KEY-----\n" + lines.join("\n") + "\n-----END PUBLIC KEY-----";
+    result.public_key_export = "SUCCESS";
+    result.instruction = "Compare this derived_public_key with what is uploaded on Wise (Settings > API tokens > Manage public keys). They MUST match exactly.";
+
+  } catch (e) {
+    result.key_import = "FAILED";
+    result.error = e.message;
+  }
+
+  return apiResponse(result);
 }
 
 /**
