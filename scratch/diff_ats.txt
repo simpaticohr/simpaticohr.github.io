@@ -1,0 +1,225 @@
+diff --git a/backend/simpatico-ats.js b/backend/simpatico-ats.js
+index 97383f0..ee74a11 100644
+--- a/backend/simpatico-ats.js
++++ b/backend/simpatico-ats.js
+@@ -885,6 +885,49 @@ async function hmacSign(secret, data) {
+     .join("");
+ }
+ 
++async function signWiseOtt(privateKeyPem, ott) {
++  // 1. Convert PEM to ArrayBuffer (DER)
++  const b64 = privateKeyPem
++    .replace(/^["']|["']$/g, "")           // strip surrounding quotes from JSON.stringify
++    .replace(/\\n/g, "\n")                  // convert literal \n to real newlines
++    .replace(/-----(BEGIN|END) (RSA )?PRIVATE KEY-----/g, "")
++    .replace(/[^A-Za-z0-9+/=]/g, "");      // strip everything except valid base64 chars
++  const binaryString = atob(b64);
++  const bytes = new Uint8Array(binaryString.length);
++  for (let i = 0; i < binaryString.length; i++) {
++    bytes[i] = binaryString.charCodeAt(i);
++  }
++  const binaryDer = bytes.buffer;
++
++  // 2. Import private key
++  const cryptoKey = await crypto.subtle.importKey(
++    "pkcs8",
++    binaryDer,
++    {
++      name: "RSASSA-PKCS1-v1_5",
++      hash: "SHA-256",
++    },
++    false,
++    ["sign"]
++  );
++
++  // 3. Sign the OTT token
++  const encoder = new TextEncoder();
++  const signatureBuffer = await crypto.subtle.sign(
++    "RSASSA-PKCS1-v1_5",
++    cryptoKey,
++    encoder.encode(ott)
++  );
++
++  // 4. Base64 encode the signature
++  const signatureBytes = new Uint8Array(signatureBuffer);
++  let binarySignature = "";
++  for (let i = 0; i < signatureBytes.byteLength; i++) {
++    binarySignature += String.fromCharCode(signatureBytes[i]);
++  }
++  return btoa(binarySignature);
++}
++
+ // ===============================================================
+ // § 9b. SLACK INTEGRATION
+ // Posts formatted messages to a tenant's configured Slack Incoming Webhook URL.
+@@ -1176,6 +1219,7 @@ function matchRoute(method, path) {
+ // Health & Meta (Trigger GH Action)
+ route("GET", "/health", handleHealth);
+ route("GET", "/version", handleVersion);
++route("GET", "/api/test-token-mask", handleTestTokenMask);
+ route("GET", "/api/fix-rls", handleFixRLS);
+ route("POST", "/users/ensure-profile", handleEnsureProfile);
+ route("POST", "/webhooks/register", handleRegisterWebhook);
+@@ -2010,6 +2054,12 @@ async function handleFixRLS(request, env, ctx) {
+   }
+ }
+ 
++async function handleTestTokenMask(request, env, ctx) {
++  const token = env.WISE_API_TOKEN || "";
++  const masked = token ? `${token.substring(0, 8)}...${token.substring(token.length - 8)}` : "not set";
++  return apiResponse({ masked_token: masked });
++}
++
+ async function handleHealth(request, env, ctx) {
+   const checks = await Promise.allSettled([
+     sbFetch(env, "GET", "/rest/v1/", null, false, ctx.tenantId),
+@@ -8388,51 +8438,113 @@ async function handleWiseVerifyPayment(request, env, ctx) {
+   const isSandbox = token.startsWith("scb-") || env.WISE_SANDBOX === "true";
+   const wiseHost = isSandbox ? "https://api.wise-sandbox.com" : "https://api.wise.com";
+ 
+-  async function fetchWise(endpoint) {
+-    const res = await fetch(`${wiseHost}${endpoint}`, {
+-      headers: {
+-        "Authorization": `Bearer ${token}`,
+-        "Content-Type": "application/json"
++  async function fetchWise(endpoint, retryHeaders = {}) {
++    const headers = {
++      "Authorization": `Bearer ${token}`,
++      "Content-Type": "application/json",
++      "User-Agent": "SimpaticoHR/5.0 (https://simpaticohr.in; info@simpaticohr.in)",
++      ...retryHeaders
++    };
++
++    const res = await fetch(`${wiseHost}${endpoint}`, { headers });
++
++    if (res.status === 403) {
++      const ott = res.headers.get("x-2fa-approval") || res.headers.get("X-2FA-Approval");
++      const approvalResult = res.headers.get("x-2fa-approval-result") || res.headers.get("X-2FA-Approval-Result");
++      const resBody = await res.text();
++
++      // If this is a RETRY that got rejected, report the details clearly
++      if (retryHeaders["x-2fa-approval"]) {
++        console.error(`[Wise SCA] Signed retry REJECTED. x-2fa-approval-result: ${approvalResult}, body: ${resBody}`);
++        throw new AppError(
++          `Wise SCA signature rejected (x-2fa-approval-result: ${approvalResult || "unknown"}). ` +
++          `This usually means the public key uploaded to Wise does not match the private key, ` +
++          `or the public key is not associated with the correct API token/profile. Body: ${resBody.substring(0, 200)}`,
++          403,
++          "SCA_SIGNATURE_REJECTED"
++        );
+       }
+-    });
++
++      // First 403 — attempt to sign and retry
++      if (ott) {
++        const privateKeyPem = env.WISE_PRIVATE_KEY;
++        if (!privateKeyPem) {
++          throw new AppError(
++            `Wise API requires Strong Customer Authentication (SCA). ` +
++            `Please configure 'WISE_PRIVATE_KEY' wrangler secret. OTT: ${ott}`,
++            403,
++            "SCA_REQUIRED"
++          );
++        }
++
++        console.log(`[Wise SCA] Got OTT challenge: ${ott}, approval-result: ${approvalResult}. Signing and retrying...`);
++        console.log(`[Wise SCA] Key stored length: ${privateKeyPem.length}, first 40: ${privateKeyPem.substring(0, 40)}, last 20: ${privateKeyPem.substring(privateKeyPem.length - 20)}`);
++        const signature = await signWiseOtt(privateKeyPem, ott);
++        console.log(`[Wise SCA] Signature length: ${signature.length}, first 40: ${signature.substring(0, 40)}`);
++        return await fetchWise(endpoint, {
++          "x-2fa-approval": ott,
++          "x-signature": signature
++        });
++      }
++
++      // 403 without OTT — generic forbidden
++      throw new AppError(`Wise API 403 Forbidden (no SCA challenge). Body: ${resBody.substring(0, 300)}`, 403, "GATEWAY_ERROR");
++    }
++
+     if (!res.ok) {
+       const errText = await res.text();
+-      console.error(`[Wise API] Error on ${endpoint}: ${res.status}`, errText);
+-      throw new AppError(`Wise API error: ${res.status} ${res.statusText} — ${errText.substring(0, 200)}`, res.status, "GATEWAY_ERROR");
++      const x2fa = res.headers.get("x-2fa-approval") || res.headers.get("X-2FA-Approval");
++      const errorMsg = `Wise API error: ${res.status} ${res.statusText}${x2fa ? ` (SCA Required: ${x2fa})` : ""} — ${errText.substring(0, 300)}`;
++      console.error(`[Wise API] Error on ${endpoint}: ${res.status}`, errText, "2FA/SCA:", x2fa);
++      throw new AppError(errorMsg, res.status, "GATEWAY_ERROR");
+     }
+     return res.json();
+   }
+ 
+   // a. Fetch Profile ID
+-  const profiles = await fetchWise("/v2/profiles");
+-  if (!profiles || !profiles.length) {
+-    throw new AppError("No Wise profiles found.", 404, "NOT_FOUND");
+-  }
+-  const profile = profiles.find(p => p.type === "business") || profiles[0];
+-  const profileId = profile.id;
+-
+-  // b. Fetch Borderless accounts
+-  const borderlessAccounts = await fetchWise(`/v1/borderless-accounts?profileId=${profileId}`);
+-  if (!borderlessAccounts || !borderlessAccounts.length) {
+-    throw new AppError("No Wise borderless accounts found.", 404, "NOT_FOUND");
+-  }
+-  const borderlessAccountId = borderlessAccounts[0].id;
+-
+-  // c. Fetch Statement for the past 5 days to ensure timezone/clearing overlap
+-  const currency = (tx.currency || "USD").toUpperCase();
+-  const createdAt = tx.created_at ? new Date(tx.created_at) : new Date();
+-  const start = new Date(createdAt.getTime() - 5 * 24 * 60 * 60 * 1000);
+-  const end = new Date(Date.now() + 24 * 60 * 60 * 1000);
+-
+-  const queryParams = new URLSearchParams({
+-    currency,
+-    intervalStart: start.toISOString(),
+-    intervalEnd: end.toISOString(),
+-    type: "COMPACT"
+-  });
++  let profiles, profile, profileId, borderlessAccounts, borderlessAccountId, statement, transactions;
++  try {
++    profiles = await fetchWise("/v2/profiles");
++    console.log("[Wise] Profiles response:", JSON.stringify(profiles).substring(0, 500));
++    if (!profiles || !profiles.length) {
++      throw new AppError("No Wise profiles found.", 404, "NOT_FOUND");
++    }
++    profile = profiles.find(p => p.type === "business") || profiles[0];
++    profileId = profile.id;
++
++    // b. Fetch Borderless accounts
++    borderlessAccounts = await fetchWise(`/v1/borderless-accounts?profileId=${profileId}`);
++    console.log("[Wise] Borderless accounts response:", JSON.stringify(borderlessAccounts).substring(0, 500));
++    if (!borderlessAccounts || !borderlessAccounts.length) {
++      throw new AppError("No Wise borderless accounts found.", 404, "NOT_FOUND");
++    }
++    borderlessAccountId = borderlessAccounts[0].id;
++
++    // c. Fetch Statement for the past 5 days to ensure timezone/clearing overlap
++    const currency = (tx.currency || "USD").toUpperCase();
++    const createdAt = tx.created_at ? new Date(tx.created_at) : new Date();
++    const start = new Date(createdAt.getTime() - 5 * 24 * 60 * 60 * 1000);
++    const end = new Date(Date.now() + 24 * 60 * 60 * 1000);
++
++    const queryParams = new URLSearchParams({
++      currency,
++      intervalStart: start.toISOString(),
++      intervalEnd: end.toISOString(),
++      type: "COMPACT"
++    });
+ 
+-  const statement = await fetchWise(`/v3/profiles/${profileId}/borderless-accounts/${borderlessAccountId}/statement.json?${queryParams.toString()}`);
+-  const transactions = statement.transactions || [];
++    statement = await fetchWise(`/v3/profiles/${profileId}/borderless-accounts/${borderlessAccountId}/statement.json?${queryParams.toString()}`);
++    console.log("[Wise] Statement response:", JSON.stringify(statement).substring(0, 500));
++    transactions = statement.transactions || [];
++  } catch (wiseErr) {
++    if (wiseErr instanceof AppError) throw wiseErr;
++    console.error("[Wise] Unexpected error during API calls:", wiseErr.stack || wiseErr.message);
++    throw new AppError(
++      `Wise verification failed: ${wiseErr.message}`,
++      500,
++      "WISE_API_ERROR"
++    );
++  }
+ 
+   // d. Match transaction by reference and amount
+   const targetAmount = parseFloat(tx.amount);

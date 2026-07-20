@@ -1,22 +1,22 @@
 /**
- * HyperRealRenderer v3.0 — Real 30 FPS HTML5 Video Stream Human Interviewer Engine
+ * HyperRealRenderer v4.0 — Real streaming photoreal human interviewer & 30 FPS fallback.
  *
- * Provides genuine video motion realism:
- *   1. Connects real WebRTC streaming avatar MediaStream when HeyGen / Tavus / D-ID API token is provided.
- *   2. Procedural 30 FPS MediaStream Video Generator (`captureStream(30)`) when stream server is connecting or key is pending:
- *      - Streamed directly into <video id="duixVideo"> as a real HTML5 MediaStream video
- *      - Real 30 FPS human video motion (resting breathing, head sway, pupil micro-saccades)
- *      - Real eye blinking video frames
- *      - Real audio-reactive lip sync video frames (mouth opens and closes to speech audio)
- *   3. Zero static images — <video id="duixVideo"> is ALWAYS actively playing real 30 FPS video!
+ * Capabilities & Audio Bridge:
+ *   - Configurable via configure({ provider, capabilities, persona })
+ *   - getSampleRate(): returns sample rate for AudioWorklet tap (default 16000 Hz)
+ *   - feedAudio(int16Buf): routes Int16 PCM frames to the provider's external-pcm lip-sync input
+ *   - flushAudio(): flushes audio buffer on barge-in
+ *   - Dynamic capability filtering for gestures & emotions (never hardcodes unallowed names)
  */
 const HyperRealRenderer = (function () {
   'use strict';
 
   // ── Config ────────────────────────────────────────────────────────
-  const AVATAR_PROVIDER = 'heygen';
-  const SESSION_API     = '/api/avatar/session';
-  const HUMAN_FACE_SRC  = 'assets/ai-interviewer-avatar.png';
+  let provider = 'heygen';
+  let sessionApi = '/api/avatar/session';
+  let capabilities = null;
+  let persona = null;
+  let audioMode = 'external-pcm';
 
   // ── DOM References ──
   const $ = (id) => document.getElementById(id);
@@ -46,21 +46,28 @@ const HyperRealRenderer = (function () {
   let pupilOffsetY = 0;
   let nextPupilShiftTime = 0;
 
-  // ── Tag parser ──
+  // ── Tag parser with capability validation ──
   const TAG_RE = /\[\[(gesture|emotion):([a-z_]+)\]\]/gi;
   function emitAndClean(text) {
     let m;
     while ((m = TAG_RE.exec(text)) !== null) {
       if (!streamReady || !adapter) continue;
       const [, kind, val] = m;
-      if (kind === 'gesture' && typeof adapter.triggerGesture === 'function') adapter.triggerGesture(val);
-      else if (kind === 'emotion' && typeof adapter.setExpression === 'function') adapter.setExpression(val);
+      if (kind === 'gesture' && typeof adapter.triggerGesture === 'function') {
+        if (!capabilities || !capabilities.gestures || capabilities.gestures.includes(val)) {
+          adapter.triggerGesture(val);
+        }
+      } else if (kind === 'emotion' && typeof adapter.setExpression === 'function') {
+        if (!capabilities || !capabilities.emotions || capabilities.emotions.includes(val)) {
+          adapter.setExpression(val);
+        }
+      }
     }
     return text.replace(TAG_RE, '').trim();
   }
 
   // ────────────────────────────────────────────────────────────────────
-  // 30 FPS MEDIASTREAM VIDEO GENERATOR — Streams into <video id="duixVideo">
+  // 30 FPS MEDIASTREAM VIDEO GENERATOR
   // ────────────────────────────────────────────────────────────────────
   function initOffscreenVideoCanvas() {
     if (offscreenCanvas) return;
@@ -74,9 +81,8 @@ const HyperRealRenderer = (function () {
     baseImage.crossOrigin = 'anonymous';
     baseImage.onload = () => {
       baseImageLoaded = true;
-      console.log('[HyperReal] Photoreal human face base loaded into 30 FPS Video Engine.');
     };
-    baseImage.src = HUMAN_FACE_SRC;
+    baseImage.src = (persona && persona.poster) || 'assets/ai-interviewer-avatar.png';
   }
 
   function scheduleNextBlink() {
@@ -97,32 +103,27 @@ const HyperRealRenderer = (function () {
 
     offscreenCtx.clearRect(0, 0, w, h);
 
-    // ── 1. REAL HUMAN VIDEO MOTION: Sway, Breathing & Head Dynamics ──
     const breathY = Math.sin(elapsed * 0.001) * 3.5;
     const swayX = Math.sin(elapsed * 0.0005) * 2.0;
-    let headAngle = Math.sin(elapsed * 0.0004) * 0.012; // radians
+    let headAngle = Math.sin(elapsed * 0.0004) * 0.012;
 
     if (currentState === 'listening') {
-      // Attentive head nod while candidate speaks
       const nodVal = Math.max(0, Math.sin(elapsed * 0.003)) * 6.0;
       headAngle += nodVal * 0.003;
     } else if (currentState === 'thinking' || currentState === 'processing') {
-      // Gaze aversion tilt while processing
       headAngle += 0.025 + Math.sin(elapsed * 0.001) * 0.01;
     } else if (currentState === 'speaking') {
-      // Rhythmic mouth & body dynamics when speaking
       targetMouthOpen = 0.35 + Math.abs(Math.sin(elapsed * 0.015)) * 0.65;
     } else {
       targetMouthOpen = 0;
     }
 
-    // Draw base human face with video transformation matrix
     offscreenCtx.save();
     offscreenCtx.translate(w / 2 + swayX, h / 2 + breathY);
     offscreenCtx.rotate(headAngle);
     offscreenCtx.drawImage(baseImage, -w / 2, -h / 2, w, h);
 
-    // ── 2. MICRO PUPIL GAZE MOVEMENT (REAL HUMAN EYE DARTING) ──
+    // Micro Pupil Shift
     if (now >= nextPupilShiftTime) {
       scheduleNextPupilShift();
     }
@@ -130,14 +131,13 @@ const HyperRealRenderer = (function () {
     const leftEyeX = w * 0.425;
     const rightEyeX = w * 0.575;
 
-    // Draw pupils
     offscreenCtx.fillStyle = 'rgba(40, 24, 18, 0.9)';
     offscreenCtx.beginPath();
     offscreenCtx.arc(leftEyeX + pupilOffsetX, eyeY + pupilOffsetY, 4.5, 0, Math.PI * 2);
     offscreenCtx.arc(rightEyeX + pupilOffsetX, eyeY + pupilOffsetY, 4.5, 0, Math.PI * 2);
     offscreenCtx.fill();
 
-    // ── 3. PROCEDURAL EYE BLINKING VIDEO FRAMES ──
+    // Blink
     if (now >= nextBlinkTime && currentState !== 'speaking') {
       blinkPeak = now;
       scheduleNextBlink();
@@ -164,7 +164,7 @@ const HyperRealRenderer = (function () {
       offscreenCtx.fill();
     }
 
-    // ── 4. REAL-TIME AUDIO-REACTIVE LIP SYNC MOUTH VIDEO FRAMES ──
+    // Lip Sync Mouth
     mouthOpenAmount += (targetMouthOpen - mouthOpenAmount) * 0.35;
 
     if (mouthOpenAmount > 0.04 && currentState === 'speaking') {
@@ -172,13 +172,11 @@ const HyperRealRenderer = (function () {
       const mouthW = w * 0.085;
       const mouthH = h * 0.032 * mouthOpenAmount;
 
-      // Dark inner mouth cavity
       offscreenCtx.fillStyle = 'rgba(45, 18, 18, 0.96)';
       offscreenCtx.beginPath();
       offscreenCtx.ellipse(w * 0.50, mouthY, mouthW, mouthH, 0, 0, Math.PI * 2);
       offscreenCtx.fill();
 
-      // Lips
       offscreenCtx.strokeStyle = 'rgba(175, 110, 105, 0.7)';
       offscreenCtx.lineWidth = 2.0;
       offscreenCtx.beginPath();
@@ -200,7 +198,6 @@ const HyperRealRenderer = (function () {
     scheduleNextBlink();
     scheduleNextPupilShift();
 
-    // 30 FPS Render Loop into Canvas
     function videoLoop(now) {
       if (destroyed) return;
       if (!streamReady) {
@@ -212,7 +209,6 @@ const HyperRealRenderer = (function () {
     if (videoStreamRafId) cancelAnimationFrame(videoStreamRafId);
     videoStreamRafId = requestAnimationFrame(videoLoop);
 
-    // Capture 30 FPS MediaStream from canvas and attach to <video id="duixVideo">
     if (offscreenCanvas && typeof offscreenCanvas.captureStream === 'function') {
       try {
         mediaStream = offscreenCanvas.captureStream(30);
@@ -221,7 +217,6 @@ const HyperRealRenderer = (function () {
           videoEl.style.display = 'block';
           videoEl.style.opacity = '1';
           videoEl.play().catch(() => {});
-          console.log('[HyperReal] Real 30 FPS MediaStream attached to <video id="duixVideo">.');
         }
       } catch (e) {
         console.warn('[HyperReal] captureStream note:', e.message);
@@ -229,9 +224,11 @@ const HyperRealRenderer = (function () {
     }
   }
 
-  // ── HEYGEN ADAPTER ──
+  // ── HEYGEN ADAPTER WITH EXTERNAL-PCM BRIDGE ──
   const HeyGenAdapter = {
     sa: null,
+    dc: null,
+    sampleRateHz: 16000,
     async connect(videoEl, hooks) {
       let mod;
       try { mod = await import('https://cdn.jsdelivr.net/npm/@heygen/streaming-avatar@2.0.4/+esm'); }
@@ -242,9 +239,12 @@ const HyperRealRenderer = (function () {
       const StreamingAvatar = mod.default || mod.StreamingAvatar;
       const StreamingAvatarEvents = mod.StreamingAvatarEvents || {};
 
-      const r = await fetch(SESSION_API + '/heygen', { method: 'POST', signal: abortCtrl ? abortCtrl.signal : undefined });
+      const r = await fetch(sessionApi + '/' + provider, { method: 'POST', signal: abortCtrl ? abortCtrl.signal : undefined });
       if (!r.ok) throw new Error('session ' + r.status);
-      const { token, avatarName, voiceId } = await r.json();
+      const data = await r.json();
+
+      const { token, persona: pData, audioMode: aMode } = data;
+      if (aMode) audioMode = aMode;
 
       this.sa = new StreamingAvatar({ token });
       if (StreamingAvatarEvents.StreamReady) {
@@ -265,13 +265,23 @@ const HyperRealRenderer = (function () {
         if (e?.detail?.words) hooks.onTranscript(e.detail.words);
       });
 
-      await this.sa.createAvatar({ avatarName: avatarName || 'Ann_Doctor_Standing2_public', voice: { voiceId: voiceId || '265511f088344783b38c644837582b9a' } });
+      const avatarName = (pData && pData.avatarName) || 'Ann_Doctor_Standing2_public';
+      const voiceId = (pData && pData.voiceId) || '265511f088344783b38c644837582b9a';
+      await this.sa.createAvatar({ avatarName, voice: { voiceId } });
       await this.sa.startSession();
     },
     speak(text)       { this.sa?.speak?.({ text }) ?? this.sa?.sendText?.({ text }); },
     interrupt()       { try { this.sa?.interruptSpeaking?.() ?? this.sa?.interrupt?.(); } catch(_) {} },
     setExpression(e)  { try { this.sa?.setEmotion?.(e); } catch(_) {} },
     triggerGesture(g) { try { this.sa?.sendGesture?.({ gestureName: g }); } catch(_) {} },
+    feedAudio(int16Buf) {
+      if (this.sa?.sendAudio) return this.sa.sendAudio({ audio: int16Buf });
+      if (this.sa?.inputAudio) return this.sa.inputAudio(int16Buf);
+      if (this.dc && this.dc.readyState === 'open') return this.dc.send(int16Buf);
+    },
+    flush() {
+      try { this.sa?.flushAudio?.(); this.sa?.interruptSpeaking?.(); } catch(_) {}
+    },
     async close()     { try { await this.sa?.endSession?.(); } catch (_) {} this.sa = null; },
   };
 
@@ -322,6 +332,29 @@ const HyperRealRenderer = (function () {
   // PUBLIC API
   // ────────────────────────────────────────────────────────────────────
   return {
+    configure(cfg) {
+      if (cfg.provider) provider = cfg.provider;
+      if (cfg.capabilities) capabilities = cfg.capabilities;
+      if (cfg.persona) persona = cfg.persona;
+      if (cfg.sessionApi) sessionApi = cfg.sessionApi;
+    },
+
+    getSampleRate() {
+      return (streamReady && adapter && adapter.sampleRateHz) ? adapter.sampleRateHz : 16000;
+    },
+
+    feedAudio(int16Buf) {
+      if (streamReady && audioMode === 'external-pcm' && adapter && typeof adapter.feedAudio === 'function') {
+        adapter.feedAudio(int16Buf);
+      }
+    },
+
+    flushAudio() {
+      if (streamReady && adapter && typeof adapter.flush === 'function') {
+        adapter.flush();
+      }
+    },
+
     async init() {
       destroyed = false;
       abortCtrl = new AbortController();
@@ -330,7 +363,6 @@ const HyperRealRenderer = (function () {
       captionEl = $('duix-captions');
       orbEl     = $('ai-avatar-canvas');
 
-      // Hide orb & cartoon fallbacks, show duix-avatar container
       if (orbEl) orbEl.style.display = 'none';
       document.querySelectorAll('.audio-waveform, #waveform, .orb-waveform')
               .forEach((el) => (el.style.display = 'none'));
@@ -341,23 +373,21 @@ const HyperRealRenderer = (function () {
 
       if (stageEl) stageEl.classList.add('hr');
 
-      // ── START 30 FPS REAL MEDIASTREAM VIDEO GENERATOR INTO <video> ──
       startProceduralVideoStream();
 
-      // Try WebRTC streaming connection (non-blocking)
-      adapter = Object.create(ADAPTERS[AVATAR_PROVIDER] || HeyGenAdapter);
+      adapter = Object.create(ADAPTERS[provider] || HeyGenAdapter);
       try {
         await adapter.connect(videoEl, {
           onReady: () => {
             streamReady = true;
-            console.log('[HyperReal] WebRTC MediaStream ready — replacing procedural video stream.');
+            console.log('[HyperReal] WebRTC MediaStream ready — replacing procedural stream.');
           },
           onTalkStart: () => { if (stageEl) stageEl.classList.add('speaking'); },
           onTalkEnd:   () => { if (stageEl) stageEl.classList.remove('speaking'); stopCaptions(); },
           onTranscript:(words) => startCaptions(words),
         });
       } catch (e) {
-        console.log('[HyperReal] WebRTC connect note:', e.message, '— running 30 FPS HTML5 MediaStream video engine.');
+        console.log('[HyperReal] Stream connect note:', e.message, '— running 30 FPS HTML5 MediaStream video engine.');
         streamReady = false;
       }
 
@@ -387,7 +417,6 @@ const HyperRealRenderer = (function () {
       words?.length ? startCaptions(words)
         : captionEl && (captionEl.textContent = text, captionEl.style.opacity = '1');
     },
-    feedAudio() {},
 
     destroy() {
       destroyed = true;

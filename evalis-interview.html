@@ -1953,23 +1953,63 @@
       await initSelectedAvatar();
     }
 
+    let tapNode = null;
+    async function installAvatarAudioTap(audioCtx) {
+      if (!audioCtx || !audioCtx.audioWorklet) return null;
+      try {
+        await audioCtx.audioWorklet.addModule('/audio/avatar-audio-tap.worklet.js');
+        tapNode = new AudioWorkletNode(audioCtx, 'avatar-audio-tap', {
+          processorOptions: { targetRate: HyperRealRenderer.getSampleRate?.() || 16000, frameSize: 3200 },
+        });
+        tapNode.port.onmessage = (e) => HyperRealRenderer.feedAudio?.(e.data);
+        tapNode.connect(audioCtx.destination);
+        return tapNode;
+      } catch (e) {
+        console.warn('[AvatarAudioTap] install note:', e.message);
+        return null;
+      }
+    }
+
+    function onCandidateStartedSpeaking() {
+      tapNode?.port.postMessage('flush');
+      if (typeof HyperRealRenderer !== 'undefined' && HyperRealRenderer.isActive()) {
+        HyperRealRenderer.onState('listening');
+      }
+    }
+
+    async function bootHyperreal(role) {
+      if (typeof HyperRealRenderer === 'undefined') return DuixRenderer;
+      try {
+        const cap = await fetch('/api/avatar/capabilities/heygen').then(r => r.ok ? r.json() : null).catch(() => null);
+        const pers = await fetch(`/api/avatar/persona/interviewer?provider=heygen&role=${encodeURIComponent(role || '')}`).then(r => r.ok ? r.json() : null).catch(() => null);
+        HyperRealRenderer.configure({ provider: 'heygen', capabilities: cap, persona: pers });
+      } catch (e) {
+        console.warn('[HyperReal] boot configuration note:', e.message);
+      }
+      return HyperRealRenderer;
+    }
+
     async function initSelectedAvatar() {
       const choice = document.getElementById('avatar-select')?.value || 'hyperreal';
-      _activeRenderer = createRenderer(choice);
+      const role = document.getElementById('role-title')?.value || 'Engineering Lead';
 
-      if (choice === 'hyperreal' && typeof HyperRealRenderer !== 'undefined') {
+      if (choice === 'hyperreal') {
+        _activeRenderer = await bootHyperreal(role);
         destroyDuix();
         destroySimli();
         await HyperRealRenderer.init();
       } else if (choice === 'duix') {
+        _activeRenderer = DuixRenderer;
         if (typeof HyperRealRenderer !== 'undefined') HyperRealRenderer.destroy();
         destroySimli();
         await initDuixIfNeeded();
       } else if (choice === 'simli') {
+        _activeRenderer = typeof SimliAdapter !== 'undefined' ? SimliAdapter : DuixRenderer;
         if (typeof HyperRealRenderer !== 'undefined') HyperRealRenderer.destroy();
         destroyDuix();
         await initSimliIfNeeded();
       } else { // orb
+        _activeRenderer = window.aiAvatar;
         if (typeof HyperRealRenderer !== 'undefined') HyperRealRenderer.destroy();
         destroyDuix();
         destroySimli();

@@ -1,0 +1,328 @@
+diff --git a/js/consulting.js b/js/consulting.js
+index 9fea844..60e7324 100644
+--- a/js/consulting.js
++++ b/js/consulting.js
+@@ -3499,6 +3499,9 @@ Be professional, highly strategic, clear, and action-oriented. Keep your spoken
+                         <span>Price</span>
+                         <span id="overlayPriceDisplay">₹2,500 / mo</span>
+                     </div>
++                    <div style="text-align:right;margin-top:6px;">
++                        <span id="overlayDetectedCurrency" style="font-size:0.7rem;color:#818CF8;font-weight:600;letter-spacing:0.3px;">🇮🇳 INR — Auto-detected</span>
++                    </div>
+                 </div>
+                 <div style="display:flex;gap:12px;">
+                     <button onclick="window.history.back()" style="flex:1;padding:12px;border-radius:10px;background:transparent;border:1.5px solid #475569;color:#F8FAFC;font-size:0.88rem;font-weight:600;cursor:pointer;transition:all 0.2s;">
+@@ -3522,16 +3525,41 @@ Be professional, highly strategic, clear, and action-oriented. Keep your spoken
+         detectAndSetOverlayPrice();
+     }
+ 
++    // Consulting monthly pricing per currency (mirrors backend PLAN_PRICING.consulting_monthly)
++    const CONSULTING_PRICES = {
++        inr: 2500, usd: 40, gbp: 40, eur: 40, aud: 40, aed: 40, cad: 40
++    };
++    const CURRENCY_SYMBOLS = { inr: '₹', usd: '$', gbp: '£', eur: '€', aud: 'A$', aed: 'AED ', cad: 'C$' };
++    const CURRENCY_FLAGS = { inr: '🇮🇳', usd: '🇺🇸', gbp: '🇬🇧', eur: '🇪🇺', aud: '🇦🇺', aed: '🇦🇪', cad: '🇨🇦' };
++
++    // Detected geo-currency, updated asynchronously
++    let _detectedConsultingCurrency = 'inr';
++
++    function formatConsultingPrice(currency) {
++        const cur = (currency || 'inr').toLowerCase();
++        const sym = CURRENCY_SYMBOLS[cur] || '$';
++        const amount = CONSULTING_PRICES[cur] || 40;
++        if (cur === 'inr') return `${sym}${amount.toLocaleString('en-IN')}`;
++        return `${sym}${amount}`;
++    }
++
+     async function detectAndSetOverlayPrice() {
+         try {
+             const res = await fetch(`${WORKER_URL}/billing/detect-currency`);
+             if (res.ok) {
+-                const data = await res.json();
++                const raw = await res.json();
++                const data = raw.data || raw;
+                 const currency = (data.currency || 'inr').toLowerCase();
+-                const symbols = { inr: '₹', usd: '$', gbp: '£', eur: '€', aud: 'A$', aed: 'AED ', cad: 'C$' };
+-                const display = currency === 'inr' ? '₹2,500 / mo' : `${symbols[currency] || '$'}40 / mo`;
++                _detectedConsultingCurrency = currency;
++
++                const flag = CURRENCY_FLAGS[currency] || '🌍';
++                const display = `${formatConsultingPrice(currency)} / mo`;
+                 const overlayPrice = document.getElementById('overlayPriceDisplay');
+                 if (overlayPrice) overlayPrice.textContent = display;
++
++                // Also update the currency badge if present
++                const currBadge = document.getElementById('overlayDetectedCurrency');
++                if (currBadge) currBadge.textContent = `${flag} ${currency.toUpperCase()} — ${data.country || 'Auto-detected'}`;
+             }
+         } catch(e) {
+             console.warn('Currency detection failed:', e.message);
+@@ -3541,16 +3569,24 @@ Be professional, highly strategic, clear, and action-oriented. Keep your spoken
+     window.subscribeToConsulting = async function() {
+         const token = localStorage.getItem('simpatico_token') || localStorage.getItem('sh_token');
+         const user = JSON.parse(localStorage.getItem('simpatico_user') || '{}');
+-        
++
++        const btn = document.getElementById('btnSubscribeConsulting');
++        if (btn) { btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Processing...'; btn.disabled = true; }
++
+         try {
+-            let currency = 'INR';
+-            const geoRes = await fetch(`${WORKER_URL}/billing/detect-currency`);
+-            if (geoRes.ok) {
+-                const geoData = await geoRes.json();
+-                currency = geoData.currency || 'INR';
+-            }
++            // Use already-detected currency or re-detect
++            let currency = _detectedConsultingCurrency || 'inr';
++            try {
++                const geoRes = await fetch(`${WORKER_URL}/billing/detect-currency`);
++                if (geoRes.ok) {
++                    const raw = await geoRes.json();
++                    const geoData = raw.data || raw;
++                    currency = (geoData.currency || 'inr').toLowerCase();
++                    _detectedConsultingCurrency = currency;
++                }
++            } catch(e) {}
+ 
+-            const isDomestic = currency.toLowerCase() === 'inr';
++            const isDomestic = currency === 'inr';
+             const endpoint = isDomestic 
+                 ? `${WORKER_URL}/billing/manual/create-order`
+                 : `${WORKER_URL}/billing/wise/create-order`;
+@@ -3574,13 +3610,232 @@ Be professional, highly strategic, clear, and action-oriented. Keep your spoken
+ 
+             if (!createOrderRes.ok) {
+                 const err = await createOrderRes.json();
+-                throw new Error(err.message || 'Failed to create order');
++                throw new Error(err?.error?.message || err.message || 'Failed to create order');
+             }
+ 
+-            const order = await createOrderRes.json();
+-            window.location.href = `../platform/consulting-invoice.html?id=${order.order_id}`;
++            const raw = await createOrderRes.json();
++            const order = raw.data || raw;
++
++            // Show inline payment modal instead of redirecting
++            showConsultingPaymentModal(order, currency, isDomestic);
++
+         } catch (e) {
+             alert('Failed to initiate subscription: ' + e.message);
++        } finally {
++            if (btn) { btn.innerHTML = 'Subscribe Now'; btn.disabled = false; }
++        }
++    };
++
++    function showConsultingPaymentModal(order, currency, isDomestic) {
++        // Remove any existing modal
++        document.getElementById('consultingPaymentModal')?.remove();
++
++        const cur = currency.toLowerCase();
++        const sym = CURRENCY_SYMBOLS[cur] || '$';
++        const flag = CURRENCY_FLAGS[cur] || '🌍';
++        const amount = order.amount || CONSULTING_PRICES[cur] || 40;
++        const amountDisplay = cur === 'inr'
++            ? `${sym}${amount.toLocaleString('en-IN')}`
++            : `${sym}${amount}`;
++        const orderId = order.order_id || order.gateway_order_id || '';
++        const wd = order.wise_details || {};
++        const pd = order.payment_details || {};
++
++        // Build bank detail rows
++        let bankDetailsHTML = '';
++        if (isDomestic) {
++            bankDetailsHTML = `
++                <div style="background:#0F172A;border-radius:10px;padding:16px;margin:16px 0;border:1px solid #1E293B;">
++                    <div style="font-size:0.7rem;font-weight:700;color:#818CF8;text-transform:uppercase;letter-spacing:1px;margin-bottom:10px;">
++                        <i class="fas fa-indian-rupee-sign" style="margin-right:4px"></i> Domestic Payment (UPI / NEFT)
++                    </div>
++                    ${_payRow('UPI ID', pd.upi_id || 'faisalkkod@okhdfcbank', true)}
++                    ${_payRow('Account Name', pd.account_name || 'FAISAL .K', false)}
++                    ${_payRow('Bank', pd.bank_name || 'State Bank of India', false)}
++                    ${_payRow('Account No', pd.account_number || '67326003131', true)}
++                    ${_payRow('IFSC', pd.ifsc_code || 'SBIN0070198', true)}
++                </div>`;
++        } else {
++            let rows = '';
++            if (wd.routing_number) rows += _payRow('Routing Number', wd.routing_number, true);
++            if (wd.sort_code) rows += _payRow('Sort Code', wd.sort_code, true);
++            if (wd.bsb_code) rows += _payRow('BSB Code', wd.bsb_code, true);
++            if (wd.iban) rows += _payRow('IBAN', wd.iban, true);
++            if (wd.institution_number) rows += _payRow('Institution Number', wd.institution_number, true);
++            if (wd.transit_number) rows += _payRow('Transit Number', wd.transit_number, true);
++            if (wd.account_number) rows += _payRow('Account Number', wd.account_number, true);
++            if (wd.swift_bic) rows += _payRow('SWIFT/BIC', wd.swift_bic, true);
++            if (wd.bank_name) rows += _payRow('Bank', wd.bank_name, false);
++            if (wd.recipient_name) rows += _payRow('Recipient', wd.recipient_name, false);
++            if (wd.email) rows += _payRow('Email', wd.email, true);
++            bankDetailsHTML = `
++                <div style="background:#0F172A;border-radius:10px;padding:16px;margin:16px 0;border:1px solid #1E293B;">
++                    <div style="font-size:0.7rem;font-weight:700;color:#818CF8;text-transform:uppercase;letter-spacing:1px;margin-bottom:10px;">
++                        <i class="fas fa-globe" style="margin-right:4px"></i> ${flag} Wise Bank Transfer (${currency.toUpperCase()})
++                    </div>
++                    ${rows}
++                    ${wd.bank_address ? `<div style="font-size:0.65rem;color:#64748B;margin-top:8px;line-height:1.4;">📍 ${wd.bank_address}</div>` : ''}
++                </div>`;
++        }
++
++        const modal = document.createElement('div');
++        modal.id = 'consultingPaymentModal';
++        modal.style.cssText = 'position:fixed;inset:0;z-index:999999;background:rgba(15,23,42,0.96);backdrop-filter:blur(12px);display:flex;align-items:center;justify-content:center;color:#fff;font-family:"Inter",sans-serif;padding:20px;animation:fadeIn .3s ease;';
++
++        modal.innerHTML = `
++            <div style="background:#1E293B;border:1px solid #334155;border-radius:20px;padding:36px;max-width:520px;width:100%;box-shadow:0 25px 50px -12px rgba(0,0,0,0.5);max-height:90vh;overflow-y:auto;">
++                <div style="text-align:center;margin-bottom:20px;">
++                    <div style="width:64px;height:64px;background:rgba(16,185,129,0.1);border:2px solid #10B981;border-radius:50%;display:flex;align-items:center;justify-content:center;margin:0 auto 16px;font-size:28px;">
++                        ${isDomestic ? '🏦' : '🌍'}
++                    </div>
++                    <h2 style="font-size:1.3rem;font-weight:800;color:#F8FAFC;margin-bottom:4px;">
++                        Complete Your Payment
++                    </h2>
++                    <p style="font-size:0.82rem;color:#94A3B8;">
++                        ${isDomestic ? 'Transfer via UPI or NEFT' : `Transfer via Wise (${currency.toUpperCase()})`} to activate your consulting subscription
++                    </p>
++                </div>
++
++                <!-- Amount -->
++                <div style="background:linear-gradient(135deg,#4F46E5,#7C3AED);border-radius:12px;padding:18px;text-align:center;margin-bottom:4px;">
++                    <div style="font-size:0.7rem;color:rgba(255,255,255,0.7);text-transform:uppercase;letter-spacing:1px;font-weight:600;">Amount Due</div>
++                    <div style="font-size:2rem;font-weight:800;color:#fff;margin-top:4px;">${amountDisplay}</div>
++                    <div style="font-size:0.72rem;color:rgba(255,255,255,0.6);margin-top:2px;">${flag} ${currency.toUpperCase()} · Business Consulting Monthly</div>
++                </div>
++
++                <!-- Reference -->
++                <div style="background:#0F172A;border-radius:8px;padding:12px;text-align:center;margin:4px 0 0;">
++                    <div style="font-size:0.65rem;color:#94A3B8;text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px;">Include this reference in your transfer note</div>
++                    <div id="consultingPayRef" style="font-family:monospace;font-size:0.95rem;font-weight:700;color:#818CF8;cursor:pointer;padding:6px 12px;background:rgba(99,102,241,0.1);border-radius:6px;border:1px dashed rgba(99,102,241,0.3);display:inline-block;"
++                         onclick="navigator.clipboard.writeText(this.textContent);this.style.background='rgba(16,185,129,0.15)';this.style.color='#10B981';this.style.borderColor='#10B981';setTimeout(()=>{this.style.background='rgba(99,102,241,0.1)';this.style.color='#818CF8';this.style.borderColor='rgba(99,102,241,0.3)'},2000)"
++                         title="Click to copy">
++                        ${orderId}
++                    </div>
++                    <div style="font-size:0.6rem;color:#64748B;margin-top:4px;">Click to copy</div>
++                </div>
++
++                ${bankDetailsHTML}
++
++                <!-- Proof input -->
++                <div style="margin-top:8px;">
++                    <label style="display:block;font-size:0.72rem;font-weight:700;color:#94A3B8;margin-bottom:6px;text-transform:uppercase;letter-spacing:.3px;">Transaction Reference / UTR Number</label>
++                    <input type="text" id="consultingPaymentRefInput" placeholder="e.g. UPI123456789 or Bank Ref" style="width:100%;padding:12px;border:1.5px solid #334155;border-radius:10px;font-size:0.85rem;font-family:inherit;outline:none;background:#0F172A;color:#F8FAFC;transition:border-color 0.2s;" onfocus="this.style.borderColor='#818CF8'" onblur="this.style.borderColor='#334155'">
++                </div>
++
++                <!-- Actions -->
++                <div style="display:flex;gap:10px;margin-top:16px;flex-direction:column;">
++                    <div style="display:flex;gap:10px;">
++                        <button onclick="document.getElementById('consultingPaymentModal')?.remove()" style="flex:1;padding:12px;border-radius:10px;background:transparent;border:1.5px solid #475569;color:#F8FAFC;font-size:0.85rem;font-weight:600;cursor:pointer;font-family:inherit;transition:all 0.2s;">
++                            Cancel
++                        </button>
++                        <button id="btnSubmitConsultingProof" onclick="submitConsultingPaymentProof('${orderId}')" style="flex:1.5;padding:12px;border-radius:10px;background:#4F46E5;border:none;color:#fff;font-size:0.85rem;font-weight:700;cursor:pointer;font-family:inherit;box-shadow:0 8px 16px rgba(79,70,229,0.3);transition:all 0.2s;">
++                            <i class="fas fa-paper-plane" style="margin-right:6px"></i> Submit Proof
++                        </button>
++                    </div>
++                    ${!isDomestic ? `
++                    <button id="btnVerifyConsultingWise" onclick="verifyConsultingWisePayment('${orderId}')" style="padding:12px;border-radius:10px;background:#059669;border:none;color:#fff;font-size:0.85rem;font-weight:700;cursor:pointer;font-family:inherit;box-shadow:0 8px 16px rgba(5,150,105,0.3);transition:all 0.2s;display:flex;align-items:center;justify-content:center;gap:6px;">
++                        <i class="fas fa-check-circle"></i> Verify Wise Payment Instantly
++                    </button>` : ''}
++                </div>
++
++                <p style="font-size:0.65rem;color:#475569;text-align:center;margin-top:14px;line-height:1.5;">
++                    ${isDomestic
++                        ? '💡 Complete UPI/NEFT transfer with the reference above, then submit your UTR number.'
++                        : '💡 Transfer via your local bank to the Wise account above. Include the reference code. Verification checks your transfer in real-time via Wise API.'}
++                </p>
++            </div>
++            <style>
++                @keyframes fadeIn { from { opacity:0; } to { opacity:1; } }
++                #consultingPaymentModal button:hover { filter:brightness(1.1); transform:translateY(-1px); }
++            </style>
++        `;
++
++        document.body.appendChild(modal);
++    }
++
++    function _payRow(label, value, copyable) {
++        if (!value) return '';
++        const copyStyle = copyable
++            ? 'cursor:pointer;color:#818CF8' 
++            : 'color:#F1F5F9';
++        const copyHandler = copyable
++            ? `onclick="navigator.clipboard.writeText(this.textContent);this.style.color='#10B981';setTimeout(()=>this.style.color='#818CF8',1500)" title="Click to copy"`
++            : '';
++        return `<div style="display:flex;justify-content:space-between;padding:5px 0;font-size:0.8rem;border-bottom:1px solid rgba(51,65,85,0.5);">
++            <span style="color:#94A3B8;">${label}</span>
++            <span style="${copyStyle};font-weight:600;" ${copyHandler}>${value}</span>
++        </div>`;
++    }
++
++    window.submitConsultingPaymentProof = async function(orderId) {
++        const reference = document.getElementById('consultingPaymentRefInput')?.value?.trim();
++        if (!reference) {
++            alert('Please enter your transaction reference / UTR number.');
++            return;
++        }
++
++        const token = localStorage.getItem('simpatico_token') || localStorage.getItem('sh_token');
++        const btn = document.getElementById('btnSubmitConsultingProof');
++        if (btn) { btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Submitting...'; btn.disabled = true; }
++
++        try {
++            const res = await fetch(`${WORKER_URL}/api/consulting/pay`, {
++                method: 'POST',
++                headers: {
++                    'Content-Type': 'application/json',
++                    'Authorization': `Bearer ${token}`
++                },
++                body: JSON.stringify({ order_id: orderId, reference })
++            });
++
++            if (!res.ok) throw new Error('Submission failed');
++
++            alert('✅ Payment proof submitted! Awaiting verification. Your subscription will be activated once confirmed.');
++            document.getElementById('consultingPaymentModal')?.remove();
++            document.getElementById('consultingSubscriptionOverlay')?.remove();
++            setTimeout(() => location.reload(), 1500);
++        } catch (e) {
++            alert('Submission error: ' + e.message);
++        } finally {
++            if (btn) { btn.innerHTML = '<i class="fas fa-paper-plane" style="margin-right:6px"></i> Submit Proof'; btn.disabled = false; }
++        }
++    };
++
++    window.verifyConsultingWisePayment = async function(orderId) {
++        const btn = document.getElementById('btnVerifyConsultingWise');
++        if (!btn) return;
++        const origText = btn.innerHTML;
++        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Verifying via Wise API...';
++        btn.disabled = true;
++
++        const token = localStorage.getItem('simpatico_token') || localStorage.getItem('sh_token');
++        try {
++            const res = await fetch(`${WORKER_URL}/billing/wise/verify`, {
++                method: 'POST',
++                headers: {
++                    'Content-Type': 'application/json',
++                    'Authorization': `Bearer ${token}`
++                },
++                body: JSON.stringify({ order_id: orderId })
++            });
++
++            const json = await res.json();
++            if (!res.ok) throw new Error(json?.error?.message || 'Verification failed');
++            const data = json.data || json;
++
++            if (data.verified) {
++                alert('✅ ' + (data.message || 'Payment verified successfully! Your consulting subscription is now active.'));
++                document.getElementById('consultingPaymentModal')?.remove();
++                document.getElementById('consultingSubscriptionOverlay')?.remove();
++                location.reload();
++            } else {
++                alert(data.message || 'Payment not found yet. Please ensure the Wise transfer is completed and includes the correct reference note.');
++            }
++        } catch (e) {
++            alert('Verification Error: ' + e.message);
++        } finally {
++            btn.innerHTML = origText;
++            btn.disabled = false;
+         }
+     };
+ 
