@@ -1251,10 +1251,37 @@
             animation: duixShimmer 1.8s infinite;
         }
 
-        @keyframes duixShimmer {
-            0% { transform: translateX(-100%); }
-            100% { transform: translateX(100%); }
+        /* Real-human mode: rounded video TILE, not a circle. */
+        .avatar-stage.hr {
+            width: 380px; height: 440px; border-radius: 20px;
+            background: #0d0d16; overflow: hidden; position: relative;
         }
+        .avatar-stage.hr .avatar-frame { position: absolute; inset: 0; }
+        .avatar-stage.hr video#duixVideo,
+        .avatar-stage.hr video.hr-idle {
+            position: absolute; inset: 0; width: 100%; height: 100%;
+            object-fit: cover; object-position: 50% 22%; border-radius: inherit; transition: opacity .5s ease;
+        }
+        .avatar-stage.hr video.hr-idle { opacity: 1; }
+
+        /* Hard-kill the orb + waveform + cartoon whenever real-human mode is active. */
+        .avatar-stage.hr #ai-avatar-canvas,
+        .avatar-stage.hr .audio-waveform,
+        .avatar-stage.hr #duix-fallback-face { display: none !important; }
+
+        /* Honest config panel (replaces cartoon as failure state). */
+        .hr-config {
+            position: absolute; inset: 0; padding: 24px; color: #cfd3dc; font-size: 13px;
+            background: rgba(13,13,22,.92); display: flex; flex-direction: column; justify-content: center; z-index: 10;
+        }
+        .hr-config h3 { color: #fff; margin: 0 0 8px; }
+        .hr-config code { color: #7dd3fc; background: rgba(255,255,255,0.06); padding: 2px 6px; border-radius: 4px; }
+
+        /* State rings for HyperReal mode */
+        .avatar-stage.hr.speaking  { box-shadow: 0 0 0 3px rgba(96,165,250,.45), 0 8px 32px rgba(0,0,0,0.4); }
+        .avatar-stage.hr.listening { box-shadow: 0 0 0 3px rgba(52,211,153,.45), 0 8px 32px rgba(0,0,0,0.4); }
+        .avatar-stage.hr.thinking,
+        .avatar-stage.hr.processing{ box-shadow: 0 0 0 3px rgba(251,191,36,.45), 0 8px 32px rgba(0,0,0,0.4); }
     </style>
 </head>
 <body>
@@ -1263,6 +1290,7 @@
     <script src="js/avatar-engine.js"></script>
     <script src="js/simli-adapter.js"></script>
     <script src="js/duix-renderer.js"></script>
+    <script src="js/hyperreal-renderer.js"></script>
 
     <!-- NAVIGATION -->
     <nav class="nav">
@@ -1363,9 +1391,10 @@
                     <div class="form-group" id="avatar-select-container">
                         <label class="form-label" for="avatar-select">Avatar Renderer</label>
                         <select id="avatar-select" class="form-select" onchange="onAvatarSelectChange()">
-                            <option value="duix" selected>DuiX Video Avatar + Idle Life Overlay</option>
-                            <option value="orb">3D WebGL Audio Orb</option>
+                            <option value="hyperreal" selected>🧑 Hyper‑Real Streaming Human (HeyGen / Tavus / D‑ID / Self‑host)</option>
                             <option value="simli">Simli Avatar (API Key required)</option>
+                            <option value="duix">DuiX Video Avatar (needs GPU model server)</option>
+                            <option value="orb">3D WebGL Audio Orb (visualizer only — not a human)</option>
                         </select>
                     </div>
                     <div class="form-group" id="subtitles-container" style="display: block;">
@@ -1902,23 +1931,52 @@
         }
     }
 
+    let _activeRenderer = null;
+
+    /**
+     * Renderer Factory Switch
+     */
+    function createRenderer(choice) {
+      const choiceVal = choice || document.getElementById('avatar-select')?.value || 'hyperreal';
+      switch (choiceVal) {
+        case 'hyperreal': return typeof HyperRealRenderer !== 'undefined' ? HyperRealRenderer : DuixRenderer;
+        case 'simli':     return typeof SimliAdapter !== 'undefined' ? SimliAdapter : DuixRenderer;
+        case 'duix':      return typeof DuixRenderer !== 'undefined' ? DuixRenderer : window.aiAvatar;
+        case 'orb':
+        default:          return window.aiAvatar;
+      }
+    }
+
     /** Handle dropdown change for avatar renderer choice */
-    function onAvatarSelectChange() {
-        const val = document.getElementById('avatar-select')?.value || 'duix';
-        if (val === 'orb') {
-            destroyDuix();
-            destroySimli();
-            const canvas = document.getElementById('ai-avatar-canvas');
-            if (canvas) canvas.style.display = 'block';
-            const duixContainer = document.getElementById('duix-avatar');
-            if (duixContainer) duixContainer.style.display = 'none';
-        } else if (val === 'duix') {
-            destroySimli();
-            initDuixIfNeeded();
-        } else if (val === 'simli') {
-            destroyDuix();
-            initSimliIfNeeded();
-        }
+    async function onAvatarSelectChange() {
+      await initSelectedAvatar();
+    }
+
+    async function initSelectedAvatar() {
+      const choice = document.getElementById('avatar-select')?.value || 'hyperreal';
+      _activeRenderer = createRenderer(choice);
+
+      if (choice === 'hyperreal' && typeof HyperRealRenderer !== 'undefined') {
+        destroyDuix();
+        destroySimli();
+        await HyperRealRenderer.init();
+      } else if (choice === 'duix') {
+        if (typeof HyperRealRenderer !== 'undefined') HyperRealRenderer.destroy();
+        destroySimli();
+        await initDuixIfNeeded();
+      } else if (choice === 'simli') {
+        if (typeof HyperRealRenderer !== 'undefined') HyperRealRenderer.destroy();
+        destroyDuix();
+        await initSimliIfNeeded();
+      } else { // orb
+        if (typeof HyperRealRenderer !== 'undefined') HyperRealRenderer.destroy();
+        destroyDuix();
+        destroySimli();
+        const canvas = document.getElementById('ai-avatar-canvas');
+        if (canvas) canvas.style.display = 'block';
+        const duixContainer = document.getElementById('duix-avatar');
+        if (duixContainer) duixContainer.style.display = 'none';
+      }
     }
 
     /**
@@ -2681,17 +2739,9 @@
         }
         window.aiAvatar.setState('processing');
 
-        // Try to initialize Simli premium avatar (async, non-blocking)
-        initSimliIfNeeded().then(simliActive => {
-            if (simliActive) {
-                console.log('[Voice] Simli premium avatar is active for this session.');
-            }
-        });
-        // Try to initialize DuiX hyper-realistic avatar (async, non-blocking)
-        initDuixIfNeeded().then(duixActive => {
-            if (duixActive) {
-                console.log('[Voice] DuiX hyper-realistic avatar is active for this session.');
-            }
+        // Initialize selected avatar renderer (HyperReal / Simli / DuiX / Orb)
+        initSelectedAvatar().then(() => {
+            console.log('[Voice] Selected avatar renderer initialized.');
         });
         document.getElementById('voice-status-dot').className = 'status-dot pulse-blue';
         document.getElementById('voice-status-text').textContent = 'CONNECTING';
