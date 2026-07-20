@@ -260,18 +260,24 @@ const SimliAdapter = (function () {
         }
 
         client = new window.SimliClient();
+        const dummyAudio = document.createElement('audio');
+        
+        // Listen to connection established event
+        client.on('connected', () => {
+          console.log('[SimliAdapter] SDK WebRTC stream connected and established!');
+          streamReady = true; // Stop procedural video loop, let WebRTC stream take over
+        });
+        
         await client.Initialize({
           apiKey: apiKey,
           faceID: faceId,
           handleSilence: true,
-          videoElement: videoEl,
-          audioElement: null,
+          videoRef: videoEl,
+          audioRef: dummyAudio,
         });
 
         await client.start();
         ready = true;
-        streamReady = true; // Simli stream overrides fallback
-        console.log('[SimliAdapter] Simli avatar pipeline connected successfully.');
         return 'simli';
       } catch (e) {
         console.warn('[SimliAdapter] SDK connection note:', e.message, '— using procedural 30 FPS fallback.');
