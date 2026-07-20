@@ -330,11 +330,14 @@ const HyperRealRenderer = (function () {
       captionEl = $('duix-captions');
       orbEl     = $('ai-avatar-canvas');
 
-      // Hide orb & cartoon fallbacks
+      // Hide orb & cartoon fallbacks, show duix-avatar container
       if (orbEl) orbEl.style.display = 'none';
       document.querySelectorAll('.audio-waveform, #waveform, .orb-waveform')
               .forEach((el) => (el.style.display = 'none'));
       const cartoon = $('duix-fallback-face'); if (cartoon) cartoon.remove();
+
+      const duixContainer = $('duix-avatar');
+      if (duixContainer) duixContainer.style.display = 'block';
 
       if (stageEl) stageEl.classList.add('hr');
 
