@@ -1149,6 +1149,85 @@
         @media (max-width: 768px) {
             .avatar-stage { width: 200px; height: 200px; }
         }
+
+        /* ═══════════════════════════════════════════
+           DuiX VIDEO AVATAR + IDLE-LIFE OVERLAY
+           ═══════════════════════════════════════════ */
+        #duix-avatar {
+            position: absolute;
+            inset: 0;
+            border-radius: 50%;
+            overflow: hidden;
+            display: none;
+        }
+        #duixWrap {
+            width: 100%; height: 100%;
+            position: relative;
+            transition: transform 0.1s ease;
+            will-change: transform;
+        }
+        #duixVideo {
+            width: 100%; height: 100%;
+            object-fit: cover;
+            border-radius: 50%;
+            display: block;
+        }
+        #duixLid {
+            position: absolute; inset: 0;
+            z-index: 5; pointer-events: none;
+            transform-origin: center 33%;
+            background:
+                radial-gradient(11% 4% at 44% 33%, rgba(30,25,20,0.95) 99%, transparent),
+                radial-gradient(11% 4% at 56% 33%, rgba(30,25,20,0.95) 99%, transparent);
+            mix-blend-mode: multiply;
+            opacity: 0;
+            transform: scaleY(.04);
+            border-radius: inherit;
+        }
+
+        /* DuiX caption bar — word-level highlighting */
+        #duix-captions {
+            position: absolute;
+            bottom: -60px; left: 50%;
+            transform: translateX(-50%);
+            width: 100%; max-width: 480px;
+            background: rgba(10, 14, 28, 0.75);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(99, 102, 241, 0.12);
+            border-radius: var(--radius-md);
+            padding: 8px 14px;
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            line-height: 1.5;
+            text-align: center;
+            opacity: 0;
+            transition: opacity 0.4s ease;
+            z-index: 10;
+            pointer-events: none;
+        }
+        #duix-captions .duix-word {
+            transition: color 0.15s ease, text-shadow 0.15s ease;
+        }
+        #duix-captions .duix-word.active {
+            color: var(--accent-cyan-light);
+            text-shadow: 0 0 8px rgba(6, 182, 212, 0.4);
+            font-weight: 600;
+        }
+        #duix-captions .duix-word.spoken {
+            color: var(--text-secondary);
+            opacity: 0.65;
+        }
+
+        /* DuiX state glow transitions */
+        .avatar-stage.speaking #duix-avatar {
+            box-shadow: 0 0 60px rgba(99, 102, 241, 0.3);
+        }
+        .avatar-stage.listening #duix-avatar {
+            box-shadow: 0 0 60px rgba(16, 185, 129, 0.3);
+        }
+        .avatar-stage.processing #duix-avatar {
+            box-shadow: 0 0 60px rgba(245, 158, 11, 0.25);
+        }
     </style>
 </head>
 <body>
@@ -1156,6 +1235,7 @@
     <div class="bg-grid"></div>
     <script src="js/avatar-engine.js"></script>
     <script src="js/simli-adapter.js"></script>
+    <script src="js/duix-renderer.js"></script>
 
     <!-- NAVIGATION -->
     <nav class="nav">
@@ -1384,6 +1464,14 @@
                     <div class="avatar-stage" id="avatar-stage" onclick="toggleSpeechRecordingManual()" ondblclick="revealHiddenSubtitles()">
                         <canvas id="ai-avatar-canvas"></canvas>
                         <div id="simli-avatar" style="display:none"><video id="simli-video" autoplay playsinline></video></div>
+                        <!-- DuiX Video Avatar (hyper-realistic) -->
+                        <div id="duix-avatar" style="display:none">
+                            <div id="duixWrap">
+                                <video id="duixVideo" autoplay playsinline muted></video>
+                            </div>
+                        </div>
+                        <!-- DuiX word-synced caption overlay -->
+                        <div id="duix-captions"></div>
                     </div>
 
                     <!-- Real-time waveform -->
@@ -1599,6 +1687,14 @@
 
     const API_BASE = 'https://evalis-api.simpaticohrconsultancy.workers.dev';
 
+    // ── DuiX Avatar Configuration (no vendor keys required) ──
+    const DUIX_CONFIG = {
+        TTS: '/api/tts-free',                   // Free TTS with word timings
+        DUIX: '/api/duix',                      // DuiX clip render endpoints
+        DUIX_ENABLED: false,                    // Set true when DuiX server is running
+    };
+    let _duixActive = false;                    // Runtime flag: is DuiX renderer active?
+
     // ── B2B Mode Detection ──
     const _urlParams = new URLSearchParams(window.location.search);
     const _isB2B = _urlParams.get('b2b') === '1' || _urlParams.has('token');
@@ -1730,6 +1826,111 @@
             _simliAdapter = null;
             return false;
         }
+    }
+
+    /**
+     * Initialize DuiX hyper-realistic video avatar if configured.
+     * Called when voice session starts. Falls back to Simli or WebGL orb on failure.
+     * DuiX = company config avatar_mode === 'duix' OR DUIX_CONFIG.DUIX_ENABLED
+     */
+    async function initDuixIfNeeded() {
+        const shouldUseDuix = (
+            (_b2bCompanyConfig?.avatar_mode === 'duix') ||
+            DUIX_CONFIG.DUIX_ENABLED ||
+            _urlParams.get('avatar') === 'duix'
+        ) && typeof DuixRenderer !== 'undefined';
+
+        if (!shouldUseDuix) return false;
+
+        try {
+            const result = await DuixRenderer.init();
+            if (result === 'duix') {
+                _duixActive = true;
+                console.log('[DuiX] Hyper-realistic video avatar activated with idle-life overlay.');
+                return true;
+            }
+        } catch (e) {
+            console.warn('[DuiX] Init failed:', e.message, '— falling back to WebGL orb.');
+        }
+        _duixActive = false;
+        return false;
+    }
+
+    /** Destroy DuiX adapter and restore WebGL orb */
+    function destroyDuix() {
+        if (_duixActive && typeof DuixRenderer !== 'undefined') {
+            try { DuixRenderer.destroy(); } catch(e) {}
+            _duixActive = false;
+        }
+    }
+
+    /**
+     * DuiX-aware speaking: routes speech through DuiX clip renderer
+     * when active, otherwise falls back to existing voice path.
+     * Also fetches word timings from the free TTS for caption sync.
+     */
+    async function duixSpeakTurn(line, callback) {
+        if (!_duixActive || typeof DuixRenderer === 'undefined') {
+            // Fall back to existing speakText (Web Speech API)
+            speakText(line, callback);
+            return;
+        }
+
+        // Update avatar stage to speaking state
+        const avatarStage = document.getElementById('avatar-stage');
+        if (avatarStage) avatarStage.className = 'avatar-stage speaking';
+        DuixRenderer.onState('speaking');
+
+        try {
+            await DuixRenderer.say(line);
+        } catch (e) {
+            console.warn('[DuiX] say() failed, falling back to speakText:', e);
+            speakText(line, callback);
+            return;
+        }
+
+        // Speech completed
+        DuixRenderer.onState('listening');
+        if (avatarStage) avatarStage.className = 'avatar-stage listening';
+        if (callback) callback();
+    }
+
+    /**
+     * Speculative pre-render: while the candidate is speaking, pre-render
+     * the likely follow-up lines so they play at ~0ms latency.
+     */
+    function duixPreRenderLikelyLines() {
+        if (!_duixActive) return;
+
+        // Build a list of likely next lines based on current state
+        const likelyLines = [];
+
+        // Common follow-up templates
+        const idx = state.currentIndex;
+        const total = state.questions.length;
+
+        if (idx < total - 1 && state.questions[idx + 1]) {
+            likelyLines.push(state.questions[idx + 1].question);
+        }
+
+        // Generic feedback transitions
+        likelyLines.push('Good answer. Let me move on to the next question.');
+        likelyLines.push('Thank you for that response. Here is the next question.');
+
+        if (!likelyLines.length) return;
+
+        fetch(DUIX_CONFIG.DUIX + '/prerender', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ lines: likelyLines.slice(0, 4) }),
+        })
+        .then(r => r.json())
+        .then(j => {
+            if (j.clips && typeof DuixRenderer !== 'undefined') {
+                DuixRenderer.primeCache(j.clips);
+            }
+        })
+        .catch(() => { /* silent fail — pre-rendering is an optimization, not critical */ });
     }
 
     /** Destroy Simli adapter and restore WebGL orb */
@@ -2429,6 +2630,12 @@
                 console.log('[Voice] Simli premium avatar is active for this session.');
             }
         });
+        // Try to initialize DuiX hyper-realistic avatar (async, non-blocking)
+        initDuixIfNeeded().then(duixActive => {
+            if (duixActive) {
+                console.log('[Voice] DuiX hyper-realistic avatar is active for this session.');
+            }
+        });
         document.getElementById('voice-status-dot').className = 'status-dot pulse-blue';
         document.getElementById('voice-status-text').textContent = 'CONNECTING';
         document.getElementById('voice-instruction').textContent = 'Establishing secure low-latency full-duplex session...';
@@ -2610,6 +2817,12 @@ Guidelines:
                     if (window.aiAvatar) {
                         window.aiAvatar.setState('listening');
                         window.aiAvatar.setAmplitude(0);
+                    }
+                    // Update DuiX overlay state to listening
+                    if (_duixActive && typeof DuixRenderer !== 'undefined') {
+                        DuixRenderer.onState('listening');
+                        // Kick off speculative pre-rendering while candidate speaks
+                        duixPreRenderLikelyLines();
                     }
                     document.getElementById('voice-status-dot').className = 'status-dot pulse-green';
                     document.getElementById('voice-status-text').textContent = 'LISTENING TO YOU';
@@ -4159,6 +4372,8 @@ Guidelines:
         }
         // Cleanup Simli premium avatar
         destroySimli();
+        // Cleanup DuiX hyper-realistic avatar
+        destroyDuix();
         // Release mic stream on full restart
         if (micStream) {
             micStream.getTracks().forEach(t => t.stop());
