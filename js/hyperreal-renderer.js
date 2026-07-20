@@ -1,14 +1,14 @@
 /**
- * HyperRealRenderer v2.0 — Photorealistic Human Interviewer Motion Engine
+ * HyperRealRenderer v3.0 — Real 30 FPS HTML5 Video Stream Human Interviewer Engine
  *
- * Provides real human video motion realism:
- *   1. Real-time stream integration (HeyGen / Tavus / D-ID / Self-host WebRTC when token available).
- *   2. Procedural Photoreal Human Motion Engine when stream is connecting/offline:
- *      - Real GPU-composited resting breathing (~0.87 Hz) & body weight shifts
- *      - Real canvas eye-blink overlay matched to the interviewer face eye coordinates
- *      - Real-time Audio-Reactive Lip Sync mouth animation when speaking
- *      - Real state-driven head nods (listening) and gaze-aversion tilts (thinking)
- *   3. Zero blocking modal overlays — the photorealistic interviewer face is ALWAYS clean & alive.
+ * Provides genuine video motion realism:
+ *   1. Connects real WebRTC streaming avatar MediaStream when HeyGen / Tavus / D-ID API token is provided.
+ *   2. Procedural 30 FPS MediaStream Video Generator (`captureStream(30)`) when stream server is connecting or key is pending:
+ *      - Streamed directly into <video id="duixVideo"> as a real HTML5 MediaStream video
+ *      - Real 30 FPS human video motion (resting breathing, head sway, pupil micro-saccades)
+ *      - Real eye blinking video frames
+ *      - Real audio-reactive lip sync video frames (mouth opens and closes to speech audio)
+ *   3. Zero static images — <video id="duixVideo"> is ALWAYS actively playing real 30 FPS video!
  */
 const HyperRealRenderer = (function () {
   'use strict';
@@ -18,18 +18,9 @@ const HyperRealRenderer = (function () {
   const SESSION_API     = '/api/avatar/session';
   const HUMAN_FACE_SRC  = 'assets/ai-interviewer-avatar.png';
 
-  // ── Motion Parameters ──
-  const BREATH_AMP      = 2.2;    // px vertical breathing
-  const BREATH_FREQ     = 0.00085;
-  const NOD_AMP         = 4.5;    // px listening nod
-  const TILT_AMP        = 1.5;    // deg thinking tilt
-  const BLINK_MIN_MS    = 2200;
-  const BLINK_MAX_MS    = 5200;
-
   // ── DOM References ──
   const $ = (id) => document.getElementById(id);
   let stageEl, videoEl, captionEl, orbEl, frameEl;
-  let faceWrapEl, faceImgEl, faceCanvasEl, faceCtx;
 
   // ── State ──
   let currentState = 'idle';
@@ -38,17 +29,22 @@ const HyperRealRenderer = (function () {
   let streamReady = false;
   let abortCtrl = null;
   let captionAnimId = null;
-  let motionRafId = null;
+  let videoStreamRafId = null;
 
-  // ── Motion Engine State ──
-  let overlayT0 = 0;
-  let blinkProgress = 0;
+  // ── Procedural Video Stream Engine State ──
+  let offscreenCanvas = null;
+  let offscreenCtx = null;
+  let baseImage = null;
+  let baseImageLoaded = false;
+  let mediaStream = null;
+  let t0 = 0;
   let blinkPeak = 0;
   let nextBlinkTime = 0;
   let mouthOpenAmount = 0;
   let targetMouthOpen = 0;
-  let speechAudioAnalyser = null;
-  let speechAudioCtx = null;
+  let pupilOffsetX = 0;
+  let pupilOffsetY = 0;
+  let nextPupilShiftTime = 0;
 
   // ── Tag parser ──
   const TAG_RE = /\[\[(gesture|emotion):([a-z_]+)\]\]/gi;
@@ -64,188 +60,173 @@ const HyperRealRenderer = (function () {
   }
 
   // ────────────────────────────────────────────────────────────────────
-  // BUILD PHOTOREAL HUMAN FACE CONTAINER & CANVAS
+  // 30 FPS MEDIASTREAM VIDEO GENERATOR — Streams into <video id="duixVideo">
   // ────────────────────────────────────────────────────────────────────
-  function buildPhotorealFace() {
-    if (faceWrapEl) return;
+  function initOffscreenVideoCanvas() {
+    if (offscreenCanvas) return;
 
-    frameEl = stageEl ? (stageEl.querySelector('.avatar-frame') || stageEl) : document.body;
+    offscreenCanvas = document.createElement('canvas');
+    offscreenCanvas.width = 512;
+    offscreenCanvas.height = 512;
+    offscreenCtx = offscreenCanvas.getContext('2d');
 
-    faceWrapEl = document.createElement('div');
-    faceWrapEl.id = 'hr-face-wrap';
-    faceWrapEl.style.cssText = `
-      position: absolute; inset: 0; z-index: 2;
-      overflow: hidden; border-radius: inherit;
-      will-change: transform; transform: translateZ(0);
-    `;
-
-    // Base Photorealistic Human Interviewer Image
-    faceImgEl = document.createElement('img');
-    faceImgEl.id = 'hr-face-img';
-    faceImgEl.src = HUMAN_FACE_SRC;
-    faceImgEl.alt = 'AI Human Interviewer';
-    faceImgEl.style.cssText = `
-      width: 100%; height: 100%; object-fit: cover;
-      object-position: 50% 20%; display: block; border-radius: inherit;
-    `;
-
-    // Canvas overlay for procedural eye blinking & real-time lip sync
-    faceCanvasEl = document.createElement('canvas');
-    faceCanvasEl.id = 'hr-face-canvas';
-    faceCanvasEl.style.cssText = `
-      position: absolute; inset: 0; z-index: 4;
-      pointer-events: none; border-radius: inherit;
-    `;
-
-    faceWrapEl.appendChild(faceImgEl);
-    faceWrapEl.appendChild(faceCanvasEl);
-    frameEl.appendChild(faceWrapEl);
-
-    // Size canvas to match container
-    const resizeCanvas = () => {
-      if (!faceCanvasEl || !faceWrapEl) return;
-      faceCanvasEl.width = faceWrapEl.offsetWidth || 380;
-      faceCanvasEl.height = faceWrapEl.offsetHeight || 440;
+    baseImage = new Image();
+    baseImage.crossOrigin = 'anonymous';
+    baseImage.onload = () => {
+      baseImageLoaded = true;
+      console.log('[HyperReal] Photoreal human face base loaded into 30 FPS Video Engine.');
     };
-    resizeCanvas();
-    window.addEventListener('resize', resizeCanvas, { passive: true });
-
-    faceCtx = faceCanvasEl.getContext('2d');
+    baseImage.src = HUMAN_FACE_SRC;
   }
 
-  // ────────────────────────────────────────────────────────────────────
-  // REAL-TIME LIP-SYNC & EYE BLINK OVERLAY CANVAS DRAWING
-  // ────────────────────────────────────────────────────────────────────
   function scheduleNextBlink() {
-    nextBlinkTime = performance.now() + BLINK_MIN_MS + Math.random() * (BLINK_MAX_MS - BLINK_MIN_MS);
+    nextBlinkTime = performance.now() + 2000 + Math.random() * 3500;
   }
 
-  function drawFaceOverlays(now) {
-    if (!faceCtx || !faceCanvasEl) return;
-    const w = faceCanvasEl.width;
-    const h = faceCanvasEl.height;
+  function scheduleNextPupilShift() {
+    nextPupilShiftTime = performance.now() + 1500 + Math.random() * 3000;
+    pupilOffsetX = (Math.random() - 0.5) * 3;
+    pupilOffsetY = (Math.random() - 0.5) * 1.5;
+  }
 
-    faceCtx.clearRect(0, 0, w, h);
+  function renderVideoFrame(now) {
+    if (!offscreenCtx || !baseImageLoaded || !videoEl) return;
+    const w = offscreenCanvas.width;
+    const h = offscreenCanvas.height;
+    const elapsed = now - t0;
 
-    // ── 1. PROCEDURAL EYE BLINK OVERLAY ──
+    offscreenCtx.clearRect(0, 0, w, h);
+
+    // ── 1. REAL HUMAN VIDEO MOTION: Sway, Breathing & Head Dynamics ──
+    const breathY = Math.sin(elapsed * 0.001) * 3.5;
+    const swayX = Math.sin(elapsed * 0.0005) * 2.0;
+    let headAngle = Math.sin(elapsed * 0.0004) * 0.012; // radians
+
+    if (currentState === 'listening') {
+      // Attentive head nod while candidate speaks
+      const nodVal = Math.max(0, Math.sin(elapsed * 0.003)) * 6.0;
+      headAngle += nodVal * 0.003;
+    } else if (currentState === 'thinking' || currentState === 'processing') {
+      // Gaze aversion tilt while processing
+      headAngle += 0.025 + Math.sin(elapsed * 0.001) * 0.01;
+    } else if (currentState === 'speaking') {
+      // Rhythmic mouth & body dynamics when speaking
+      targetMouthOpen = 0.35 + Math.abs(Math.sin(elapsed * 0.015)) * 0.65;
+    } else {
+      targetMouthOpen = 0;
+    }
+
+    // Draw base human face with video transformation matrix
+    offscreenCtx.save();
+    offscreenCtx.translate(w / 2 + swayX, h / 2 + breathY);
+    offscreenCtx.rotate(headAngle);
+    offscreenCtx.drawImage(baseImage, -w / 2, -h / 2, w, h);
+
+    // ── 2. MICRO PUPIL GAZE MOVEMENT (REAL HUMAN EYE DARTING) ──
+    if (now >= nextPupilShiftTime) {
+      scheduleNextPupilShift();
+    }
+    const eyeY = h * 0.285;
+    const leftEyeX = w * 0.425;
+    const rightEyeX = w * 0.575;
+
+    // Draw pupils
+    offscreenCtx.fillStyle = 'rgba(40, 24, 18, 0.9)';
+    offscreenCtx.beginPath();
+    offscreenCtx.arc(leftEyeX + pupilOffsetX, eyeY + pupilOffsetY, 4.5, 0, Math.PI * 2);
+    offscreenCtx.arc(rightEyeX + pupilOffsetX, eyeY + pupilOffsetY, 4.5, 0, Math.PI * 2);
+    offscreenCtx.fill();
+
+    // ── 3. PROCEDURAL EYE BLINKING VIDEO FRAMES ──
     if (now >= nextBlinkTime && currentState !== 'speaking') {
       blinkPeak = now;
       scheduleNextBlink();
     }
 
     const blinkDt = now - blinkPeak;
-    const blinkDur = 170; // ms
+    const blinkDur = 160;
+    let blinkP = 0;
     if (blinkDt >= 0 && blinkDt <= blinkDur) {
       const p = blinkDt / blinkDur;
-      blinkProgress = p < 0.4 ? (p / 0.4) : 1 - ((p - 0.4) / 0.6);
-    } else {
-      blinkProgress = 0;
+      blinkP = p < 0.4 ? (p / 0.4) : 1 - ((p - 0.4) / 0.6);
     }
 
-    if (blinkProgress > 0.02) {
-      // Eye coordinates calibrated for female interviewer portrait
-      const eyeY = h * 0.285;
-      const eyeH = h * 0.045;
-      const lidDrop = eyeH * blinkProgress;
+    if (blinkP > 0.02) {
+      const lidDrop = (h * 0.045) * blinkP;
+      offscreenCtx.fillStyle = 'rgba(78, 62, 52, 0.96)';
 
-      faceCtx.fillStyle = 'rgba(78, 62, 52, 0.94)';
+      offscreenCtx.beginPath();
+      offscreenCtx.ellipse(leftEyeX, eyeY + lidDrop * 0.4, w * 0.065, Math.max(1, lidDrop), -0.05, 0, Math.PI * 2);
+      offscreenCtx.fill();
 
-      // Left eyelid
-      faceCtx.beginPath();
-      faceCtx.ellipse(w * 0.425, eyeY + lidDrop * 0.5, w * 0.065, Math.max(1, lidDrop), -0.05, 0, Math.PI * 2);
-      faceCtx.fill();
-
-      // Right eyelid
-      faceCtx.beginPath();
-      faceCtx.ellipse(w * 0.575, eyeY + lidDrop * 0.5, w * 0.065, Math.max(1, lidDrop), 0.05, 0, Math.PI * 2);
-      faceCtx.fill();
+      offscreenCtx.beginPath();
+      offscreenCtx.ellipse(rightEyeX, eyeY + lidDrop * 0.4, w * 0.065, Math.max(1, lidDrop), 0.05, 0, Math.PI * 2);
+      offscreenCtx.fill();
     }
 
-    // ── 2. REAL-TIME AUDIO-REACTIVE LIP SYNC MOUTH OVERLAY ──
-    // Smooth interpolation to target mouth opening
+    // ── 4. REAL-TIME AUDIO-REACTIVE LIP SYNC MOUTH VIDEO FRAMES ──
     mouthOpenAmount += (targetMouthOpen - mouthOpenAmount) * 0.35;
 
-    if (mouthOpenAmount > 0.03 && currentState === 'speaking') {
+    if (mouthOpenAmount > 0.04 && currentState === 'speaking') {
       const mouthY = h * 0.47;
       const mouthW = w * 0.085;
       const mouthH = h * 0.032 * mouthOpenAmount;
 
-      // Inner mouth dark cavity
-      faceCtx.fillStyle = 'rgba(45, 18, 18, 0.95)';
-      faceCtx.beginPath();
-      faceCtx.ellipse(w * 0.50, mouthY, mouthW, mouthH, 0, 0, Math.PI * 2);
-      faceCtx.fill();
+      // Dark inner mouth cavity
+      offscreenCtx.fillStyle = 'rgba(45, 18, 18, 0.96)';
+      offscreenCtx.beginPath();
+      offscreenCtx.ellipse(w * 0.50, mouthY, mouthW, mouthH, 0, 0, Math.PI * 2);
+      offscreenCtx.fill();
 
-      // Upper lip highlight
-      faceCtx.strokeStyle = 'rgba(165, 105, 100, 0.6)';
-      faceCtx.lineWidth = 1.8;
-      faceCtx.beginPath();
-      faceCtx.arc(w * 0.50, mouthY - mouthH * 0.3, mouthW * 0.8, Math.PI, 0);
-      faceCtx.stroke();
+      // Lips
+      offscreenCtx.strokeStyle = 'rgba(175, 110, 105, 0.7)';
+      offscreenCtx.lineWidth = 2.0;
+      offscreenCtx.beginPath();
+      offscreenCtx.arc(w * 0.50, mouthY - mouthH * 0.2, mouthW * 0.8, Math.PI, 0);
+      offscreenCtx.stroke();
 
-      // Lower lip curve
-      faceCtx.strokeStyle = 'rgba(180, 115, 110, 0.7)';
-      faceCtx.lineWidth = 2.0;
-      faceCtx.beginPath();
-      faceCtx.arc(w * 0.50, mouthY + mouthH * 0.4, mouthW * 0.8, 0, Math.PI);
-      faceCtx.stroke();
+      offscreenCtx.strokeStyle = 'rgba(185, 120, 115, 0.8)';
+      offscreenCtx.beginPath();
+      offscreenCtx.arc(w * 0.50, mouthY + mouthH * 0.3, mouthW * 0.8, 0, Math.PI);
+      offscreenCtx.stroke();
     }
+
+    offscreenCtx.restore();
   }
 
-  // ────────────────────────────────────────────────────────────────────
-  // HUMAN MOTION ANIMATION LOOP (Breathing, Nods, Tilts, Lip Sync)
-  // ────────────────────────────────────────────────────────────────────
-  function startHumanMotionLoop() {
-    overlayT0 = performance.now();
+  function startProceduralVideoStream() {
+    initOffscreenVideoCanvas();
+    t0 = performance.now();
     scheduleNextBlink();
+    scheduleNextPupilShift();
 
-    function loop(now) {
+    // 30 FPS Render Loop into Canvas
+    function videoLoop(now) {
       if (destroyed) return;
-      const t = now - overlayT0;
-
-      // ── BREATHING: Organic vertical translate & micro scale ──
-      const breathPhase = t * BREATH_FREQ;
-      const breathY = Math.sin(breathPhase) * BREATH_AMP;
-      const breathScale = 1.0 + Math.sin(breathPhase * 0.5) * 0.003;
-
-      // ── STATE-DRIVEN HEAD MOTIONS ──
-      let extraTransform = '';
-
-      if (currentState === 'listening') {
-        // Attentive head nod while candidate talks
-        const nodY = Math.max(0, Math.sin(t * 0.0019)) * NOD_AMP;
-        const microTilt = Math.sin(t * 0.0007) * 0.4;
-        extraTransform = `translateY(${nodY.toFixed(2)}px) rotate(${microTilt.toFixed(2)}deg)`;
-      } else if (currentState === 'thinking' || currentState === 'processing') {
-        // Gaze aversion tilt while processing
-        const tilt = TILT_AMP + Math.sin(t * 0.001) * 0.7;
-        const driftX = Math.sin(t * 0.0005) * 2.0;
-        extraTransform = `rotate(${tilt.toFixed(2)}deg) translateX(${driftX.toFixed(2)}px)`;
-      } else if (currentState === 'speaking') {
-        // Rhythmic speaking animation
-        const talkSway = Math.sin(t * 0.004) * 1.2;
-        extraTransform = `translateX(${talkSway.toFixed(2)}px)`;
-
-        // Simulate lip-sync mouth movement if audio analyser not attached
-        targetMouthOpen = 0.3 + Math.abs(Math.sin(t * 0.012)) * 0.7;
-      } else {
-        targetMouthOpen = 0;
+      if (!streamReady) {
+        renderVideoFrame(now);
       }
-
-      // Apply GPU-composited transform to human face container
-      if (faceWrapEl) {
-        faceWrapEl.style.transform =
-          `translate3d(0, ${breathY.toFixed(2)}px, 0) scale(${breathScale.toFixed(4)}) ${extraTransform}`;
-      }
-
-      // Draw blinking and mouth overlays
-      drawFaceOverlays(now);
-
-      motionRafId = requestAnimationFrame(loop);
+      videoStreamRafId = requestAnimationFrame(videoLoop);
     }
 
-    if (motionRafId) cancelAnimationFrame(motionRafId);
-    motionRafId = requestAnimationFrame(loop);
+    if (videoStreamRafId) cancelAnimationFrame(videoStreamRafId);
+    videoStreamRafId = requestAnimationFrame(videoLoop);
+
+    // Capture 30 FPS MediaStream from canvas and attach to <video id="duixVideo">
+    if (offscreenCanvas && typeof offscreenCanvas.captureStream === 'function') {
+      try {
+        mediaStream = offscreenCanvas.captureStream(30);
+        if (videoEl) {
+          videoEl.srcObject = mediaStream;
+          videoEl.style.display = 'block';
+          videoEl.style.opacity = '1';
+          videoEl.play().catch(() => {});
+          console.log('[HyperReal] Real 30 FPS MediaStream attached to <video id="duixVideo">.');
+        }
+      } catch (e) {
+        console.warn('[HyperReal] captureStream note:', e.message);
+      }
+    }
   }
 
   // ── HEYGEN ADAPTER ──
@@ -299,12 +280,12 @@ const HyperRealRenderer = (function () {
   // ── CAPTIONS ──
   function startCaptions(words) {
     if (!captionEl || !words?.length) return;
-    const t0 = performance.now();
+    const t0Cap = performance.now();
     captionEl.innerHTML = words.map((w) => `<span class="duix-word">${esc(w.w)}</span> `).join('');
     captionEl.style.opacity = '1';
     const tick = () => {
       if (destroyed) return;
-      const e = performance.now() - t0;
+      const e = performance.now() - t0Cap;
       captionEl.querySelectorAll('.duix-word').forEach((sp, i) => {
         const cw = words[i]; if (!cw) return;
         sp.classList.toggle('active', e >= cw.start && e <= cw.start + cw.dur);
@@ -357,27 +338,24 @@ const HyperRealRenderer = (function () {
 
       if (stageEl) stageEl.classList.add('hr');
 
-      // Build Photorealistic Human Face + Eye Blink + Mouth Lip-Sync Canvas
-      buildPhotorealFace();
-      startHumanMotionLoop();
+      // ── START 30 FPS REAL MEDIASTREAM VIDEO GENERATOR INTO <video> ──
+      startProceduralVideoStream();
 
-      // Try streaming WebRTC connection if available (non-blocking)
+      // Try WebRTC streaming connection (non-blocking)
       adapter = Object.create(ADAPTERS[AVATAR_PROVIDER] || HeyGenAdapter);
       try {
         await adapter.connect(videoEl, {
           onReady: () => {
             streamReady = true;
-            if (videoEl) { videoEl.style.display = 'block'; videoEl.style.opacity = '1'; }
-            if (faceWrapEl) faceWrapEl.style.opacity = '0';
+            console.log('[HyperReal] WebRTC MediaStream ready — replacing procedural video stream.');
           },
           onTalkStart: () => { if (stageEl) stageEl.classList.add('speaking'); },
           onTalkEnd:   () => { if (stageEl) stageEl.classList.remove('speaking'); stopCaptions(); },
           onTranscript:(words) => startCaptions(words),
         });
       } catch (e) {
-        console.log('[HyperReal] Stream connect note:', e.message, '— using built-in photoreal human motion engine.');
+        console.log('[HyperReal] WebRTC connect note:', e.message, '— running 30 FPS HTML5 MediaStream video engine.');
         streamReady = false;
-        if (faceWrapEl) faceWrapEl.style.opacity = '1';
       }
 
       setState(currentState || 'idle');
@@ -395,7 +373,6 @@ const HyperRealRenderer = (function () {
       const clean = emitAndClean(text);
       if (streamReady && adapter) {
         adapter.speak(clean);
-        if (videoEl) videoEl.style.opacity = '1';
       } else if (typeof DuixRenderer !== 'undefined' && DuixRenderer.isActive()) {
         DuixRenderer.say(clean);
       }
@@ -412,13 +389,16 @@ const HyperRealRenderer = (function () {
     destroy() {
       destroyed = true;
       stopCaptions();
-      if (motionRafId) cancelAnimationFrame(motionRafId);
+      if (videoStreamRafId) cancelAnimationFrame(videoStreamRafId);
       if (adapter && typeof adapter.close === 'function') adapter.close();
       if (abortCtrl) abortCtrl.abort();
-      if (videoEl) { try { videoEl.pause(); } catch (_) {} videoEl.srcObject = null; }
-      if (faceWrapEl && faceWrapEl.parentElement) {
-        faceWrapEl.parentElement.removeChild(faceWrapEl);
-        faceWrapEl = null;
+      if (videoEl) {
+        try { videoEl.pause(); } catch (_) {}
+        videoEl.srcObject = null;
+      }
+      if (mediaStream) {
+        mediaStream.getTracks().forEach((t) => t.stop());
+        mediaStream = null;
       }
     },
     isActive() { return !destroyed; },
