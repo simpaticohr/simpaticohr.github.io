@@ -2942,9 +2942,10 @@
         state.liveWs = ws;
 
         ws.onopen = () => {
+            const targetQuestions = state.questionsCount || 5;
             const systemPrompt = `You are a professional, polite, and thorough AI technical interviewer at a top technology company.
 You are interviewing a candidate for the role of ${state.role} (experience level: ${state.level}).
-Your goal is to conduct a professional candidate evaluation. Ask exactly 5 technical questions one by one.
+Your goal is to conduct a professional candidate evaluation. Ask exactly ${targetQuestions} technical questions one by one.
 
 Guidelines:
 1. Start the interview by greeting the candidate, introducing yourself briefly, and immediately asking the first question.
@@ -2952,7 +2953,7 @@ Guidelines:
 3. Once the candidate responds, briefly acknowledge their answer, ask a follow-up question if their answer was incomplete/ambiguous, or transition directly to the next question.
 4. Keep your responses, questions, and transitions extremely concise and natural.
 5. Do NOT use markdown, asterisks, bullet points, or JSON formatting in your output. Just output clean, readable conversational English that is suitable for speech synthesis.
-6. Once all 5 questions have been answered, conclude the interview by thanking the candidate, stating that their assessment is being finalized, and say goodbye. Do not ask any more questions.`;
+6. Once all ${targetQuestions} questions have been answered, conclude the interview by thanking the candidate, stating that their assessment is being finalized, and say goodbye. Do not ask any more questions.`;
 
             const setupMsg = {
                 setup: {
@@ -3080,12 +3081,36 @@ Guidelines:
                     
                     // Update progress dynamically based on model turns
                     const modelTurns = state.liveTranscript.filter(t => t.role === 'model').length;
-                    state.currentIndex = Math.min(4, Math.max(0, modelTurns - 1));
+                    const targetQuestions = state.questionsCount || 5;
+                    state.currentIndex = Math.min(targetQuestions - 1, Math.max(0, modelTurns - 1));
                     updateProgress();
                     document.getElementById('q-number').textContent = `Q${state.currentIndex + 1}`;
 
                     state.aiSpokenTextBuffer = '';
                     state.aiSpeakingActive = false;
+
+                    // If we have completed the final turn, wait for audio queue to finish playing, then terminate!
+                    if (modelTurns >= targetQuestions) {
+                        console.log("Reached target question count. Stopping mic stream and waiting for final playback to finish...");
+                        stopMicStreaming();
+                        
+                        // Disable the end button to show it is finalizing
+                        const finishBtn = document.getElementById('btn-voice-finish');
+                        if (finishBtn) {
+                            finishBtn.disabled = true;
+                            finishBtn.textContent = '⌛ Finalizing Report...';
+                        }
+                        
+                        // Check periodically for audio queue to drain
+                        const checkInterval = setInterval(() => {
+                            if (audioQueue.length === 0) {
+                                clearInterval(checkInterval);
+                                console.log("Audio queue empty. Terminating voice session...");
+                                finishLiveVoiceInterview();
+                            }
+                        }, 250);
+                        return;
+                    }
 
                     avatarStage.className = 'avatar-stage listening';
                     if (window.aiAvatar) {
@@ -3901,6 +3926,7 @@ Guidelines:
             state.role = role;
             state.level = level;
             state.questions = [];
+            state.questionsCount = count || 5;
             state.currentIndex = 0;
             state.answers = [];
             state.voiceMode = true;
