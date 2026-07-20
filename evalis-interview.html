@@ -1416,7 +1416,7 @@
                             <span style="font-size:1rem">🔑</span>
                             <div>
                                 <div style="font-size:0.88rem;font-weight:700;color:#fff">AI Voice & Streaming Avatar API Keys</div>
-                                <div style="font-size:0.75rem;color:var(--text-muted)">Configure Google Gemini Voice & HeyGen / Tavus / D-ID Avatar Service Keys</div>
+                                <div style="font-size:0.75rem;color:var(--text-muted)">Configure Google Gemini Voice & HeyGen / Tavus / D-ID / Simli Avatar Service Keys</div>
                             </div>
                         </div>
                         <span id="byok-arrow" style="color:var(--text-muted);font-size:0.85rem;transition:transform 0.2s">▼</span>
@@ -1439,8 +1439,9 @@
                         <div class="form-row" style="margin-top:0.8rem;">
                             <div class="form-group">
                                 <label class="form-label" for="avatar-provider-select">Human Avatar Service</label>
-                                <select id="avatar-provider-select" class="form-select">
+                                <select id="avatar-provider-select" class="form-select" onchange="onAvatarProviderKeyChange()">
                                     <option value="heygen" selected>HeyGen Streaming Avatar API</option>
+                                    <option value="simli">Simli Avatar API</option>
                                     <option value="tavus">Tavus CVI API</option>
                                     <option value="did">D-ID Streaming API</option>
                                     <option value="selfhost">Self-Hosted WebRTC GPU Server</option>
@@ -1448,7 +1449,7 @@
                             </div>
                             <div class="form-group">
                                 <label class="form-label" for="avatar-key-input">Avatar API Key</label>
-                                <input type="password" id="avatar-key-input" class="form-input" placeholder="Paste HeyGen / Tavus / D-ID API key..." oninput="saveAvatarKey()">
+                                <input type="password" id="avatar-key-input" class="form-input" placeholder="Paste HeyGen / Simli / Tavus / D-ID API key..." oninput="saveAvatarKey()">
                             </div>
                         </div>
 
@@ -2174,9 +2175,38 @@
     }
 
     function saveAvatarKey() {
+        const provider = document.getElementById('avatar-provider-select')?.value || 'heygen';
         const key = document.getElementById('avatar-key-input')?.value?.trim() || '';
         localStorage.setItem('evalis_avatar_key', key);
-        localStorage.setItem('evalis_heygen_key', key);
+        localStorage.setItem(`evalis_${provider}_key`, key);
+        if (provider === 'heygen') {
+            localStorage.setItem('evalis_heygen_key', key);
+        } else if (provider === 'simli') {
+            localStorage.setItem('evalis_simli_key', key);
+            localStorage.setItem('simli_api_key', key);
+        }
+    }
+
+    function onAvatarProviderKeyChange() {
+        const provider = document.getElementById('avatar-provider-select')?.value || 'heygen';
+        const savedKey = localStorage.getItem(`evalis_${provider}_key`) || 
+                          (provider === 'heygen' ? localStorage.getItem('evalis_heygen_key') : '') ||
+                          (provider === 'simli' ? localStorage.getItem('evalis_simli_key') : '') || '';
+        const keyInput = document.getElementById('avatar-key-input');
+        if (keyInput) {
+            keyInput.value = savedKey;
+        }
+
+        const statusEl = document.getElementById('avatar-conn-status');
+        if (statusEl) {
+            if (savedKey) {
+                statusEl.innerHTML = `🔑 ${provider.toUpperCase()} Key Loaded & Active`;
+                statusEl.style.color = '#60a5fa';
+            } else {
+                statusEl.innerHTML = 'Status: Offline / Local Motion Engine';
+                statusEl.style.color = 'var(--text-muted)';
+            }
+        }
     }
 
     async function saveAndConnectAvatarService() {
@@ -2188,13 +2218,21 @@
             statusEl.style.color = 'var(--accent-amber)';
         }
 
-        const avatarProvider = document.getElementById('avatar-provider-select')?.value || 'heygen';
-        const userAvatarKey = localStorage.getItem('evalis_heygen_key') || '';
+        const provider = document.getElementById('avatar-provider-select')?.value || 'heygen';
+        const userAvatarKey = localStorage.getItem(`evalis_${provider}_key`) || '';
+
+        if (provider === 'simli') {
+            if (statusEl) {
+                statusEl.innerHTML = '✅ Simli Avatar API Key Saved & Active!';
+                statusEl.style.color = '#34d399';
+            }
+            return;
+        }
 
         try {
             const endpoints = [
-                `/api/avatar/session/${avatarProvider}`,
-                `http://localhost:8790/api/avatar/session/${avatarProvider}`
+                `/api/avatar/session/${provider}`,
+                `http://localhost:8790/api/avatar/session/${provider}`
             ];
             let r = null;
             for (const ep of endpoints) {
@@ -2210,12 +2248,12 @@
 
             if (r && (r.ok || r.status === 200)) {
                 if (statusEl) {
-                    statusEl.innerHTML = '✅ Avatar Service Connected & Token Minted!';
+                    statusEl.innerHTML = `✅ ${provider.toUpperCase()} Connection Verified!`;
                     statusEl.style.color = '#34d399';
                 }
             } else if (userAvatarKey) {
                 if (statusEl) {
-                    statusEl.innerHTML = '🔑 Avatar API Key Saved & Active (Token Server Ready)';
+                    statusEl.innerHTML = `🔑 ${provider.toUpperCase()} Key Saved & Active`;
                     statusEl.style.color = '#60a5fa';
                 }
             } else {
@@ -2234,18 +2272,12 @@
 
     window.addEventListener('DOMContentLoaded', () => {
         const savedGeminiKey = localStorage.getItem('byok_key') || localStorage.getItem('evalis_byok_gemini_key') || '';
-        const savedAvatarKey = localStorage.getItem('evalis_heygen_key') || localStorage.getItem('evalis_avatar_key') || '';
         if (savedGeminiKey && document.getElementById('byok-key')) {
             document.getElementById('byok-key').value = savedGeminiKey;
         }
-        if (savedAvatarKey && document.getElementById('avatar-key-input')) {
-            document.getElementById('avatar-key-input').value = savedAvatarKey;
-            const statusEl = document.getElementById('avatar-conn-status');
-            if (statusEl) {
-                statusEl.innerHTML = '🔑 Avatar API Key Active';
-                statusEl.style.color = '#60a5fa';
-            }
-        }
+        
+        // Load initial key based on selected provider
+        onAvatarProviderKeyChange();
     });
 
     function getByokHeaders() {
