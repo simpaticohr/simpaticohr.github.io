@@ -291,15 +291,21 @@ app.post('/api/avatar/session/:provider', async (req, res) => {
       base.external.conversationUrl = body.conversation_url;
 
     } else if (p === 'did') {
-      const { body } = await upstream('https://api.d-id.com/talks', {
+      const activeKey = getKey('did', req);
+      const { body } = await upstream('https://api.d-id.com/talks/streams', {
         method: 'POST',
-        headers: { Authorization: `Basic ${Buffer.from(C.did.key + ':').toString('base64')}`, 'Content-Type': 'application/json' },
+        headers: {
+          Authorization: `Basic ${Buffer.from(activeKey + ':').toString('base64')}`,
+          'Content-Type': 'application/json'
+        },
         body: JSON.stringify({
-          source_url: C.did.sourceUrl, stream: true,
-          script: { type: 'text', input: ' ', provider: { type: 'microsoft', voice_id: C.did.voiceId } },
-        }),
-      }, { tag: 'did.create' });
-      base.external.talk = body;
+          source_url: C.did.sourceUrl || 'https://d-id-public-bucket.s3.amazonaws.com/alice.png'
+        })
+      }, { tag: 'did.create_stream' });
+      base.external.streamId = body.id;
+      base.external.offer = body.offer;
+      base.external.iceServers = body.ice_servers;
+      base.external.sessionId = body.session_id;
 
     } else if (p === 'selfhost') {
       const { body } = await upstream(`${C.selfhost.signalUrl}/reserve`, {
@@ -331,14 +337,86 @@ app.post('/api/avatar/session/selfhost/ice', async (req, res) => {
   res.json({ ok: true });
 });
 
+// ── D-ID WebRTC answer + ICE trickle + speak ─────────────────
+app.post('/api/avatar/session/did/answer', async (req, res) => {
+  const s = touch(req.body?.sessionId); if (!s) return res.status(404).json({ error: 'no session' });
+  const activeKey = getKey('did', req);
+  try {
+    await upstream(`https://api.d-id.com/talks/streams/${s.external.streamId}/sdp`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Basic ${Buffer.from(activeKey + ':').toString('base64')}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        answer: req.body.answer,
+        session_id: s.external.sessionId
+      })
+    }, { retries: 1, tag: 'did.send_sdp' });
+    res.json({ ok: true });
+  } catch (e) { sendUpstreamErr(res, e); }
+});
+
+app.post('/api/avatar/session/did/ice', async (req, res) => {
+  const s = touch(req.body?.sessionId); if (!s) return res.status(404).json({ error: 'no session' });
+  const activeKey = getKey('did', req);
+  try {
+    await upstream(`https://api.d-id.com/talks/streams/${s.external.streamId}/ice`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Basic ${Buffer.from(activeKey + ':').toString('base64')}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        candidate: req.body.candidate.candidate || req.body.candidate,
+        sdpMid: req.body.candidate.sdpMid,
+        sdpMLineIndex: req.body.candidate.sdpMLineIndex,
+        session_id: s.external.sessionId
+      })
+    }, { retries: 1, tag: 'did.send_ice' });
+    res.json({ ok: true });
+  } catch (e) {}
+});
+
+app.post('/api/avatar/session/did/speak', async (req, res) => {
+  const s = touch(req.body?.sessionId); if (!s) return res.status(404).json({ error: 'no session' });
+  const activeKey = getKey('did', req);
+  try {
+    await upstream(`https://api.d-id.com/talks/streams/${s.external.streamId}`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Basic ${Buffer.from(activeKey + ':').toString('base64')}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        script: {
+          type: 'text',
+          input: req.body.text || ' ',
+          provider: { type: 'microsoft', voice_id: C.did.voiceId || 'en-US-AriaNeural' }
+        },
+        session_id: s.external.sessionId
+      })
+    }, { retries: 1, tag: 'did.speak' });
+    res.json({ ok: true });
+  } catch (e) { sendUpstreamErr(res, e); }
+});
+
 // ── END SESSION ──────────────────────────────────
 app.post('/api/avatar/session/:provider/end', async (req, res) => {
   const s = touch(req.body?.sessionId); if (!s) return res.json({ ok: true, note: 'already gone' });
+  const activeKey = getKey(s.provider, req);
   try {
     if (s.provider === 'tavus' && s.external.conversationId)
       await upstream(`https://api.tavus.io/v2/conversations/${s.external.conversationId}/end`, { method: 'POST', headers: { 'x-api-key': C.tavus.key } }, { retries: 1 }).catch(() => {});
-    else if (s.provider === 'did' && s.external.talk?.id)
-      await upstream(`https://api.d-id.com/talks/${s.external.talk.id}`, { method: 'DELETE', headers: { Authorization: `Basic ${Buffer.from(C.did.key + ':').toString('base64')}` } }, { retries: 1 }).catch(() => {});
+    else if (s.provider === 'did' && s.external.streamId)
+      await upstream(`https://api.d-id.com/talks/streams/${s.external.streamId}`, {
+        method: 'DELETE',
+        headers: {
+          Authorization: `Basic ${Buffer.from(activeKey + ':').toString('base64')}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ session_id: s.external.sessionId })
+      }, { retries: 1 }).catch(() => {});
     else if (s.provider === 'selfhost')
       fetch(`${C.selfhost.signalUrl}/release`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: s.id }) }).catch(() => {});
   } finally { sessions.delete(s.id); metrics.sessions_ended++; }

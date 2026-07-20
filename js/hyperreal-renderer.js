@@ -307,7 +307,246 @@ const HyperRealRenderer = (function () {
     async close()     { try { await this.sa?.endSession?.(); } catch (_) {} this.sa = null; },
   };
 
-  const ADAPTERS = { heygen: HeyGenAdapter };
+  // ── D-ID ADAPTER ──
+  const DIdAdapter = {
+    pc: null,
+    sessionId: null,
+    streamId: null,
+    async connect(videoEl, hooks) {
+      const userAvatarKey = localStorage.getItem('evalis_avatar_key') || localStorage.getItem('evalis_did_key') || localStorage.getItem('evalis_heygen_key') || '';
+      let r;
+      const endpoints = [
+        sessionApi + '/did',
+        'http://localhost:8790' + sessionApi + '/did',
+        'http://127.0.0.1:8790' + sessionApi + '/did'
+      ];
+      let lastFetchErr;
+      for (const ep of endpoints) {
+        try {
+          r = await fetch(ep, {
+            method: 'POST',
+            signal: abortCtrl ? abortCtrl.signal : undefined,
+            headers: { 'Content-Type': 'application/json', 'X-Avatar-Key': userAvatarKey },
+            body: JSON.stringify({ apiKey: userAvatarKey })
+          });
+          if (r.ok) break;
+        } catch (e) {
+          lastFetchErr = e;
+        }
+      }
+      if (!r || !r.ok) throw new Error('D-ID session ' + (r ? r.status : (lastFetchErr ? lastFetchErr.message : 'failed')));
+      const data = await r.json();
+
+      this.streamId = data.streamId;
+      this.sessionId = data.sessionId;
+      const { offer, iceServers } = data;
+
+      // Setup WebRTC connection
+      this.pc = new RTCPeerConnection({ iceServers });
+      this.pc.ontrack = (event) => {
+        if (event.track.kind === 'video' && videoEl) {
+          videoEl.srcObject = event.streams[0];
+          hooks.onReady();
+        }
+      };
+
+      this.pc.onicecandidate = async (event) => {
+        if (event.candidate) {
+          const iceEndpoints = [
+            '/api/avatar/session/did/ice',
+            'http://localhost:8790/api/avatar/session/did/ice'
+          ];
+          for (const iceEp of iceEndpoints) {
+            try {
+              await fetch(iceEp, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-Avatar-Key': userAvatarKey },
+                body: JSON.stringify({ sessionId: this.sessionId, candidate: event.candidate })
+              });
+            } catch (e) {}
+          }
+        }
+      };
+
+      await this.pc.setRemoteDescription(offer);
+      const answer = await this.pc.createAnswer();
+      await this.pc.setLocalDescription(answer);
+
+      // Send SDP answer to D-ID
+      const answerEndpoints = [
+        '/api/avatar/session/did/answer',
+        'http://localhost:8790/api/avatar/session/did/answer'
+      ];
+      for (const ansEp of answerEndpoints) {
+        try {
+          await fetch(ansEp, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-Avatar-Key': userAvatarKey },
+            body: JSON.stringify({ sessionId: this.sessionId, answer })
+          });
+        } catch (e) {}
+      }
+    },
+    async speak(text) {
+      const userAvatarKey = localStorage.getItem('evalis_avatar_key') || localStorage.getItem('evalis_did_key') || localStorage.getItem('evalis_heygen_key') || '';
+      const speakEndpoints = [
+        '/api/avatar/session/did/speak',
+        'http://localhost:8790/api/avatar/session/did/speak'
+      ];
+      for (const spEp of speakEndpoints) {
+        try {
+          await fetch(spEp, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-Avatar-Key': userAvatarKey },
+            body: JSON.stringify({ sessionId: this.sessionId, text })
+          });
+        } catch (e) {}
+      }
+    },
+    interrupt() {},
+    setExpression(e) {},
+    triggerGesture(g) {},
+    feedAudio(int16Buf) {},
+    flush() {},
+    async close() {
+      if (this.pc) {
+        this.pc.close();
+        this.pc = null;
+      }
+      const userAvatarKey = localStorage.getItem('evalis_avatar_key') || localStorage.getItem('evalis_did_key') || localStorage.getItem('evalis_heygen_key') || '';
+      const endEndpoints = [
+        `/api/avatar/session/did/end`,
+        `http://localhost:8790/api/avatar/session/did/end`
+      ];
+      for (const endEp of endEndpoints) {
+        try {
+          await fetch(endEp, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-Avatar-Key': userAvatarKey },
+            body: JSON.stringify({ sessionId: this.sessionId })
+          });
+        } catch (e) {}
+      }
+    }
+  };
+
+  // ── TAVUS ADAPTER ──
+  const TavusAdapter = {
+    iframe: null,
+    sessionId: null,
+    async connect(videoEl, hooks) {
+      const userAvatarKey = localStorage.getItem('evalis_avatar_key') || localStorage.getItem('evalis_tavus_key') || localStorage.getItem('evalis_heygen_key') || '';
+      let r;
+      const endpoints = [
+        sessionApi + '/tavus',
+        'http://localhost:8790' + sessionApi + '/tavus'
+      ];
+      for (const ep of endpoints) {
+        try {
+          r = await fetch(ep, {
+            method: 'POST',
+            signal: abortCtrl ? abortCtrl.signal : undefined,
+            headers: { 'Content-Type': 'application/json', 'X-Avatar-Key': userAvatarKey },
+            body: JSON.stringify({ apiKey: userAvatarKey })
+          });
+          if (r.ok) break;
+        } catch (e) {}
+      }
+      if (!r || !r.ok) throw new Error('Tavus session connection failed');
+      const data = await r.json();
+
+      this.sessionId = data.sessionId;
+      const { conversationUrl } = data;
+
+      this.iframe = document.createElement('iframe');
+      this.iframe.src = conversationUrl;
+      this.iframe.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;border:0;border-radius:inherit;z-index:5;';
+      const frame = stageEl.querySelector('.avatar-frame') || stageEl;
+      frame.appendChild(this.iframe);
+
+      if (videoEl) videoEl.style.display = 'none';
+      hooks.onReady();
+    },
+    speak(text) {},
+    interrupt() {},
+    setExpression(e) {},
+    triggerGesture(g) {},
+    feedAudio(int16Buf) {},
+    flush() {},
+    async close() {
+      if (this.iframe && this.iframe.parentElement) {
+        this.iframe.parentElement.removeChild(this.iframe);
+        this.iframe = null;
+      }
+      const userAvatarKey = localStorage.getItem('evalis_avatar_key') || localStorage.getItem('evalis_tavus_key') || localStorage.getItem('evalis_heygen_key') || '';
+      try {
+        await fetch(`/api/avatar/session/tavus/end`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Avatar-Key': userAvatarKey },
+          body: JSON.stringify({ sessionId: this.sessionId })
+        });
+      } catch (e) {}
+    }
+  };
+
+  // ── SELFHOST ADAPTER ──
+  const SelfHostAdapter = {
+    pc: null,
+    sessionId: null,
+    async connect(videoEl, hooks) {
+      let r = await fetch(sessionApi + '/selfhost', { method: 'POST', headers: { 'Content-Type': 'application/json' } });
+      if (!r.ok) r = await fetch('http://localhost:8790' + sessionApi + '/selfhost', { method: 'POST', headers: { 'Content-Type': 'application/json' } });
+      if (!r || !r.ok) throw new Error('SelfHost connection failed');
+      const data = await r.json();
+
+      this.sessionId = data.sessionId;
+      const { offer } = data;
+
+      this.pc = new RTCPeerConnection();
+      this.pc.ontrack = (event) => {
+        if (event.track.kind === 'video' && videoEl) {
+          videoEl.srcObject = event.streams[0];
+          hooks.onReady();
+        }
+      };
+
+      this.pc.onicecandidate = async (event) => {
+        if (event.candidate) {
+          await fetch('/api/avatar/session/selfhost/ice', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ sessionId: this.sessionId, candidate: event.candidate })
+          }).catch(() => {});
+        }
+      };
+
+      await this.pc.setRemoteDescription(offer);
+      const answer = await this.pc.createAnswer();
+      await this.pc.setLocalDescription(answer);
+
+      await fetch('/api/avatar/session/selfhost/answer', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId: this.sessionId, answer })
+      }).catch(() => {});
+    },
+    speak(text) {},
+    interrupt() {},
+    setExpression(e) {},
+    triggerGesture(g) {},
+    feedAudio(int16Buf) {},
+    flush() {},
+    async close() {
+      if (this.pc) this.pc.close();
+      await fetch('/api/avatar/session/selfhost/end', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId: this.sessionId })
+      }).catch(() => {});
+    }
+  };
+
+  const ADAPTERS = { heygen: HeyGenAdapter, did: DIdAdapter, tavus: TavusAdapter, selfhost: SelfHostAdapter };
 
   // ── CAPTIONS ──
   function startCaptions(words) {
