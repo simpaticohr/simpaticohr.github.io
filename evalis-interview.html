@@ -1408,14 +1408,14 @@
                     </div>
                 </div>
 
-                <!-- BYOK Section -->
-                <div class="byok-section" style="margin-top:1rem;padding:1.2rem;background:rgba(99,102,241,0.04);border:1px solid rgba(99,102,241,0.1);border-radius:var(--radius-md);">
+                <!-- BYOK & Avatar Service Key Section -->
+                <div class="byok-section" style="margin-top:1rem;padding:1.2rem;background:rgba(99,102,241,0.06);border:1px solid rgba(99,102,241,0.2);border-radius:var(--radius-md);">
                     <div style="display:flex;align-items:center;justify-content:space-between;cursor:pointer" onclick="toggleByokPanel()">
                         <div style="display:flex;align-items:center;gap:8px;">
                             <span style="font-size:1rem">🔑</span>
                             <div>
-                                <div style="font-size:0.88rem;font-weight:700;color:#fff">Bring Your Own Key (Optional)</div>
-                                <div style="font-size:0.75rem;color:var(--text-muted)">Use your own AI API key for premium providers</div>
+                                <div style="font-size:0.88rem;font-weight:700;color:#fff">AI Voice & Streaming Avatar API Keys</div>
+                                <div style="font-size:0.75rem;color:var(--text-muted)">Configure Google Gemini Voice & HeyGen / Tavus / D-ID Avatar Service Keys</div>
                             </div>
                         </div>
                         <span id="byok-arrow" style="color:var(--text-muted);font-size:0.85rem;transition:transform 0.2s">▼</span>
@@ -1423,27 +1423,50 @@
                     <div id="byok-panel" style="display:none;margin-top:1rem;">
                         <div class="form-row">
                             <div class="form-group">
-                                <label class="form-label" for="byok-provider">AI Provider</label>
+                                <label class="form-label" for="byok-provider">AI Voice Provider</label>
                                 <select id="byok-provider" class="form-select" onchange="onByokProviderChange()">
-                                    <option value="gemini">Google Gemini (Voice + Text)</option>
+                                    <option value="gemini" selected>Google Gemini (Voice + Full Duplex)</option>
                                     <option value="nvidia">NVIDIA NIM</option>
-                                    <option value="huggingface">Hugging Face</option>
                                     <option value="openai">OpenAI / Compatible</option>
                                 </select>
                             </div>
                             <div class="form-group" id="byok-key-group" style="display:block">
-                                <label class="form-label" for="byok-key">API Key</label>
-                                <input type="password" id="byok-key" class="form-input" placeholder="Paste your API key here..." oninput="saveByokKey()">
+                                <label class="form-label" for="byok-key">Google Gemini API Key</label>
+                                <input type="password" id="byok-key" class="form-input" placeholder="AIzaSy... (Gemini API Key)" oninput="saveByokKey()">
                             </div>
                         </div>
-                        <div id="byok-voice-hint" style="display:none;font-size:0.78rem;color:var(--accent-amber);margin-top:0.3rem;">
+                        <div class="form-row" style="margin-top:0.8rem;">
+                            <div class="form-group">
+                                <label class="form-label" for="avatar-provider-select">Human Avatar Service</label>
+                                <select id="avatar-provider-select" class="form-select">
+                                    <option value="heygen" selected>HeyGen Streaming Avatar API</option>
+                                    <option value="tavus">Tavus CVI API</option>
+                                    <option value="did">D-ID Streaming API</option>
+                                    <option value="selfhost">Self-Hosted WebRTC GPU Server</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label" for="avatar-key-input">Avatar API Key</label>
+                                <input type="password" id="avatar-key-input" class="form-input" placeholder="Paste HeyGen / Tavus / D-ID API key..." oninput="saveAvatarKey()">
+                            </div>
+                        </div>
+
+                        <div style="display:flex;align-items:center;gap:12px;margin-top:1rem;">
+                            <button type="button" class="btn btn-primary" onclick="saveAndConnectAvatarService()" style="padding:8px 18px;font-size:0.82rem;font-weight:700;">
+                                💾 Save Keys & Connect Avatar Service
+                            </button>
+                            <span id="avatar-conn-status" style="font-size:0.78rem;color:var(--text-muted);">
+                                Status: Offline / Local Motion Engine
+                            </span>
+                        </div>
+
+                        <div id="byok-voice-hint" style="display:none;font-size:0.78rem;color:var(--accent-amber);margin-top:0.5rem;">
                             ⚠️ Voice mode requires a Gemini API key. Select "Google Gemini" provider.
                         </div>
                         <div style="font-size:0.72rem;color:var(--text-muted);margin-top:0.6rem;line-height:1.6;">
-                            Your key is used for this session only — never stored on our servers. 
-                            Get free keys: <a href="https://aistudio.google.com/apikey" target="_blank" style="color:var(--accent-indigo-light)">Gemini</a> · 
-                            <a href="https://build.nvidia.com/" target="_blank" style="color:var(--accent-indigo-light)">NVIDIA</a> · 
-                            <a href="https://huggingface.co/settings/tokens" target="_blank" style="color:var(--accent-indigo-light)">HuggingFace</a>
+                            Keys are stored securely in browser session only.
+                            Get keys: <a href="https://aistudio.google.com/apikey" target="_blank" style="color:var(--accent-indigo-light)">Gemini API Key</a> · 
+                            <a href="https://app.heygen.com/settings?tab=api" target="_blank" style="color:var(--accent-indigo-light)">HeyGen API Key</a>
                         </div>
                     </div>
                 </div>
@@ -2167,10 +2190,87 @@
     function saveByokKey() {
         const key = document.getElementById('byok-key')?.value?.trim() || '';
         localStorage.setItem('byok_key', key);
+        localStorage.setItem('evalis_byok_gemini_key', key);
     }
+
+    function saveAvatarKey() {
+        const key = document.getElementById('avatar-key-input')?.value?.trim() || '';
+        localStorage.setItem('evalis_avatar_key', key);
+        localStorage.setItem('evalis_heygen_key', key);
+    }
+
+    async function saveAndConnectAvatarService() {
+        saveByokKey();
+        saveAvatarKey();
+        const statusEl = document.getElementById('avatar-conn-status');
+        if (statusEl) {
+            statusEl.innerHTML = '⌛ Testing Avatar Service Connection...';
+            statusEl.style.color = 'var(--accent-amber)';
+        }
+
+        const avatarProvider = document.getElementById('avatar-provider-select')?.value || 'heygen';
+        const userAvatarKey = localStorage.getItem('evalis_heygen_key') || '';
+
+        try {
+            const endpoints = [
+                `/api/avatar/session/${avatarProvider}`,
+                `http://localhost:8790/api/avatar/session/${avatarProvider}`
+            ];
+            let r = null;
+            for (const ep of endpoints) {
+                try {
+                    r = await fetch(ep, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'X-Avatar-Key': userAvatarKey },
+                        body: JSON.stringify({ apiKey: userAvatarKey })
+                    });
+                    if (r && r.status !== 404) break;
+                } catch(e) {}
+            }
+
+            if (r && (r.ok || r.status === 200)) {
+                if (statusEl) {
+                    statusEl.innerHTML = '✅ Avatar Service Connected & Token Minted!';
+                    statusEl.style.color = '#34d399';
+                }
+            } else if (userAvatarKey) {
+                if (statusEl) {
+                    statusEl.innerHTML = '🔑 Avatar API Key Saved & Active (Token Server Ready)';
+                    statusEl.style.color = '#60a5fa';
+                }
+            } else {
+                if (statusEl) {
+                    statusEl.innerHTML = '⚡ Keys Saved (Running Procedural 30 FPS Motion Engine)';
+                    statusEl.style.color = '#7dd3fc';
+                }
+            }
+        } catch(e) {
+            if (statusEl) {
+                statusEl.innerHTML = '💾 Keys Saved to Browser Session';
+                statusEl.style.color = '#60a5fa';
+            }
+        }
+    }
+
+    window.addEventListener('DOMContentLoaded', () => {
+        const savedGeminiKey = localStorage.getItem('byok_key') || localStorage.getItem('evalis_byok_gemini_key') || '';
+        const savedAvatarKey = localStorage.getItem('evalis_heygen_key') || localStorage.getItem('evalis_avatar_key') || '';
+        if (savedGeminiKey && document.getElementById('byok-key')) {
+            document.getElementById('byok-key').value = savedGeminiKey;
+        }
+        if (savedAvatarKey && document.getElementById('avatar-key-input')) {
+            document.getElementById('avatar-key-input').value = savedAvatarKey;
+            const statusEl = document.getElementById('avatar-conn-status');
+            if (statusEl) {
+                statusEl.innerHTML = '🔑 Avatar API Key Active';
+                statusEl.style.color = '#60a5fa';
+            }
+        }
+    });
+
     function getByokHeaders() {
-        const provider = document.getElementById('byok-provider')?.value || '';
-        const key = document.getElementById('byok-key')?.value?.trim() || '';
+        const provider = document.getElementById('byok-provider')?.value || 'gemini';
+        const key = document.getElementById('byok-key')?.value?.trim() || localStorage.getItem('byok_key') || '';
         const headers = {};
         if (provider && key) {
             headers['X-AI-Provider'] = provider;

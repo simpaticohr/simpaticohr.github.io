@@ -245,10 +245,18 @@ const HyperRealRenderer = (function () {
         'http://localhost:8790' + sessionApi + '/' + provider,
         'http://127.0.0.1:8790' + sessionApi + '/' + provider
       ];
-      let lastFetchErr;
+      const userAvatarKey = localStorage.getItem('evalis_avatar_key') || localStorage.getItem('evalis_heygen_key') || '';
       for (const ep of endpoints) {
         try {
-          r = await fetch(ep, { method: 'POST', signal: abortCtrl ? abortCtrl.signal : undefined, headers: { 'Content-Type': 'application/json' } });
+          r = await fetch(ep, {
+            method: 'POST',
+            signal: abortCtrl ? abortCtrl.signal : undefined,
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Avatar-Key': userAvatarKey
+            },
+            body: JSON.stringify({ apiKey: userAvatarKey })
+          });
           if (r.ok) break;
         } catch (e) {
           lastFetchErr = e;

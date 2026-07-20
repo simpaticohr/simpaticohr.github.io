@@ -239,11 +239,23 @@ app.get('/api/avatar/persona/:id', (req, res) => {
   res.json({ id: req.params.id, ...personaFor(p, req.query.role) });
 });
 
+const getKey = (p, req) => {
+  const reqKey = req ? (req.headers['x-avatar-key'] || req.headers[`x-${p}-key`] || (req.body && req.body.apiKey)) : '';
+  return reqKey || C[p]?.key || '';
+};
+
+const enabledReq = (p, req) =>
+  (p === 'heygen' && !!getKey('heygen', req)) ||
+  (p === 'tavus'  && !!getKey('tavus', req) && !!C.tavus.replicaId && !!C.tavus.personaId) ||
+  (p === 'did'    && !!getKey('did', req)) ||
+  (p === 'selfhost' && !!C.selfhost.signalUrl);
+
 // ── CREATE SESSION ──────
 app.post('/api/avatar/session/:provider', async (req, res) => {
   const p = req.params.provider;
   if (!CAPS[p]) return res.status(404).json({ error: 'unknown provider' });
-  if (!enabled(p)) return res.status(503).json({ error: `provider ${p} not configured on server` });
+  const activeKey = getKey(p, req);
+  if (!enabledReq(p, req)) return res.status(503).json({ error: `provider ${p} API key not configured on server or request` });
   const ip = req.ip || 'na';
   if (liveCountByIp(ip) >= C.maxConcurPerIp) return res.status(429).json({ error: 'too many concurrent avatar sessions' });
 
@@ -260,7 +272,7 @@ app.post('/api/avatar/session/:provider', async (req, res) => {
     if (p === 'heygen') {
       const { body } = await upstream('https://api.heygen.com/v2/streaming/create_token', {
         method: 'POST',
-        headers: { 'X-Api-Key': C.heygen.key, 'Content-Type': 'application/json' },
+        headers: { 'X-Api-Key': activeKey, 'Content-Type': 'application/json' },
         body: JSON.stringify({}),
       }, { tag: 'heygen.create_token' });
       base.external.token = body?.data?.token ?? body?.token;
