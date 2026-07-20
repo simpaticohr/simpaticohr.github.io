@@ -1,162 +1,160 @@
 /**
- * Evalis AI — Simli Avatar Adapter (Plug-in Architecture)
- * 
- * This adapter provides a standard interface to integrate Simli's
- * real-time avatar rendering with the Evalis interview platform.
- * 
- * Currently: Architecture only (ready to plug in when Simli API key is available)
- * 
- * Integration flow:
- *   1. User selects "Human Avatar (Simli)" in setup screen
- *   2. SimliAdapter.init() loads the Simli SDK dynamically
- *   3. Audio PCM chunks from Gemini are routed to Simli for lip-sync
- *   4. Simli renders a video stream in #simli-video
- *   5. WebGL orb is hidden, video container is shown
- * 
- * Usage:
- *   const simli = new SimliAdapter({ apiKey: '...', faceId: '...' });
- *   await simli.init(document.getElementById('simli-video'));
- *   simli.sendAudio(pcmBase64);  // Route AI audio to Simli
- *   simli.destroy();
+ * SimliAdapter v2.0 — Production-grade Simli Avatar Integration Adapter.
+ *
+ * Implements the standard renderer contract:
+ *   - init()
+ *   - mode()
+ *   - getState()
+ *   - onState(s)
+ *   - say(text)
+ *   - primeCache(clips)
+ *   - setCaptions(text, words)
+ *   - feedAudio(int16Buf)
+ *   - destroy()
+ *   - isActive()
  */
+const SimliAdapter = (function () {
+  'use strict';
 
-class SimliAdapter {
-    constructor(options = {}) {
-        this.apiKey = options.apiKey || null;
-        this.faceId = options.faceId || 'default_female_01';
-        this.videoElement = null;
-        this.client = null;
-        this.ready = false;
-        this.fallbackToOrb = true;
-    }
+  const $ = (id) => document.getElementById(id);
+  let stageEl, videoEl, containerEl, orbEl, captionEl;
+  let client = null;
+  let ready = false;
+  let currentState = 'idle';
+  let destroyed = false;
 
-    /**
-     * Initialize Simli SDK and set up the video stream
-     * @param {HTMLVideoElement} videoEl — the <video> element to render into
-     * @returns {boolean} — true if Simli initialized, false if fallback to orb
-     */
-    async init(videoEl) {
-        if (!this.apiKey) {
-            console.warn('[SimliAdapter] No API key provided. Falling back to WebGL orb.');
-            return false;
+  const SDK_URL = 'https://cdn.simli.com/sdk/simli-client.min.js';
+
+  function _loadScript(src) {
+    return new Promise((resolve, reject) => {
+      if (window.SimliClient) return resolve();
+      const script = document.createElement('script');
+      script.src = src;
+      script.onload = resolve;
+      script.onerror = reject;
+      document.head.appendChild(script);
+    });
+  }
+
+  return {
+    async init() {
+      destroyed = false;
+      stageEl = $('avatar-stage');
+      videoEl = $('simli-video');
+      containerEl = $('simli-avatar');
+      orbEl = $('ai-avatar-canvas');
+      captionEl = $('duix-captions');
+
+      const apiKey = localStorage.getItem('evalis_simli_key') || localStorage.getItem('simli_api_key') || '';
+      const faceId = localStorage.getItem('evalis_simli_face_id') || localStorage.getItem('simli_face_id') || 'default_female_01';
+
+      if (!apiKey) {
+        console.warn('[SimliAdapter] No API key configured. Cannot start Simli stream.');
+        throw new Error('SIMLI_API_KEY_MISSING');
+      }
+
+      // Hide WebGL orb canvas & duix video
+      if (orbEl) orbEl.style.display = 'none';
+      const duixVid = $('duixVideo');
+      if (duixVid) duixVid.style.display = 'none';
+      document.querySelectorAll('.audio-waveform, #waveform, .orb-waveform')
+              .forEach((el) => (el.style.display = 'none'));
+      const cartoon = $('duix-fallback-face'); if (cartoon) cartoon.remove();
+
+      // Show Simli container
+      if (containerEl) {
+        containerEl.style.display = 'block';
+      }
+
+      try {
+        console.log('[SimliAdapter] Loading Simli WebRTC SDK...');
+        await _loadScript(SDK_URL);
+
+        if (!window.SimliClient) {
+          throw new Error('SimliClient SDK not loaded successfully');
         }
 
-        this.videoElement = videoEl;
-
-        try {
-            // Dynamically load Simli SDK
-            if (!window.SimliClient) {
-                await this._loadScript('https://cdn.simli.com/sdk/simli-client.min.js');
-            }
-
-            if (!window.SimliClient) {
-                console.error('[SimliAdapter] Failed to load Simli SDK.');
-                return false;
-            }
-
-            // Initialize Simli client
-            this.client = new window.SimliClient();
-            await this.client.Initialize({
-                apiKey: this.apiKey,
-                faceID: this.faceId,
-                handleSilence: true,
-                videoElement: this.videoElement,
-                audioElement: null, // We handle audio playback ourselves via Gemini
-            });
-
-            await this.client.start();
-            this.ready = true;
-
-            // Show video, hide orb
-            this.videoElement.parentElement.style.display = 'block';
-            const orbCanvas = document.getElementById('ai-avatar-canvas');
-            if (orbCanvas) orbCanvas.style.display = 'none';
-
-            console.log('[SimliAdapter] Simli avatar initialized successfully.');
-            return true;
-
-        } catch (e) {
-            console.error('[SimliAdapter] Init failed:', e);
-            this.ready = false;
-            return false;
-        }
-    }
-
-    /**
-     * Send PCM audio data to Simli for lip-sync rendering
-     * @param {string} base64Pcm — base64-encoded PCM audio chunk
-     */
-    sendAudio(base64Pcm) {
-        if (!this.ready || !this.client) return;
-
-        try {
-            // Convert base64 to Uint8Array for Simli
-            const binaryString = atob(base64Pcm);
-            const bytes = new Uint8Array(binaryString.length);
-            for (let i = 0; i < binaryString.length; i++) {
-                bytes[i] = binaryString.charCodeAt(i);
-            }
-            this.client.sendAudioData(bytes);
-        } catch (e) {
-            console.warn('[SimliAdapter] Audio send failed:', e);
-        }
-    }
-
-    /**
-     * Clear the current lip-sync state (e.g., when AI is interrupted)
-     */
-    clearBuffer() {
-        if (this.client && this.ready) {
-            try {
-                this.client.ClearBuffer();
-            } catch (e) { /* silent */ }
-        }
-    }
-
-    /**
-     * Destroy the Simli session and clean up
-     */
-    destroy() {
-        if (this.client) {
-            try {
-                this.client.close();
-            } catch (e) { /* silent */ }
-            this.client = null;
-        }
-        this.ready = false;
-
-        // Restore orb visibility
-        if (this.videoElement) {
-            this.videoElement.parentElement.style.display = 'none';
-        }
-        const orbCanvas = document.getElementById('ai-avatar-canvas');
-        if (orbCanvas) orbCanvas.style.display = 'block';
-    }
-
-    /**
-     * Check if Simli is available and configured
-     */
-    isAvailable() {
-        return !!this.apiKey;
-    }
-
-    /**
-     * Check if Simli is currently active and rendering
-     */
-    isActive() {
-        return this.ready && !!this.client;
-    }
-
-    _loadScript(src) {
-        return new Promise((resolve, reject) => {
-            const script = document.createElement('script');
-            script.src = src;
-            script.onload = resolve;
-            script.onerror = reject;
-            document.head.appendChild(script);
+        client = new window.SimliClient();
+        await client.Initialize({
+          apiKey: apiKey,
+          faceID: faceId,
+          handleSilence: true,
+          videoElement: videoEl,
+          audioElement: null, // We play audio locally to maintain WebRTC synchronization
         });
-    }
-}
 
-// Export for use in interview pages
+        await client.start();
+        ready = true;
+        console.log('[SimliAdapter] Simli avatar pipeline connected successfully.');
+        return 'simli';
+      } catch (e) {
+        console.error('[SimliAdapter] Initialization failed:', e.message);
+        ready = false;
+        throw e;
+      }
+    },
+
+    mode() { return 'simli'; },
+    getState() { return currentState; },
+    onState(s) {
+      currentState = s;
+      if (s === 'listening') {
+        this.clearBuffer();
+      }
+    },
+
+    say(text) {
+      // Simli is audio-reactive; TTS speech text is rendered via feedAudio(pcm)
+      return Promise.resolve();
+    },
+
+    primeCache() {},
+
+    setCaptions(text, words) {
+      if (captionEl) {
+        captionEl.textContent = text;
+        captionEl.style.opacity = '1';
+      }
+    },
+
+    feedAudio(int16Buf) {
+      if (!ready || !client) return;
+      try {
+        // Convert Int16 buffer to Uint8Array payload for Simli WebRTC audio channel
+        const i16Array = new Int16Array(int16Buf);
+        const u8Array = new Uint8Array(i16Array.buffer);
+        client.sendAudioData(u8Array);
+      } catch (e) {
+        console.warn('[SimliAdapter] Audio buffer transmission failed:', e.message);
+      }
+    },
+
+    clearBuffer() {
+      if (client && ready) {
+        try {
+          client.ClearBuffer();
+        } catch (e) {}
+      }
+    },
+
+    destroy() {
+      destroyed = true;
+      ready = false;
+      if (client) {
+        try {
+          client.close();
+        } catch (e) {}
+        client = null;
+      }
+
+      // Hide Simli container & restore WebGL orb canvas
+      if (containerEl) containerEl.style.display = 'none';
+      if (orbEl) orbEl.style.display = 'block';
+    },
+
+    isActive() { return ready && !destroyed; }
+  };
+})();
+
+// Export globally
 window.SimliAdapter = SimliAdapter;

@@ -1882,35 +1882,14 @@
      * Called when voice session starts. Falls back to WebGL orb on failure.
      */
     async function initSimliIfNeeded() {
-        // Only init Simli if: B2B mode + company has simli avatar + SimliAdapter available
-        const shouldUseSimli = _b2bCompanyConfig?.avatar_mode === 'simli' && window.SimliAdapter;
+        const choice = document.getElementById('avatar-select')?.value || 'hyperreal';
+        const shouldUseSimli = (choice === 'simli' || _b2bCompanyConfig?.avatar_mode === 'simli') && typeof SimliAdapter !== 'undefined';
         if (!shouldUseSimli) return false;
 
         try {
-            // Simli API key comes from company config (server-side) or localStorage for testing
-            const simliApiKey = localStorage.getItem('simli_api_key') || '';
-            const simliFaceId = localStorage.getItem('simli_face_id') || 'default_female_01';
-
-            if (!simliApiKey) {
-                console.log('[Simli] No API key configured. Using WebGL orb fallback.');
-                return false;
-            }
-
-            _simliAdapter = new SimliAdapter({ apiKey: simliApiKey, faceId: simliFaceId });
-            const videoEl = document.getElementById('simli-video');
-            const success = await _simliAdapter.init(videoEl);
-
-            if (success) {
-                console.log('[Simli] Premium avatar activated.');
-                document.getElementById('simli-avatar').style.display = 'block';
-                const canvas = document.getElementById('ai-avatar-canvas');
-                if (canvas) canvas.style.display = 'none';
-                return true;
-            } else {
-                console.log('[Simli] Init returned false. Falling back to WebGL orb.');
-                _simliAdapter = null;
-                return false;
-            }
+            await SimliAdapter.init();
+            _simliAdapter = SimliAdapter;
+            return true;
         } catch (e) {
             console.warn('[Simli] Init failed:', e.message, '— falling back to WebGL orb.');
             _simliAdapter = null;
@@ -2127,10 +2106,10 @@
 
     /** Destroy Simli adapter and restore WebGL orb */
     function destroySimli() {
-        if (_simliAdapter) {
-            try { _simliAdapter.destroy(); } catch(e) {}
-            _simliAdapter = null;
+        if (typeof SimliAdapter !== 'undefined') {
+            try { SimliAdapter.destroy(); } catch(e) {}
         }
+        _simliAdapter = null;
         document.getElementById('simli-avatar').style.display = 'none';
         const canvas = document.getElementById('ai-avatar-canvas');
         if (canvas) canvas.style.display = 'block';
