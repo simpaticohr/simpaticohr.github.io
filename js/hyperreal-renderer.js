@@ -78,7 +78,6 @@ const HyperRealRenderer = (function () {
     offscreenCtx = offscreenCanvas.getContext('2d');
 
     baseImage = new Image();
-    baseImage.crossOrigin = 'anonymous';
     baseImage.onload = () => {
       baseImageLoaded = true;
     };
@@ -217,6 +216,9 @@ const HyperRealRenderer = (function () {
           videoEl.style.display = 'block';
           videoEl.style.opacity = '1';
           videoEl.play().catch(() => {});
+          
+          const poster = document.getElementById('duixPoster');
+          if (poster) poster.style.display = 'none';
         }
       } catch (e) {
         console.warn('[HyperReal] captureStream note:', e.message);
