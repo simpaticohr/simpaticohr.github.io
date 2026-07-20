@@ -239,8 +239,22 @@ const HyperRealRenderer = (function () {
       const StreamingAvatar = mod.default || mod.StreamingAvatar;
       const StreamingAvatarEvents = mod.StreamingAvatarEvents || {};
 
-      const r = await fetch(sessionApi + '/' + provider, { method: 'POST', signal: abortCtrl ? abortCtrl.signal : undefined });
-      if (!r.ok) throw new Error('session ' + r.status);
+      let r;
+      const endpoints = [
+        sessionApi + '/' + provider,
+        'http://localhost:8790' + sessionApi + '/' + provider,
+        'http://127.0.0.1:8790' + sessionApi + '/' + provider
+      ];
+      let lastFetchErr;
+      for (const ep of endpoints) {
+        try {
+          r = await fetch(ep, { method: 'POST', signal: abortCtrl ? abortCtrl.signal : undefined, headers: { 'Content-Type': 'application/json' } });
+          if (r.ok) break;
+        } catch (e) {
+          lastFetchErr = e;
+        }
+      }
+      if (!r || !r.ok) throw new Error('session ' + (r ? r.status : (lastFetchErr ? lastFetchErr.message : 'failed')));
       const data = await r.json();
 
       const { token, persona: pData, audioMode: aMode } = data;
