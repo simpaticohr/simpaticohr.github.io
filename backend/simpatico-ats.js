@@ -1406,6 +1406,15 @@ route("POST", "/ai/talent-match", handleTalentMatch);
 route("GET", "/ai/talent-matches/:jobId", handleListTalentMatches);
 route("GET", "/talent-pool", handleTalentPool);
 
+// Avatar Session Broker (HeyGen / Tavus / D-ID — caller-provided keys)
+route("GET", "/api/avatar/capabilities/:provider", handleAvatarCapabilities);
+route("GET", "/api/avatar/persona/:id", handleAvatarPersona);
+route("POST", "/api/avatar/session/:provider", handleAvatarSessionCreate);
+route("POST", "/api/avatar/session/did/answer", handleAvatarDidAnswer);
+route("POST", "/api/avatar/session/did/ice", handleAvatarDidIce);
+route("POST", "/api/avatar/session/did/speak", handleAvatarDidSpeak);
+route("POST", "/api/avatar/session/:provider/end", handleAvatarSessionEnd);
+
 // Calendar & ICS
 route("POST", "/calendar/ics", handleGenerateICS);
 
@@ -1551,9 +1560,10 @@ export default {
         if (!tx) return Response.json({ success: false, error: "Order not found" }, { status: 404, headers: corsHdrs });
 
         const systemCtx = { requestId: crypto.randomUUID(), tenantId: tx.company_id, actorEmail: "admin_email_1click", actorRole: "superadmin", actorId: "admin" };
-        await executeCompletePayment(env, tx, `utr_approved_${Date.now()}`, systemCtx);
+        const completeResult = await executeCompletePayment(env, tx, `utr_approved_${Date.now()}`, systemCtx);
+        const already = !!(completeResult && completeResult.already_paid);
 
-        return new Response(`<!DOCTYPE html><html><head><title>Payment Approved</title><meta name="viewport" content="width=device-width,initial-scale=1"></head><body style="font-family:sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#F8FAFC"><div style="background:#FFF;padding:32px;border-radius:16px;box-shadow:0 4px 6px -1px rgba(0,0,0,0.1);text-align:center;max-width:400px"><h1 style="color:#059669;margin-bottom:8px">✅ Payment Approved!</h1><p style="color:#475569;font-size:14px">Order <strong>${orderId}</strong> has been confirmed.<br>Subscription is now active for ${tx.customer_name || 'customer'}.</p></div></body></html>`, { status: 200, headers: { "Content-Type": "text/html" } });
+        return new Response(`<!DOCTYPE html><html><head><title>${already ? "Already Confirmed" : "Payment Approved"}</title><meta name="viewport" content="width=device-width,initial-scale=1"></head><body style="font-family:sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#F8FAFC"><div style="background:#FFF;padding:32px;border-radius:16px;box-shadow:0 4px 6px -1px rgba(0,0,0,0.1);text-align:center;max-width:400px"><h1 style="color:#059669;margin-bottom:8px">${already ? "ℹ️ Already Confirmed" : "✅ Payment Approved!"}</h1><p style="color:#475569;font-size:14px">Order <strong>${orderId}</strong> ${already ? "was already confirmed earlier — no duplicate action taken" : "has been confirmed"}.<br>Subscription is now active for ${tx.customer_name || "customer"}.</p></div></body></html>`, { status: 200, headers: { "Content-Type": "text/html" } });
       } catch (err) {
         return Response.json({ success: false, error: err.message }, { status: 500, headers: corsHdrs });
       }
@@ -5450,6 +5460,290 @@ async function handleTalentPool(request, env, ctx, _, url) {
   return apiResponse({ candidates, total: candidates.length });
 }
 
+// ── Avatar Session Broker (HeyGen / Tavus / D-ID) ────────────────────────────
+// Production port of server/hyperreal-session.js. Sessions live in KV
+// (stateless worker); provider API keys are always caller-provided via
+// X-Avatar-Key / body.apiKey (never logged, optional env fallback via secrets).
+// These routes are intentionally unauthenticated: callers must present a valid
+// provider key to do anything, and the global rate limiter still applies.
+
+const AVATAR_CAPS = {
+  heygen: {
+    transport: "webrtc-sdk",
+    audioModes: ["external-pcm", "native"],
+    wordTimings: "sdk-event",
+    bargeIn: true,
+    gestures: ["nod", "head_tilt", "gaze_away", "explain", "hand_raise", "shake_head"],
+    emotions: ["neutral", "happy", "curious", "serious", "empathetic", "attentive"],
+    sampleRateHz: 16000,
+  },
+  tavus: {
+    transport: "sdk-div",
+    audioModes: ["native"],
+    wordTimings: "webhook",
+    bargeIn: true,
+    gestures: ["nod", "gaze_away", "explain"],
+    emotions: ["neutral", "happy", "curious", "serious"],
+  },
+  did: {
+    transport: "sdk-ws",
+    audioModes: ["native"],
+    wordTimings: "sdk-event",
+    bargeIn: true,
+    gestures: ["nod", "gaze_away"],
+    emotions: ["neutral", "happy", "curious", "serious", "empathetic"],
+  },
+};
+
+function avatarKey(env, p, request, body) {
+  const fromReq =
+    request.headers.get("x-avatar-key") ||
+    request.headers.get(`x-${p}-key`) ||
+    (body && body.apiKey) ||
+    "";
+  if (fromReq) return fromReq;
+  const envKeys = { heygen: env.HEYGEN_API_KEY, tavus: env.TAVUS_API_KEY, did: env.DID_API_KEY };
+  return envKeys[p] || "";
+}
+
+function avatarPersona(env, provider) {
+  const avatarName =
+    provider === "heygen"
+      ? env.HEYGEN_AVATAR_NAME || "Ann_Doctor_Standing2_public"
+      : provider;
+  const voiceId =
+    provider === "heygen"
+      ? env.HEYGEN_VOICE_ID || "265511f088344783b38c644837582b9a"
+      : env.DID_VOICE_ID || "en-US-AriaNeural";
+  return {
+    provider,
+    avatarName,
+    voiceId,
+    idleLoop: `/assets/avatar/${avatarName || "default"}/idle-loop.mp4`,
+    poster: `/assets/avatar/${avatarName || "default"}/idle-poster.jpg`,
+    capabilities: AVATAR_CAPS[provider],
+  };
+}
+
+async function avatarUpstream(url, opts = {}, tag = "avatar") {
+  const res = await fetch(url, opts);
+  const text = await res.text();
+  let body;
+  try {
+    body = text ? JSON.parse(text) : {};
+  } catch {
+    body = { raw: text };
+  }
+  if (!res.ok) {
+    throw new AppError(
+      `${tag} failed (${res.status}): ${text.substring(0, 180)}`,
+      res.status >= 500 ? HTTP.SERVER_ERROR : res.status,
+      "AVATAR_UPSTREAM",
+    );
+  }
+  return body;
+}
+
+const avatarSessPut = (env, id, data) =>
+  env.HR_KV ? env.HR_KV.put(`avatar:sess:${id}`, JSON.stringify(data), { expirationTtl: 3600 }) : null;
+const avatarSessGet = (env, id) => (env.HR_KV ? env.HR_KV.get(`avatar:sess:${id}`, { type: "json" }) : null);
+const avatarSessDel = (env, id) => (env.HR_KV ? env.HR_KV.delete(`avatar:sess:${id}`) : null);
+
+async function handleAvatarCapabilities(request, env, ctx, [provider]) {
+  const caps = AVATAR_CAPS[provider];
+  if (!caps) throw new NotFoundError("provider");
+  const key = avatarKey(env, provider, request, null);
+  const enabled =
+    (provider === "heygen" && !!key) ||
+    (provider === "did" && !!key) ||
+    (provider === "tavus" && !!(key && env.TAVUS_REPLICA_ID && env.TAVUS_PERSONA_ID));
+  return apiResponse({ provider, enabled, ...caps });
+}
+
+async function handleAvatarPersona(request, env, ctx, [id], url) {
+  const provider = url.searchParams.get("provider") || "heygen";
+  if (!AVATAR_CAPS[provider]) throw new NotFoundError("provider");
+  return apiResponse({ id, ...avatarPersona(env, provider) });
+}
+
+async function handleAvatarSessionCreate(request, env, ctx, [provider]) {
+  const caps = AVATAR_CAPS[provider];
+  if (!caps) throw new NotFoundError("provider");
+  const body = await safeJson(request);
+  const key = avatarKey(env, provider, request, body);
+  if (!key) {
+    throw new AppError(
+      `provider ${provider} API key not configured (pass X-Avatar-Key)`,
+      HTTP.UNAVAILABLE,
+      "AVATAR_KEY_MISSING",
+    );
+  }
+
+  const audioMode =
+    body.audioMode === "native" ? "native" : caps.audioModes.includes("external-pcm") ? "external-pcm" : "native";
+  const id = crypto.randomUUID();
+  const persona = avatarPersona(env, provider);
+  const external = {};
+
+  if (provider === "heygen") {
+    const data = await avatarUpstream(
+      "https://api.heygen.com/v2/streaming/create_token",
+      {
+        method: "POST",
+        headers: { "X-Api-Key": key, "Content-Type": "application/json" },
+        body: "{}",
+      },
+      "heygen.create_token",
+    );
+    external.token = data?.data?.token ?? data?.token;
+    if (!external.token) throw new AppError("no token in heygen response", HTTP.SERVER_ERROR, "AVATAR_UPSTREAM");
+  } else if (provider === "tavus") {
+    const data = await avatarUpstream(
+      "https://api.tavus.io/v2/conversations",
+      {
+        method: "POST",
+        headers: { "x-api-key": key, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          replica_id: env.TAVUS_REPLICA_ID || body.replica_id,
+          persona_id: env.TAVUS_PERSONA_ID || body.persona_id,
+          properties: { max_call_duration_seconds: 1800, conversation_name: `evalis-${id.slice(0, 8)}` },
+        }),
+      },
+      "tavus.create",
+    );
+    external.conversationId = data.conversation_id;
+    external.conversationUrl = data.conversation_url;
+  } else if (provider === "did") {
+    const data = await avatarUpstream(
+      "https://api.d-id.com/talks/streams",
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Basic ${btoa(key + ":")}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          source_url: env.DID_SOURCE_URL || body.source_url || "https://d-id-public-bucket.s3.amazonaws.com/alice.png",
+        }),
+      },
+      "did.create_stream",
+    );
+    if (!data.id) throw new AppError("no stream id in D-ID response", HTTP.SERVER_ERROR, "AVATAR_UPSTREAM");
+    // Store D-ID ids server-side; client only ever sends our sessionId back.
+    external.offer = data.offer;
+    external.iceServers = data.ice_servers;
+    await avatarSessPut(env, id, {
+      provider,
+      key,
+      streamId: data.id,
+      didSessionId: data.session_id || null,
+    });
+  }
+
+  if (provider !== "did") {
+    await avatarSessPut(env, id, { provider, key, ...external });
+  }
+  // (D-ID already stored above with its stream ids)
+  return apiResponse({
+    sessionId: id,
+    provider,
+    audioMode,
+    ...external,
+    persona,
+    capabilities: caps,
+  });
+}
+
+async function avatarDidSession(env, request) {
+  const body = await safeJson(request);
+  const s = await avatarSessGet(env, body?.sessionId);
+  if (!s || s.provider !== "did") throw new NotFoundError("avatar session");
+  const key = avatarKey(env, "did", request, body) || s.key;
+  return { s, key, body };
+}
+
+async function handleAvatarDidAnswer(request, env, ctx) {
+  const { s, key, body } = await avatarDidSession(env, request);
+  await avatarUpstream(
+    `https://api.d-id.com/talks/streams/${s.streamId}/sdp`,
+    {
+      method: "POST",
+      headers: { Authorization: `Basic ${btoa(key + ":")}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ answer: body.answer, session_id: s.didSessionId }),
+    },
+    "did.send_sdp",
+  );
+  return apiResponse({ ok: true });
+}
+
+async function handleAvatarDidIce(request, env, ctx) {
+  const { s, key, body } = await avatarDidSession(env, request);
+  const cand = body.candidate || {};
+  await avatarUpstream(
+    `https://api.d-id.com/talks/streams/${s.streamId}/ice`,
+    {
+      method: "POST",
+      headers: { Authorization: `Basic ${btoa(key + ":")}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        candidate: cand.candidate || cand,
+        sdpMid: cand.sdpMid,
+        sdpMLineIndex: cand.sdpMLineIndex,
+        session_id: s.didSessionId,
+      }),
+    },
+    "did.send_ice",
+  );
+  return apiResponse({ ok: true });
+}
+
+async function handleAvatarDidSpeak(request, env, ctx) {
+  const { s, key, body } = await avatarDidSession(env, request);
+  await avatarUpstream(
+    `https://api.d-id.com/talks/streams/${s.streamId}`,
+    {
+      method: "POST",
+      headers: { Authorization: `Basic ${btoa(key + ":")}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        script: {
+          type: "text",
+          input: body.text || " ",
+          provider: { type: "microsoft", voice_id: env.DID_VOICE_ID || "en-US-AriaNeural" },
+        },
+        session_id: s.didSessionId,
+      }),
+    },
+    "did.speak",
+  );
+  return apiResponse({ ok: true });
+}
+
+async function handleAvatarSessionEnd(request, env, ctx, [provider]) {
+  const body = await safeJson(request);
+  const id = body?.sessionId;
+  const s = id ? await avatarSessGet(env, id) : null;
+  if (s) {
+    try {
+      const key = avatarKey(env, provider, request, body) || s.key;
+      if (provider === "tavus" && s.conversationId) {
+        await fetch(`https://api.tavus.io/v2/conversations/${s.conversationId}/end`, {
+          method: "POST",
+          headers: { "x-api-key": key },
+        });
+      } else if (provider === "did" && s.streamId) {
+        await fetch(`https://api.d-id.com/talks/streams/${s.streamId}`, {
+          method: "DELETE",
+          headers: { Authorization: `Basic ${btoa(key + ":")}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ session_id: s.didSessionId }),
+        });
+      }
+    } catch (e) {
+      console.warn("[Avatar] upstream end failed (ignored):", e.message);
+    }
+    await avatarSessDel(env, id);
+  }
+  return apiResponse({ ok: true });
+}
+
 async function handleHRAutomationGenerator(request, env, ctx) {
   const { query } = await safeJson(request);
   if (!query) throw new ValidationError("query is required");
@@ -8593,7 +8887,7 @@ async function handleManualCreateOrder(request, env, ctx) {
     plan, billing_cycle,
     payment_details: {
       upi_id: env.UPI_ID || "faisalkkod@okhdfcbank",
-      account_name: env.DOMESTIC_ACCOUNT_NAME || "FAISAL .K",
+      account_name: env.DOMESTIC_ACCOUNT_NAME || "Faisal",
       bank_name: env.DOMESTIC_BANK_NAME || "State Bank of India",
       account_number: env.DOMESTIC_ACCOUNT_NUMBER || "67326003131",
       ifsc_code: env.DOMESTIC_IFSC_CODE || "SBIN0070198",
@@ -8815,19 +9109,32 @@ async function executeCompletePayment(env, tx, gatewayPaymentId, ctx) {
   const companyId = tx.company_id;
   const actorEmail = ctx.actorEmail || "system_auto";
 
-  // Mark transaction as paid
-  const payRes = await fetch(`${env.SUPABASE_URL}/rest/v1/payment_transactions?gateway_order_id=eq.${order_id}`, {
-    method: "PATCH", headers: {
-      apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
-      "Content-Type": "application/json", Prefer: "return=minimal",
-    },
-    body: JSON.stringify({
-      status: "paid", gateway_payment_id: gatewayPaymentId || "auto_confirm",
-      payment_method: tx.gateway === "wise" ? "bank_transfer" : (tx.gateway || "manual"),
-      metadata: { ...tx.metadata, confirmed_by: actorEmail, confirmed_at: new Date().toISOString(), transaction_reference: gatewayPaymentId },
-    }),
-  });
-  if (!payRes.ok) throw new AppError("Failed to update transaction status", payRes.status, "DB_ERROR");
+  // ★ ATOMIC IDEMPOTENCY CLAIM — only the FIRST caller transitions the order
+  // out of a non-paid state (conditional PATCH + row count). Webhook retries,
+  // polling races, double-clicks and repeated quick-approve clicks all see 0
+  // rows changed and exit here — no duplicate emails, no subscription reset.
+  const claimRes = await fetch(
+    `${env.SUPABASE_URL}/rest/v1/payment_transactions?gateway_order_id=eq.${order_id}&or=(status.neq.paid,status.is.null)`,
+    {
+      method: "PATCH",
+      headers: {
+        apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
+        "Content-Type": "application/json", Prefer: "count=exact,return=minimal",
+      },
+      body: JSON.stringify({
+        status: "paid", gateway_payment_id: gatewayPaymentId || "auto_confirm",
+        payment_method: tx.gateway === "wise" ? "bank_transfer" : (tx.gateway || "manual"),
+        metadata: { ...tx.metadata, confirmed_by: actorEmail, confirmed_at: new Date().toISOString(), transaction_reference: gatewayPaymentId },
+      }),
+    }
+  );
+  if (!claimRes.ok) throw new AppError("Failed to update transaction status", claimRes.status, "DB_ERROR");
+  const claimRange = claimRes.headers.get("content-range") || "";
+  const claimed = parseInt((claimRange.match(/\/(\d+)$/) || [])[1] || "0", 10);
+  if (claimed === 0) {
+    console.log(`[Billing] ${order_id} already completed by another caller — skipping duplicate emails/activation`);
+    return { already_paid: true };
+  }
 
   const isConsultingInvoice = order_id.startsWith("CON_") || (tx.plan && tx.plan.includes("consulting") && tx.plan !== "consulting_monthly");
 

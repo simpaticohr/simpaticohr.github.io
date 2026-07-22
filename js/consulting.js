@@ -3679,7 +3679,7 @@ Be professional, highly strategic, clear, and action-oriented. Keep your spoken 
                         <i class="fas fa-indian-rupee-sign" style="margin-right:4px"></i> Domestic Payment (UPI / NEFT)
                     </div>
                     ${_payRow('UPI ID', pd.upi_id || 'faisalkkod@okhdfcbank', true)}
-                    ${_payRow('Account Name', pd.account_name || 'FAISAL .K', false)}
+                    ${_payRow('Account Name', pd.account_name || 'Faisal', false)}
                     ${_payRow('Bank', pd.bank_name || 'State Bank of India', false)}
                     ${_payRow('Account No', pd.account_number || '67326003131', true)}
                     ${_payRow('IFSC', pd.ifsc_code || 'SBIN0070198', true)}

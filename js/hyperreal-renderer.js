@@ -13,7 +13,13 @@ const HyperRealRenderer = (function () {
 
   // ── Config ────────────────────────────────────────────────────────
   let provider = 'heygen';
-  let sessionApi = '/api/avatar/session';
+  // Production avatar broker lives on the simpatico-hr-ats worker.
+  // (A relative /api/avatar path 404s on GitHub Pages; localhost entries
+  // below remain as dev fallbacks.)
+  const AVATAR_API_BASE =
+    (typeof window !== 'undefined' && window.SIMPATICO_CONFIG && window.SIMPATICO_CONFIG.workerUrl) ||
+    'https://simpatico-hr-ats.simpaticohrconsultancy.workers.dev';
+  let sessionApi = AVATAR_API_BASE + '/api/avatar/session';
   let capabilities = null;
   let persona = null;
   let audioMode = 'external-pcm';
@@ -355,7 +361,7 @@ const HyperRealRenderer = (function () {
       this.pc.onicecandidate = async (event) => {
         if (event.candidate) {
           const iceEndpoints = [
-            '/api/avatar/session/did/ice',
+            sessionApi + '/did/ice',
             'http://localhost:8790/api/avatar/session/did/ice'
           ];
           for (const iceEp of iceEndpoints) {
@@ -376,7 +382,7 @@ const HyperRealRenderer = (function () {
 
       // Send SDP answer to D-ID
       const answerEndpoints = [
-        '/api/avatar/session/did/answer',
+        sessionApi + '/did/answer',
         'http://localhost:8790/api/avatar/session/did/answer'
       ];
       for (const ansEp of answerEndpoints) {
@@ -392,7 +398,7 @@ const HyperRealRenderer = (function () {
     async speak(text) {
       const userAvatarKey = localStorage.getItem('evalis_avatar_key') || localStorage.getItem('evalis_did_key') || localStorage.getItem('evalis_heygen_key') || '';
       const speakEndpoints = [
-        '/api/avatar/session/did/speak',
+        sessionApi + '/did/speak',
         'http://localhost:8790/api/avatar/session/did/speak'
       ];
       for (const spEp of speakEndpoints) {
@@ -417,7 +423,7 @@ const HyperRealRenderer = (function () {
       }
       const userAvatarKey = localStorage.getItem('evalis_avatar_key') || localStorage.getItem('evalis_did_key') || localStorage.getItem('evalis_heygen_key') || '';
       const endEndpoints = [
-        `/api/avatar/session/did/end`,
+        sessionApi + '/did/end',
         `http://localhost:8790/api/avatar/session/did/end`
       ];
       for (const endEp of endEndpoints) {
@@ -482,7 +488,7 @@ const HyperRealRenderer = (function () {
       }
       const userAvatarKey = localStorage.getItem('evalis_avatar_key') || localStorage.getItem('evalis_tavus_key') || localStorage.getItem('evalis_heygen_key') || '';
       try {
-        await fetch(`/api/avatar/session/tavus/end`, {
+        await fetch(sessionApi + '/tavus/end', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'X-Avatar-Key': userAvatarKey },
           body: JSON.stringify({ sessionId: this.sessionId })
