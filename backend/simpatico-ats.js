@@ -768,6 +768,19 @@ async function callExternalLLM(cfg, messages, maxTokens, stream = false) {
 const CF_DEFAULT_MODEL = "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
 const CF_LIGHT_MODEL = "@cf/meta/llama-3.1-8b-instruct";
 
+/**
+ * True when a BYOK failure is transient (provider overloaded / rate-limited /
+ * network issue) rather than a config problem. Upstream status is embedded in
+ * the error message as "(NNN)". 4xx = bad key/config → must surface, not fall back.
+ */
+function isTransientByokError(err) {
+  if (!err || err.code !== "CUSTOM_AI_ERROR") return false;
+  const m = String(err.message || "").match(/\((\d{3})\)/);
+  if (!m) return true; // network/timeout — no upstream status
+  const s = parseInt(m[1], 10);
+  return s === 429 || s >= 500;
+}
+
 async function runLLM(env, tenantId, messages, maxTokens = 1024) {
   const aiConfig = await getCompanyAIConfig(env, tenantId);
 
@@ -781,7 +794,13 @@ async function runLLM(env, tenantId, messages, maxTokens = 1024) {
 
   if (aiConfig) {
     console.log(`[BYOK] Using custom AI: provider=${aiConfig.provider}, model=${aiConfig.model || "(default)"}`);
-    return await callExternalLLM(aiConfig, messages, maxTokens, false);
+    try {
+      return await callExternalLLM(aiConfig, messages, maxTokens, false);
+    } catch (err) {
+      if (!isTransientByokError(err) || !env.AI) throw err;
+      console.warn(`[BYOK] Custom AI failed transiently — falling back to Cloudflare AI: ${err.message}`);
+      return await env.AI.run(CF_DEFAULT_MODEL, { messages, max_tokens: maxTokens });
+    }
   }
 
   // Fallback: Cloudflare Workers AI (default model)
@@ -805,7 +824,13 @@ async function runLLMStream(env, tenantId, messages, maxTokens = 2048) {
 
   if (aiConfig) {
     console.log(`[BYOK-Stream] Using custom AI: provider=${aiConfig.provider}`);
-    return await callExternalLLM(aiConfig, messages, maxTokens, true);
+    try {
+      return await callExternalLLM(aiConfig, messages, maxTokens, true);
+    } catch (err) {
+      if (!isTransientByokError(err) || !env.AI) throw err;
+      console.warn(`[BYOK-Stream] Custom AI failed transiently — falling back to Cloudflare AI: ${err.message}`);
+      return await env.AI.run(CF_DEFAULT_MODEL, { messages, max_tokens: maxTokens, stream: true });
+    }
   }
 
   // Fallback: Cloudflare Workers AI streaming (default model)
@@ -4068,17 +4093,21 @@ async function handleCreateJob(request, env, ctx) {
     ? body.syndication_targets.filter(t => validPlatforms.includes(t))
     : [];
 
+  const jobPayload = {
+    ...sanitize(body),
+    syndication_targets: syndicationTargets,
+    status: jobStatus,
+    company_id: ctx.tenantId,
+    created_by: ctx.actorId,
+  };
+  // This DB's jobs table has no tenant_id column — company_id is the tenant key
+  delete jobPayload.tenant_id;
+
   const res = await sbFetch(
     env,
     "POST",
     "/rest/v1/jobs",
-    {
-      ...sanitize(body),
-      syndication_targets: syndicationTargets,
-      status: jobStatus,
-      tenant_id: ctx.tenantId,
-      created_by: ctx.actorId,
-    },
+    jobPayload,
     false,
     ctx.tenantId,
   );
@@ -4152,10 +4181,15 @@ async function handleListJobs(request, env, ctx, _, url) {
   // Authenticated read — tenant isolation enforced by sbFetch tenant_id filter
   requireAuth(ctx);
   const status = url.searchParams.get("status") || "open";
+  // "open" is an alias — legacy rows in this DB use status "active"/"published"
+  const statusFilter =
+    status === "open"
+      ? "or=(status.eq.open,status.eq.active,status.eq.published)"
+      : `status=eq.${encodeURIComponent(status)}`;
   const res = await sbFetch(
     env,
     "GET",
-    `/rest/v1/jobs?status=eq.${status}&select=*&order=created_at.desc`,
+    `/rest/v1/jobs?${statusFilter}&select=*&order=created_at.desc`,
     null,
     false,
     ctx.tenantId,
@@ -5157,8 +5191,34 @@ Include 2-4 logical actions. Keep it practical for enterprise HR.`;
 // ── Talent Rediscovery & Matching ─────────────────────────────────────────────
 
 /**
+ * Normalizes a job_applications row across schema generations.
+ * Legacy rows store identity in name/email/ats_score/ats_matched_skills;
+ * v5.0 rows use candidate_name/candidate_email/match_score/candidate_skills.
+ */
+function normalizeApplication(r) {
+  return {
+    id: r.id,
+    name: r.candidate_name || r.name || null,
+    email: r.candidate_email || r.email || null,
+    skills:
+      r.candidate_skills ||
+      (Array.isArray(r.ats_matched_skills) && r.ats_matched_skills.length
+        ? r.ats_matched_skills.join(", ")
+        : null),
+    score: r.match_score ?? r.ats_score ?? null,
+    summary: r.ai_summary || r.ats_summary || null,
+    status: r.status || null,
+    resume_text: r.resume_text || "",
+    applied_at: r.applied_at || r.created_at || null,
+  };
+}
+
+const APP_SELECT =
+  "id,candidate_name,candidate_email,candidate_skills,match_score,ai_summary,status,resume_text,applied_at,created_at,name,email,ats_score,ats_matched_skills,ats_summary";
+
+/**
  * POST /ai/talent-match — Score the tenant's EXISTING applicant pool against a
- * job and persist ranked results in talent_matches (silver-medalist rediscovery).
+ * job and persist ranked results to KV (silver-medalist rediscovery).
  * Body: { job_id, limit? }  (limit: candidates scored per run, default 15, max 25)
  */
 async function handleTalentMatch(request, env, ctx) {
@@ -5184,7 +5244,7 @@ async function handleTalentMatch(request, env, ctx) {
   const poolRes = await sbFetch(
     env,
     "GET",
-    `/rest/v1/job_applications?job_id=neq.${jobId}&select=id,candidate_name,candidate_email,candidate_skills,match_score,status,resume_text,applied_at&order=applied_at.desc&limit=200`,
+    `/rest/v1/job_applications?job_id=neq.${jobId}&select=${APP_SELECT}&order=applied_at.desc&limit=200`,
     null,
     false,
     ctx.tenantId,
@@ -5193,8 +5253,9 @@ async function handleTalentMatch(request, env, ctx) {
 
   // Dedupe by email — keep the newest application per candidate
   const byEmail = new Map();
-  for (const r of rows || []) {
-    const key = (r.candidate_email || "").toLowerCase().trim();
+  for (const raw of Array.isArray(rows) ? rows : []) {
+    const r = normalizeApplication(raw);
+    const key = (r.email || "").toLowerCase().trim();
     if (!key || byEmail.has(key)) continue;
     byEmail.set(key, r);
   }
@@ -5202,20 +5263,20 @@ async function handleTalentMatch(request, env, ctx) {
   const poolSize = pool.length;
   if (!poolSize) return apiResponse({ matches: [], pool_size: 0, scored: 0, model: null });
 
-  // 3. Cheap pre-rank: overlap of job.skills_required with candidate_skills,
+  // 3. Cheap pre-rank: overlap of job skills with candidate skills,
   //    tie-break on the candidate's previous application score
-  const jobSkills = (job.skills_required || [])
+  const jobSkills = (job.skills_required || job.skills || [])
     .map((s) => String(s).toLowerCase().trim())
     .filter(Boolean);
   const overlap = (c) => {
     if (!jobSkills.length) return 0;
-    const cs = String(c.candidate_skills || "").toLowerCase();
+    const cs = String(c.skills || "").toLowerCase();
     let n = 0;
     for (const s of jobSkills) if (s && cs.includes(s)) n++;
     return n;
   };
   pool = pool
-    .map((c) => ({ c, o: overlap(c), prev: c.match_score || 0 }))
+    .map((c) => ({ c, o: overlap(c), prev: c.score || 0 }))
     .sort((a, b) => b.o - a.o || b.prev - a.prev)
     .slice(0, limit)
     .map((x) => x.c);
@@ -5247,8 +5308,8 @@ Description: ${String(job.description || "").replace(/\s+/g, " ").slice(0, 1200)
           .trim()
           .slice(0, 600);
         return `CANDIDATE ${j + 1} (application_id=${c.id})
-Name: ${c.candidate_name || "?"}
-Skills: ${c.candidate_skills || "n/a"}
+Name: ${c.name || "?"}
+Skills: ${c.skills || "n/a"}
 Resume excerpt: ${excerpt || "n/a"}`;
       })
       .join("\n\n");
@@ -5302,92 +5363,44 @@ Resume excerpt: ${excerpt || "n/a"}`;
   }
   clean.sort((a, b) => b.match_score - a.match_score);
 
-  // 6. Persist (upsert on the unique job_id+application_id pair)
-  if (clean.length) {
-    const upRows = clean.map((m) => ({
-      tenant_id: ctx.tenantId,
-      job_id: jobId,
-      application_id: m.application_id,
-      match_score: m.match_score,
-      reasoning: m.reasoning,
-      skills_matched: m.skills_matched,
-      skills_missing: m.skills_missing,
-      model: modelLabel,
-      updated_at: new Date().toISOString(),
-    }));
-    const upRes = await fetch(
-      `${env.SUPABASE_URL}/rest/v1/talent_matches?on_conflict=job_id,application_id`,
-      {
-        method: "POST",
-        headers: {
-          apikey: env.SUPABASE_SERVICE_KEY,
-          Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
-          "Content-Type": "application/json",
-          Prefer: "resolution=merge-duplicates,return=minimal",
-        },
-        body: JSON.stringify(upRows),
-      },
+  // 6. Merge candidate details, then persist to KV (per tenant+job).
+  // KV is used instead of a DB table so this feature works without any
+  // SQL migration — match results are recomputable, so KV durability suffices.
+  const matches = clean.map((m) => {
+    const c = byId.get(m.application_id);
+    return {
+      ...m,
+      candidate_name: c?.name || null,
+      candidate_email: c?.email || null,
+      candidate_skills: c?.skills || null,
+      current_status: c?.status || null,
+    };
+  });
+
+  if (env.HR_KV) {
+    await env.HR_KV.put(
+      `talent:matches:${ctx.tenantId}:${jobId}`,
+      JSON.stringify({ matches, model: modelLabel, run_at: new Date().toISOString() }),
     );
-    if (!upRes.ok) {
-      const errText = await upRes.text().catch(() => "unknown");
-      throw new AppError(`Failed to persist talent matches: ${errText}`, HTTP.SERVER_ERROR, "DB_ERROR");
-    }
   }
 
-  await invalidateCache(env, `talent:matches:${ctx.tenantId}:${jobId}`);
   await audit(env, ctx, "talent.match_run", "jobs", jobId, {
     pool_size: poolSize,
     scored: clean.length,
     model: modelLabel,
   }).catch(() => {});
-
-  const matches = clean.map((m) => {
-    const c = byId.get(m.application_id);
-    return {
-      ...m,
-      candidate_name: c?.candidate_name || null,
-      candidate_email: c?.candidate_email || null,
-      candidate_skills: c?.candidate_skills || null,
-      current_status: c?.status || null,
-    };
-  });
   return apiResponse({ matches, pool_size: poolSize, scored: clean.length, model: modelLabel });
 }
 
 /**
- * GET /ai/talent-matches/:jobId — Previously persisted matches for a job,
- * joined with the candidate's application details. KV-cached 60s.
+ * GET /ai/talent-matches/:jobId — Previously persisted matches for a job.
+ * Read from KV (written by handleTalentMatch); no DB table required.
  */
 async function handleListTalentMatches(request, env, ctx, [jobId]) {
   requireAuth(ctx);
-  const payload = await withCache(env, `talent:matches:${ctx.tenantId}:${jobId}`, CACHE_TTL_DEFAULT, async () => {
-    const mRes = await sbFetch(
-      env,
-      "GET",
-      `/rest/v1/talent_matches?job_id=eq.${jobId}&select=*&order=match_score.desc&limit=100`,
-      null,
-      false,
-      ctx.tenantId,
-    );
-    const matches = await mRes.json();
-    if (!Array.isArray(matches) || !matches.length) return { matches: [] };
-
-    const ids = matches.map((m) => m.application_id).filter(Boolean);
-    const aRes = await sbFetch(
-      env,
-      "GET",
-      `/rest/v1/job_applications?id=in.(${ids.join(",")})&select=id,candidate_name,candidate_email,candidate_skills,status,job_id,match_score`,
-      null,
-      false,
-      ctx.tenantId,
-    );
-    const apps = await aRes.json();
-    const appById = new Map((apps || []).map((a) => [a.id, a]));
-    return {
-      matches: matches.map((m) => ({ ...m, candidate: appById.get(m.application_id) || null })),
-    };
-  });
-  return apiResponse(payload);
+  if (!env.HR_KV) return apiResponse({ matches: [] });
+  const stored = await env.HR_KV.get(`talent:matches:${ctx.tenantId}:${jobId}`, { type: "json" });
+  return apiResponse(stored || { matches: [] });
 }
 
 /**
@@ -5400,9 +5413,11 @@ async function handleTalentPool(request, env, ctx, _, url) {
   const q = sanitizeTerm(url.searchParams.get("q"));
   const skills = sanitizeTerm(url.searchParams.get("skills"));
 
-  let qp =
-    "select=id,candidate_name,candidate_email,candidate_skills,match_score,status,applied_at,jobs(title)&order=applied_at.desc&limit=300";
-  if (q) qp += `&or=(candidate_name.ilike.*${encodeURIComponent(q)}*,candidate_email.ilike.*${encodeURIComponent(q)}*)`;
+  let qp = `select=${APP_SELECT},jobs(title)&order=applied_at.desc&limit=300`;
+  if (q) {
+    const e = encodeURIComponent(q);
+    qp += `&or=(candidate_name.ilike.*${e}*,candidate_email.ilike.*${e}*,name.ilike.*${e}*,email.ilike.*${e}*)`;
+  }
   if (skills) qp += `&candidate_skills=ilike.*${encodeURIComponent(skills)}*`;
 
   const res = await sbFetch(env, "GET", `/rest/v1/job_applications?${qp}`, null, false, ctx.tenantId);
@@ -5410,22 +5425,23 @@ async function handleTalentPool(request, env, ctx, _, url) {
 
   // Dedupe by email — keep the row with the best score
   const byEmail = new Map();
-  for (const r of rows || []) {
-    const key = (r.candidate_email || "").toLowerCase().trim();
+  for (const raw of Array.isArray(rows) ? rows : []) {
+    const r = normalizeApplication(raw);
+    const key = (r.email || "").toLowerCase().trim();
     if (!key) continue;
     const cur = byEmail.get(key);
-    if (!cur || (r.match_score || 0) > (cur.match_score || 0)) byEmail.set(key, r);
+    if (!cur || (r.score || 0) > (cur.score || 0)) byEmail.set(key, { ...r, last_job_title: raw.jobs?.title || null });
   }
 
   const candidates = [...byEmail.values()]
     .map((r) => ({
       application_id: r.id,
-      name: r.candidate_name,
-      email: r.candidate_email,
-      skills: r.candidate_skills,
-      best_score: r.match_score,
+      name: r.name,
+      email: r.email,
+      skills: r.skills,
+      best_score: r.score,
       last_status: r.status,
-      last_job_title: r.jobs?.title || null,
+      last_job_title: r.last_job_title,
       applied_at: r.applied_at,
     }))
     .sort((a, b) => (b.best_score || 0) - (a.best_score || 0))
@@ -6259,26 +6275,31 @@ async function sbFetch(
     // Billing — NOTE: subscriptions and payment_transactions use company_id, NOT tenant_id.
     // They are NOT tenant_id-aware and must NOT be in this list.
   ];
-  // Inject tenant_id filter for GET, PATCH, and DELETE to prevent cross-tenant access
+  // Inject tenant filter for GET, PATCH, and DELETE to prevent cross-tenant access.
+  // Some tables predate the tenant_id convention — jobs stores the same company
+  // UUID in company_id instead, so filter those by their real column.
+  const TENANT_COLUMN_OVERRIDES = { jobs: "company_id" };
   if (["GET", "PATCH", "DELETE"].includes(method) && tenantId && tenantId !== "default") {
     const tableName = (path.match(/\/rest\/v1\/([a-z_]+)/) || [])[1];
     if (tableName && TENANT_AWARE_TABLES.includes(tableName)) {
+      const col = TENANT_COLUMN_OVERRIDES[tableName] || "tenant_id";
       const separator = finalPath.includes("?") ? "&" : "?";
-      finalPath += `${separator}tenant_id=eq.${tenantId}`;
+      finalPath += `${separator}${col}=eq.${tenantId}`;
     }
   }
 
-  // Auto-inject tenant_id for POST on tenant-aware tables
+  // Auto-inject tenant key for POST on tenant-aware tables
   if (method === 'POST' && tenantId && tenantId !== 'default') {
     const table = (path.match(/\/rest\/v1\/([a-z_]+)/) || [])[1];
     if (table && TENANT_AWARE_TABLES.includes(table)) {
+      const col = TENANT_COLUMN_OVERRIDES[table] || "tenant_id";
       try {
         const parsedBody = body || {};
         if (Array.isArray(parsedBody)) {
           // Bulk insert - inject into each record
-          parsedBody.forEach(record => { if (!record.tenant_id) record.tenant_id = tenantId; });
+          parsedBody.forEach(record => { if (!record[col]) record[col] = tenantId; });
         } else {
-          if (!parsedBody.tenant_id) parsedBody.tenant_id = tenantId;
+          if (!parsedBody[col]) parsedBody[col] = tenantId;
         }
         body = parsedBody;
       } catch (e) { /* body isn't valid, skip */ }

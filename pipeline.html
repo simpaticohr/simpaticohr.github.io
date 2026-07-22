@@ -115,9 +115,16 @@
       { key: 'rejected',    label: 'Rejected',    color: '#f87171' }
     ];
     const STAGE_KEYS = new Set(STAGES.map(s => s.key));
-    const STATUS_ALIAS = { interview_scheduled: 'interview' };
+    const STATUS_ALIAS = { interview_scheduled: 'interview', interviewed: 'interview' };
 
     let allApps = [];
+
+    // Legacy rows store identity in name/email/ats_score; v5.0 rows use candidate_*/match_score
+    const appName = (a) => a.candidate_name || a.name || '?';
+    const appEmail = (a) => a.candidate_email || a.email || '';
+    const appScore = (a) => a.match_score ?? a.ats_score ?? null;
+    const appSummary = (a) => a.ai_summary || a.ats_summary || '';
+    const appSkills = (a) => a.candidate_skills || (Array.isArray(a.ats_matched_skills) && a.ats_matched_skills.length ? a.ats_matched_skills.join(', ') : '');
 
     const normalizeStatus = (s) => STAGE_KEYS.has(s) ? s : (STATUS_ALIAS[s] || 'applied');
     const scoreClass = (s) => s >= 75 ? 'score-high' : s >= 50 ? 'score-mid' : 'score-low';
@@ -151,7 +158,7 @@
       let filtered = allApps;
       if (search) {
         filtered = filtered.filter(a =>
-          `${a.candidate_name || ''} ${a.candidate_email || ''} ${a.jobs?.title || ''}`.toLowerCase().includes(search)
+          `${appName(a)} ${appEmail(a)} ${a.jobs?.title || ''}`.toLowerCase().includes(search)
         );
       }
 
@@ -173,15 +180,15 @@
     }
 
     function renderCard(a, stage) {
-      const sc = a.match_score;
+      const sc = appScore(a);
       const next = nextStage(stage);
       return `<div class="cand-card" draggable="true" ondragstart="cardDragStart(event,'${a.id}')" ondragend="cardDragEnd(event)" onclick="openDetail('${a.id}')">
         <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
-          <div class="cand-name">${escapeHtml(a.candidate_name || '?')}</div>
+          <div class="cand-name">${escapeHtml(appName(a))}</div>
           ${sc != null ? `<span class="score-badge ${scoreClass(sc)}">${sc}</span>` : ''}
         </div>
         <div class="cand-meta">${escapeHtml(a.jobs?.title || 'N/A')}</div>
-        <div class="cand-meta">${escapeHtml(a.candidate_email || '')}</div>
+        <div class="cand-meta">${escapeHtml(appEmail(a))}</div>
         <div class="cand-actions">
           ${next && stage !== 'rejected' ? `<button class="mini-btn advance" onclick="event.stopPropagation();moveApp('${a.id}','${next}')"><i class="fas fa-arrow-right"></i> ${next}</button>` : ''}
           ${stage !== 'rejected' && stage !== 'hired' ? `<button class="mini-btn reject" onclick="event.stopPropagation();moveApp('${a.id}','rejected')"><i class="fas fa-xmark"></i></button>` : ''}
@@ -234,24 +241,27 @@
       const a = allApps.find(x => String(x.id) === String(id));
       if (!a) return;
       const stage = normalizeStatus(a.status);
+      const score = appScore(a);
+      const summary = appSummary(a);
+      const skills = appSkills(a);
       $('detailOverlay').classList.remove('hidden');
       $('detailContent').innerHTML = `
         <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap">
           <div>
-            <h2>${escapeHtml(a.candidate_name || '?')}</h2>
-            <div style="color:#64748b;font-size:.84rem">${escapeHtml(a.candidate_email || '')}</div>
+            <h2>${escapeHtml(appName(a))}</h2>
+            <div style="color:#64748b;font-size:.84rem">${escapeHtml(appEmail(a))}</div>
             <div style="color:#a5b4fc;font-size:.88rem;font-weight:600;margin-top:4px">Applied for: ${escapeHtml(a.jobs?.title || 'N/A')}</div>
           </div>
           <div style="display:flex;gap:8px;align-items:center">
-            ${a.match_score != null ? `<span class="score-badge ${scoreClass(a.match_score)}" style="padding:6px 14px;font-size:.85rem">ATS ${a.match_score}</span>` : ''}
+            ${score != null ? `<span class="score-badge ${scoreClass(score)}" style="padding:6px 14px;font-size:.85rem">ATS ${score}</span>` : ''}
             <span class="score-badge" style="background:rgba(99,102,241,.14);color:#a5b4fc;padding:6px 14px;font-size:.8rem">${escapeHtml(stage.replace(/_/g, ' '))}</span>
             <button class="mini-btn reject" onclick="closeDetail()"><i class="fas fa-xmark"></i></button>
           </div>
         </div>
 
-        ${a.ai_summary ? `<div class="detail-section"><h3>AI Screening Summary</h3><div class="ai-summary">${escapeHtml(a.ai_summary)}</div></div>` : ''}
+        ${summary ? `<div class="detail-section"><h3>AI Screening Summary</h3><div class="ai-summary">${escapeHtml(summary)}</div></div>` : ''}
 
-        ${a.candidate_skills ? `<div class="detail-section"><h3>Skills</h3><div style="color:#94a3b8;font-size:.86rem">${escapeHtml(a.candidate_skills)}</div></div>` : ''}
+        ${skills ? `<div class="detail-section"><h3>Skills</h3><div style="color:#94a3b8;font-size:.86rem">${escapeHtml(skills)}</div></div>` : ''}
 
         <div class="detail-section">
           <h3>Move to stage</h3>
