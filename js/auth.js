@@ -101,6 +101,9 @@ class AuthManager {
       return { success: true, company, user: authData.user };
     } catch (error) {
       console.error('Registration error:', error);
+      // Cleanup: if auth user was created but subsequent steps failed,
+      // sign them out to avoid orphaned auth entries that block re-registration
+      try { await this.db.auth.signOut(); } catch (_) {}
       throw error;
     }
   }
@@ -197,13 +200,8 @@ class AuthManager {
       this.userProfile = profile;
       return { session, profile };
     }
-    const token = localStorage.getItem("simpatico_token");
-    const user = JSON.parse(localStorage.getItem("simpatico_user") || "{}");
-    if (!token || !user.id) return null;
-    const profile = await this.getUserProfile(user.id);
-    if (!profile) return null;
-    this.currentUser = user;
-    return { session: { user }, profile };
+    // No active Supabase session — do not fall back to unverified localStorage
+    return null;
   }
 
   // Redirect by Role
@@ -333,12 +331,18 @@ function showToast(message, type = 'info') {
   
   const toast = document.createElement('div');
   toast.className = `toast ${type}`;
-  toast.innerHTML = `
-    <i class="fas fa-${type === 'success' ? 'check-circle' : type === 'error' ? 'exclamation-circle' : type === 'warning' ? 'exclamation-triangle' : 'info-circle'}" 
-       style="color: var(--${type === 'error' ? 'danger' : type})"></i>
-    <span>${message}</span>
-    <button onclick="this.parentElement.remove()" style="margin-left:auto;background:none;color:var(--gray-400);font-size:1rem;">&times;</button>
-  `;
+  const icon = document.createElement('i');
+  icon.className = `fas fa-${type === 'success' ? 'check-circle' : type === 'error' ? 'exclamation-circle' : type === 'warning' ? 'exclamation-triangle' : 'info-circle'}`;
+  icon.style.color = `var(--${type === 'error' ? 'danger' : type})`;
+  const span = document.createElement('span');
+  span.textContent = message;
+  const closeBtn = document.createElement('button');
+  closeBtn.innerHTML = '&times;';
+  closeBtn.style.cssText = 'margin-left:auto;background:none;color:var(--gray-400);font-size:1rem;';
+  closeBtn.onclick = function() { toast.remove(); };
+  toast.appendChild(icon);
+  toast.appendChild(span);
+  toast.appendChild(closeBtn);
   container.appendChild(toast);
   setTimeout(() => toast.remove(), 5000);
 }

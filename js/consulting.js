@@ -29,8 +29,8 @@
             if (window.SIMPATICO_CONFIG && window.SIMPATICO_CONFIG.tenantId) return window.SIMPATICO_CONFIG.tenantId;
             if (typeof getCompanyId === 'function' && getCompanyId()) return getCompanyId();
             const user = JSON.parse(localStorage.getItem('simpatico_user') || '{}');
-            return user.company_id || 'SIMP_PRO_MAIN';
-        } catch { return 'SIMP_PRO_MAIN'; }
+            return user.company_id || null;
+        } catch { return null; }
     }
 
     function getUserInfo() {
@@ -213,9 +213,13 @@
 
     window.signOut = function () {
         if (confirm('Sign out of the consulting portal?')) {
-            localStorage.removeItem('simpatico_token');
-            localStorage.removeItem('sh_token');
-            window.location.href = '../platform/login.html';
+            if (typeof window.doLogout === 'function') {
+                window.doLogout();
+            } else {
+                localStorage.removeItem('simpatico_token');
+                localStorage.removeItem('sh_token');
+                window.location.href = '../platform/login.html';
+            }
         }
     };
 
@@ -225,10 +229,19 @@
     window.showToast = function (message, type) {
         type = type || 'info';
         const container = document.getElementById('toastContainer');
+        if (!container) return;
         const icons = { success: 'fa-check-circle', error: 'fa-times-circle', info: 'fa-info-circle' };
         const toast = document.createElement('div');
         toast.className = 'toast ' + type;
-        toast.innerHTML = '<i class="fas ' + (icons[type] || icons.info) + '"></i> ' + message;
+        
+        const icon = document.createElement('i');
+        icon.className = 'fas ' + (icons[type] || icons.info);
+        toast.appendChild(icon);
+        
+        const textSpan = document.createElement('span');
+        textSpan.textContent = ' ' + message;
+        toast.appendChild(textSpan);
+        
         container.appendChild(toast);
         setTimeout(() => { toast.style.opacity = '0'; toast.style.transform = 'translateX(40px)'; setTimeout(() => toast.remove(), 300); }, 3000);
     };
@@ -2028,7 +2041,13 @@ Be professional, highly strategic, clear, and action-oriented. Support the custo
     };
 
     function markdownToHtml(text) {
-        return (text || '')
+        const escaped = (text || '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+        return escaped
             .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
             .replace(/\*(.+?)\*/g, '<em>$1</em>')
             .replace(/`(.+?)`/g, '<code>$1</code>')
@@ -2705,11 +2724,13 @@ RECOMMENDATIONS FOR NEXT WEEK
     // Gemini Live Real-time Call variables
     var liveSocket = null;
     var liveAudioContext = null;
+    var livePlaybackAudioContext = null; // Separate context for 24kHz playback
     var liveMicStream = null;
     var liveScriptNode = null;
     var livePlaybackTime = 0;
     var liveAudioQueue = [];
     var isLiveCallActive = false;
+    var liveSessionReady = false; // Track whether server setup is complete
     var currentBotLiveMessageEl = null;
     var currentUserLiveMessageEl = null;
 
@@ -2874,7 +2895,7 @@ RECOMMENDATIONS FOR NEXT WEEK
     }
 
     function playIncomingAudioChunk(base64Data, sampleRate) {
-        if (!liveAudioContext || !isLiveCallActive) return;
+        if (!livePlaybackAudioContext || !isLiveCallActive) return;
 
         const buffer = base64ToArrayBuffer(base64Data);
         const int16Array = new Int16Array(buffer);
@@ -2886,18 +2907,18 @@ RECOMMENDATIONS FOR NEXT WEEK
         }
 
         // Create AudioBuffer
-        const audioBuffer = liveAudioContext.createBuffer(1, float32Array.length, sampleRate || 24000);
+        const audioBuffer = livePlaybackAudioContext.createBuffer(1, float32Array.length, sampleRate || 24000);
         audioBuffer.copyToChannel(float32Array, 0);
 
         // Create BufferSourceNode
-        const sourceNode = liveAudioContext.createBufferSource();
+        const sourceNode = livePlaybackAudioContext.createBufferSource();
         sourceNode.buffer = audioBuffer;
         
         // Connect to destination
-        sourceNode.connect(liveAudioContext.destination);
+        sourceNode.connect(livePlaybackAudioContext.destination);
 
         // Chronological scheduling
-        const currentTime = liveAudioContext.currentTime;
+        const currentTime = livePlaybackAudioContext.currentTime;
         if (livePlaybackTime < currentTime) {
             livePlaybackTime = currentTime;
         }
@@ -2926,7 +2947,7 @@ RECOMMENDATIONS FOR NEXT WEEK
         liveScriptNode.connect(liveAudioContext.destination);
 
         liveScriptNode.onaudioprocess = function (audioProcessingEvent) {
-            if (!isLiveCallActive || !liveSocket || liveSocket.readyState !== WebSocket.OPEN) return;
+            if (!isLiveCallActive || !liveSessionReady || !liveSocket || liveSocket.readyState !== WebSocket.OPEN) return;
 
             const inputBuffer = audioProcessingEvent.inputBuffer;
             const inputData = inputBuffer.getChannelData(0); // Float32 array
@@ -2991,6 +3012,7 @@ RECOMMENDATIONS FOR NEXT WEEK
 
     window.endLiveVoiceCall = function () {
         isLiveCallActive = false;
+        liveSessionReady = false;
         
         if (liveSocket) {
             try {
@@ -3018,6 +3040,13 @@ RECOMMENDATIONS FOR NEXT WEEK
                 liveAudioContext.close();
             } catch(e) {}
             liveAudioContext = null;
+        }
+
+        if (livePlaybackAudioContext) {
+            try {
+                livePlaybackAudioContext.close();
+            } catch(e) {}
+            livePlaybackAudioContext = null;
         }
 
         clearPlaybackQueue();
@@ -3093,6 +3122,7 @@ RECOMMENDATIONS FOR NEXT WEEK
 
         try {
             isLiveCallActive = true;
+            liveSessionReady = false;
             liveAudioQueue = [];
             livePlaybackTime = 0;
             currentBotLiveMessageEl = null;
@@ -3107,13 +3137,14 @@ RECOMMENDATIONS FOR NEXT WEEK
                 }
             });
 
-            // 2. Initialize AudioContext at 16kHz
+            // 2. Initialize AudioContexts: 16kHz for mic capture, 24kHz for playback
             const AudioContextClass = window.AudioContext || window.webkitAudioContext;
             liveAudioContext = new AudioContextClass({ sampleRate: 16000 });
+            livePlaybackAudioContext = new AudioContextClass({ sampleRate: 24000 });
             const source = liveAudioContext.createMediaStreamSource(liveMicStream);
 
             // 3. Connect WebSocket to Gemini Multimodal Live API
-            const wsUrl = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent?key=${key}`;
+            const wsUrl = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=${key}`;
             liveSocket = new WebSocket(wsUrl);
 
             liveSocket.onopen = function () {
@@ -3142,7 +3173,7 @@ Be professional, highly strategic, clear, and action-oriented. Keep your spoken 
                 // Setup configuration message
                 const setupMsg = {
                     setup: {
-                        model: "models/gemini-2.0-flash-exp",
+                        model: "models/gemini-3.1-flash-live-preview",
                         generationConfig: {
                             responseModalities: ["AUDIO"],
                             speechConfig: {
@@ -3160,16 +3191,25 @@ Be professional, highly strategic, clear, and action-oriented. Keep your spoken 
                 };
                 liveSocket.send(JSON.stringify(setupMsg));
 
-                if (statusText) statusText.textContent = 'Voice Call Active. Speak now!';
-                if (waveform) waveform.style.display = 'flex';
+                if (statusText) statusText.textContent = 'Waiting for session setup...';
 
-                // Start capturing audio from mic
-                startRecordingAudio(source);
+                // Audio recording will start once we receive setupComplete from server
+                // (handled in onmessage below)
             };
 
             liveSocket.onmessage = function (event) {
                 try {
                     const data = JSON.parse(event.data);
+
+                    // Handle setup completion — now safe to start sending audio
+                    if (data.setupComplete) {
+                        console.log('[Gemini Live] Setup complete, starting audio capture');
+                        liveSessionReady = true;
+                        if (statusText) statusText.textContent = 'Voice Call Active. Speak now!';
+                        if (waveform) waveform.style.display = 'flex';
+                        startRecordingAudio(source);
+                        return;
+                    }
 
                     // Server notifies of client interruption (user barges in)
                     if (data.interrupted) {
@@ -3336,36 +3376,24 @@ Be professional, highly strategic, clear, and action-oriented. Keep your spoken 
         if (!cid) return;
 
         try {
-            collabChannel = client.channel('consulting-collaboration')
-                .on('postgres_changes', { event: '*', schema: 'public', table: 'consulting_projects' }, (payload) => {
-                    const row = payload.new || payload.old;
-                    if (row && row.tenant_id === cid) {
-                        loadProjects().then(() => {
-                            renderProjects();
-                            updateVisualAnalytics();
-                        });
-                    }
+            collabChannel = client.channel('consulting-' + cid)
+                .on('postgres_changes', { event: '*', schema: 'public', table: 'consulting_projects', filter: 'tenant_id=eq.' + cid }, (payload) => {
+                    loadProjects().then(() => {
+                        renderProjects();
+                        updateVisualAnalytics();
+                    });
                 })
-                .on('postgres_changes', { event: '*', schema: 'public', table: 'consulting_kpis' }, (payload) => {
-                    const row = payload.new || payload.old;
-                    if (row && row.tenant_id === cid) {
-                        loadKPIs();
-                    }
+                .on('postgres_changes', { event: '*', schema: 'public', table: 'consulting_kpis', filter: 'tenant_id=eq.' + cid }, (payload) => {
+                    loadKPIs();
                 })
-                .on('postgres_changes', { event: '*', schema: 'public', table: 'consulting_kpi_history' }, (payload) => {
-                    const row = payload.new || payload.old;
-                    if (row && row.tenant_id === cid) {
-                        loadKPIHistory().then(() => {
-                            renderKPIs();
-                            updateVisualAnalytics();
-                        });
-                    }
+                .on('postgres_changes', { event: '*', schema: 'public', table: 'consulting_kpi_history', filter: 'tenant_id=eq.' + cid }, (payload) => {
+                    loadKPIHistory().then(() => {
+                        renderKPIs();
+                        updateVisualAnalytics();
+                    });
                 })
-                .on('postgres_changes', { event: '*', schema: 'public', table: 'consulting_swot' }, (payload) => {
-                    const row = payload.new || payload.old;
-                    if (row && row.tenant_id === cid) {
-                        loadSwot().then(() => renderSwot());
-                    }
+                .on('postgres_changes', { event: '*', schema: 'public', table: 'consulting_swot', filter: 'tenant_id=eq.' + cid }, (payload) => {
+                    loadSwot().then(() => renderSwot());
                 })
                 .subscribe();
         } catch (e) {
@@ -3430,7 +3458,7 @@ Be professional, highly strategic, clear, and action-oriented. Keep your spoken 
                 .from('subscriptions')
                 .select('*')
                 .eq('company_id', tenantId)
-                .eq('plan', 'consulting_monthly')
+                .ilike('plan', 'consulting%')
                 .eq('status', 'active')
                 .gt('current_period_end', new Date().toISOString())
                 .limit(1);
@@ -3462,9 +3490,8 @@ Be professional, highly strategic, clear, and action-oriented. Keep your spoken 
 
                     if (!isPaidPlatform) {
                         // Trial is expired, but not a paid platform plan either.
-                        // Allow loading the page so trial-guard.js can show the expired paywall overlay
-                        // with "Browse in Read-Only" support.
-                        return true;
+                        // Do not allow loading workspace
+                        return false;
                     }
                 }
             }
@@ -3943,7 +3970,7 @@ Be professional, highly strategic, clear, and action-oriented. Keep your spoken 
         if (progressBar) progressBar.style.width = percent + '%';
     }
 
-    function updateMilestoneUi(elId, status) {
+    function updateMilestoneUi(elId, status, label) {
         const el = document.getElementById(elId);
         if (!el) return;
 

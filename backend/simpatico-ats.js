@@ -336,6 +336,27 @@ function base64UrlDecode(str) {
   return Uint8Array.from(binary, (c) => c.charCodeAt(0));
 }
 
+/**
+ * Computes the 1-click billing approval token for an order.
+ * FAIL-CLOSED: throws when JWT_SECRET is not configured. Never fall back to a
+ * known constant here — a predictable token lets anyone approve real payments.
+ */
+async function quickApproveToken(env, orderId) {
+  if (!env.JWT_SECRET) {
+    throw new ServiceUnavailableError(
+      "Quick-approve disabled (JWT_SECRET not configured)",
+    );
+  }
+  const buf = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(`${orderId}:${env.JWT_SECRET}`),
+  );
+  return Array.from(new Uint8Array(buf))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("")
+    .substring(0, 32);
+}
+
 // ===============================================================
 // § 4.  RATE LIMITER  (KV-backed sliding window)
 // ===============================================================
@@ -404,13 +425,13 @@ async function withCircuitBreaker(env, service, fn) {
 // § 6.  IDEMPOTENCY  (KV-backed)
 // ===============================================================
 
-async function withIdempotency(env, key, tenantId, fn) {
+async function withIdempotency(env, key, tenantId, fn, request) {
   if (!key || !env.HR_KV) return fn();
   const kvKey = `idem:${tenantId}:${key}`;
   const cached = await env.HR_KV.get(kvKey, { type: "json" });
   if (cached)
     return Response.json(cached, {
-      headers: { "X-Idempotent-Replayed": "true", ...CORS_HEADERS },
+      headers: { "X-Idempotent-Replayed": "true", ...getCorsHeaders(request) },
     });
 
   const result = await fn();
@@ -1355,6 +1376,11 @@ route("POST", "/ai/generate-assessment", handleGenerateAssessment);
 route("POST", "/ai/assessments", handleSaveAssessment);
 route("POST", "/ai/generate-course", handleGenerateCourse);
 
+// Talent Rediscovery & Matching
+route("POST", "/ai/talent-match", handleTalentMatch);
+route("GET", "/ai/talent-matches/:jobId", handleListTalentMatches);
+route("GET", "/talent-pool", handleTalentPool);
+
 // Calendar & ICS
 route("POST", "/calendar/ics", handleGenerateICS);
 
@@ -1456,12 +1482,14 @@ export default {
       });
 
     // ── Wise Webhook: Early intercept (bypasses auth, rate limiting, tenant context) ──
+    // NOTE: Wise webhooks must bypass auth — they are server-to-server calls from Wise.
     if (path === "/api/webhooks/wise") {
+      const corsHdrs = getCorsHeaders(request);
       // GET/HEAD: Wise validates URL reachability before allowing webhook creation
       if (method === "GET" || method === "HEAD") {
         return Response.json(
           { success: true, message: "Wise webhook endpoint active", version: VERSION },
-          { status: 200, headers: CORS_HEADERS },
+          { status: 200, headers: corsHdrs },
         );
       }
       // POST: Actual webhook event from Wise
@@ -1472,7 +1500,7 @@ export default {
           console.error("[Wise Webhook] Error:", err.stack || err.message);
           return Response.json(
             { success: false, error: err.message },
-            { status: err.status || 500, headers: CORS_HEADERS },
+            { status: err.status || 500, headers: corsHdrs },
           );
         }
       }
@@ -1480,33 +1508,43 @@ export default {
 
     // ── 1-Click Admin Payment Approve via Email Token ──
     if (method === "GET" && path === "/admin/billing/quick-approve") {
+      const corsHdrs = getCorsHeaders(request);
       try {
         const url = new URL(request.url);
         const token = url.searchParams.get("token");
         const orderId = url.searchParams.get("order_id");
-        if (!token || !orderId) return Response.json({ success: false, error: "Token and order_id required" }, { status: 400, headers: CORS_HEADERS });
+        if (!token || !orderId) return Response.json({ success: false, error: "Token and order_id required" }, { status: 400, headers: corsHdrs });
 
-        // Verify token matches internal secret token
-        const expectedToken = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`${orderId}:${env.JWT_SECRET || 'simpatico'}`)).then(buf => Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('').substring(0, 32));
-        if (token !== expectedToken) return Response.json({ success: false, error: "Invalid or expired token" }, { status: 403, headers: CORS_HEADERS });
+        // Verify token matches internal secret token (fail-closed when JWT_SECRET is unset)
+        const expectedToken = await quickApproveToken(env, orderId);
+        if (token !== expectedToken) return Response.json({ success: false, error: "Invalid or expired token" }, { status: 403, headers: corsHdrs });
 
         // Fetch transaction
         const txRes = await fetch(`${env.SUPABASE_URL}/rest/v1/payment_transactions?gateway_order_id=eq.${orderId}&select=*&limit=1`, { headers: { apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}` } });
         const txns = await txRes.json();
         const tx = txns?.[0];
-        if (!tx) return Response.json({ success: false, error: "Order not found" }, { status: 404, headers: CORS_HEADERS });
+        if (!tx) return Response.json({ success: false, error: "Order not found" }, { status: 404, headers: corsHdrs });
 
         const systemCtx = { requestId: crypto.randomUUID(), tenantId: tx.company_id, actorEmail: "admin_email_1click", actorRole: "superadmin", actorId: "admin" };
         await executeCompletePayment(env, tx, `utr_approved_${Date.now()}`, systemCtx);
 
         return new Response(`<!DOCTYPE html><html><head><title>Payment Approved</title><meta name="viewport" content="width=device-width,initial-scale=1"></head><body style="font-family:sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#F8FAFC"><div style="background:#FFF;padding:32px;border-radius:16px;box-shadow:0 4px 6px -1px rgba(0,0,0,0.1);text-align:center;max-width:400px"><h1 style="color:#059669;margin-bottom:8px">✅ Payment Approved!</h1><p style="color:#475569;font-size:14px">Order <strong>${orderId}</strong> has been confirmed.<br>Subscription is now active for ${tx.customer_name || 'customer'}.</p></div></body></html>`, { status: 200, headers: { "Content-Type": "text/html" } });
       } catch (err) {
-        return Response.json({ success: false, error: err.message }, { status: 500, headers: CORS_HEADERS });
+        return Response.json({ success: false, error: err.message }, { status: 500, headers: corsHdrs });
       }
     }
 
-    // ── Wise Webhook Setup: One-time admin endpoint (bypasses auth, uses stored WISE_API_TOKEN) ──
+    // ── Wise Webhook Setup: Admin-only endpoint (requires superadmin auth) ──
     if (path === "/admin/wise/setup-webhook") {
+      const corsHdrs = getCorsHeaders(request);
+      // Auth check: require superadmin for both GET and POST
+      let adminCtx;
+      try {
+        adminCtx = await buildContext(request, env);
+        requireRole(adminCtx, "super_admin", "superadmin");
+      } catch (authErr) {
+        return Response.json({ success: false, error: authErr.message || "Authentication required" }, { status: authErr.status || 401, headers: corsHdrs });
+      }
       if (method === "GET") {
         // List existing subscriptions for diagnostics
         try {
@@ -1516,24 +1554,31 @@ export default {
           const profile = profiles.find(p => p.type === "BUSINESS") || profiles[0];
           const subsRes = await fetch(`https://api.transferwise.com/v3/profiles/${profile.id}/subscriptions`, { headers: { Authorization: `Bearer ${wiseToken}` } });
           const subs = await subsRes.json();
-          return Response.json({ success: true, profile_id: profile.id, profile_type: profile.type, subscriptions: subs }, { status: 200, headers: CORS_HEADERS });
+          return Response.json({ success: true, profile_id: profile.id, profile_type: profile.type, subscriptions: subs }, { status: 200, headers: corsHdrs });
         } catch (err) {
-          return Response.json({ success: false, error: err.message }, { status: 500, headers: CORS_HEADERS });
+          return Response.json({ success: false, error: err.message }, { status: 500, headers: corsHdrs });
         }
       }
       if (method === "POST") {
         try {
-          const systemCtx = { requestId: crypto.randomUUID(), tenantId: "system", actorEmail: "admin_setup", actorRole: "superadmin", actorId: "admin" };
-          return await handleWiseSetupWebhook(request, env, systemCtx);
+          return await handleWiseSetupWebhook(request, env, adminCtx);
         } catch (err) {
-          console.error("[Wise Setup] Error:", err.stack || err.message);
-          return Response.json({ success: false, error: err.message }, { status: err.status || 500, headers: CORS_HEADERS });
+          console.error("[Wise Setup] Error:", err.message);
+          return Response.json({ success: false, error: err.message }, { status: err.status || 500, headers: corsHdrs });
         }
       }
     }
 
-    // ── Wise Webhook Test: Full round-trip test ──
+    // ── Wise Webhook Test: Admin-only full round-trip test ──
     if (method === "POST" && path === "/admin/wise/test-webhook") {
+      const corsHdrs = getCorsHeaders(request);
+      // Auth check: require superadmin
+      try {
+        const testCtx = await buildContext(request, env);
+        requireRole(testCtx, "super_admin", "superadmin");
+      } catch (authErr) {
+        return Response.json({ success: false, error: authErr.message || "Authentication required" }, { status: authErr.status || 401, headers: corsHdrs });
+      }
       try {
         const testOrderId = `TEST_WISE_${crypto.randomUUID().replace(/-/g, "").substring(0, 10)}`;
         const testAmount = 0.01;
@@ -1548,7 +1593,7 @@ export default {
         const companies = await compRes.json();
         const testCompanyId = companies?.[0]?.id;
         if (!testCompanyId) {
-          return Response.json({ success: false, error: "No companies found in database to use for test" }, { status: 500, headers: CORS_HEADERS });
+          return Response.json({ success: false, error: "No companies found in database to use for test" }, { status: 500, headers: corsHdrs });
         }
 
         // Step 1: Create a fake pending order in Supabase
@@ -1575,7 +1620,7 @@ export default {
         const createData = await createRes.text();
         results.steps.push({ step: "1_create_order", status: createRes.ok ? "✅ Created" : "❌ Failed", order_id: testOrderId, response: createData.substring(0, 200) });
         if (!createRes.ok) {
-          return Response.json({ success: false, results, error: "Failed to create test order" }, { status: 500, headers: CORS_HEADERS });
+          return Response.json({ success: false, results, error: "Failed to create test order" }, { status: 500, headers: corsHdrs });
         }
 
         // Step 2: Simulate Wise webhook POST to our own endpoint
@@ -1593,7 +1638,7 @@ export default {
           },
         });
 
-        // Step 2: Directly process webhook logic via handler function
+        // Directly process webhook logic via handler function
         const syntheticWebhookReq = new Request("https://localhost/api/webhooks/wise", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -1629,9 +1674,9 @@ export default {
           ? "🎉 WEBHOOK TEST PASSED! Full flow working: Order → Wise Deposit → Auto-Activation"
           : "⚠️ Webhook received but order not auto-activated. Check logs.";
 
-        return Response.json(results, { status: 200, headers: CORS_HEADERS });
+        return Response.json(results, { status: 200, headers: corsHdrs });
       } catch (err) {
-        return Response.json({ success: false, error: err.message, stack: err.stack?.substring(0, 300) }, { status: 500, headers: CORS_HEADERS });
+        return Response.json({ success: false, error: err.message }, { status: 500, headers: corsHdrs });
       }
     }
 
@@ -1688,6 +1733,7 @@ export default {
         idempotencyKey,
         tenantId,
         handlerFn,
+        request,
       );
 
       // ── Flush Audit Buffer ──
@@ -4103,7 +4149,8 @@ async function handleCreateJob(request, env, ctx) {
 }
 
 async function handleListJobs(request, env, ctx, _, url) {
-  // No strict role check — tenant isolation enforced by sbFetch
+  // Authenticated read — tenant isolation enforced by sbFetch tenant_id filter
+  requireAuth(ctx);
   const status = url.searchParams.get("status") || "open";
   const res = await sbFetch(
     env,
@@ -4681,7 +4728,8 @@ Return ONLY valid JSON in format: {"match_score": 85, "reason": "Brief 1-sentenc
 }
 
 async function handleListApplications(request, env, ctx, _, url) {
-  // No strict role check — tenant isolation enforced by sbFetch tenant_id filter
+  // Authenticated read — tenant isolation enforced by sbFetch tenant_id filter
+  requireAuth(ctx);
   const jobId = url.searchParams.get("job_id");
   const status = url.searchParams.get("status");
   let qp = `select=*,jobs(title,department)&order=created_at.desc`;
@@ -4699,6 +4747,8 @@ async function handleListApplications(request, env, ctx, _, url) {
 }
 
 async function handleUpdateApplication(request, env, ctx, [id]) {
+  // Authenticated + recruiter role — sbFetch additionally scopes to ctx.tenantId
+  requireRole(ctx, "hr", "admin", "superadmin", "client_admin");
   const body = await safeJson(request);
 
   // Only allow safe fields to be patched
@@ -5102,6 +5152,286 @@ Include 2-4 logical actions. Keep it practical for enterprise HR.`;
       result.response,
     );
   }
+}
+
+// ── Talent Rediscovery & Matching ─────────────────────────────────────────────
+
+/**
+ * POST /ai/talent-match — Score the tenant's EXISTING applicant pool against a
+ * job and persist ranked results in talent_matches (silver-medalist rediscovery).
+ * Body: { job_id, limit? }  (limit: candidates scored per run, default 15, max 25)
+ */
+async function handleTalentMatch(request, env, ctx) {
+  requireRole(ctx, "hr", "admin", "superadmin", "client_admin");
+  const body = await safeJson(request);
+  const jobId = body.job_id;
+  if (!jobId) throw new ValidationError("job_id is required");
+  const limit = Math.min(Math.max(parseInt(body.limit, 10) || 15, 1), 25);
+
+  // 1. Target job (tenant-scoped — 404s on cross-tenant ids)
+  const jobRes = await sbFetch(
+    env,
+    "GET",
+    `/rest/v1/jobs?id=eq.${jobId}&select=id,title,description,department,location,skills_required,status`,
+    null,
+    false,
+    ctx.tenantId,
+  );
+  const [job] = await jobRes.json();
+  if (!job) throw new NotFoundError("Job");
+
+  // 2. Rediscovery pool: this tenant's applications to OTHER jobs
+  const poolRes = await sbFetch(
+    env,
+    "GET",
+    `/rest/v1/job_applications?job_id=neq.${jobId}&select=id,candidate_name,candidate_email,candidate_skills,match_score,status,resume_text,applied_at&order=applied_at.desc&limit=200`,
+    null,
+    false,
+    ctx.tenantId,
+  );
+  const rows = await poolRes.json();
+
+  // Dedupe by email — keep the newest application per candidate
+  const byEmail = new Map();
+  for (const r of rows || []) {
+    const key = (r.candidate_email || "").toLowerCase().trim();
+    if (!key || byEmail.has(key)) continue;
+    byEmail.set(key, r);
+  }
+  let pool = [...byEmail.values()];
+  const poolSize = pool.length;
+  if (!poolSize) return apiResponse({ matches: [], pool_size: 0, scored: 0, model: null });
+
+  // 3. Cheap pre-rank: overlap of job.skills_required with candidate_skills,
+  //    tie-break on the candidate's previous application score
+  const jobSkills = (job.skills_required || [])
+    .map((s) => String(s).toLowerCase().trim())
+    .filter(Boolean);
+  const overlap = (c) => {
+    if (!jobSkills.length) return 0;
+    const cs = String(c.candidate_skills || "").toLowerCase();
+    let n = 0;
+    for (const s of jobSkills) if (s && cs.includes(s)) n++;
+    return n;
+  };
+  pool = pool
+    .map((c) => ({ c, o: overlap(c), prev: c.match_score || 0 }))
+    .sort((a, b) => b.o - a.o || b.prev - a.prev)
+    .slice(0, limit)
+    .map((x) => x.c);
+
+  // 4. LLM scoring — one call per batch of 15 (stays inside the 28s wall)
+  const aiCfg = await getCompanyAIConfig(env, ctx.tenantId);
+  const modelLabel = aiCfg?.provider
+    ? `${aiCfg.provider}:${aiCfg.model || aiCfg.cfModel || "default"}`
+    : `cloudflare:${CF_DEFAULT_MODEL}`;
+
+  const systemPrompt = `You are an expert technical recruiter. Score how well each candidate matches the job on transferable skills, seniority and domain fit — NOT on their previous application score. Return ONLY a valid JSON array (no markdown, no backticks), one object per candidate:
+[{"application_id":"<id>","match_score":<integer 0-100>,"reasoning":"<one sentence>","skills_matched":["..."],"skills_missing":["..."]}]
+Score conservatively and consistently. skills_matched / skills_missing: max 6 short items each, empty array when none.`;
+
+  const jobBlock = `JOB: ${job.title}
+Department: ${job.department || "n/a"} · Location: ${job.location || "n/a"}
+Required skills: ${jobSkills.join(", ") || "n/a"}
+Description: ${String(job.description || "").replace(/\s+/g, " ").slice(0, 1200)}`;
+
+  const BATCH = 15;
+  const scored = [];
+  for (let i = 0; i < pool.length; i += BATCH) {
+    const batch = pool.slice(i, i + BATCH);
+    const candLines = batch
+      .map((c, j) => {
+        const excerpt = String(c.resume_text || "")
+          .replace(/\[AI Score:[^\]]*\]\s*/g, "")
+          .replace(/\s+/g, " ")
+          .trim()
+          .slice(0, 600);
+        return `CANDIDATE ${j + 1} (application_id=${c.id})
+Name: ${c.candidate_name || "?"}
+Skills: ${c.candidate_skills || "n/a"}
+Resume excerpt: ${excerpt || "n/a"}`;
+      })
+      .join("\n\n");
+
+    const result = await runLLM(
+      env,
+      ctx.tenantId,
+      [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: `${jobBlock}\n\n${candLines}` },
+      ],
+      2048,
+    );
+
+    let arr;
+    try {
+      const text = result.response.replace(/```json|```/g, "").trim();
+      try {
+        arr = JSON.parse(text);
+      } catch {
+        // Tolerate prose around the JSON array
+        arr = JSON.parse(text.slice(text.indexOf("["), text.lastIndexOf("]") + 1));
+      }
+    } catch (e) {
+      throw new AppError(
+        "Failed to parse AI talent-match response",
+        HTTP.SERVER_ERROR,
+        "PARSE_ERROR",
+        result.response,
+      );
+    }
+    if (Array.isArray(arr)) scored.push(...arr);
+  }
+
+  // 5. Sanitize: drop hallucinated ids, clamp scores, cap arrays
+  const byId = new Map(pool.map((c) => [c.id, c]));
+  const clean = [];
+  for (const m of scored) {
+    if (!m || !byId.has(m.application_id)) continue;
+    clean.push({
+      application_id: m.application_id,
+      match_score: Math.max(0, Math.min(100, Math.round(Number(m.match_score) || 0))),
+      reasoning: String(m.reasoning || "").slice(0, 500),
+      skills_matched: (Array.isArray(m.skills_matched) ? m.skills_matched : [])
+        .map((s) => String(s).slice(0, 60))
+        .slice(0, 6),
+      skills_missing: (Array.isArray(m.skills_missing) ? m.skills_missing : [])
+        .map((s) => String(s).slice(0, 60))
+        .slice(0, 6),
+    });
+  }
+  clean.sort((a, b) => b.match_score - a.match_score);
+
+  // 6. Persist (upsert on the unique job_id+application_id pair)
+  if (clean.length) {
+    const upRows = clean.map((m) => ({
+      tenant_id: ctx.tenantId,
+      job_id: jobId,
+      application_id: m.application_id,
+      match_score: m.match_score,
+      reasoning: m.reasoning,
+      skills_matched: m.skills_matched,
+      skills_missing: m.skills_missing,
+      model: modelLabel,
+      updated_at: new Date().toISOString(),
+    }));
+    const upRes = await fetch(
+      `${env.SUPABASE_URL}/rest/v1/talent_matches?on_conflict=job_id,application_id`,
+      {
+        method: "POST",
+        headers: {
+          apikey: env.SUPABASE_SERVICE_KEY,
+          Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
+          "Content-Type": "application/json",
+          Prefer: "resolution=merge-duplicates,return=minimal",
+        },
+        body: JSON.stringify(upRows),
+      },
+    );
+    if (!upRes.ok) {
+      const errText = await upRes.text().catch(() => "unknown");
+      throw new AppError(`Failed to persist talent matches: ${errText}`, HTTP.SERVER_ERROR, "DB_ERROR");
+    }
+  }
+
+  await invalidateCache(env, `talent:matches:${ctx.tenantId}:${jobId}`);
+  await audit(env, ctx, "talent.match_run", "jobs", jobId, {
+    pool_size: poolSize,
+    scored: clean.length,
+    model: modelLabel,
+  }).catch(() => {});
+
+  const matches = clean.map((m) => {
+    const c = byId.get(m.application_id);
+    return {
+      ...m,
+      candidate_name: c?.candidate_name || null,
+      candidate_email: c?.candidate_email || null,
+      candidate_skills: c?.candidate_skills || null,
+      current_status: c?.status || null,
+    };
+  });
+  return apiResponse({ matches, pool_size: poolSize, scored: clean.length, model: modelLabel });
+}
+
+/**
+ * GET /ai/talent-matches/:jobId — Previously persisted matches for a job,
+ * joined with the candidate's application details. KV-cached 60s.
+ */
+async function handleListTalentMatches(request, env, ctx, [jobId]) {
+  requireAuth(ctx);
+  const payload = await withCache(env, `talent:matches:${ctx.tenantId}:${jobId}`, CACHE_TTL_DEFAULT, async () => {
+    const mRes = await sbFetch(
+      env,
+      "GET",
+      `/rest/v1/talent_matches?job_id=eq.${jobId}&select=*&order=match_score.desc&limit=100`,
+      null,
+      false,
+      ctx.tenantId,
+    );
+    const matches = await mRes.json();
+    if (!Array.isArray(matches) || !matches.length) return { matches: [] };
+
+    const ids = matches.map((m) => m.application_id).filter(Boolean);
+    const aRes = await sbFetch(
+      env,
+      "GET",
+      `/rest/v1/job_applications?id=in.(${ids.join(",")})&select=id,candidate_name,candidate_email,candidate_skills,status,job_id,match_score`,
+      null,
+      false,
+      ctx.tenantId,
+    );
+    const apps = await aRes.json();
+    const appById = new Map((apps || []).map((a) => [a.id, a]));
+    return {
+      matches: matches.map((m) => ({ ...m, candidate: appById.get(m.application_id) || null })),
+    };
+  });
+  return apiResponse(payload);
+}
+
+/**
+ * GET /talent-pool — Browse the tenant's whole applicant pool, deduped per
+ * candidate with their best score. Optional ?q= (name/email) and ?skills= filters.
+ */
+async function handleTalentPool(request, env, ctx, _, url) {
+  requireAuth(ctx);
+  const sanitizeTerm = (s) => (s || "").replace(/[(),.*"\\%_]/g, " ").trim();
+  const q = sanitizeTerm(url.searchParams.get("q"));
+  const skills = sanitizeTerm(url.searchParams.get("skills"));
+
+  let qp =
+    "select=id,candidate_name,candidate_email,candidate_skills,match_score,status,applied_at,jobs(title)&order=applied_at.desc&limit=300";
+  if (q) qp += `&or=(candidate_name.ilike.*${encodeURIComponent(q)}*,candidate_email.ilike.*${encodeURIComponent(q)}*)`;
+  if (skills) qp += `&candidate_skills=ilike.*${encodeURIComponent(skills)}*`;
+
+  const res = await sbFetch(env, "GET", `/rest/v1/job_applications?${qp}`, null, false, ctx.tenantId);
+  const rows = await res.json();
+
+  // Dedupe by email — keep the row with the best score
+  const byEmail = new Map();
+  for (const r of rows || []) {
+    const key = (r.candidate_email || "").toLowerCase().trim();
+    if (!key) continue;
+    const cur = byEmail.get(key);
+    if (!cur || (r.match_score || 0) > (cur.match_score || 0)) byEmail.set(key, r);
+  }
+
+  const candidates = [...byEmail.values()]
+    .map((r) => ({
+      application_id: r.id,
+      name: r.candidate_name,
+      email: r.candidate_email,
+      skills: r.candidate_skills,
+      best_score: r.match_score,
+      last_status: r.status,
+      last_job_title: r.jobs?.title || null,
+      applied_at: r.applied_at,
+    }))
+    .sort((a, b) => (b.best_score || 0) - (a.best_score || 0))
+    .slice(0, 100);
+
+  return apiResponse({ candidates, total: candidates.length });
 }
 
 async function handleHRAutomationGenerator(request, env, ctx) {
@@ -5884,6 +6214,7 @@ async function sbFetch(
     "interviews",
     "interview_sessions",
     "applications",
+    "talent_matches",
     // Leave & Attendance
     "leave_requests",
     "leave_balances",
@@ -8204,6 +8535,17 @@ async function handleManualCreateOrder(request, env, ctx) {
   await audit(env, ctx, "billing.manual_order_created", "payment_transactions", orderId, { plan, billing_cycle, amount: pricing.inr });
 
   // Notify admin about new domestic payment order
+  // Build the 1-click approval section only when JWT_SECRET is configured —
+  // a predictable fallback token would let anyone approve real payments.
+  let quickApproveSectionHtml = "";
+  try {
+    const approveToken = await quickApproveToken(env, orderId);
+    quickApproveSectionHtml = `<div style="margin-top:12px;padding:12px;background:#F0FDF4;border-radius:8px;text-align:center">
+        <a href="https://simpatico-hr-ats.simpaticohrconsultancy.workers.dev/admin/billing/quick-approve?order_id=${orderId}&token=${approveToken}" style="display:inline-block;padding:10px 20px;background:#059669;color:#fff;border-radius:8px;text-decoration:none;font-weight:700;font-size:13px">⚡ 1-Click Approve & Activate Subscription</a>
+      </div>`;
+  } catch (e) {
+    console.warn("[Billing] Quick-approve link omitted:", e.message);
+  }
   const adminEmail = env.ADMIN_NOTIFICATION_EMAIL || "info@simpaticohr.in";
   sendEmail(env, {
     to: adminEmail,
@@ -8220,9 +8562,7 @@ async function handleManualCreateOrder(request, env, ctx) {
         <tr><td style="padding:8px 12px;font-weight:600;color:#374151">Company ID</td><td style="padding:8px 12px">${companyId}</td></tr>
       </table>
       <p style="margin-top:16px;font-size:13px;color:#DC2626;font-weight:600">⏳ Awaiting payment — verify in your bank app and confirm when received:</p>
-      <div style="margin-top:12px;padding:12px;background:#F0FDF4;border-radius:8px;text-align:center">
-        <a href="https://simpatico-hr-ats.simpaticohrconsultancy.workers.dev/admin/billing/quick-approve?order_id=${orderId}&token=${await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`${orderId}:${env.JWT_SECRET || 'simpatico'}`)).then(buf => Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('').substring(0, 32))}" style="display:inline-block;padding:10px 20px;background:#059669;color:#fff;border-radius:8px;text-decoration:none;font-weight:700;font-size:13px">⚡ 1-Click Approve & Activate Subscription</a>
-      </div>
+      ${quickApproveSectionHtml}
       <p style="margin-top:12px;font-size:12px"><a href="https://simpaticohrconsultancy.com/platform/super-admin.html">Or manage in Admin Panel →</a></p>
     </div>`,
   }).catch(e => console.warn("[Billing] Admin notification failed for manual order:", e.message));
@@ -8273,9 +8613,15 @@ async function handleManualSubmitUtr(request, env, ctx) {
     }
   );
 
-  // Generate secure 1-click approval token
-  const approveToken = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`${order_id}:${env.JWT_SECRET || 'simpatico'}`)).then(buf => Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('').substring(0, 32));
-  const quickApproveUrl = `https://simpatico-hr-ats.simpaticohrconsultancy.workers.dev/admin/billing/quick-approve?order_id=${order_id}&token=${approveToken}`;
+  // Generate the 1-click approval link only when JWT_SECRET is configured —
+  // a predictable fallback token would let anyone approve real payments.
+  let quickApproveUrl = "";
+  try {
+    const approveToken = await quickApproveToken(env, order_id);
+    quickApproveUrl = `https://simpatico-hr-ats.simpaticohrconsultancy.workers.dev/admin/billing/quick-approve?order_id=${order_id}&token=${approveToken}`;
+  } catch (e) {
+    console.warn("[Billing] Quick-approve link omitted:", e.message);
+  }
 
   // Notify admin via email
   const adminEmail = env.ADMIN_NOTIFICATION_EMAIL || "info@simpaticohr.in";
@@ -8288,11 +8634,11 @@ async function handleManualSubmitUtr(request, env, ctx) {
       <p><strong>Submitted UTR:</strong> <code style="font-size:16px;background:#EEF2FF;color:#3730A3;padding:4px 8px;border-radius:4px;font-weight:700">${utr}</code></p>
       <p><strong>Customer:</strong> ${tx.customer_name} (${tx.customer_email})</p>
       <p><strong>Amount:</strong> ₹${tx.amount} INR</p>
-      
-      <div style="margin-top:20px;padding:16px;background:#F0FDF4;border-radius:8px;text-align:center">
+
+      ${quickApproveUrl ? `<div style="margin-top:20px;padding:16px;background:#F0FDF4;border-radius:8px;text-align:center">
         <p style="margin:0 0 10px;font-size:13px;color:#166534;font-weight:600">Verified payment in your bank? Activate immediately:</p>
         <a href="${quickApproveUrl}" style="display:inline-block;padding:12px 24px;background:#059669;color:#fff;border-radius:8px;text-decoration:none;font-weight:700;font-size:14px">⚡ 1-Click Approve & Activate Subscription</a>
-      </div>
+      </div>` : ""}
       
       <p style="margin-top:16px;font-size:12px;color:#64748B">Or manage manually in your <a href="https://simpaticohrconsultancy.com/platform/super-admin.html">Super Admin Panel</a>.</p>
     </div>`,
@@ -8928,7 +9274,7 @@ async function handleGetConsultingInvoices(request, env, ctx) {
   const companyId = ctx.tenantId;
   try {
     const res = await fetch(`${env.SUPABASE_URL}/rest/v1/payment_transactions?company_id=eq.${companyId}&plan=ilike.*consulting*&order=created_at.desc`, {
-      headers: { apikey: env.SUPABASE_ANON_KEY, Authorization: `Bearer ${ctx.token}` },
+      headers: { apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}` },
     });
     const data = await res.json();
     return apiResponse(data);
