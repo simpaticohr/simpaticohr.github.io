@@ -251,7 +251,7 @@ const SimliAdapter = (function () {
 
       if (!apiKey) {
         console.warn('[SimliAdapter] No API key configured. Running on procedural motion engine.');
-        return 'simli';
+        return 'simli-fallback';
       }
 
       try {
@@ -262,31 +262,41 @@ const SimliAdapter = (function () {
         }
 
         client = new window.SimliClient();
-        const dummyAudio = document.createElement('audio');
-        
+
+        // Real (hidden) audio element in the DOM — a detached element gets
+        // blocked by autoplay policies, leaving the avatar mute.
+        let audioEl = document.getElementById('simli-audio-out');
+        if (!audioEl) {
+          audioEl = document.createElement('audio');
+          audioEl.id = 'simli-audio-out';
+          audioEl.autoplay = true;
+          audioEl.playsInline = true;
+          audioEl.style.display = 'none';
+          document.body.appendChild(audioEl);
+        }
+
         // Listen to connection established event
         client.on('connected', () => {
           console.log('[SimliAdapter] SDK WebRTC stream connected and established!');
           streamReady = true; // Stop procedural video loop, let WebRTC stream take over
         });
-        
+
         await client.Initialize({
           apiKey: apiKey,
           faceID: faceId,
           handleSilence: true,
           videoRef: videoEl,
-          audioRef: dummyAudio,
+          audioRef: audioEl,
         });
 
         await client.start();
         ready = true;
-        return 'simli';
+        return 'simli-live';
       } catch (e) {
         console.warn('[SimliAdapter] SDK connection note:', e.message, '— using procedural 30 FPS fallback.');
         ready = false;
+        return 'simli-fallback';
       }
-
-      return 'simli';
     },
 
     mode() { return 'simli'; },
@@ -354,6 +364,8 @@ const SimliAdapter = (function () {
       // Hide Simli container & restore WebGL orb canvas
       if (containerEl) containerEl.style.display = 'none';
       if (orbEl) orbEl.style.display = 'block';
+      const audioEl = document.getElementById('simli-audio-out');
+      if (audioEl) { try { audioEl.pause(); } catch (_) {} audioEl.remove(); }
     },
 
     isActive() { return ready && !destroyed; }

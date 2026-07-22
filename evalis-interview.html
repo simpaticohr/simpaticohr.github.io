@@ -1890,8 +1890,19 @@
         if (!shouldUseSimli) return false;
 
         try {
-            await SimliAdapter.init();
+            const mode = await SimliAdapter.init(); // 'simli-live' | 'simli-fallback'
             _simliAdapter = SimliAdapter;
+            console.log(`[Simli] Avatar initialized: ${mode}`);
+            const statusEl = document.getElementById('avatar-conn-status');
+            if (statusEl) {
+                if (mode === 'simli-live') {
+                    statusEl.innerHTML = '✅ Simli live avatar connected';
+                    statusEl.style.color = '#34d399';
+                } else {
+                    statusEl.innerHTML = '⚡ Simli unavailable — running built-in motion engine';
+                    statusEl.style.color = '#7dd3fc';
+                }
+            }
             return true;
         } catch (e) {
             console.warn('[Simli] Init failed:', e.message, '— falling back to WebGL orb.');
@@ -1967,7 +1978,14 @@
         tapNode = new AudioWorkletNode(audioCtx, 'avatar-audio-tap', {
           processorOptions: { targetRate: HyperRealRenderer.getSampleRate?.() || 16000, frameSize: 3200 },
         });
-        tapNode.port.onmessage = (e) => HyperRealRenderer.feedAudio?.(e.data);
+        // Route audio to whichever renderer is active — previously this only fed
+        // HyperRealRenderer, so a connected Simli avatar never received audio.
+        tapNode.port.onmessage = (e) => {
+          const target = (_activeRenderer && typeof _activeRenderer.feedAudio === 'function')
+            ? _activeRenderer
+            : (typeof HyperRealRenderer !== 'undefined' ? HyperRealRenderer : null);
+          target?.feedAudio?.(e.data);
+        };
         tapNode.connect(audioCtx.destination);
         return tapNode;
       } catch (e) {
@@ -2224,9 +2242,17 @@
         const userAvatarKey = localStorage.getItem(`evalis_${provider}_key`) || '';
 
         if (provider === 'simli') {
+            // No fake "verified" here — Simli only connects when the interview
+            // starts (WebRTC). Report what will actually happen.
+            const simliKey = localStorage.getItem('evalis_simli_key') || '';
             if (statusEl) {
-                statusEl.innerHTML = '✅ Simli Avatar API Key Saved & Active!';
-                statusEl.style.color = '#34d399';
+                if (simliKey) {
+                    statusEl.innerHTML = '🔑 Simli key saved — live avatar connects when the interview starts';
+                    statusEl.style.color = '#60a5fa';
+                } else {
+                    statusEl.innerHTML = '⚠️ No Simli key — built-in motion engine will be used';
+                    statusEl.style.color = 'var(--accent-amber)';
+                }
             }
             return;
         }
