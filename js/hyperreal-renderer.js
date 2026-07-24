@@ -554,7 +554,69 @@ const HyperRealRenderer = (function () {
     }
   };
 
-  const ADAPTERS = { heygen: HeyGenAdapter, did: DIdAdapter, tavus: TavusAdapter, selfhost: SelfHostAdapter };
+  // ── LIVEPORTRAIT OPEN-SOURCE ADAPTER ──
+  const LivePortraitAdapter = {
+    pc: null,
+    sessionId: null,
+    async connect(videoEl, hooks) {
+      let r;
+      const endpoints = [
+        sessionApi + '/liveportrait',
+        'http://localhost:8790/api/avatar/session/liveportrait'
+      ];
+      for (const ep of endpoints) {
+        try {
+          r = await fetch(ep, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ avatarImage: (persona && persona.poster) || 'assets/ai-interviewer-avatar.png' })
+          });
+          if (r.ok) break;
+        } catch (e) {}
+      }
+      if (!r || !r.ok) throw new Error('LivePortrait session connection failed');
+      const data = await r.json();
+
+      this.sessionId = data.sessionId;
+      const { offer } = data;
+
+      if (offer && window.RTCPeerConnection) {
+        this.pc = new RTCPeerConnection();
+        this.pc.ontrack = (event) => {
+          if (event.track.kind === 'video' && videoEl) {
+            videoEl.srcObject = event.streams[0];
+            hooks.onReady();
+          }
+        };
+        await this.pc.setRemoteDescription(offer);
+        const answer = await this.pc.createAnswer();
+        await this.pc.setLocalDescription(answer);
+        await fetch(sessionApi + '/liveportrait/answer', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sessionId: this.sessionId, answer })
+        }).catch(() => {});
+      } else {
+        hooks.onReady();
+      }
+    },
+    speak(text) {},
+    interrupt() {},
+    setExpression(e) {},
+    triggerGesture(g) {},
+    feedAudio(int16Buf) {},
+    flush() {},
+    async close() {
+      if (this.pc) this.pc.close();
+      await fetch(sessionApi + '/liveportrait/end', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId: this.sessionId })
+      }).catch(() => {});
+    }
+  };
+
+  const ADAPTERS = { heygen: HeyGenAdapter, did: DIdAdapter, tavus: TavusAdapter, selfhost: SelfHostAdapter, liveportrait: LivePortraitAdapter };
 
   // ── CAPTIONS ──
   function startCaptions(words) {
