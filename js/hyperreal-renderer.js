@@ -84,8 +84,10 @@ const HyperRealRenderer = (function () {
     offscreenCtx = offscreenCanvas.getContext('2d');
 
     baseImage = new Image();
+    baseImage.crossOrigin = "anonymous";
     baseImage.onload = () => {
       baseImageLoaded = true;
+      console.log('[HyperReal] Base avatar image loaded successfully.');
     };
     baseImage.src = (persona && persona.poster) || 'assets/ai-interviewer-avatar.png';
   }
@@ -101,7 +103,7 @@ const HyperRealRenderer = (function () {
   }
 
   function renderVideoFrame(now) {
-    if (!offscreenCtx || !baseImageLoaded || !videoEl) return;
+    if (!offscreenCtx || !baseImageLoaded) return;
     const w = offscreenCanvas.width;
     const h = offscreenCanvas.height;
     const elapsed = now - t0;
@@ -195,6 +197,16 @@ const HyperRealRenderer = (function () {
     }
 
     offscreenCtx.restore();
+
+    // Render directly to DOM avatarCanvas if present
+    const domCanvas = $('avatarCanvas') || $('duixCanvas');
+    if (domCanvas) {
+      const domCtx = domCanvas.getContext('2d');
+      if (domCtx) {
+        domCtx.clearRect(0, 0, domCanvas.width, domCanvas.height);
+        domCtx.drawImage(offscreenCanvas, 0, 0, domCanvas.width, domCanvas.height);
+      }
+    }
   }
 
   function startProceduralVideoStream() {
