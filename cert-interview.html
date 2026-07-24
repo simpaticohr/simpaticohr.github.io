@@ -416,6 +416,188 @@ function renderQuestion() {
   }, 400);
 }
 
+// ── GEMINI MULTIMODAL LIVE REALTIME FULL DUPLEX ENGINE (PORTED FROM EVALIS INTERVIEW) ──
+let liveWs = null;
+let nextPlayTime = 0;
+let audioQueue = [];
+let micProcessor = null;
+let micAudioContext = null;
+let micStream = null;
+let audioCtx = null;
+
+function getAudioContext() {
+  if (!audioCtx) {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 24000 });
+  }
+  return audioCtx;
+}
+
+function base64ToFloat32Array(base64) {
+  const binaryString = atob(base64);
+  const bytes = new Uint8Array(binaryString.length);
+  for (let i = 0; i < binaryString.length; i++) {
+    bytes[i] = binaryString.charCodeAt(i);
+  }
+  const int16Array = new Int16Array(bytes.buffer);
+  const float32Array = new Float32Array(int16Array.length);
+  for (let i = 0; i < int16Array.length; i++) {
+    float32Array[i] = int16Array[i] / 32768;
+  }
+  return float32Array;
+}
+
+function playPcmChunk(base64Pcm) {
+  const ctx = getAudioContext();
+  if (ctx.state === 'suspended') ctx.resume();
+
+  const samples = base64ToFloat32Array(base64Pcm);
+  if (samples.length === 0) return;
+
+  const audioBuffer = ctx.createBuffer(1, samples.length, 24000);
+  audioBuffer.getChannelData(0).set(samples);
+
+  const source = ctx.createBufferSource();
+  source.buffer = audioBuffer;
+  source.connect(ctx.destination);
+
+  const now = ctx.currentTime;
+  if (nextPlayTime < now) {
+    nextPlayTime = now + 0.05; // 50ms lookahead to prevent jitter
+  }
+
+  source.start(nextPlayTime);
+  audioQueue.push(source);
+  nextPlayTime += audioBuffer.duration;
+
+  // Route PCM audio samples directly to Avatar Lip Sync GPU server
+  if (typeof HyperRealRenderer !== 'undefined' && typeof HyperRealRenderer.feedAudio === 'function') {
+    const int16Array = new Int16Array(samples.length);
+    for (let i = 0; i < samples.length; i++) {
+      int16Array[i] = Math.max(-32768, Math.min(32767, samples[i] * 32768));
+    }
+    HyperRealRenderer.feedAudio(int16Array);
+  }
+
+  source.onended = () => {
+    const index = audioQueue.indexOf(source);
+    if (index > -1) audioQueue.splice(index, 1);
+  };
+}
+
+function stopPlayback() {
+  audioQueue.forEach(source => {
+    try { source.stop(); } catch(e) {}
+  });
+  audioQueue.length = 0;
+  nextPlayTime = 0;
+  if (typeof HyperRealRenderer !== 'undefined') {
+    try { HyperRealRenderer.onState('listening'); } catch(e) {}
+  }
+}
+
+async function startGeminiLiveFullDuplex() {
+  const cfg = JSON.parse(localStorage.getItem('adminConfig') || '{}');
+  const geminiKey = cfg.geminiKey || localStorage.getItem('evalis_byok_gemini_key') || '';
+  if (!geminiKey) {
+    console.log('[Gemini Live] Key not set, using standard TTS engine.');
+    return;
+  }
+
+  const wsUrl = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent?key=${geminiKey}`;
+  try {
+    liveWs = new WebSocket(wsUrl);
+    liveWs.onopen = () => {
+      console.log('[Gemini Live] Connected to Google Gemini Multimodal Realtime WebSocket!');
+      const modelName = cfg.geminiModel === 'gemini-3.6-flash' ? 'models/gemini-2.0-flash-exp' : (cfg.geminiModel || 'models/gemini-2.0-flash-exp');
+      const setupMsg = {
+        setup: {
+          model: modelName.startsWith('models/') ? modelName : 'models/' + modelName,
+          generationConfig: {
+            responseModalities: ["AUDIO", "TEXT"],
+            speechConfig: {
+              voiceConfig: {
+                prebuiltVoiceConfig: { voiceName: "Aoede" }
+              }
+            }
+          }
+        }
+      };
+      liveWs.send(JSON.stringify(setupMsg));
+      startMicStreamingToGemini(liveWs);
+    };
+
+    liveWs.onmessage = (evt) => {
+      try {
+        const msg = JSON.parse(evt.data);
+        if (msg.serverContent && msg.serverContent.modelTurn) {
+          const parts = msg.serverContent.modelTurn.parts || [];
+          parts.forEach(part => {
+            if (part.inlineData && part.inlineData.mimeType?.startsWith('audio/pcm')) {
+              playPcmChunk(part.inlineData.data);
+              if (typeof HyperRealRenderer !== 'undefined') HyperRealRenderer.onState('speaking');
+            }
+            if (part.text) {
+              const captionsEl = document.getElementById('duix-captions');
+              if (captionsEl) captionsEl.textContent = 'AI Interviewer (Gemini 3.6 Live): ' + part.text;
+            }
+          });
+        }
+      } catch(e) {}
+    };
+
+    liveWs.onerror = (err) => {
+      console.warn('[Gemini Live] WebSocket note:', err);
+    };
+  } catch(e) {
+    console.warn('[Gemini Live] Connection error:', e);
+  }
+}
+
+async function startMicStreamingToGemini(ws) {
+  try {
+    micStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, sampleRate: 16000 } });
+    micAudioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+    const source = micAudioContext.createMediaStreamSource(micStream);
+    micProcessor = micAudioContext.createScriptProcessor(2048, 1, 1);
+    source.connect(micProcessor);
+    micProcessor.connect(micAudioContext.destination);
+
+    micProcessor.onaudioprocess = function(e) {
+      const inputData = e.inputBuffer.getChannelData(0);
+      let hasSpeech = false;
+      const int16Buffer = new Int16Array(inputData.length);
+      for (let i = 0; i < inputData.length; i++) {
+        const s = Math.max(-1, Math.min(1, inputData[i]));
+        if (Math.abs(s) > 0.02) hasSpeech = true;
+        int16Buffer[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+      }
+
+      // Full duplex barge-in: stop avatar speech when candidate speaks
+      if (hasSpeech && audioQueue.length > 0) {
+        stopPlayback();
+      }
+
+      const uint8Buffer = new Uint8Array(int16Buffer.buffer);
+      let binary = '';
+      for (let i = 0; i < uint8Buffer.length; i++) binary += String.fromCharCode(uint8Buffer[i]);
+      const base64Audio = btoa(binary);
+
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({
+          realtimeInput: {
+            mediaChunks: [{
+              mimeType: 'audio/pcm;rate=16000',
+              data: base64Audio
+            }]
+          }
+        }));
+      }
+    };
+  } catch(e) {
+    console.warn('[Gemini Live] Mic streaming note:', e);
+  }
+}
+
 function speakAvatar(text) {
   const captionsEl = document.getElementById('duix-captions');
   if(captionsEl) captionsEl.textContent = 'AI Interviewer: ' + text;
@@ -427,13 +609,26 @@ function speakAvatar(text) {
     } catch(e) {}
   }
 
+  // If Gemini Live WebSocket is open, send text turn
+  if (liveWs && liveWs.readyState === WebSocket.OPEN) {
+    liveWs.send(JSON.stringify({
+      clientContent: {
+        turns: [{
+          role: "user",
+          parts: [{ text: "Read this question aloud naturally as the interviewer: " + text }]
+        }],
+        turnComplete: true
+      }
+    }));
+    return;
+  }
+
   if ('speechSynthesis' in window) {
     window.speechSynthesis.cancel();
     const u = new SpeechSynthesisUtterance(text);
     u.rate = 0.98;
     u.pitch = 1.05;
 
-    // Select Google Neural / Natural High Definition Voice
     const voices = window.speechSynthesis.getVoices();
     const googleVoice = voices.find(v => v.name.includes('Google') || v.name.includes('Natural') || v.name.includes('Neural') || v.name.includes('Zira') || v.lang.startsWith('en'));
     if (googleVoice) u.voice = googleVoice;
@@ -449,6 +644,7 @@ function speakAvatar(text) {
 }
 
 function stopAvatarSpeaking() {
+  stopPlayback();
   if ('speechSynthesis' in window) {
     window.speechSynthesis.cancel();
   }
@@ -480,6 +676,9 @@ async function init3DAvatarStage() {
   } else if (typeof SimliAdapter !== 'undefined') {
     try { await SimliAdapter.init(); } catch(e) {}
   }
+
+  // Initialize Gemini Multimodal Live Engine
+  startGeminiLiveFullDuplex();
 }
 window.addEventListener('DOMContentLoaded', init3DAvatarStage);
 
