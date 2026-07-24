@@ -19,9 +19,9 @@ const InterviewPipelineEngine = (function () {
   let recognition = null;
 
   const PIPELINE_ENDPOINTS = [
+    'https://evalis-ai.simpaticohrconsultancy.workers.dev/api/pipeline/turn',
     '/api/pipeline/turn',
-    'http://localhost:8791/api/pipeline/turn',
-    'http://127.0.0.1:8791/api/pipeline/turn'
+    'http://localhost:8791/api/pipeline/turn'
   ];
 
   // Helper for fetch with endpoint fallback

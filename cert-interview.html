@@ -350,6 +350,39 @@ function renderQuestion() {
   }
 
   container.innerHTML = html;
+
+  if(qData.isVoice) {
+    setTimeout(() => {
+      speakAvatarText(qData.q);
+      startHandsFreeVoice();
+    }, 400);
+  }
+}
+
+function speakAvatarText(text) {
+  const captionsEl = document.getElementById('duix-captions');
+  if(captionsEl) captionsEl.textContent = 'AI Interviewer: ' + text;
+
+  if ('speechSynthesis' in window) {
+    window.speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(text);
+    u.rate = 1.0;
+    u.pitch = 1.0;
+    window.speechSynthesis.speak(u);
+  }
+
+  if (typeof HyperRealRenderer !== 'undefined' && typeof HyperRealRenderer.speak === 'function') {
+    try { HyperRealRenderer.speak(text); } catch(e) {}
+  }
+}
+
+function stopAvatarSpeaking() {
+  if ('speechSynthesis' in window) {
+    window.speechSynthesis.cancel();
+  }
+  if (typeof HyperRealRenderer !== 'undefined' && typeof HyperRealRenderer.interrupt === 'function') {
+    try { HyperRealRenderer.interrupt(); } catch(e) {}
+  }
 }
 
 let avatarInitialized = false;
@@ -378,6 +411,11 @@ function selectOption(idx) {
   });
 }
 
+function startHandsFreeVoice() {
+  if(isListeningVoice) return;
+  toggleHandsFreeVoice();
+}
+
 function toggleHandsFreeVoice() {
   const txt = document.getElementById('vBtnTxt');
   const txtArea = document.getElementById('textAns');
@@ -389,16 +427,27 @@ function toggleHandsFreeVoice() {
       window.recInst.continuous = true;
       window.recInst.interimResults = true;
       window.recInst.onresult = (e) => {
+        // Full duplex barge-in interruption: stop avatar speech when user speaks
+        stopAvatarSpeaking();
+
         let t = '';
         for (let i = e.resultIndex; i < e.results.length; i++) t += e.results[i][0].transcript;
-        if(txtArea) txtArea.value = t;
+        if(txtArea && t) txtArea.value = t;
       };
-      window.recInst.start();
+      window.recInst.onend = () => {
+        if(isListeningVoice && window.recInst) {
+          try { window.recInst.start(); } catch(err) {}
+        }
+      };
+      try { window.recInst.start(); } catch(err) {}
     }
     isListeningVoice = true;
     if(txt) txt.textContent = 'Listening (Hands-Free)';
   } else {
-    if(window.recInst) window.recInst.stop();
+    if(window.recInst) {
+      window.recInst.onend = null;
+      window.recInst.stop();
+    }
     isListeningVoice = false;
     if(txt) txt.textContent = 'Start Hands-Free Voice';
   }
