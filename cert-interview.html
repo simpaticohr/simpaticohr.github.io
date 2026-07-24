@@ -598,18 +598,15 @@ async function startMicStreamingToGemini(ws) {
   }
 }
 
-function speakAvatar(text) {
+async function speakAvatar(text) {
   const captionsEl = document.getElementById('duix-captions');
-  if(captionsEl) captionsEl.textContent = 'AI Interviewer: ' + text;
+  if(captionsEl) captionsEl.textContent = 'AI Interviewer (Gemini 3.6): ' + text;
 
   if (typeof HyperRealRenderer !== 'undefined') {
-    try {
-      HyperRealRenderer.onState('speaking');
-      if (typeof HyperRealRenderer.say === 'function') HyperRealRenderer.say(text);
-    } catch(e) {}
+    try { HyperRealRenderer.onState('speaking'); } catch(e) {}
   }
 
-  // If Gemini Live WebSocket is open, send text turn
+  // 1. Try Gemini Multimodal Live WebSocket if connected
   if (liveWs && liveWs.readyState === WebSocket.OPEN) {
     liveWs.send(JSON.stringify({
       clientContent: {
@@ -623,14 +620,53 @@ function speakAvatar(text) {
     return;
   }
 
+  // 2. Synthesize authentic 24kHz Google Gemini Neural Voice (Aoede) via Gemini API
+  const cfg = JSON.parse(localStorage.getItem('adminConfig') || '{}');
+  const geminiKey = cfg.geminiKey || localStorage.getItem('evalis_byok_gemini_key') || '';
+
+  if (geminiKey) {
+    try {
+      const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiKey}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{
+            parts: [{ text: "Read this interview question aloud naturally in a clear, warm human voice: " + text }]
+          }],
+          generationConfig: {
+            responseModalities: ["AUDIO"],
+            speechConfig: {
+              voiceConfig: {
+                prebuiltVoiceConfig: { voiceName: "Aoede" }
+              }
+            }
+          }
+        })
+      });
+
+      if (resp.ok) {
+        const data = await resp.json();
+        const inlineData = data.candidates?.[0]?.content?.parts?.find(p => p.inlineData)?.inlineData;
+        if (inlineData && inlineData.data) {
+          console.log('[Gemini Voice] Playing authentic 24kHz Google Gemini Neural Audio (Aoede)...');
+          playPcmChunk(inlineData.data);
+          return;
+        }
+      }
+    } catch(err) {
+      console.warn('[Gemini Voice] API note:', err);
+    }
+  }
+
+  // 3. High-Quality Natural Fallback Voice
   if ('speechSynthesis' in window) {
     window.speechSynthesis.cancel();
     const u = new SpeechSynthesisUtterance(text);
-    u.rate = 0.98;
-    u.pitch = 1.05;
+    u.rate = 0.96;
+    u.pitch = 1.0;
 
     const voices = window.speechSynthesis.getVoices();
-    const googleVoice = voices.find(v => v.name.includes('Google') || v.name.includes('Natural') || v.name.includes('Neural') || v.name.includes('Zira') || v.lang.startsWith('en'));
+    const googleVoice = voices.find(v => v.name.includes('Google') || v.name.includes('Natural') || v.name.includes('Neural') || v.name.includes('Samantha') || v.name.includes('Zira') || v.lang.startsWith('en'));
     if (googleVoice) u.voice = googleVoice;
 
     u.onstart = () => {
