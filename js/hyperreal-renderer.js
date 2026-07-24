@@ -231,9 +231,7 @@ const HyperRealRenderer = (function () {
 
     function videoLoop(now) {
       if (destroyed) return;
-      if (!streamReady) {
-        renderVideoFrame(now);
-      }
+      renderVideoFrame(now);
       videoStreamRafId = requestAnimationFrame(videoLoop);
     }
 
@@ -610,7 +608,6 @@ const HyperRealRenderer = (function () {
                   if (domCanvas) {
                     const domCtx = domCanvas.getContext('2d');
                     if (domCtx) {
-                      domCtx.clearRect(0, 0, domCanvas.width, domCanvas.height);
                       domCtx.drawImage(img, 0, 0, domCanvas.width, domCanvas.height);
                     }
                   }
