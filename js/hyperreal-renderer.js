@@ -566,11 +566,9 @@ const HyperRealRenderer = (function () {
     }
   };
 
-  // ── BYTEDANCE LATENTSYNC ADAPTER (Apache 2.0 Free Commercial) ──
+  // ── BYTEDANCE LATENTSYNC / RTX 4060 GPU ADAPTER (Apache 2.0 Free Commercial) ──
   const LatentSyncAdapter = {
     ws: null,
-    canvas: null,
-    ctx: null,
     connected: false,
     async connect(videoEl, hooks) {
       const cfg = JSON.parse(localStorage.getItem('adminConfig') || '{}');
@@ -585,44 +583,72 @@ const HyperRealRenderer = (function () {
               this.ws = new WebSocket(wsUrl);
               this.ws.onopen = () => {
                 this.connected = true;
-                console.log('[LatentSync] WebRTC/WebSocket connected:', wsUrl);
+                console.log('[RTX 4060 GPU Server] WebSocket connected to GPU server:', wsUrl);
+                this.ws.send(JSON.stringify({ type: 'ping' }));
                 hooks.onReady();
                 resolve();
               };
               this.ws.onmessage = (evt) => {
                 try {
                   const msg = JSON.parse(evt.data);
-                  if (msg.type === 'frame' && msg.data && videoEl) {
+                  if (msg.type === 'frame' && msg.data) {
+                    const domCanvas = $('avatarCanvas') || $('duixCanvas');
                     const img = new window.Image();
                     img.onload = () => {
-                      if (!this.canvas) {
-                        this.canvas = document.createElement('canvas');
-                        this.canvas.width = 512;
-                        this.canvas.height = 512;
-                        this.ctx = this.canvas.getContext('2d');
-                        const stream = this.canvas.captureStream(30);
-                        videoEl.srcObject = stream;
-                        videoEl.play().catch(() => {});
+                      if (domCanvas) {
+                        const domCtx = domCanvas.getContext('2d');
+                        if (domCtx) {
+                          domCtx.clearRect(0, 0, domCanvas.width, domCanvas.height);
+                          domCtx.drawImage(img, 0, 0, domCanvas.width, domCanvas.height);
+                        }
                       }
-                      this.ctx.drawImage(img, 0, 0, 512, 512);
+                      if (videoEl && videoEl.style.display !== 'none') {
+                        videoEl.style.display = 'none'; // DOM canvas handles GPU stream rendering
+                      }
                     };
                     img.src = 'data:image/jpeg;base64,' + msg.data;
                   }
                 } catch(e) {}
               };
-              this.ws.onerror = () => { reject(new Error('LatentSync WS offline')); };
-              setTimeout(() => { if (!this.connected) reject(new Error('LatentSync timeout')); }, 2000);
+              this.ws.onerror = () => { reject(new Error('RTX 4060 GPU Server offline')); };
+              setTimeout(() => { if (!this.connected) reject(new Error('GPU server connection timeout')); }, 2000);
             } catch(e) { reject(e); }
           });
         }
       } catch(e) {}
-      throw new Error('LatentSync server offline at ' + endpoint);
+      throw new Error('RTX 4060 GPU Server offline at ' + endpoint);
     },
-    speak(text) {},
-    interrupt() {},
-    setExpression(e) {},
-    triggerGesture(g) {},
-    feedAudio(int16Buf) {},
+    speak(text) {
+      if (this.ws && this.connected) {
+        this.ws.send(JSON.stringify({ type: 'animate', mouth_open: 0.6, text: text }));
+      }
+    },
+    interrupt() {
+      if (this.ws && this.connected) {
+        this.ws.send(JSON.stringify({ type: 'animate', mouth_open: 0.0 }));
+      }
+    },
+    setExpression(e) {
+      if (this.ws && this.connected) {
+        this.ws.send(JSON.stringify({ type: 'animate', expression: e }));
+      }
+    },
+    triggerGesture(g) {
+      if (this.ws && this.connected) {
+        this.ws.send(JSON.stringify({ type: 'animate', gesture: g }));
+      }
+    },
+    feedAudio(int16Buf) {
+      if (this.ws && this.connected && int16Buf && int16Buf.length) {
+        try {
+          const u8 = new Uint8Array(int16Buf.buffer, int16Buf.byteOffset, int16Buf.byteLength);
+          let binary = '';
+          for (let i = 0; i < u8.length; i++) binary += String.fromCharCode(u8[i]);
+          const b64 = btoa(binary);
+          this.ws.send(JSON.stringify({ type: 'audio', data: b64 }));
+        } catch(e) {}
+      }
+    },
     flush() {},
     async close() {
       if (this.ws) { this.ws.close(); this.ws = null; }
