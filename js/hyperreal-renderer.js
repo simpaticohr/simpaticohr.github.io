@@ -554,65 +554,130 @@ const HyperRealRenderer = (function () {
     }
   };
 
-  // ── LIVEPORTRAIT OPEN-SOURCE ADAPTER ──
+  // ── LIVEPORTRAIT OPEN-SOURCE ADAPTER (WebSocket to local GPU server) ──
   const LivePortraitAdapter = {
-    pc: null,
-    sessionId: null,
+    ws: null,
+    canvas: null,
+    ctx: null,
+    animFrame: null,
+    connected: false,
     async connect(videoEl, hooks) {
-      let r;
-      const endpoints = [
-        sessionApi + '/liveportrait',
-        'http://localhost:8790/api/avatar/session/liveportrait'
-      ];
-      for (const ep of endpoints) {
-        try {
-          r = await fetch(ep, {
+      const wsUrl = 'ws://localhost:8765';
+      const httpUrl = 'http://localhost:8766';
+
+      // First check if server is running via HTTP health check
+      let serverUp = false;
+      try {
+        const hc = await fetch(httpUrl + '/health', { signal: AbortSignal.timeout(2000) });
+        if (hc.ok) { const j = await hc.json(); serverUp = j.status === 'ok'; }
+      } catch(e) {}
+
+      if (!serverUp) {
+        console.warn('[LivePortrait] Local server not running at localhost:8765. Start start_server.bat on your laptop.');
+        hooks.onReady();
+        return;
+      }
+
+      // Set source image from admin config
+      try {
+        const cfg = JSON.parse(localStorage.getItem('adminConfig') || '{}');
+        if (cfg.lpAvatarUrl) {
+          await fetch(httpUrl + '/set-source', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ avatarImage: (persona && persona.poster) || 'assets/ai-interviewer-avatar.png' })
+            body: JSON.stringify({ image_url: cfg.lpAvatarUrl })
           });
-          if (r.ok) break;
-        } catch (e) {}
-      }
-      if (!r || !r.ok) throw new Error('LivePortrait session connection failed');
-      const data = await r.json();
+        }
+      } catch(e) {}
 
-      this.sessionId = data.sessionId;
-      const { offer } = data;
-
-      if (offer && window.RTCPeerConnection) {
-        this.pc = new RTCPeerConnection();
-        this.pc.ontrack = (event) => {
-          if (event.track.kind === 'video' && videoEl) {
-            videoEl.srcObject = event.streams[0];
+      // Connect WebSocket
+      return new Promise((resolve, reject) => {
+        try {
+          this.ws = new WebSocket(wsUrl);
+          this.ws.onopen = () => {
+            this.connected = true;
+            console.log('[LivePortrait] WebSocket connected to local GPU server');
+            this.ws.send(JSON.stringify({ type: 'status' }));
             hooks.onReady();
-          }
-        };
-        await this.pc.setRemoteDescription(offer);
-        const answer = await this.pc.createAnswer();
-        await this.pc.setLocalDescription(answer);
-        await fetch(sessionApi + '/liveportrait/answer', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ sessionId: this.sessionId, answer })
-        }).catch(() => {});
-      } else {
-        hooks.onReady();
+            resolve();
+          };
+
+          this.ws.onmessage = (evt) => {
+            try {
+              const msg = JSON.parse(evt.data);
+              if (msg.type === 'frame' && msg.data && videoEl) {
+                // Render base64 JPEG frame onto video element via canvas
+                const img = new window.Image();
+                img.onload = () => {
+                  if (!this.canvas) {
+                    this.canvas = document.createElement('canvas');
+                    this.canvas.width = 512;
+                    this.canvas.height = 512;
+                    this.ctx = this.canvas.getContext('2d');
+                    const stream = this.canvas.captureStream(30);
+                    videoEl.srcObject = stream;
+                    videoEl.play().catch(() => {});
+                  }
+                  this.ctx.drawImage(img, 0, 0, 512, 512);
+                };
+                img.src = 'data:image/jpeg;base64,' + msg.data;
+              }
+            } catch(e) {}
+          };
+
+          this.ws.onerror = () => {
+            console.warn('[LivePortrait] WebSocket error');
+            hooks.onReady();
+            resolve();
+          };
+
+          this.ws.onclose = () => {
+            this.connected = false;
+            console.log('[LivePortrait] WebSocket disconnected');
+          };
+
+          // Timeout after 3 seconds
+          setTimeout(() => { if (!this.connected) { hooks.onReady(); resolve(); } }, 3000);
+        } catch(e) {
+          hooks.onReady();
+          resolve();
+        }
+      });
+    },
+    speak(text) {
+      if (this.ws && this.connected) {
+        this.ws.send(JSON.stringify({ type: 'animate', mouth_open: 0.6, text: text }));
       }
     },
-    speak(text) {},
-    interrupt() {},
-    setExpression(e) {},
-    triggerGesture(g) {},
-    feedAudio(int16Buf) {},
+    interrupt() {
+      if (this.ws && this.connected) {
+        this.ws.send(JSON.stringify({ type: 'animate', mouth_open: 0.0 }));
+      }
+    },
+    setExpression(e) {
+      if (this.ws && this.connected) {
+        this.ws.send(JSON.stringify({ type: 'animate', expression: e }));
+      }
+    },
+    triggerGesture(g) {
+      if (this.ws && this.connected) {
+        this.ws.send(JSON.stringify({ type: 'animate', gesture: g }));
+      }
+    },
+    feedAudio(int16Buf) {
+      if (this.ws && this.connected) {
+        // Send audio amplitude to drive lip sync
+        let sum = 0;
+        for (let i = 0; i < int16Buf.length; i++) sum += Math.abs(int16Buf[i]);
+        const amp = sum / int16Buf.length / 32768;
+        this.ws.send(JSON.stringify({ type: 'animate', mouth_open: Math.min(1.0, amp * 3) }));
+      }
+    },
     flush() {},
     async close() {
-      if (this.pc) this.pc.close();
-      await fetch(sessionApi + '/liveportrait/end', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionId: this.sessionId })
-      }).catch(() => {});
+      if (this.ws) { this.ws.close(); this.ws = null; }
+      if (this.canvas) { this.canvas = null; this.ctx = null; }
+      this.connected = false;
     }
   };
 
