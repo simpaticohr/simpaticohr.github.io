@@ -563,17 +563,48 @@ const HyperRealRenderer = (function () {
     async connect(videoEl, hooks) {
       const cfg = JSON.parse(localStorage.getItem('adminConfig') || '{}');
       const endpoint = cfg.latentsyncUrl || 'http://localhost:8000';
+      const wsUrl = endpoint.replace(/^http/, 'ws') + '/ws';
 
       try {
-        const hc = await fetch(endpoint + '/health', { signal: AbortSignal.timeout(2000) });
+        const hc = await fetch(endpoint + '/health', { signal: AbortSignal.timeout(1500) });
         if (hc.ok) {
-          this.connected = true;
-          console.log('[LatentSync] Connected to LatentSync endpoint:', endpoint);
+          return new Promise((resolve, reject) => {
+            try {
+              this.ws = new WebSocket(wsUrl);
+              this.ws.onopen = () => {
+                this.connected = true;
+                console.log('[LatentSync] WebRTC/WebSocket connected:', wsUrl);
+                hooks.onReady();
+                resolve();
+              };
+              this.ws.onmessage = (evt) => {
+                try {
+                  const msg = JSON.parse(evt.data);
+                  if (msg.type === 'frame' && msg.data && videoEl) {
+                    const img = new window.Image();
+                    img.onload = () => {
+                      if (!this.canvas) {
+                        this.canvas = document.createElement('canvas');
+                        this.canvas.width = 512;
+                        this.canvas.height = 512;
+                        this.ctx = this.canvas.getContext('2d');
+                        const stream = this.canvas.captureStream(30);
+                        videoEl.srcObject = stream;
+                        videoEl.play().catch(() => {});
+                      }
+                      this.ctx.drawImage(img, 0, 0, 512, 512);
+                    };
+                    img.src = 'data:image/jpeg;base64,' + msg.data;
+                  }
+                } catch(e) {}
+              };
+              this.ws.onerror = () => { reject(new Error('LatentSync WS offline')); };
+              setTimeout(() => { if (!this.connected) reject(new Error('LatentSync timeout')); }, 2000);
+            } catch(e) { reject(e); }
+          });
         }
-      } catch(e) {
-        console.warn('[LatentSync] Endpoint not reachable:', endpoint);
-      }
-      hooks.onReady();
+      } catch(e) {}
+      throw new Error('LatentSync server offline at ' + endpoint);
     },
     speak(text) {},
     interrupt() {},
@@ -582,6 +613,7 @@ const HyperRealRenderer = (function () {
     feedAudio(int16Buf) {},
     flush() {},
     async close() {
+      if (this.ws) { this.ws.close(); this.ws = null; }
       this.connected = false;
     }
   };
