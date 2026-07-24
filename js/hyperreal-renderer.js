@@ -212,13 +212,15 @@ const HyperRealRenderer = (function () {
 
     offscreenCtx.restore();
 
-    // Render directly to DOM avatarCanvas if present
-    const domCanvas = $('avatarCanvas') || $('duixCanvas');
-    if (domCanvas) {
-      const domCtx = domCanvas.getContext('2d');
-      if (domCtx) {
-        domCtx.clearRect(0, 0, domCanvas.width, domCanvas.height);
-        domCtx.drawImage(offscreenCanvas, 0, 0, domCanvas.width, domCanvas.height);
+    // Render directly to DOM avatarCanvas if present (only when GPU WebSocket stream is not active)
+    if (!streamReady) {
+      const domCanvas = $('avatarCanvas') || $('duixCanvas');
+      if (domCanvas) {
+        const domCtx = domCanvas.getContext('2d');
+        if (domCtx) {
+          domCtx.clearRect(0, 0, domCanvas.width, domCanvas.height);
+          domCtx.drawImage(offscreenCanvas, 0, 0, domCanvas.width, domCanvas.height);
+        }
       }
     }
   }
