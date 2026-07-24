@@ -667,7 +667,7 @@ const HyperRealRenderer = (function () {
     }
   };
 
-  const ADAPTERS = { latentsync: LatentSyncAdapter, rtx4060: LatentSyncAdapter, wav2lip: LatentSyncAdapter, hyperreal: LatentSyncAdapter, selfhost: LatentSyncAdapter, liveportrait: LatentSyncAdapter, heygen: HeyGenAdapter, did: DIdAdapter, tavus: TavusAdapter, simli: SelfHostAdapter };
+  const ADAPTERS = { latentsync: LatentSyncAdapter, rtx4060: LatentSyncAdapter, wav2lip: LatentSyncAdapter, hyperreal: LatentSyncAdapter, selfhost: LatentSyncAdapter, liveportrait: LatentSyncAdapter, heygen: LatentSyncAdapter, did: LatentSyncAdapter, tavus: LatentSyncAdapter, simli: LatentSyncAdapter };
 
   // ── CAPTIONS ──
   function startCaptions(words) {
@@ -757,7 +757,7 @@ const HyperRealRenderer = (function () {
 
       startProceduralVideoStream();
 
-      adapter = Object.create(ADAPTERS[provider] || HeyGenAdapter);
+      adapter = Object.create(ADAPTERS[provider] || LatentSyncAdapter);
       try {
         await adapter.connect(videoEl, {
           onReady: () => {
