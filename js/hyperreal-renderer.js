@@ -18,7 +18,7 @@ const HyperRealRenderer = (function () {
   // below remain as dev fallbacks.)
   const AVATAR_API_BASE =
     (typeof window !== 'undefined' && window.SIMPATICO_CONFIG && window.SIMPATICO_CONFIG.workerUrl) ||
-    'https://simpatico-hr-ats.simpaticohrconsultancy.workers.dev';
+    'https://evalis-ai.simpaticohrconsultancy.workers.dev';
   let sessionApi = AVATAR_API_BASE + '/api/avatar/session';
   let capabilities = null;
   let persona = null;
@@ -250,8 +250,8 @@ const HyperRealRenderer = (function () {
       let r;
       const endpoints = [
         sessionApi + '/' + provider,
-        'http://localhost:8790' + sessionApi + '/' + provider,
-        'http://127.0.0.1:8790' + sessionApi + '/' + provider
+        'http://localhost:8790/api/avatar/session/' + provider,
+        'http://127.0.0.1:8790/api/avatar/session/' + provider
       ];
       const userAvatarKey = localStorage.getItem('evalis_avatar_key') || localStorage.getItem('evalis_heygen_key') || '';
       for (const ep of endpoints) {
@@ -325,8 +325,8 @@ const HyperRealRenderer = (function () {
       let r;
       const endpoints = [
         sessionApi + '/did',
-        'http://localhost:8790' + sessionApi + '/did',
-        'http://127.0.0.1:8790' + sessionApi + '/did'
+        'http://localhost:8790/api/avatar/session/did',
+        'http://127.0.0.1:8790/api/avatar/session/did'
       ];
       let lastFetchErr;
       for (const ep of endpoints) {
@@ -447,7 +447,7 @@ const HyperRealRenderer = (function () {
       let r;
       const endpoints = [
         sessionApi + '/tavus',
-        'http://localhost:8790' + sessionApi + '/tavus'
+        'http://localhost:8790/api/avatar/session/tavus'
       ];
       for (const ep of endpoints) {
         try {
@@ -503,7 +503,7 @@ const HyperRealRenderer = (function () {
     sessionId: null,
     async connect(videoEl, hooks) {
       let r = await fetch(sessionApi + '/selfhost', { method: 'POST', headers: { 'Content-Type': 'application/json' } });
-      if (!r.ok) r = await fetch('http://localhost:8790' + sessionApi + '/selfhost', { method: 'POST', headers: { 'Content-Type': 'application/json' } });
+      if (!r.ok) r = await fetch('http://localhost:8790/api/avatar/session/selfhost', { method: 'POST', headers: { 'Content-Type': 'application/json' } });
       if (!r || !r.ok) throw new Error('SelfHost connection failed');
       const data = await r.json();
 
