@@ -584,50 +584,76 @@ const HyperRealRenderer = (function () {
     connected: false,
     async connect(videoEl, hooks) {
       const cfg = JSON.parse(localStorage.getItem('adminConfig') || '{}');
-      const endpoint = cfg.latentsyncUrl || 'http://localhost:8000';
-      let wsUrl = endpoint.replace(/^http/, 'ws');
-      if (!wsUrl.endsWith('/ws')) wsUrl = wsUrl.replace(/\/+$/, '') + '/ws';
+      const customEp = cfg.latentsyncUrl || '';
+      const candidateUrls = [];
+      if (customEp) {
+        let u = customEp.replace(/^http/, 'ws');
+        if (!u.endsWith('/ws')) u = u.replace(/\/+$/, '') + '/ws';
+        candidateUrls.push(u);
+      }
+      candidateUrls.push('ws://localhost:8000/ws');
+      candidateUrls.push('ws://127.0.0.1:8000/ws');
 
-      return new Promise((resolve, reject) => {
-        try {
-          this.ws = new WebSocket(wsUrl);
-          this.ws.onopen = () => {
-            this.connected = true;
-            console.log('[RTX 4060 GPU Server] WebSocket connected to GPU server:', wsUrl);
-            this.ws.send(JSON.stringify({ type: 'ping' }));
-            hooks.onReady();
-            resolve();
-          };
-          this.ws.onmessage = (evt) => {
-            try {
-              const msg = JSON.parse(evt.data);
-              if (msg.type === 'frame' && msg.data) {
-                const domCanvas = $('avatarCanvas') || $('duixCanvas');
-                const img = new window.Image();
-                img.onload = () => {
-                  if (domCanvas) {
-                    const domCtx = domCanvas.getContext('2d');
-                    if (domCtx) {
-                      domCtx.drawImage(img, 0, 0, domCanvas.width, domCanvas.height);
-                    }
-                  }
-                  if (videoEl && videoEl.style.display !== 'none') {
-                    videoEl.style.display = 'none';
-                  }
-                };
-                img.src = 'data:image/jpeg;base64,' + msg.data;
+      const tryConnect = (index) => {
+        if (index >= candidateUrls.length) {
+          return Promise.reject(new Error('RTX 4060 GPU Server offline at all endpoints'));
+        }
+        const wsUrl = candidateUrls[index];
+        return new Promise((resolve, reject) => {
+          try {
+            const ws = new WebSocket(wsUrl);
+            let connTimeout = setTimeout(() => {
+              if (!this.connected) {
+                try { ws.close(); } catch(e) {}
+                tryConnect(index + 1).then(resolve).catch(reject);
               }
-            } catch(e) {}
-          };
-          this.ws.onerror = (err) => {
-            console.warn('[RTX 4060 GPU Server] WebSocket error:', err);
-            reject(new Error('RTX 4060 GPU Server offline'));
-          };
-          setTimeout(() => {
-            if (!this.connected) reject(new Error('GPU server connection timeout'));
-          }, 2500);
-        } catch(e) { reject(e); }
-      });
+            }, 2000);
+
+            ws.onopen = () => {
+              clearTimeout(connTimeout);
+              this.ws = ws;
+              this.connected = true;
+              console.log('[RTX 4060 GPU Server] WebSocket connected to GPU server:', wsUrl);
+              this.ws.send(JSON.stringify({ type: 'ping' }));
+              hooks.onReady();
+              resolve();
+            };
+
+            ws.onmessage = (evt) => {
+              try {
+                const msg = JSON.parse(evt.data);
+                if (msg.type === 'frame' && msg.data) {
+                  const domCanvas = $('avatarCanvas') || $('duixCanvas');
+                  const img = new window.Image();
+                  img.onload = () => {
+                    if (domCanvas) {
+                      const domCtx = domCanvas.getContext('2d');
+                      if (domCtx) {
+                        domCtx.drawImage(img, 0, 0, domCanvas.width, domCanvas.height);
+                      }
+                    }
+                    if (videoEl && videoEl.style.display !== 'none') {
+                      videoEl.style.display = 'none';
+                    }
+                  };
+                  img.src = 'data:image/jpeg;base64,' + msg.data;
+                }
+              } catch(e) {}
+            };
+
+            ws.onerror = () => {
+              clearTimeout(connTimeout);
+              if (!this.connected) {
+                tryConnect(index + 1).then(resolve).catch(reject);
+              }
+            };
+          } catch(e) {
+            tryConnect(index + 1).then(resolve).catch(reject);
+          }
+        });
+      };
+
+      return tryConnect(0);
     },
     speak(text) {
       if (this.ws && this.connected) {
