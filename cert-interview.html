@@ -196,7 +196,8 @@
       <div class="step-pill" id="pill-0">1. Cognitive</div>
       <div class="step-pill" id="pill-1">2. Situational</div>
       <div class="step-pill" id="pill-2">3. Attitude</div>
-      <div class="step-pill" id="pill-3">4. 3D Full-Duplex Voice</div>
+      <div class="step-pill" id="pill-3">4. 3D Voice Interview</div>
+      <div class="step-pill" id="pill-4">5. Communication</div>
     </div>
 
     <!-- 3D AVATAR STAGE FOR VOICE PHASE -->
@@ -243,11 +244,15 @@ const QUESTIONS_BATTERY = [
   { pillar: 2, title: "Attitude & Professional Ethics (3/4)", q: "When receiving severe constructive feedback during a performance evaluation:", opts: ["A) Listen actively, ask clarifying questions, and design a tangible personal growth plan.", "B) Argue back against every critical point.", "C) Disengage from team contributions.", "D) Resign immediately."], correct: 0 },
   { pillar: 2, title: "Attitude & Professional Ethics (4/4)", q: "What best describes your philosophy toward cross-functional collaboration and knowledge sharing?", opts: ["A) Keep internal technical knowledge secret to ensure job security.", "B) Proactively document processes, mentor peers, and foster transparent team communication.", "C) Share information only when explicitly requested by upper management.", "D) Outsource problem solving to external forums."], correct: 1 },
 
-  // Pillar 3: 3D Full-Duplex AI Interview (4 Questions)
-  { pillar: 3, title: "3D Full-Duplex AI Interview (1/4)", q: "Explain your technical architecture process for high-availability distributed systems. What metrics do you prioritize?", isVoice: true },
-  { pillar: 3, title: "3D Full-Duplex AI Interview (2/4)", q: "Describe a complex engineering challenge you solved under severe deadline pressure.", isVoice: true },
-  { pillar: 3, title: "3D Full-Duplex AI Interview (3/4)", q: "How do you implement data encryption, compliance, and privacy across multi-cloud infrastructure?", isVoice: true },
-  { pillar: 3, title: "3D Full-Duplex AI Interview (4/4)", q: "Summarize your long-term career trajectory and how this Simpatico HR certification empowers your growth.", isVoice: true }
+  // Pillar 3: 3D Full-Duplex AI Voice Interview (4 Questions)
+  { pillar: 3, title: "3D Voice Interview (1/4)", q: "Explain your technical architecture process for high-availability distributed systems. What metrics do you prioritize?", isVoice: true },
+  { pillar: 3, title: "3D Voice Interview (2/4)", q: "Describe a complex engineering challenge you solved under severe deadline pressure.", isVoice: true },
+  { pillar: 3, title: "3D Voice Interview (3/4)", q: "How do you implement data encryption, compliance, and privacy across multi-cloud infrastructure?", isVoice: true },
+  { pillar: 3, title: "3D Voice Interview (4/4)", q: "Summarize your long-term career trajectory and how this Simpatico HR certification empowers your growth.", isVoice: true },
+
+  // Pillar 4: Communication Skills (2 Voice Questions)
+  { pillar: 4, title: "Communication Skills (1/2)", q: "Present a compelling 60-second elevator pitch for yourself as if you were meeting a potential employer for the first time.", isVoice: true },
+  { pillar: 4, title: "Communication Skills (2/2)", q: "Explain a complex technical concept from your field to a non-technical audience. Focus on clarity, structure, and engagement.", isVoice: true }
 ];
 
 let currentQ = 0;
@@ -364,9 +369,9 @@ function initAntiCheatListeners() {
 function renderQuestion() {
   const qData = QUESTIONS_BATTERY[currentQ];
 
-  for(let i=0; i<4; i++) {
+  for(let i=0; i<5; i++) {
     const p = document.getElementById('pill-' + i);
-    p.className = 'step-pill ' + (i === qData.pillar ? 'active' : (i < qData.pillar ? 'completed' : ''));
+    if(p) p.className = 'step-pill ' + (i === qData.pillar ? 'active' : (i < qData.pillar ? 'completed' : ''));
   }
 
   const stageWrap = document.getElementById('avatarStageWrap');
@@ -524,6 +529,28 @@ function nextQuestion() {
   }
 }
 
+function evaluateCommunication(voiceAnswers) {
+  let totalWords = 0, uniqueWords = new Set(), totalLen = 0;
+  voiceAnswers.forEach(ans => {
+    if(typeof ans === 'string') {
+      const words = ans.split(/\s+/).filter(w => w.length > 0);
+      totalWords += words.length;
+      words.forEach(w => uniqueWords.add(w.toLowerCase()));
+      totalLen += ans.length;
+    }
+  });
+  const avgWords = voiceAnswers.length > 0 ? totalWords / voiceAnswers.length : 0;
+  const diversity = uniqueWords.size / Math.max(totalWords, 1);
+  let score = 60;
+  if(avgWords > 15) score += 10;
+  if(avgWords > 30) score += 8;
+  if(avgWords > 50) score += 5;
+  if(diversity > 0.4) score += 8;
+  if(diversity > 0.6) score += 5;
+  score += Math.min(4, Math.floor(totalLen / 200));
+  return Math.min(100, Math.max(55, score));
+}
+
 function finishTest() {
   let cogCorrect = 0, sitCorrect = 0, attCorrect = 0;
   for(let i=0; i<4; i++) if(userAnswers[i] === QUESTIONS_BATTERY[i].correct) cogCorrect++;
@@ -533,8 +560,13 @@ function finishTest() {
   let cogScore = Math.round(60 + (cogCorrect / 4) * 38);
   let sitScore = Math.round(65 + (sitCorrect / 4) * 33);
   let attScore = Math.round(70 + (attCorrect / 4) * 28);
-  let jobScore = 93;
-  let overall = Math.round((cogScore + sitScore + attScore + jobScore + integrityScore) / 5);
+  let jobScore = Math.round(78 + Math.random() * 18);
+
+  // Communication Skills: evaluate voice responses (questions 12-17 are voice)
+  const voiceResponses = userAnswers.slice(12).filter(a => typeof a === 'string');
+  let commScore = evaluateCommunication(voiceResponses);
+
+  let overall = Math.round((cogScore + sitScore + attScore + jobScore + commScore + integrityScore) / 6);
 
   const certId = 'SIMP-' + Math.floor(100000 + Math.random() * 900000);
   const certObj = {
@@ -547,6 +579,7 @@ function finishTest() {
     situational: sitScore,
     attitude: attScore,
     jobScore: jobScore,
+    communication: commScore,
     integrity: integrityScore
   };
 
