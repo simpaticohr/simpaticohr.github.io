@@ -84,12 +84,26 @@ const HyperRealRenderer = (function () {
     offscreenCtx = offscreenCanvas.getContext('2d');
 
     baseImage = new Image();
-    baseImage.crossOrigin = "anonymous";
     baseImage.onload = () => {
       baseImageLoaded = true;
       console.log('[HyperReal] Base avatar image loaded successfully.');
     };
-    baseImage.src = (persona && persona.poster) || 'assets/ai-interviewer-avatar.png';
+    baseImage.onerror = (err) => {
+      console.warn('[HyperReal] Base avatar image error, loading without CORS headers...');
+      const fbImg = new Image();
+      fbImg.onload = () => {
+        baseImage = fbImg;
+        baseImageLoaded = true;
+        console.log('[HyperReal] Fallback avatar image loaded successfully.');
+      };
+      fbImg.src = (persona && persona.poster) || 'assets/ai-interviewer-avatar.png';
+    };
+
+    const imgSrc = (persona && persona.poster) || 'assets/ai-interviewer-avatar.png';
+    if (imgSrc.startsWith('http') && !imgSrc.includes(location.hostname)) {
+      baseImage.crossOrigin = "anonymous";
+    }
+    baseImage.src = imgSrc;
   }
 
   function scheduleNextBlink() {
