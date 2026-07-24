@@ -12,6 +12,7 @@
   <script src="js/duix-renderer.js"></script>
   <script src="js/simli-adapter.js"></script>
   <script src="js/hyperreal-renderer.js"></script>
+  <script src="js/local-avatar-engine.js"></script>
   <script src="js/interview-pipeline-engine.js"></script>
 
   <style>
@@ -600,7 +601,23 @@ async function startMicStreamingToGemini(ws) {
 
 async function speakAvatar(text) {
   const captionsEl = document.getElementById('duix-captions');
-  if(captionsEl) captionsEl.textContent = 'AI Interviewer (Gemini 3.6): ' + text;
+  if(captionsEl) captionsEl.textContent = 'AI Interviewer: ' + text;
+
+  // 0. RTX GPU hybrid engine: pre-rendered LatentSync clip or live MuseTalk stream.
+  //    Handles both audio AND video — skip the legacy TTS chain entirely if it succeeds.
+  if (typeof LocalAvatarEngine !== 'undefined') {
+    try {
+      const handled = await LocalAvatarEngine.trySpeak(text);
+      if (handled) {
+        if (typeof HyperRealRenderer !== 'undefined') {
+          try { HyperRealRenderer.onState('speaking'); } catch(e) {}
+        }
+        return;
+      }
+    } catch(e) {
+      console.warn('[LocalAvatar] trySpeak note:', e.message);
+    }
+  }
 
   if (typeof HyperRealRenderer !== 'undefined') {
     try {
@@ -684,6 +701,9 @@ async function speakAvatar(text) {
 
 function stopAvatarSpeaking() {
   stopPlayback();
+  if (typeof LocalAvatarEngine !== 'undefined') {
+    try { LocalAvatarEngine.stop(); } catch(e) {}
+  }
   if ('speechSynthesis' in window) {
     window.speechSynthesis.cancel();
   }
@@ -704,6 +724,11 @@ async function init3DAvatarStage() {
   if(cfg.elevenKey) localStorage.setItem('evalis_elevenlabs_key', cfg.elevenKey);
 
   const provider = cfg.avatarProvider || 'latentsync';
+
+  // Warm up the RTX GPU hybrid engine (clip manifest + server health probe)
+  if (typeof LocalAvatarEngine !== 'undefined') {
+    try { LocalAvatarEngine.init(); } catch(e) {}
+  }
 
   if (typeof HyperRealRenderer !== 'undefined') {
     try {
