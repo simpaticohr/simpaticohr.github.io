@@ -554,9 +554,25 @@ const HyperRealRenderer = (function () {
     }
   };
 
-  // ── COMMERCIAL AI AVATAR ADAPTER ──
-  const CommercialAvatarAdapter = {
+  // ── BYTEDANCE LATENTSYNC ADAPTER (Apache 2.0 Free Commercial) ──
+  const LatentSyncAdapter = {
+    ws: null,
+    canvas: null,
+    ctx: null,
+    connected: false,
     async connect(videoEl, hooks) {
+      const cfg = JSON.parse(localStorage.getItem('adminConfig') || '{}');
+      const endpoint = cfg.latentsyncUrl || 'http://localhost:8000';
+
+      try {
+        const hc = await fetch(endpoint + '/health', { signal: AbortSignal.timeout(2000) });
+        if (hc.ok) {
+          this.connected = true;
+          console.log('[LatentSync] Connected to LatentSync endpoint:', endpoint);
+        }
+      } catch(e) {
+        console.warn('[LatentSync] Endpoint not reachable:', endpoint);
+      }
       hooks.onReady();
     },
     speak(text) {},
@@ -565,10 +581,12 @@ const HyperRealRenderer = (function () {
     triggerGesture(g) {},
     feedAudio(int16Buf) {},
     flush() {},
-    async close() {}
+    async close() {
+      this.connected = false;
+    }
   };
 
-  const ADAPTERS = { heygen: HeyGenAdapter, did: DIdAdapter, tavus: TavusAdapter, selfhost: SelfHostAdapter, simli: SelfHostAdapter, liveportrait: SelfHostAdapter };
+  const ADAPTERS = { latentsync: LatentSyncAdapter, heygen: HeyGenAdapter, did: DIdAdapter, tavus: TavusAdapter, selfhost: SelfHostAdapter, simli: SelfHostAdapter, liveportrait: LatentSyncAdapter };
 
   // ── CAPTIONS ──
   function startCaptions(words) {
