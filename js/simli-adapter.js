@@ -94,24 +94,12 @@ const SimliAdapter = (function () {
 
     offscreenCtx.clearRect(0, 0, w, h);
 
-    const breathY = Math.sin(elapsed * 0.001) * 3.5;
-    const swayX = Math.sin(elapsed * 0.0005) * 2.0;
-    let headAngle = Math.sin(elapsed * 0.0004) * 0.012;
-
-    if (currentState === 'listening') {
-      const nodVal = Math.max(0, Math.sin(elapsed * 0.003)) * 6.0;
-      headAngle += nodVal * 0.003;
-    } else if (currentState === 'thinking' || currentState === 'processing') {
-      headAngle += 0.025 + Math.sin(elapsed * 0.001) * 0.01;
-    } else if (currentState === 'speaking') {
-      targetMouthOpen = 0.35 + Math.abs(Math.sin(elapsed * 0.015)) * 0.65;
-    } else {
-      targetMouthOpen = 0;
-    }
+    const breathY = 0;
+    const swayX = 0;
+    let headAngle = 0;
 
     offscreenCtx.save();
-    offscreenCtx.translate(w / 2 + swayX, h / 2 + breathY);
-    offscreenCtx.rotate(headAngle);
+    offscreenCtx.translate(w / 2, h / 2);
     offscreenCtx.drawImage(baseImage, -w / 2, -h / 2, w, h);
 
     // Micro Pupil Shift
