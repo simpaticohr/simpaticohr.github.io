@@ -691,8 +691,8 @@ const HyperRealRenderer = (function () {
     async init() {
       destroyed = false;
       abortCtrl = new AbortController();
-      stageEl   = $('avatar-stage');
-      videoEl   = $('duixVideo');
+      stageEl   = $('avatar-stage') || $('avatarStageWrap') || $('simli-avatar');
+      videoEl   = $('duixVideo') || $('simli-video');
       captionEl = $('duix-captions');
       orbEl     = $('ai-avatar-canvas');
 
