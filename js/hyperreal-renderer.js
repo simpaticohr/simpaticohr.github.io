@@ -260,21 +260,12 @@ const HyperRealRenderer = (function () {
     if (videoStreamRafId) cancelAnimationFrame(videoStreamRafId);
     videoStreamRafId = requestAnimationFrame(videoLoop);
 
-    if (offscreenCanvas && typeof offscreenCanvas.captureStream === 'function') {
-      try {
-        mediaStream = offscreenCanvas.captureStream(30);
-        if (videoEl) {
-          videoEl.srcObject = mediaStream;
-          videoEl.style.display = 'block';
-          videoEl.style.opacity = '1';
-          videoEl.play().catch(() => {});
-          
-          const poster = document.getElementById('duixPoster');
-          if (poster) poster.style.display = 'none';
-        }
-      } catch (e) {
-        console.warn('[HyperReal] captureStream note:', e.message);
-      }
+    const domCanvas = $('avatarCanvas') || $('duixCanvas');
+    if (domCanvas) {
+      domCanvas.style.display = 'block';
+    }
+    if (videoEl) {
+      videoEl.style.display = 'none';
     }
   }
 
