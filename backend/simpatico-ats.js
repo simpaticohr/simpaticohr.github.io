@@ -5539,11 +5539,11 @@ function maskProfile(candidate, isUnlocked) {
 
 async function handleTalentBankSearch(request, env, ctx) {
   const body = await safeJson(request) || {};
-  const { query = "", skill = "", minScore = 0, companyId = "demo-company-1" } = body;
+  const { query = "", skill = "", minScore = 0, verifiedStatus = "all", companyId = "demo-company-1" } = body;
 
   let candidates = [];
   try {
-    const res = await sbFetch(env, "GET", "/rest/v1/candidate_profiles?select=*&order=cert_score.desc.nullslast&limit=50", null, false, ctx.tenantId);
+    const res = await sbFetch(env, "GET", "/rest/v1/candidate_profiles?select=*&order=cert_verified.desc,cert_score.desc.nullslast&limit=50", null, false, ctx.tenantId);
     if (res.ok) {
       const data = await res.json();
       if (Array.isArray(data) && data.length > 0) candidates = data;
@@ -5553,6 +5553,8 @@ async function handleTalentBankSearch(request, env, ctx) {
   }
 
   let filtered = candidates.filter(c => {
+    if (verifiedStatus === "verified" && !c.cert_verified) return false;
+    if (verifiedStatus === "unverified" && c.cert_verified) return false;
     if (minScore > 0 && (c.cert_score || 0) < minScore) return false;
     if (skill && Array.isArray(c.skills)) {
       const hasSkill = c.skills.some(s => s.toLowerCase().includes(skill.toLowerCase()));
@@ -5566,6 +5568,14 @@ async function handleTalentBankSearch(request, env, ctx) {
       if (!matchName && !matchHead && !matchSkill) return false;
     }
     return true;
+  });
+
+  // Prioritization Sorting: Verified candidates first, highest score first
+  filtered.sort((a, b) => {
+    if (b.cert_verified !== a.cert_verified) {
+      return (b.cert_verified ? 1 : 0) - (a.cert_verified ? 1 : 0);
+    }
+    return (b.cert_score || 0) - (a.cert_score || 0);
   });
 
   let unlockedIds = new Set();

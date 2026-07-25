@@ -330,6 +330,12 @@
           <option value="design">UI/UX Design</option>
         </select>
 
+        <select id="verifiedFilter" class="filter-select" onchange="doSearch()">
+          <option value="all">All Verification Statuses</option>
+          <option value="verified">★ Verified Candidates Only</option>
+          <option value="unverified">Unverified Profiles</option>
+        </select>
+
         <select id="scoreFilter" class="filter-select" onchange="doSearch()">
           <option value="0">Min AI Cert Score</option>
           <option value="80">★ 80+ Top Rated</option>
@@ -384,6 +390,7 @@
     async function loadCandidates() {
       const query = document.getElementById('searchInput').value;
       const minScore = parseInt(document.getElementById('scoreFilter').value || 0);
+      const verifiedStatus = document.getElementById('verifiedFilter').value || 'all';
       const skill = Array.from(activeSkills).join(',');
 
       const container = document.getElementById('candidatesContainer');
@@ -393,7 +400,7 @@
         const res = await fetch('/talent-bank/search', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ query, minScore, skill, companyId: 'demo-company-1' })
+          body: JSON.stringify({ query, minScore, verifiedStatus, skill, companyId: 'demo-company-1' })
         });
         const data = await res.json();
         renderCandidates(data.candidates || []);
@@ -405,7 +412,7 @@
 
     function renderCandidates(list) {
       const container = document.getElementById('candidatesContainer');
-      document.getElementById('candidateCount').textContent = `Showing ${list.length} verified candidates`;
+      document.getElementById('candidateCount').textContent = `Showing ${list.length} candidates`;
 
       if(list.length === 0) {
         container.innerHTML = `
@@ -422,13 +429,20 @@
       container.innerHTML = list.map(c => {
         const isUnlocked = c.is_unlocked;
         const name = isUnlocked ? c.full_name : c.masked_name;
+        const isVerified = c.cert_verified && c.cert_score > 0;
 
         return `
           <div class="cand-card">
             <div>
-              <div class="cert-badge-ribbon">
-                <i class="fas fa-certificate"></i> AI VERIFIED — ${c.cert_score}/100 (${c.cert_band})
-              </div>
+              ${isVerified ? `
+                <div class="cert-badge-ribbon" style="background:rgba(16,185,129,0.12); border:1px solid rgba(16,185,129,0.3); color:#34d399;">
+                  <i class="fas fa-certificate"></i> ★ AI VERIFIED — ${c.cert_score}/100 (${c.cert_band || 'Gold'})
+                </div>
+              ` : `
+                <div class="cert-badge-ribbon" style="background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.1); color:var(--text-dim);">
+                  <i class="fas fa-clock"></i> Unverified • Cert Pending
+                </div>
+              `}
 
               <div class="cand-name">
                 <span>${name}</span>
