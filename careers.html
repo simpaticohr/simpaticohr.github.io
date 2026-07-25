@@ -509,7 +509,7 @@
 
         // ── Tenant Identification & Brand Setup ──────────
         const params = new URLSearchParams(window.location.search);
-        const companyId = params.get('company_id') || params.get('tenant_id') || params.get('c') || params.get('org') || 'a0000000-0000-0000-0000-000000000001';
+        const companyId = params.get('company_id') || params.get('tenant_id') || params.get('c') || params.get('org') || params.get('company') || 'a0000000-0000-0000-0000-000000000001';
 
         // Set Canonical URL for SEO Tenant Isolation
         const canonicalUrl = `${BASE_URL}/careers.html${companyId !== 'a0000000-0000-0000-0000-000000000001' ? '?company_id=' + companyId : ''}`;
@@ -532,6 +532,39 @@
             if (heroEl) heroEl.style.background = `linear-gradient(135deg, ${c} 0%, ${c}cc 50%, ${c}99 100%)`;
         }
 
+        // Generate Brand Avatar SVG Logo if company logo is missing
+        function generateBrandLogo(name, website) {
+            const cleanName = (name || 'Company').trim();
+            const words = cleanName.split(/\s+/).filter(Boolean);
+            let initials = 'CO';
+            if (words.length >= 2) {
+                initials = (words[0][0] + words[1][0]).toUpperCase();
+            } else if (words.length === 1) {
+                initials = words[0].substring(0, 2).toUpperCase();
+            }
+
+            // Create canvas badge with initial initials & sleek gradient fallback
+            const avatarUrl = `https://ui-avatars.com/api/?name=${encodeURIComponent(cleanName)}&background=4f46e5&color=fff&size=128&bold=true&font-size=0.45`;
+            
+            let domainLogo = '';
+            if (website) {
+                try {
+                    const domain = new URL(website.startsWith('http') ? website : 'https://' + website).hostname.replace(/^www\./, '');
+                    if (domain) {
+                        domainLogo = `https://logo.clearbit.com/${domain}`;
+                    }
+                } catch(e){}
+            }
+
+            return `
+                <div class="brand-logo-badge" style="width:48px;height:48px;border-radius:12px;background:linear-gradient(135deg,#ffffff 0%,#f1f5f9 100%);display:inline-flex;align-items:center;justify-content:center;box-shadow:0 4px 12px rgba(0,0,0,0.12);border:1.5px solid rgba(255,255,255,0.8);overflow:hidden;position:relative;">
+                    ${domainLogo ? `<img src="${domainLogo}" alt="${escapeHtml(cleanName)}" style="width:100%;height:100%;object-fit:contain;padding:4px;" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">` : ''}
+                    <div style="display:${domainLogo ? 'none' : 'flex'};width:100%;height:100%;align-items:center;justify-content:center;background:linear-gradient(135deg,#4f46e5,#7c3aed);color:#fff;font-weight:800;font-size:18px;letter-spacing:0.5px;">
+                        ${initials}
+                    </div>
+                </div>`;
+        }
+
         // Initialize tenant data
         initCareersPage();
 
@@ -546,8 +579,13 @@
             try {
                 const SB_URL = window.SIMPATICO_CONFIG?.supabaseUrl || 'https://cvkxtsvgnynxexmemfuy.supabase.co';
                 const SB_KEY = window.SIMPATICO_CONFIG?.supabaseAnonKey;
+                
+                // Support querying by ID or by company slug/name
+                const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(companyId);
+                const queryFilter = isUuid ? `id=eq.${companyId}` : `slug=eq.${encodeURIComponent(companyId)}`;
+                
                 const res = await fetch(
-                    `${SB_URL}/rest/v1/companies?id=eq.${companyId}&select=name,logo_url,description,website,primary_color`,
+                    `${SB_URL}/rest/v1/companies?${queryFilter}&select=id,name,logo_url,description,website,primary_color`,
                     { headers: { 'apikey': SB_KEY, 'Authorization': 'Bearer ' + SB_KEY } }
                 );
                 if (res.ok) {
@@ -575,12 +613,19 @@
                         const siteNameMeta = document.querySelector('meta[property="og:site_name"]');
                         if (siteNameMeta) siteNameMeta.setAttribute('content', `${company.name} Careers`);
                     }
-                    if (company.logo_url) {
-                        const logoEl = document.getElementById('heroLogo');
-                        if (logoEl) logoEl.innerHTML = `<img src="${company.logo_url}" alt="${company.name} Logo" style="width:36px;height:36px;object-fit:contain;border-radius:8px;background:#fff;padding:2px;">`;
-                        document.getElementById('ogImage')?.setAttribute('content', company.logo_url);
-                        document.getElementById('twImage')?.setAttribute('content', company.logo_url);
+                    
+                    // Render uploaded logo or generate custom brand badge logo
+                    const logoEl = document.getElementById('heroLogo');
+                    if (logoEl) {
+                        if (company.logo_url) {
+                            logoEl.innerHTML = `<img src="${company.logo_url}" alt="${company.name || 'Company'} Logo" style="width:40px;height:40px;object-fit:contain;border-radius:10px;background:#fff;padding:3px;box-shadow:0 2px 8px rgba(0,0,0,0.1);">`;
+                            document.getElementById('ogImage')?.setAttribute('content', company.logo_url);
+                            document.getElementById('twImage')?.setAttribute('content', company.logo_url);
+                        } else {
+                            logoEl.innerHTML = generateBrandLogo(company.name || companyName, company.website);
+                        }
                     }
+
                     if (company.primary_color && !params.get('color')) {
                         setBrandTheme(company.primary_color);
                     }
