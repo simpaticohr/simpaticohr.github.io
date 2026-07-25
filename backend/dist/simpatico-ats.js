@@ -22563,8 +22563,29 @@ async function handlePublicJobs(request, env, ctx, _, url) {
 __name(handlePublicJobs, "handlePublicJobs");
 async function handleCreateApplication(request, env, ctx) {
   const body = await safeJson(request);
-  if (!body.job_id || !body.candidate_email)
-    throw new ValidationError("job_id and candidate_email required");
+  if (!body.candidate_email)
+    throw new ValidationError("candidate_email is required");
+
+  let targetJobId = body.job_id;
+  if (!targetJobId || targetJobId === "null" || targetJobId === "undefined" || targetJobId === "00000000-0000-0000-0000-000000000000") {
+    try {
+      const defaultJobRes = await sbFetch(
+        env,
+        "GET",
+        `/rest/v1/jobs?company_id=eq.${ctx.tenantId}&status=eq.open&select=id&limit=1`,
+        null,
+        false,
+        ctx.tenantId
+      );
+      if (defaultJobRes.ok) {
+        const dJobs = await defaultJobRes.json();
+        if (dJobs && dJobs[0]?.id) targetJobId = dJobs[0].id;
+      }
+    } catch(e) {}
+
+    if (!targetJobId) targetJobId = "a0000000-0000-0000-0000-000000000001";
+    body.job_id = targetJobId;
+  }
   let secureFileKey = null;
   if (body.resume_base64 && body.resume_filename) {
     try {
