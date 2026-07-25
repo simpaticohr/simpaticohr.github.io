@@ -122,8 +122,8 @@
     try {
       if (client) {
         const [jobsRes, intRes] = await Promise.all([
-          client.from('jobs').select('id', { count: 'exact', head: true }).or(`company_id.eq.${companyId},tenant_id.eq.${companyId}`),
-          client.from('interviews').select('id', { count: 'exact', head: true }).or(`company_id.eq.${companyId},tenant_id.eq.${companyId}`),
+          client.from('jobs').select('id', { count: 'exact', head: true }).eq('company_id', companyId),
+          client.from('interviews').select('id', { count: 'exact', head: true }).eq('company_id', companyId),
         ]);
         jobsCount = jobsRes.count || 0;
         interviewsCount = intRes.count || 0;

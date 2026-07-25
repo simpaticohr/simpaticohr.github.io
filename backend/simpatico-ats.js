@@ -4124,7 +4124,7 @@ async function handleCreateJob(request, env, ctx) {
     }
     const isPaid = ['starter', 'professional', 'enterprise', 'pro', 'business', 'premium'].includes(plan);
     if (!isPaid) {
-      const countRes = await sbFetch(env, "GET", `/rest/v1/jobs?or=(company_id.eq.${targetCompanyId},tenant_id.eq.${targetCompanyId})&select=id`, null, false, targetCompanyId);
+      const countRes = await sbFetch(env, "GET", `/rest/v1/jobs?company_id=eq.${targetCompanyId}&select=id`, null, false, targetCompanyId);
       if (countRes.ok) {
         const existingJobs = await countRes.json();
         if (Array.isArray(existingJobs) && existingJobs.length >= 1) {
