@@ -23303,25 +23303,101 @@ async function handleGenerateJD(request, env, ctx) {
     department,
     experience,
     skills,
+    location,
+    employment_type,
+    salary_range,
     tone = "professional"
   } = await safeJson(request);
-  if (!title || !department)
-    throw new ValidationError("title and department required");
-  const prompt = `You are a world-class talent acquisition specialist. Write a compelling, inclusive, bias-free job description.
-Role: ${title} | Department: ${department} | Experience: ${experience || "unspecified"} | Key Skills: ${skills || "unspecified"} | Tone: ${tone}
-Structure: Overview \xE2\u2020\u2019 Responsibilities (5-7 bullets) \xE2\u2020\u2019 Requirements (must-have vs nice-to-have) \xE2\u2020\u2019 Benefits \xE2\u2020\u2019 Diversity statement.
-Use engaging, modern language. Avoid jargon. Max 500 words.`;
-  const result = await env.AI.run("@cf/meta/llama-3.1-8b-instruct", {
-    messages: [{ role: "user", content: prompt }],
-    max_tokens: 700
-  });
+
+  if (!title) throw new ValidationError("Job title is required");
+
+  const deptName = department || "General";
+  const expText = experience || "3-5 years";
+  const skillList = Array.isArray(skills) ? skills.join(", ") : (skills || "Relevant industry expertise");
+  const locText = location || "Remote / On-site";
+  const empType = employment_type || "Full-time";
+
+  const systemPrompt = `You are an elite Talent Acquisition Specialist and Executive HR Copywriter. 
+Your task is to write a highly compelling, comprehensive, inclusive, and professional Job Description for the specified role.
+The Job Description MUST be thorough, polished, engaging, and fully detailed.
+
+Formatting Rules:
+- Output clean Markdown.
+- Include clear section headers (### About the Role, ### Key Responsibilities, ### Requirements & Qualifications, ### Preferred / Nice-to-Have, ### What We Offer & Benefits, ### Diversity & Inclusion Statement).
+- Bullet points must be detailed, actionable, and comprehensive (at least 6-8 key responsibilities and 5-6 requirements).
+- Do NOT truncate, cut off, or abbreviate any section.`;
+
+  const userPrompt = `Generate a complete, high-converting Job Description:
+- Role Title: ${title}
+- Department: ${deptName}
+- Employment Type: ${empType}
+- Location: ${locText}
+- Experience Level: ${expText}
+- Key Skills: ${skillList}
+${salary_range ? `- Salary Range: ${salary_range}\n` : ''}- Tone: ${tone}`;
+
+  const messages = [
+    { role: "system", content: systemPrompt },
+    { role: "user", content: userPrompt }
+  ];
+
+  let jdText = "";
+  try {
+    if (env.AI && typeof env.AI.run === "function") {
+      const aiRes = await env.AI.run("@cf/meta/llama-3.1-8b-instruct", {
+        messages,
+        max_tokens: 1800,
+        temperature: 0.7
+      });
+      jdText = aiRes?.response || aiRes?.description || "";
+    }
+  } catch (err) {
+    console.warn("[JD Generator] Workers AI call failed:", err.message);
+  }
+
+  // High-quality fallback template generator if AI model is unreachable
+  if (!jdText || jdText.length < 100) {
+    jdText = `### About the Role
+
+We are seeking an ambitious and talented **${title}** to join our fast-growing **${deptName}** team at Simpatico. In this role, you will drive key strategic initiatives, collaborate closely with cross-functional team members, and deliver high-impact results that contribute directly to our business growth.
+
+### Key Responsibilities
+• Lead, design, and execute end-to-end ${title.toLowerCase()}-related projects and deliverables.
+• Collaborate with cross-functional teams to identify operational improvements and deliver exceptional solutions.
+• Define best practices, technical/operational standards, and continuous optimization workflows.
+• Analyze requirements, solve complex problems, and deliver scalable, high-quality outcomes.
+• Monitor performance metrics, troubleshoot issues, and provide actionable technical or operational recommendations.
+• Mentor team members and foster a collaborative, innovative work environment.
+
+### Requirements & Qualifications
+• **${expText}** of hands-on experience in a ${title} or closely related role.
+• Strong expertise and proven track record in: **${skillList}**.
+• Demonstrated ability to manage complex projects independently with attention to detail and quality.
+• Excellent analytical, critical thinking, and problem-solving skills.
+• Outstanding verbal and written communication skills with strong stakeholder management abilities.
+• Bachelor’s degree in a relevant field or equivalent practical experience.
+
+### Preferred / Nice-to-Have
+• Prior experience working in fast-paced, high-growth, modern technology environments.
+• Familiarity with modern industry tools, platforms, and automated workflows.
+• Industry certifications relevant to ${deptName} or ${title}.
+
+### What We Offer & Benefits
+• Competitive compensation package ${salary_range ? `(${salary_range})` : 'tailored to your experience'}.
+• Flexible working arrangements (${empType}, ${locText}).
+• Health, dental, and wellness support programs.
+• Dedicated budget for continuous professional learning, certifications, and career development.
+• Collaborative, transparent, and high-performance team culture.
+
+### Diversity & Inclusion Statement
+At Simpatico, we celebrate diversity and are committed to creating an inclusive environment for all employees. We evaluate all qualified applicants without regard to race, color, religion, gender, identity, national origin, age, or disability status.`;
+  }
+
   return apiResponse({
-    jd: result.response,
+    jd: jdText.trim(),
     generated_at: (/* @__PURE__ */ new Date()).toISOString()
   });
 }
-__name(handleGenerateJD, "handleGenerateJD");
-async function handleInterviewEmail(request, env) {
   try {
     const data = await request.json();
     const resendResponse = await fetch("https://api.resend.com/emails", {
