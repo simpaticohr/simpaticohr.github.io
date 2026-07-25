@@ -231,8 +231,10 @@ const SCHEMAS = {
     },
   },
   job_posting: {
-    required: ["title", "department", "location"],
+    required: ["title"],
     optional: [
+      "department",
+      "location",
       "description",
       "employment_type",
       "salary_range",
@@ -4126,8 +4128,8 @@ async function handleCreateJob(request, env, ctx) {
   // Clean payload so only valid jobs table columns are sent to Supabase REST API
   const jobPayload = {
     title: rawPayload.title,
-    department: rawPayload.department,
-    location: rawPayload.location,
+    department: rawPayload.department || rawPayload.category || "General",
+    location: rawPayload.location || "Remote",
     category: rawPayload.category || rawPayload.department,
     description: rawPayload.description || "",
     employment_type: rawPayload.employment_type || "Full-time",
@@ -6334,11 +6336,12 @@ async function handleGenerateJD(request, env, ctx) {
     skills,
     tone = "professional",
   } = await safeJson(request);
-  if (!title || !department)
-    throw new ValidationError("title and department required");
+  if (!title)
+    throw new ValidationError("title is required");
 
+  const deptName = department || "General";
   const prompt = `You are a world-class talent acquisition specialist. Write a compelling, inclusive, bias-free job description.
-Role: ${title} | Department: ${department} | Experience: ${experience || "unspecified"} | Key Skills: ${skills || "unspecified"} | Tone: ${tone}
+Role: ${title} | Department: ${deptName} | Experience: ${experience || "unspecified"} | Key Skills: ${skills || "unspecified"} | Tone: ${tone}
 Structure: Overview → Responsibilities (5-7 bullets) → Requirements (must-have vs nice-to-have) → Benefits → Diversity statement.
 Use engaging, modern language. Avoid jargon. Max 500 words.`;
 

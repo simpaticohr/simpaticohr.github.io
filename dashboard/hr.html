@@ -4726,8 +4726,11 @@ async function handleCreateJob(e, status = 'open') {
     const shortlistThreshold = autoShortlist ? parseInt(document.getElementById('jobShortlistThreshold')?.value) || 70 : null;
     const rejectThreshold = autoShortlist ? parseInt(document.getElementById('jobRejectThreshold')?.value) || 40 : null;
 
-    if (!title || !department || !location) {
-        showToast('Please fill in Job Title, Department, and Location', 'error');
+    const finalDept = department || 'General';
+    const finalLoc  = location || 'Remote';
+
+    if (!title) {
+        showToast('Please enter a Job Title', 'error');
         btn.disabled = false; btn.innerHTML = origHtml;
         return false;
     }
@@ -4737,7 +4740,7 @@ async function handleCreateJob(e, status = 'open') {
     const isEdit = !!editJobId;
 
     const newJob = {
-        title, category: department, department, location,
+        title, category: finalDept, department: finalDept, location: finalLoc,
         employment_type: type,
         experience_min: experience ? parseFloat(experience) || null : null,
         salary_min: salaryMin ? parseFloat(salaryMin) : null,
@@ -4807,8 +4810,13 @@ async function handleCreateJob(e, status = 'open') {
 
             if (!res.ok) {
                 const errJson = await res.json().catch(() => ({}));
-                const msg = errJson.message || errJson.error?.message || (typeof errJson.error === 'string' ? errJson.error : '') || `Server error (${res.status})`;
-                throw new Error(msg);
+                let msg = errJson.message || errJson.error?.message || (typeof errJson.error === 'string' ? errJson.error : '');
+                if (errJson.details && Array.isArray(errJson.details)) {
+                    msg += ': ' + errJson.details.map(d => d.message || d.field).join(', ');
+                } else if (errJson.error?.details && Array.isArray(errJson.error.details)) {
+                    msg += ': ' + errJson.error.details.map(d => d.message || d.field).join(', ');
+                }
+                throw new Error(msg || `Server error (${res.status})`);
             }
 
             const resJson = await res.json();
