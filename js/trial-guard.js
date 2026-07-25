@@ -114,23 +114,35 @@
 
   // ── Check usage counts for trial limits ──
   async function checkTrialUsage(companyId) {
+    if (!companyId) return { jobs: 0, interviews: 0 };
     const client = sb();
-    if (!client || !companyId) return { jobs: 0, interviews: 0 };
+    let jobsCount = 0;
+    let interviewsCount = 0;
 
     try {
-      const [jobsRes, interviewsRes] = await Promise.all([
-        client.from('jobs').select('id', { count: 'exact', head: true }).eq('tenant_id', companyId),
-        client.from('interviews').select('id', { count: 'exact', head: true }).eq('tenant_id', companyId),
-      ]);
+      if (client) {
+        const [jobsRes, intRes] = await Promise.all([
+          client.from('jobs').select('id', { count: 'exact', head: true }).or(`company_id.eq.${companyId},tenant_id.eq.${companyId}`),
+          client.from('interviews').select('id', { count: 'exact', head: true }).or(`company_id.eq.${companyId},tenant_id.eq.${companyId}`),
+        ]);
+        jobsCount = jobsRes.count || 0;
+        interviewsCount = intRes.count || 0;
+      }
 
-      return {
-        jobs: jobsRes.count || 0,
-        interviews: interviewsRes.count || 0,
-      };
+      // Secondary check via Worker API
+      const cfg = window.SIMPATICO_CONFIG || {};
+      const workerUrl = cfg.workerUrl || 'https://simpatico-hr-ats.simpaticohrconsultancy.workers.dev';
+      const res = await fetch(`${workerUrl}/recruitment/trial-usage?tenant_id=${companyId}`);
+      if (res.ok) {
+        const uData = await res.json();
+        const d = uData.data || uData;
+        if (typeof d.jobs === 'number') jobsCount = Math.max(jobsCount, d.jobs);
+        if (typeof d.interviews === 'number') interviewsCount = Math.max(interviewsCount, d.interviews);
+      }
     } catch(e) {
       console.warn('[trial-guard] Error checking usage:', e.message);
-      return { jobs: 0, interviews: 0 };
     }
+    return { jobs: jobsCount, interviews: interviewsCount };
   }
 
   // ── Calculate remaining time ──

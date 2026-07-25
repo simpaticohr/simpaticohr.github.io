@@ -4114,6 +4114,26 @@ async function handleCreateJob(request, env, ctx) {
     targetCompanyId = body.tenant_id;
   }
 
+  // ── SERVER-SIDE TRIAL GUARD ENFORCEMENT ──
+  if (targetCompanyId && targetCompanyId !== 'a0000000-0000-0000-0000-000000000001' && ctx.role !== 'superadmin' && ctx.role !== 'super_admin') {
+    const compRes = await sbFetch(env, "GET", `/rest/v1/companies?id=eq.${targetCompanyId}&select=subscription_plan,is_active`, null, false, targetCompanyId);
+    let plan = 'trial';
+    if (compRes.ok) {
+      const compArr = await compRes.json();
+      if (compArr && compArr[0]?.subscription_plan) plan = compArr[0].subscription_plan.toLowerCase();
+    }
+    const isPaid = ['starter', 'professional', 'enterprise', 'pro', 'business', 'premium'].includes(plan);
+    if (!isPaid) {
+      const countRes = await sbFetch(env, "GET", `/rest/v1/jobs?or=(company_id.eq.${targetCompanyId},tenant_id.eq.${targetCompanyId})&select=id`, null, false, targetCompanyId);
+      if (countRes.ok) {
+        const existingJobs = await countRes.json();
+        if (Array.isArray(existingJobs) && existingJobs.length >= 1) {
+          throw new AppError("Trial limit reached. Your 2-day free trial allows 1 job posting. Please upgrade your subscription to post more jobs.", 403);
+        }
+      }
+    }
+  }
+
   // Accept status from frontend (open, draft, closed) — default to "open"
   const jobStatus = ["open", "draft", "closed"].includes(body.status) ? body.status : "open";
 
