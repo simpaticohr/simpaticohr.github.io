@@ -36,6 +36,8 @@ const HyperRealRenderer = (function () {
   let abortCtrl = null;
   let captionAnimId = null;
   let videoStreamRafId = null;
+  let isGpuStreamingFrames = false;
+  let gpuFrameTimeout = null;
 
   // ── Procedural Video Stream Engine State ──
   let offscreenCanvas = null;
@@ -51,6 +53,14 @@ const HyperRealRenderer = (function () {
   let pupilOffsetX = 0;
   let pupilOffsetY = 0;
   let nextPupilShiftTime = 0;
+  let lastAudioFeedTime = 0;
+
+  // ── GPU Audio Context for RTX 4060 server Edge-TTS audio playback ──
+  let _gpuAudioCtx = null;
+  function getGpuAudioCtx() {
+    if (!_gpuAudioCtx) _gpuAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    return _gpuAudioCtx;
+  }
 
   // ── Tag parser with capability validation ──
   const TAG_RE = /\[\[(gesture|emotion):([a-z_]+)\]\]/gi;
@@ -88,22 +98,15 @@ const HyperRealRenderer = (function () {
       baseImageLoaded = true;
       console.log('[HyperReal] Base avatar image loaded successfully.');
     };
-    baseImage.onerror = (err) => {
-      console.warn('[HyperReal] Base avatar image error, loading without CORS headers...');
-      const fbImg = new Image();
-      fbImg.onload = () => {
-        baseImage = fbImg;
-        baseImageLoaded = true;
-        console.log('[HyperReal] Fallback avatar image loaded successfully.');
-      };
-      fbImg.src = (persona && persona.poster) || 'assets/ai-interviewer-avatar.png';
+    baseImage.onerror = () => {
+      baseImageLoaded = true; // Proceed with procedural 3D avatar head rendering
+      console.log('[HyperReal] Procedural 3D Canvas Avatar active.');
     };
 
     const imgSrc = (persona && persona.poster) || 'assets/ai-interviewer-avatar.png';
-    if (imgSrc.startsWith('http') && !imgSrc.includes(location.hostname)) {
-      baseImage.crossOrigin = "anonymous";
-    }
     baseImage.src = imgSrc;
+    // Set baseImageLoaded true after trigger to avoid freeze
+    baseImageLoaded = true;
   }
 
   function scheduleNextBlink() {
@@ -117,20 +120,44 @@ const HyperRealRenderer = (function () {
   }
 
   function renderVideoFrame(now) {
-    if (!offscreenCtx || !baseImageLoaded) return;
+    if (!offscreenCtx) return;
     const w = offscreenCanvas.width;
     const h = offscreenCanvas.height;
     const elapsed = now - t0;
 
     offscreenCtx.clearRect(0, 0, w, h);
 
-    const breathY = 0;
-    const swayX = 0;
-    let headAngle = 0;
+    const breathY = Math.sin(elapsed * 0.002) * 2;
+    const swayX = Math.cos(elapsed * 0.001) * 1.5;
 
     offscreenCtx.save();
-    offscreenCtx.translate(w / 2, h / 2);
-    offscreenCtx.drawImage(baseImage, -w / 2, -h / 2, w, h);
+    offscreenCtx.translate(w / 2 + swayX, h / 2 + breathY);
+
+    if (baseImage && baseImage.complete && baseImage.naturalWidth !== 0) {
+      offscreenCtx.drawImage(baseImage, -w / 2, -h / 2, w, h);
+    } else {
+      // Procedural 3D Human Avatar Head Rendering
+      const bgGrad = offscreenCtx.createRadialGradient(0, 0, 50, 0, 0, 300);
+      bgGrad.addColorStop(0, '#1e293b');
+      bgGrad.addColorStop(1, '#020617');
+      offscreenCtx.fillStyle = bgGrad;
+      offscreenCtx.fillRect(-w/2, -h/2, w, h);
+
+      // Shoulders & Torso
+      offscreenCtx.fillStyle = '#0f172a';
+      offscreenCtx.beginPath();
+      offscreenCtx.ellipse(0, h * 0.4, w * 0.38, h * 0.25, 0, 0, Math.PI * 2);
+      offscreenCtx.fill();
+
+      // Head & Skin
+      const headGrad = offscreenCtx.createLinearGradient(0, -h * 0.25, 0, h * 0.15);
+      headGrad.addColorStop(0, '#f8fafc');
+      headGrad.addColorStop(1, '#cbd5e1');
+      offscreenCtx.fillStyle = headGrad;
+      offscreenCtx.beginPath();
+      offscreenCtx.ellipse(0, -h * 0.05, w * 0.22, h * 0.28, 0, 0, Math.PI * 2);
+      offscreenCtx.fill();
+    }
 
     // Micro Pupil Shift
     if (now >= nextPupilShiftTime) {
@@ -173,13 +200,18 @@ const HyperRealRenderer = (function () {
       offscreenCtx.fill();
     }
 
-    // Lip Sync Mouth
+    // Lip Sync Mouth — Dynamic Speech Cadence & RMS Audio Energy
+    if (currentState === 'speaking') {
+      targetMouthOpen = 0.35 + 0.45 * Math.abs(Math.sin(now * 0.016)) * (0.5 + 0.5 * Math.cos(now * 0.009));
+    } else if (now - lastAudioFeedTime > 350) {
+      targetMouthOpen = 0;
+    }
     mouthOpenAmount += (targetMouthOpen - mouthOpenAmount) * 0.35;
 
-    if (mouthOpenAmount > 0.04 && currentState === 'speaking') {
+    if (mouthOpenAmount > 0.04) {
       const mouthY = h * 0.47;
       const mouthW = w * 0.085;
-      const mouthH = h * 0.032 * mouthOpenAmount;
+      const mouthH = h * 0.038 * mouthOpenAmount;
 
       offscreenCtx.fillStyle = 'rgba(45, 18, 18, 0.96)';
       offscreenCtx.beginPath();
@@ -200,8 +232,8 @@ const HyperRealRenderer = (function () {
 
     offscreenCtx.restore();
 
-    // Render directly to DOM avatarCanvas if present (only when GPU WebSocket stream is not active)
-    if (!streamReady) {
+    // Render procedural natural idle animation (blinking, pupils, breath) whenever active GPU speech frames are not arriving
+    if (!isGpuStreamingFrames) {
       const domCanvas = $('avatarCanvas') || $('duixCanvas');
       if (domCanvas) {
         const domCtx = domCanvas.getContext('2d');
@@ -575,15 +607,19 @@ const HyperRealRenderer = (function () {
     async connect(videoEl, hooks) {
       const cfg = JSON.parse(localStorage.getItem('adminConfig') || '{}');
       const customEp = cfg.latentsyncUrl || '';
-      const candidateUrls = [];
+      const candidateUrls = [
+        'ws://localhost:8000/ws',
+        'ws://127.0.0.1:8000/ws'
+      ];
       if (customEp) {
         let u = customEp.replace(/^http/, 'ws');
         if (!u.endsWith('/ws')) u = u.replace(/\/+$/, '') + '/ws';
-        candidateUrls.push(u);
+        if (!candidateUrls.includes(u)) candidateUrls.unshift(u);
       }
-      candidateUrls.push('ws://localhost:8000/ws');
-      candidateUrls.push('ws://127.0.0.1:8000/ws');
+      return this.connectWs(candidateUrls, videoEl, hooks);
+    },
 
+    async connectWs(candidateUrls, videoEl, hooks) {
       const tryConnect = (index) => {
         if (index >= candidateUrls.length) {
           return Promise.reject(new Error('RTX 4060 GPU Server offline at all endpoints'));
@@ -613,6 +649,10 @@ const HyperRealRenderer = (function () {
               try {
                 const msg = JSON.parse(evt.data);
                 if (msg.type === 'frame' && msg.data) {
+                  isGpuStreamingFrames = true;
+                  if (gpuFrameTimeout) clearTimeout(gpuFrameTimeout);
+                  gpuFrameTimeout = setTimeout(() => { isGpuStreamingFrames = false; }, 400);
+
                   const domCanvas = $('avatarCanvas') || $('duixCanvas');
                   const img = new window.Image();
                   img.onload = () => {
@@ -627,63 +667,85 @@ const HyperRealRenderer = (function () {
                     }
                   };
                   img.src = 'data:image/jpeg;base64,' + msg.data;
+                } else if (msg.type === 'audio_wav' && msg.data) {
+                  try {
+                    const binaryStr = atob(msg.data);
+                    const len = binaryStr.length;
+                    const wavBytes = new Uint8Array(len);
+                    for (let i = 0; i < len; i++) wavBytes[i] = binaryStr.charCodeAt(i);
+                    const actx = getGpuAudioCtx();
+                    if (actx.state === 'suspended') actx.resume();
+                    actx.decodeAudioData(wavBytes.buffer.slice(0), (audioBuffer) => {
+                      const source = actx.createBufferSource();
+                      source.buffer = audioBuffer;
+                      source.connect(actx.destination);
+                      source.start(0);
+                    });
+                  } catch(ae) {}
                 }
               } catch(e) {}
-            };
-
-            ws.onerror = () => {
-              clearTimeout(connTimeout);
-              if (!this.connected) {
-                tryConnect(index + 1).then(resolve).catch(reject);
-              }
             };
           } catch(e) {
             tryConnect(index + 1).then(resolve).catch(reject);
           }
         });
       };
-
       return tryConnect(0);
     },
     speak(text) {
       if (this.ws && this.connected) {
-        this.ws.send(JSON.stringify({ type: 'animate', mouth_open: 0.6, text: text }));
+        this.ws.send(JSON.stringify({ type: 'speak', text: text }));
       }
     },
     interrupt() {
       if (this.ws && this.connected) {
-        this.ws.send(JSON.stringify({ type: 'animate', mouth_open: 0.0 }));
+        this.ws.send(JSON.stringify({ type: 'interrupt' }));
       }
     },
-    setExpression(e) {
-      if (this.ws && this.connected) {
-        this.ws.send(JSON.stringify({ type: 'animate', expression: e }));
-      }
-    },
-    triggerGesture(g) {
-      if (this.ws && this.connected) {
-        this.ws.send(JSON.stringify({ type: 'animate', gesture: g }));
-      }
-    },
-    feedAudio(int16Buf) {
-      if (this.ws && this.connected && int16Buf && int16Buf.length) {
-        try {
-          const u8 = new Uint8Array(int16Buf.buffer, int16Buf.byteOffset, int16Buf.byteLength);
-          let binary = '';
-          for (let i = 0; i < u8.length; i++) binary += String.fromCharCode(u8[i]);
-          const b64 = btoa(binary);
-          this.ws.send(JSON.stringify({ type: 'audio', data: b64 }));
-        } catch(e) {}
-      }
-    },
+    setExpression(e) {},
+    triggerGesture(g) {},
+    feedAudio(int16Buf) {},
     flush() {},
-    async close() {
-      if (this.ws) { this.ws.close(); this.ws = null; }
+    close() {
+      if (this.ws) {
+        try { this.ws.close(); } catch(e) {}
+        this.ws = null;
+      }
       this.connected = false;
     }
   };
 
-  const ADAPTERS = { latentsync: LatentSyncAdapter, rtx4060: LatentSyncAdapter, wav2lip: LatentSyncAdapter, hyperreal: LatentSyncAdapter, selfhost: LatentSyncAdapter, liveportrait: LatentSyncAdapter, heygen: LatentSyncAdapter, did: LatentSyncAdapter, tavus: LatentSyncAdapter, simli: LatentSyncAdapter };
+  // ── MUSETALK REALTIME LIP-SYNC GPU ADAPTER (Tencent / Open-Source Local GPU) ──
+  const MuseTalkAdapter = Object.create(LatentSyncAdapter);
+  MuseTalkAdapter.connect = async function(videoEl, hooks) {
+    const cfg = JSON.parse(localStorage.getItem('adminConfig') || '{}');
+    const customEp = cfg.musetalkUrl || '';
+    const candidateUrls = [
+      'ws://localhost:8001/realtime',
+      'ws://localhost:8001/ws',
+      'ws://127.0.0.1:8001/realtime'
+    ];
+    if (customEp) {
+      let u = customEp.replace(/^http/, 'ws');
+      if (!u.endsWith('/realtime') && !u.endsWith('/ws')) u = u.replace(/\/+$/, '') + '/realtime';
+      if (!candidateUrls.includes(u)) candidateUrls.unshift(u);
+    }
+    return this.connectWs(candidateUrls, videoEl, hooks);
+  };
+
+  const ADAPTERS = {
+    latentsync: LatentSyncAdapter,
+    musetalk: MuseTalkAdapter,
+    rtx4060: LatentSyncAdapter,
+    wav2lip: LatentSyncAdapter,
+    hyperreal: LatentSyncAdapter,
+    selfhost: SelfHostAdapter,
+    liveportrait: LatentSyncAdapter,
+    heygen: HeyGenAdapter,
+    did: DIDAdapter,
+    tavus: TavusAdapter,
+    simli: LatentSyncAdapter
+  };
 
   // ── CAPTIONS ──
   function startCaptions(words) {
@@ -742,6 +804,18 @@ const HyperRealRenderer = (function () {
     },
 
     feedAudio(int16Buf) {
+      if (int16Buf && int16Buf.length) {
+        let sumSq = 0;
+        for (let i = 0; i < int16Buf.length; i += 8) {
+          const s = int16Buf[i] / 32768;
+          sumSq += s * s;
+        }
+        const rms = Math.sqrt(sumSq / (int16Buf.length / 8));
+        if (rms > 0.02) {
+          targetMouthOpen = Math.min(1.0, rms * 12.0);
+          lastAudioFeedTime = performance.now();
+        }
+      }
       if (streamReady && audioMode === 'external-pcm' && adapter && typeof adapter.feedAudio === 'function') {
         adapter.feedAudio(int16Buf);
       }
@@ -832,5 +906,6 @@ const HyperRealRenderer = (function () {
       }
     },
     isActive() { return !destroyed; },
+    isStreamReady() { return streamReady && adapter && adapter.connected; },
   };
 })();
