@@ -5508,93 +5508,7 @@ const AVATAR_CAPS = {
 // B2B TALENT DATA BANK & PROFILE UNLOCK HANDLERS
 // ════════════════════════════════════════════════════════
 
-const SEED_TALENT_BANK = [
-  {
-    id: "cand-001",
-    full_name: "Ananya Roy",
-    email: "ananya.roy@example.com",
-    phone: "+91 98765 43210",
-    location_city: "Kochi",
-    location_country: "IN",
-    headline: "Senior Full Stack Software Engineer • Node.js, React, Cloud Architecture",
-    years_experience: 6,
-    skills: ["React", "Node.js", "TypeScript", "PostgreSQL", "AWS", "Docker"],
-    cert_verified: true,
-    cert_score: 92,
-    cert_date: "2026-07-20T10:00:00Z",
-    cert_hash: "SIG-SHA256-A8F92D01B4",
-    cert_band: "Exceptional",
-    is_actively_looking: true
-  },
-  {
-    id: "cand-002",
-    full_name: "Rahul Verma",
-    email: "rahul.verma@example.com",
-    phone: "+91 98123 45678",
-    location_city: "Bengaluru",
-    location_country: "IN",
-    headline: "AI/ML Systems Lead • PyTorch, LLMs, Vector Databases & RAG Pipelines",
-    years_experience: 5,
-    skills: ["Python", "PyTorch", "LangChain", "FastAPI", "Vectorize", "Docker"],
-    cert_verified: true,
-    cert_score: 89,
-    cert_date: "2026-07-22T14:30:00Z",
-    cert_hash: "SIG-SHA256-B7E41C90D2",
-    cert_band: "Advanced",
-    is_actively_looking: true
-  },
-  {
-    id: "cand-003",
-    full_name: "Priya Sharma",
-    email: "priya.sharma@example.com",
-    phone: "+91 97654 32109",
-    location_city: "Mumbai",
-    location_country: "IN",
-    headline: "HR Talent Acquisition Partner • Technical Recruiting, ATS & Executive Search",
-    years_experience: 7,
-    skills: ["Talent Acquisition", "Technical Recruiting", "HR Automation", "Payroll", "Workday"],
-    cert_verified: true,
-    cert_score: 86,
-    cert_date: "2026-07-24T09:15:00Z",
-    cert_hash: "SIG-SHA256-C3D98A71E6",
-    cert_band: "Advanced",
-    is_actively_looking: true
-  },
-  {
-    id: "cand-004",
-    full_name: "Karthik Nair",
-    email: "karthik.nair@example.com",
-    phone: "+91 96543 21098",
-    location_city: "Trivandrum",
-    location_country: "IN",
-    headline: "DevOps & Cloud Infrastructure Engineer • Kubernetes, Terraform, CI/CD",
-    years_experience: 4,
-    skills: ["Kubernetes", "AWS", "Terraform", "CI/CD", "Linux", "Prometheus"],
-    cert_verified: true,
-    cert_score: 88,
-    cert_date: "2026-07-19T16:45:00Z",
-    cert_hash: "SIG-SHA256-D1F54E32A8",
-    cert_band: "Advanced",
-    is_actively_looking: true
-  },
-  {
-    id: "cand-005",
-    full_name: "Sneha Menon",
-    email: "sneha.menon@example.com",
-    phone: "+91 95432 10987",
-    location_city: "Calicut",
-    location_country: "IN",
-    headline: "Frontend UI/UX Developer • Next.js, Tailwind, Design Systems & Motion",
-    years_experience: 3,
-    skills: ["React", "Next.js", "Tailwind CSS", "Figma", "JavaScript", "Redux"],
-    cert_verified: true,
-    cert_score: 94,
-    cert_date: "2026-07-25T11:20:00Z",
-    cert_hash: "SIG-SHA256-E9A87C65B3",
-    cert_band: "Exceptional",
-    is_actively_looking: true
-  }
-];
+const SEED_TALENT_BANK = [];
 
 function maskProfile(candidate, isUnlocked) {
   if (isUnlocked) return { ...candidate, is_unlocked: true };
@@ -5638,10 +5552,6 @@ async function handleTalentBankSearch(request, env, ctx) {
     console.warn("Candidate DB query note:", e.message);
   }
 
-  if (candidates.length === 0) {
-    candidates = SEED_TALENT_BANK;
-  }
-
   let filtered = candidates.filter(c => {
     if (minScore > 0 && (c.cert_score || 0) < minScore) return false;
     if (skill && Array.isArray(c.skills)) {
@@ -5682,18 +5592,15 @@ async function handleTalentBankUnlock(request, env, ctx, [candidateId]) {
   const body = await safeJson(request) || {};
   const companyId = body.companyId || "demo-company-1";
 
-  let candidate = SEED_TALENT_BANK.find(c => c.id === candidateId);
-
-  if (!candidate) {
-    try {
-      const res = await sbFetch(env, "GET", `/rest/v1/candidate_profiles?select=*&id=eq.${candidateId}`, null, false, ctx.tenantId);
-      if (res.ok) {
-        const data = await res.json();
-        if (Array.isArray(data) && data[0]) candidate = data[0];
-      }
-    } catch (e) {
-      console.warn("Fetch candidate note:", e.message);
+  let candidate = null;
+  try {
+    const res = await sbFetch(env, "GET", `/rest/v1/candidate_profiles?select=*&id=eq.${candidateId}`, null, false, ctx.tenantId);
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data) && data[0]) candidate = data[0];
     }
+  } catch (e) {
+    console.warn("Fetch candidate note:", e.message);
   }
 
   if (!candidate) {
