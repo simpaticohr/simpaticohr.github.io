@@ -20,11 +20,13 @@ function sbHeaders() {
         }
     }
   }
+  const _isUuid = (s) => typeof s === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
+  const rawTenant = window.SIMPATICO_CONFIG?.tenantId || 'SIMP_PRO_MAIN';
   return {
     "apikey": SB_KEY,
     "Authorization": "Bearer " + (token || SB_KEY),
     "Content-Type": "application/json",
-    "X-Tenant-ID": window.SIMPATICO_CONFIG?.tenantId || 'SIMP_PRO_MAIN'
+    "X-Tenant-ID": _isUuid(rawTenant) ? rawTenant : '00000000-0000-0000-0000-000000000000'
   };
 }
 

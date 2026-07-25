@@ -4312,6 +4312,8 @@ async function handleCreateApplication(request, env, ctx) {
   if (!body.job_id || !body.candidate_email)
     throw new ValidationError("job_id and candidate_email required");
 
+  const _isUuid = (s) => typeof s === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
+
   // ★ DUPLICATE APPLICATION CHECK
   // Prevent the same candidate from applying to the same job multiple times
   try {
@@ -4448,16 +4450,14 @@ Return ONLY valid JSON in format: {"match_score": 85, "reason": "Brief 1-sentenc
       for (let i = 0; i < 32; i++) {
         interviewToken += chars.charAt(Math.floor(Math.random() * chars.length));
       }
-    } else if (match_score < rejectThreshold) {
-      // LOW SCORE → Auto-reject with notification
-      status = "rejected";
-      autoRejected = true;
     }
     // MIDDLE SCORE (rejectThreshold..69) → stays as "applied" for manual review
   }
 
   // Preserve resume_text for the candidate profile drawer
   const storedResumeText = body.resume_text || null;
+
+  const realCompanyId = _isUuid(ctx.tenantId) ? ctx.tenantId : (job?.company_id || job?.tenant_id || null);
 
   // Explicitly whitelist only columns that exist on the job_applications table.
   // Using ...sanitize(body) caused PGRST204 errors when unknown fields
@@ -4474,8 +4474,11 @@ Return ONLY valid JSON in format: {"match_score": 85, "reason": "Brief 1-sentenc
     source: body.source || null,
     candidate_skills: body._extracted_skills || body.candidate_skills || null,
     applied_at: new Date().toISOString(),
-    tenant_id: ctx.tenantId,
   };
+
+  if (_isUuid(realCompanyId)) {
+    insertPayload.tenant_id = realCompanyId;
+  }
 
   const res = await sbFetch(
     env,
@@ -4503,7 +4506,6 @@ Return ONLY valid JSON in format: {"match_score": 85, "reason": "Brief 1-sentenc
       interview_role: job.title,
       interview_level: "Screening Call",
       status: "pending",
-      company_id: ctx.tenantId,
       question_count: 5,
       interview_language: "en",
       max_attempts: 1,
@@ -4511,6 +4513,9 @@ Return ONLY valid JSON in format: {"match_score": 85, "reason": "Brief 1-sentenc
       expires_at: expiresAt,
       created_at: new Date().toISOString(),
     };
+    if (_isUuid(realCompanyId)) {
+      intvPayload.company_id = realCompanyId;
+    }
 
     try {
       const intvRes = await sbFetch(
@@ -6572,8 +6577,9 @@ async function sbFetch(
   // Inject tenant filter for GET, PATCH, and DELETE to prevent cross-tenant access.
   // Some tables predate the tenant_id convention — jobs stores the same company
   // UUID in company_id instead, so filter those by their real column.
+  const _isUuid = (s) => typeof s === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
   const TENANT_COLUMN_OVERRIDES = { jobs: "company_id" };
-  if (["GET", "PATCH", "DELETE"].includes(method) && tenantId && tenantId !== "default") {
+  if (["GET", "PATCH", "DELETE"].includes(method) && tenantId && tenantId !== "default" && _isUuid(tenantId)) {
     const tableName = (path.match(/\/rest\/v1\/([a-z_]+)/) || [])[1];
     if (tableName && TENANT_AWARE_TABLES.includes(tableName)) {
       const col = TENANT_COLUMN_OVERRIDES[tableName] || "tenant_id";
@@ -6583,7 +6589,7 @@ async function sbFetch(
   }
 
   // Auto-inject tenant key for POST on tenant-aware tables
-  if (method === 'POST' && tenantId && tenantId !== 'default') {
+  if (method === 'POST' && tenantId && tenantId !== 'default' && _isUuid(tenantId)) {
     const table = (path.match(/\/rest\/v1\/([a-z_]+)/) || [])[1];
     if (table && TENANT_AWARE_TABLES.includes(table)) {
       const col = TENANT_COLUMN_OVERRIDES[table] || "tenant_id";
