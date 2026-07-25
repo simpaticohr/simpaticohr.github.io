@@ -296,6 +296,7 @@ function startTest() {
   initWebcamAndProctor();
   renderQuestion();
   initAntiCheatListeners();
+  startHandsFreeVoice();
 }
 
 function initWebcamAndProctor() {
@@ -760,6 +761,8 @@ function selectOption(idx) {
   });
 }
 
+let vadSilenceTimer = null;
+
 function startHandsFreeVoice() {
   if(isListeningVoice) return;
   toggleHandsFreeVoice();
@@ -779,9 +782,37 @@ function toggleHandsFreeVoice() {
         // Full duplex barge-in interruption: stop avatar speech when user speaks
         stopAvatarSpeaking();
 
-        let t = '';
-        for (let i = e.resultIndex; i < e.results.length; i++) t += e.results[i][0].transcript;
-        if(txtArea && t) txtArea.value = t;
+        let transcript = '';
+        for (let i = e.resultIndex; i < e.results.length; i++) transcript += e.results[i][0].transcript;
+        transcript = transcript.trim();
+
+        const qData = QUESTIONS_BATTERY[currentQ];
+        if (qData) {
+          if (qData.isVoice) {
+            if (txtArea && transcript) {
+              txtArea.value = transcript;
+            }
+            // Auto-advance after 2.2s silence detection (Full-Duplex VAD)
+            if (vadSilenceTimer) clearTimeout(vadSilenceTimer);
+            vadSilenceTimer = setTimeout(() => {
+              if (qData.isVoice && txtArea && txtArea.value.trim().length >= 8) {
+                console.log('[Full-Duplex VAD] Candidate silence detected. Auto-submitting response...');
+                nextQuestion();
+              }
+            }, 2200);
+          } else {
+            // Hands-free multiple choice voice command selection
+            const lower = transcript.toLowerCase();
+            if (lower.includes('option a') || lower.includes('choice a') || lower.endsWith(' a')) selectOption(0);
+            else if (lower.includes('option b') || lower.includes('choice b') || lower.endsWith(' b')) selectOption(1);
+            else if (lower.includes('option c') || lower.includes('choice c') || lower.endsWith(' c')) selectOption(2);
+            else if (lower.includes('option d') || lower.includes('choice d') || lower.endsWith(' d')) selectOption(3);
+
+            if (lower.includes('next') || lower.includes('continue') || lower.includes('submit')) {
+              nextQuestion();
+            }
+          }
+        }
       };
       window.recInst.onend = () => {
         if(isListeningVoice && window.recInst) {
@@ -791,7 +822,7 @@ function toggleHandsFreeVoice() {
       try { window.recInst.start(); } catch(err) {}
     }
     isListeningVoice = true;
-    if(txt) txt.textContent = 'Listening (Hands-Free)';
+    if(txt) txt.textContent = 'Listening (Hands-Free Active)';
   } else {
     if(window.recInst) {
       window.recInst.onend = null;
