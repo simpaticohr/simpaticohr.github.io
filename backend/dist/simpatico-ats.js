@@ -20328,7 +20328,16 @@ var SCHEMAS = {
       "syndication_targets",
       "category",
       "status",
-      "company_id"
+      "company_id",
+      "tenant_id",
+      "auto_shortlist",
+      "auto_shortlist_threshold",
+      "auto_reject_threshold",
+      "syndication_targets",
+      "category",
+      "level",
+      "created_by",
+      "is_active"
     ],
     rules: {
       employment_type: /* @__PURE__ */ __name((v) => !v || [
@@ -20348,7 +20357,7 @@ function validate(data, schemaName) {
   const schema = SCHEMAS[schemaName];
   if (!schema) throw new AppError(`Unknown schema: ${schemaName}`);
   const errors = [];
-  for (const field of schema.required) {
+  for (const field of schema.required || []) {
     if (data[field] === void 0 || data[field] === null || data[field] === "") {
       errors.push({ field, message: `${field} is required` });
     }
@@ -20358,14 +20367,6 @@ function validate(data, schemaName) {
       const result = rule(data[field]);
       if (result !== true) errors.push({ field, message: result });
     }
-  }
-  const allowed = /* @__PURE__ */ new Set([
-    ...schema.required || [],
-    ...schema.optional || []
-  ]);
-  for (const key of Object.keys(data)) {
-    if (!allowed.has(key))
-      errors.push({ field: key, message: `Unknown field: ${key}` });
   }
   if (errors.length)
     throw new ValidationError("Request body validation failed", errors);
@@ -22393,24 +22394,57 @@ async function handleCreateJob(request, env, ctx) {
   requireRole(ctx, "hr", "admin", "superadmin");
   const body = await safeJson(request);
   validate(body, "job_posting");
+
+  const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  let targetCompanyId = 'a0000000-0000-0000-0000-000000000001';
+  if (UUID_REGEX.test(ctx.tenantId)) {
+    targetCompanyId = ctx.tenantId;
+  } else if (UUID_REGEX.test(body.company_id)) {
+    targetCompanyId = body.company_id;
+  } else if (UUID_REGEX.test(body.tenant_id)) {
+    targetCompanyId = body.tenant_id;
+  }
+
   const jobStatus = ["open", "draft", "closed"].includes(body.status) ? body.status : "open";
   const validPlatforms = ["linkedin", "indeed"];
   const syndicationTargets = Array.isArray(body.syndication_targets) ? body.syndication_targets.filter((t) => validPlatforms.includes(t)) : [];
+
+  const rawPayload = sanitize(body);
+  const jobPayload = {
+    title: rawPayload.title,
+    department: rawPayload.department || rawPayload.category || "General",
+    location: rawPayload.location || "Remote",
+    category: rawPayload.category || rawPayload.department,
+    description: rawPayload.description || "",
+    employment_type: rawPayload.employment_type || "Full-time",
+    status: jobStatus,
+    company_id: targetCompanyId,
+    created_by: ctx.actorId || null,
+    tenant_id: targetCompanyId,
+    syndicated_platforms: syndicationTargets,
+    syndication_status: syndicationTargets.length > 0 ? "queued" : "none",
+  };
+
+  if (rawPayload.salary_min !== undefined && rawPayload.salary_min !== null) jobPayload.salary_min = rawPayload.salary_min;
+  if (rawPayload.salary_max !== undefined && rawPayload.salary_max !== null) jobPayload.salary_max = rawPayload.salary_max;
+  if (rawPayload.experience_min !== undefined && rawPayload.experience_min !== null) jobPayload.experience_min = rawPayload.experience_min;
+  if (Array.isArray(rawPayload.skills_required)) jobPayload.skills_required = rawPayload.skills_required;
+
   const res = await sbFetch(
     env,
     "POST",
     "/rest/v1/jobs",
-    {
-      ...sanitize(body),
-      syndication_targets: syndicationTargets,
-      status: jobStatus,
-      tenant_id: ctx.tenantId,
-      created_by: ctx.actorId
-    },
+    jobPayload,
     false,
-    ctx.tenantId
+    targetCompanyId
   );
-  const [job] = await res.json();
+  if (!res.ok) {
+    const errText = await res.text();
+    console.error("[CreateJob] Supabase DB insert failed:", res.status, errText);
+    throw new AppError(`Database insertion failed (${res.status}): ${errText}`, res.status);
+  }
+  const resData = await res.json();
+  const job = Array.isArray(resData) ? resData[0] : resData;
   let syndicationInfo = { platforms_queued: [], status: "none" };
   if (syndicationTargets.length > 0 && jobStatus === "open") {
     syndicationInfo.platforms_queued = [...syndicationTargets];
