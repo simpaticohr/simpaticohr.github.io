@@ -11046,14 +11046,12 @@ async function handleInterviewEvaluate(request, env, ctx) {
     "What was the biggest technical trade-off or risk involved in this decision?",
     "How did you ensure security, auth, and data integrity during this process?"
   ];
-  const followUp = followUps[Math.floor(Math.random() * followUps.length)];
-
   return apiResponse({
     score,
     verdict,
     strengths,
     improvements,
-    followUp
+    followUp: ""
   });
 }
 

@@ -1769,7 +1769,7 @@
 
     <!-- FOOTER -->
     <footer class="page-footer">
-        <p>Powered by <a href="https://simpaticohr.in">Simpatico HR</a> · Gemini AI · Internal Use Only</p>
+        <p>Powered by <a href="https://simpaticohr.in">Simpatico HR</a> · Live AI Interviewer</p>
         <p class="mt-1" style="font-size:0.75rem;">© 2026 Simpatico HR · All Rights Reserved</p>
     </footer>
 
@@ -2165,8 +2165,116 @@
         inFollowUp: false,
         originalAnswer: '',
         currentFollowUpQuestion: '',
-        proctoringViolations: { tabSwitches: 0, pasteAttempts: 0, faceNotDetected: 0, multipleFaces: 0 }
+        proctoringViolations: { tabSwitches: 0, pasteAttempts: 0, faceNotDetected: 0, multipleFaces: 0, screenShareDisconnected: 0, totalViolations: 0 }
     };
+
+    // ══════════════════════════════════════════
+    //  ANTI-CHEAT & SCREEN SHARING PROCTORING MODULE
+    // ══════════════════════════════════════════
+    let _screenStream = null;
+
+    async function requestScreenShareProctoring() {
+        try {
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
+                console.warn('Screen sharing not supported in this browser environment.');
+                return true;
+            }
+            
+            _screenStream = await navigator.mediaDevices.getDisplayMedia({
+                video: { displaySurface: 'monitor' },
+                audio: false
+            });
+
+            const track = _screenStream.getVideoTracks()[0];
+            if (track) {
+                track.onended = () => {
+                    console.warn('Screen sharing was stopped by user.');
+                    state.proctoringViolations.screenShareDisconnected++;
+                    state.proctoringViolations.totalViolations++;
+                    showScreenShareWarning();
+                };
+            }
+
+            return true;
+        } catch(e) {
+            console.warn('Screen sharing request denied or cancelled:', e.message);
+            showError('setup-error', 'Screen sharing is required for Anti-Cheat evaluation. Please allow screen sharing to proceed.');
+            return false;
+        }
+    }
+
+    function showScreenShareWarning() {
+        const banner = document.getElementById('proctor-warning-banner');
+        if (banner) {
+            banner.innerHTML = `<div style="background:rgba(244,63,94,0.2); border:1px solid var(--accent-rose); color:#fecdd3; padding:12px 16px; border-radius:12px; margin-bottom:1rem; display:flex; align-items:center; justify-content:space-between;">
+                <span>⚠️ <strong>PROCTOR WARNING:</strong> Screen sharing was disconnected! Re-enable to avoid test invalidation.</span>
+                <button onclick="reEnableScreenShare()" class="btn" style="padding:6px 14px; font-size:0.8rem; background:var(--accent-rose); color:#fff; border:none; border-radius:8px; cursor:pointer;">Re-Share Screen</button>
+            </div>`;
+            banner.style.display = 'block';
+        }
+    }
+
+    async function reEnableScreenShare() {
+        const ok = await requestScreenShareProctoring();
+        if (ok) {
+            const banner = document.getElementById('proctor-warning-banner');
+            if (banner) banner.style.display = 'none';
+        }
+    }
+
+    function initAntiCheatProctoring() {
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden && state.sessionId) {
+                state.proctoringViolations.tabSwitches++;
+                state.proctoringViolations.totalViolations++;
+                showProctorToast(`⚠️ Tab Switch Detected! (Violation #${state.proctoringViolations.tabSwitches})`);
+            }
+        });
+
+        window.addEventListener('blur', () => {
+            if (state.sessionId) {
+                state.proctoringViolations.tabSwitches++;
+                state.proctoringViolations.totalViolations++;
+            }
+        });
+
+        document.addEventListener('copy', (e) => {
+            if (state.sessionId) {
+                e.preventDefault();
+                state.proctoringViolations.pasteAttempts++;
+                state.proctoringViolations.totalViolations++;
+                showProctorToast('⚠️ Copying question text is disabled during proctored evaluation.');
+            }
+        });
+
+        document.addEventListener('paste', (e) => {
+            if (state.sessionId) {
+                e.preventDefault();
+                state.proctoringViolations.pasteAttempts++;
+                state.proctoringViolations.totalViolations++;
+                showProctorToast('⚠️ Pasting pre-written answers is disabled in proctored mode.');
+            }
+        });
+
+        document.addEventListener('contextmenu', (e) => {
+            if (state.sessionId) {
+                e.preventDefault();
+                showProctorToast('⚠️ Right-click context menu disabled during evaluation.');
+            }
+        });
+    }
+
+    function showProctorToast(message) {
+        const toast = document.createElement('div');
+        toast.style.cssText = 'position:fixed; bottom:24px; right:24px; z-index:9999; background:rgba(244,63,94,0.9); color:#fff; padding:12px 20px; border-radius:12px; font-weight:700; font-size:0.85rem; box-shadow:0 10px 30px rgba(0,0,0,0.5); backdrop-filter:blur(8px); transition:all 0.3s;';
+        toast.textContent = message;
+        document.body.appendChild(toast);
+        setTimeout(() => {
+            toast.style.opacity = '0';
+            toast.style.transform = 'translateY(10px)';
+            setTimeout(() => toast.remove(), 300);
+        }, 3500);
+    }
 
     // ── BYOK (Bring Your Own Key) ──
     function toggleByokPanel() {
@@ -3988,6 +4096,15 @@ Guidelines:
             }
         }
 
+        // Anti-Cheat & Screen Sharing Proctoring Setup
+        const screenShareOk = await requestScreenShareProctoring();
+        if (!screenShareOk) {
+            btn.disabled = false;
+            btn.innerHTML = '⚡ Start AI Interview';
+            return;
+        }
+        initAntiCheatProctoring();
+
         if (_enableProctoring) {
             initProctoring();
         }
@@ -4424,97 +4541,24 @@ Guidelines:
             improvementsList.appendChild(li);
         });
 
-        // Follow-up
+        // Follow-up (Disabled)
         const followUpBox = document.getElementById('fb-followup-box');
-        const followUpText = document.getElementById('fb-followup');
-        if (evaluation.followUp) {
-            followUpBox.style.display = '';
-            followUpText.textContent = evaluation.followUp;
-        } else {
-            followUpBox.style.display = 'none';
-        }
+        if (followUpBox) followUpBox.style.display = 'none';
+        _pendingFollowUp = '';
 
-        // Update next button
-        _pendingFollowUp = evaluation.followUp || '';
         const isLast = state.currentIndex >= state.questions.length - 1;
-        if (_pendingFollowUp && !state.inFollowUp) {
-            document.getElementById('btn-next-question').textContent = 'Answer Follow-up →';
-        } else {
-            document.getElementById('btn-next-question').textContent = isLast ? 'View Report →' : 'Next Question →';
-        }
+        document.getElementById('btn-next-question').textContent = isLast ? 'View Report →' : 'Next Question →';
 
         if (state.voiceMode) {
             let feedbackVoiceText = `Answer evaluated. You scored ${score} out of 100. `;
-            
-            if (state.inFollowUp) {
-                // If we just evaluated the follow-up, let's proceed to next question
-                feedbackVoiceText = `Follow-up evaluated. Your final score for this question is ${score} out of 100. `;
-                const isLast = state.currentIndex >= state.questions.length - 1;
-                if (isLast) {
-                    feedbackVoiceText += `The interview is now complete. Generating your hiring report.`;
-                } else {
-                    feedbackVoiceText += `Moving to the next question.`;
-                }
-                speakText(feedbackVoiceText, function() {
-                    nextQuestion();
-                });
-            } else if (evaluation.followUp) {
-                // We have a follow-up question, let's read it and switch back to cockpit
-                feedbackVoiceText += `Here is a follow-up question: ${evaluation.followUp}`;
-                speakText(feedbackVoiceText, function() {
-                    // Update state to follow-up mode
-                    state.inFollowUp = true;
-                    state.currentFollowUpQuestion = evaluation.followUp;
-                    
-                    // Navigate back to interview cockpit screen
-                    showScreen('screen-interview');
-                    
-                    // Show the follow-up question text in place of the main question
-                    document.getElementById('q-text').textContent = `Follow-up: ${evaluation.followUp}`;
-                    
-                    // Reset VAD state & clean transcript
-                    if (state.recognition) {
-                        try { state.recognition.stop(); } catch(e) {}
-                    }
-                    resetVad();
-                    
-                    state.userSpeechTranscript = '';
-                    document.getElementById('subtitles-text').textContent = 'Listening...';
-                    document.getElementById('btn-voice-finish').disabled = false;
-                    
-                    // Update visualizer state to listening
-                    const visualizer = document.getElementById('visualizer-container');
-                    visualizer.className = 'visualizer-container listening';
-                    document.getElementById('visualizer-icon').textContent = '🎙️';
-                    document.getElementById('voice-status-dot').className = 'status-dot pulse-green';
-                    document.getElementById('voice-status-text').textContent = 'LISTENING TO YOU';
-                    document.getElementById('voice-instruction').textContent = 'Answer the follow-up. Auto-submits when you stop.';
-                    
-                    // Start audio systems for follow-up
-                    playChime('listening');
-                    startWaveform();
-                    startSpeakingTimer();
-                    
-                    // Restart speech recognition
-                    if (!state.recognition) {
-                        state.recognition = initSpeechRecognition();
-                    }
-                    if (state.recognition && !state.recognitionActive) {
-                        try { state.recognition.start(); } catch(e) {}
-                    }
-                });
+            if (isLast) {
+                feedbackVoiceText += `The interview is now complete. Generating your hiring report.`;
             } else {
-                // No follow-up question, move to the next question
-                const isLast = state.currentIndex >= state.questions.length - 1;
-                if (isLast) {
-                    feedbackVoiceText += `The interview is now complete. Generating your hiring report.`;
-                } else {
-                    feedbackVoiceText += `Moving to the next question.`;
-                }
-                speakText(feedbackVoiceText, function() {
-                    nextQuestion();
-                });
+                feedbackVoiceText += `Moving to the next question.`;
             }
+            speakText(feedbackVoiceText, function() {
+                nextQuestion();
+            });
         }
     }
 
@@ -4644,7 +4688,28 @@ Guidelines:
         // Lists
         renderReportList('report-strengths', report.topStrengths || []);
         renderReportList('report-focus', report.focusAreas || []);
-        renderReportList('report-steps', report.nextSteps || []);
+        // Render Anti-Cheat Audit Summary Card
+        let antiCheatCard = document.getElementById('report-anti-cheat-card');
+        if (!antiCheatCard) {
+            antiCheatCard = document.createElement('div');
+            antiCheatCard.id = 'report-anti-cheat-card';
+            const reportContainer = document.querySelector('#screen-report .glass-card') || document.getElementById('screen-report');
+            if (reportContainer) reportContainer.appendChild(antiCheatCard);
+        }
+        const v = state.proctoringViolations;
+        const trustScore = Math.max(60, 100 - (v.totalViolations || 0) * 10);
+        antiCheatCard.innerHTML = `
+            <div style="background:rgba(16,185,129,0.08); border:1px solid rgba(16,185,129,0.25); border-radius:16px; padding:1.25rem; margin-top:1.5rem;">
+                <div style="font-weight:700; color:#34d399; font-size:0.9rem; margin-bottom:8px; display:flex; align-items:center; gap:8px;">
+                    🛡️ PROCTORED ANTI-CHEAT INTEGRITY REPORT
+                </div>
+                <div style="font-size:0.82rem; color:var(--text-secondary); display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+                    <div>Screen Share Monitor: <strong style="color:${v.screenShareDisconnected > 0 ? '#f43f5e' : '#34d399'};">${v.screenShareDisconnected > 0 ? 'Warnings Logged' : 'Verified Active'}</strong></div>
+                    <div>Tab Switch Violations: <strong style="color:${v.tabSwitches > 0 ? '#f43f5e' : '#34d399'};">${v.tabSwitches}</strong></div>
+                    <div>Copy/Paste Violations: <strong style="color:${v.pasteAttempts > 0 ? '#f43f5e' : '#34d399'};">${v.pasteAttempts}</strong></div>
+                    <div>Anti-Cheat Trust Score: <strong style="color:#34d399;">${trustScore}% (${trustScore >= 90 ? 'Clean' : 'Flagged'})</strong></div>
+                </div>
+            </div>`;
 
         // Sync AI certification score & cryptographic signature to candidate profile
         try {
