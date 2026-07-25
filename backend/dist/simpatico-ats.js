@@ -22420,10 +22420,12 @@ async function handleCreateJob(request, env, ctx) {
     status: jobStatus,
     company_id: targetCompanyId,
     created_by: ctx.actorId || null,
-    tenant_id: targetCompanyId,
-    syndicated_platforms: syndicationTargets,
-    syndication_status: syndicationTargets.length > 0 ? "queued" : "none",
   };
+
+  if (syndicationTargets.length > 0) {
+    jobPayload.syndicated_platforms = syndicationTargets;
+    jobPayload.syndication_status = "queued";
+  }
 
   if (rawPayload.salary_min !== undefined && rawPayload.salary_min !== null) jobPayload.salary_min = rawPayload.salary_min;
   if (rawPayload.salary_max !== undefined && rawPayload.salary_max !== null) jobPayload.salary_max = rawPayload.salary_max;
