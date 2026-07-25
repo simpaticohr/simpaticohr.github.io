@@ -246,6 +246,13 @@ const SCHEMAS = {
       "category",
       "status",
       "company_id",
+      "tenant_id",
+      "auto_shortlist",
+      "auto_shortlist_threshold",
+      "auto_reject_threshold",
+      "level",
+      "created_by",
+      "is_active",
     ],
     rules: {
       employment_type: (v) =>
@@ -264,7 +271,7 @@ function validate(data, schemaName) {
   if (!schema) throw new AppError(`Unknown schema: ${schemaName}`);
 
   const errors = [];
-  for (const field of schema.required) {
+  for (const field of schema.required || []) {
     if (
       data[field] === undefined ||
       data[field] === null ||
@@ -278,14 +285,6 @@ function validate(data, schemaName) {
       const result = rule(data[field]);
       if (result !== true) errors.push({ field, message: result });
     }
-  }
-  const allowed = new Set([
-    ...(schema.required || []),
-    ...(schema.optional || []),
-  ]);
-  for (const key of Object.keys(data)) {
-    if (!allowed.has(key))
-      errors.push({ field: key, message: `Unknown field: ${key}` });
   }
   if (errors.length)
     throw new ValidationError("Request body validation failed", errors);
@@ -4103,6 +4102,16 @@ async function handleCreateJob(request, env, ctx) {
   const body = await safeJson(request);
   validate(body, "job_posting");
 
+  const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  let targetCompanyId = 'a0000000-0000-0000-0000-000000000001';
+  if (UUID_REGEX.test(ctx.tenantId)) {
+    targetCompanyId = ctx.tenantId;
+  } else if (UUID_REGEX.test(body.company_id)) {
+    targetCompanyId = body.company_id;
+  } else if (UUID_REGEX.test(body.tenant_id)) {
+    targetCompanyId = body.tenant_id;
+  }
+
   // Accept status from frontend (open, draft, closed) — default to "open"
   const jobStatus = ["open", "draft", "closed"].includes(body.status) ? body.status : "open";
 
@@ -4112,15 +4121,26 @@ async function handleCreateJob(request, env, ctx) {
     ? body.syndication_targets.filter(t => validPlatforms.includes(t))
     : [];
 
+  const rawPayload = sanitize(body);
+  
+  // Clean payload so only valid jobs table columns are sent to Supabase REST API
   const jobPayload = {
-    ...sanitize(body),
-    syndication_targets: syndicationTargets,
+    title: rawPayload.title,
+    department: rawPayload.department,
+    location: rawPayload.location,
+    category: rawPayload.category || rawPayload.department,
+    description: rawPayload.description || "",
+    employment_type: rawPayload.employment_type || "Full-time",
     status: jobStatus,
-    company_id: ctx.tenantId,
-    created_by: ctx.actorId,
+    company_id: targetCompanyId,
+    created_by: ctx.actorId || null,
+    syndication_targets: syndicationTargets,
   };
-  // This DB's jobs table has no tenant_id column — company_id is the tenant key
-  delete jobPayload.tenant_id;
+
+  if (rawPayload.salary_min !== undefined && rawPayload.salary_min !== null) jobPayload.salary_min = rawPayload.salary_min;
+  if (rawPayload.salary_max !== undefined && rawPayload.salary_max !== null) jobPayload.salary_max = rawPayload.salary_max;
+  if (rawPayload.experience_min !== undefined && rawPayload.experience_min !== null) jobPayload.experience_min = rawPayload.experience_min;
+  if (Array.isArray(rawPayload.skills_required)) jobPayload.skills_required = rawPayload.skills_required;
 
   const res = await sbFetch(
     env,
@@ -4128,9 +4148,17 @@ async function handleCreateJob(request, env, ctx) {
     "/rest/v1/jobs",
     jobPayload,
     false,
-    ctx.tenantId,
+    targetCompanyId,
   );
-  const [job] = await res.json();
+
+  if (!res.ok) {
+    const errText = await res.text();
+    console.error("[CreateJob] Supabase DB insert failed:", res.status, errText);
+    throw new AppError(`Database insertion failed (${res.status}): ${errText}`, res.status);
+  }
+
+  const resData = await res.json();
+  const job = Array.isArray(resData) ? resData[0] : resData;
 
   // Multi-Platform Job Syndication Integration (LinkedIn & Indeed)
   let syndicationInfo = { platforms_queued: [], status: "none" };
