@@ -8,6 +8,7 @@
     <meta name="description" content="Browse open positions and apply directly. Powered by SimpaticoHR ATS.">
     <meta name="robots" content="index, follow">
     <!-- Open Graph for Social Sharing -->
+    <link rel="canonical" href="" id="canonicalUrl">
     <meta property="og:type" content="website">
     <meta property="og:title" content="Careers — Open Positions" id="ogTitle">
     <meta property="og:description" content="Browse open positions and apply directly. Find your next career opportunity." id="ogDesc">
@@ -504,69 +505,41 @@
         const BASE_URL = window.location.origin;
 
         let allJobs = [];
-        let companyName = '';
+        let companyName = 'Simpatico HR';
+
+        // ── Tenant Identification & Brand Setup ──────────
+        const params = new URLSearchParams(window.location.search);
+        const companyId = params.get('company_id') || params.get('tenant_id') || params.get('c') || params.get('org') || 'a0000000-0000-0000-0000-000000000001';
+
+        // Set Canonical URL for SEO Tenant Isolation
+        const canonicalUrl = `${BASE_URL}/careers.html${companyId !== 'a0000000-0000-0000-0000-000000000001' ? '?company_id=' + companyId : ''}`;
+        document.getElementById('canonicalUrl')?.setAttribute('href', canonicalUrl);
+        document.getElementById('ogUrl')?.setAttribute('content', canonicalUrl);
 
         // ── Brand Color Customization ──────────
-        // Clients can pass ?color=2563eb to override the default purple theme
         (function applyBrandColor() {
-            const p = new URLSearchParams(window.location.search);
-            const hex = p.get('color');
+            const hex = params.get('color');
             if (hex && /^[0-9a-fA-F]{6}$/.test(hex)) {
-                const c = '#' + hex;
-                document.documentElement.style.setProperty('--primary', c);
-                document.documentElement.style.setProperty('--primary-dark', c);
-                document.documentElement.style.setProperty('--primary-light', c + '12');
-                document.querySelector('.hero').style.background = `linear-gradient(135deg, ${c} 0%, ${c}cc 50%, ${c}99 100%)`;
+                setBrandTheme('#' + hex);
             }
         })();
 
-        // Set OG URL
-        document.getElementById('ogUrl')?.setAttribute('content', window.location.href);
+        function setBrandTheme(c) {
+            document.documentElement.style.setProperty('--primary', c);
+            document.documentElement.style.setProperty('--primary-dark', c);
+            document.documentElement.style.setProperty('--primary-light', c + '12');
+            const heroEl = document.querySelector('.hero');
+            if (heroEl) heroEl.style.background = `linear-gradient(135deg, ${c} 0%, ${c}cc 50%, ${c}99 100%)`;
+        }
 
-        // Get company_id from URL params, default to Simpatico HR
-        const params = new URLSearchParams(window.location.search);
-        const companyId = params.get('company_id') || 'a0000000-0000-0000-0000-000000000001';
+        // Initialize tenant data
+        initCareersPage();
 
-        loadJobs();
-
-        async function loadJobs() {
-            try {
-                const SB_URL = window.SIMPATICO_CONFIG?.supabaseUrl || 'https://cvkxtsvgnynxexmemfuy.supabase.co';
-                const SB_KEY = window.SIMPATICO_CONFIG?.supabaseAnonKey;
-                const res = await fetch(
-                    `${SB_URL}/rest/v1/jobs?company_id=eq.${companyId}&is_active=eq.true&status=in.(open,active)&select=id,title,department,location,employment_type,level,description,skills,skills_required,salary_min,salary_max,company_name,created_at&order=created_at.desc`,
-                    { headers: { 'apikey': SB_KEY, 'Authorization': 'Bearer ' + SB_KEY } }
-                );
-                if (!res.ok) throw new Error(`HTTP ${res.status}`);
-                allJobs = await res.json();
-
-                // Try to load company name
-                loadCompanyBranding();
-
-                // Populate filters
-                populateFilters(allJobs);
-                
-                // Update stats
-                updateStats(allJobs);
-
-                // Render
-                renderJobs(allJobs);
-
-                // Inject Google Jobs JSON-LD structured data
-                injectJobStructuredData(allJobs);
-
-                // Update page title
-                document.title = `Careers — ${allJobs.length} Open Positions`;
-
-            } catch (err) {
-                console.error('Failed to load jobs:', err);
-                document.getElementById('jobsList').innerHTML = `
-                    <div class="error-state">
-                        <div class="error-icon">😞</div>
-                        <h3>Couldn't load positions</h3>
-                        <p>There was a problem fetching job listings. Please try again later or contact the employer directly.</p>
-                    </div>`;
-            }
+        async function initCareersPage() {
+            // Load company profile first for instant SEO & UI auto-branding
+            await loadCompanyBranding();
+            // Load open jobs for this tenant
+            await loadJobs();
         }
 
         async function loadCompanyBranding() {
@@ -574,7 +547,7 @@
                 const SB_URL = window.SIMPATICO_CONFIG?.supabaseUrl || 'https://cvkxtsvgnynxexmemfuy.supabase.co';
                 const SB_KEY = window.SIMPATICO_CONFIG?.supabaseAnonKey;
                 const res = await fetch(
-                    `${SB_URL}/rest/v1/companies?id=eq.${companyId}&select=name,logo_url,description`,
+                    `${SB_URL}/rest/v1/companies?id=eq.${companyId}&select=name,logo_url,description,website,primary_color`,
                     { headers: { 'apikey': SB_KEY, 'Authorization': 'Bearer ' + SB_KEY } }
                 );
                 if (res.ok) {
@@ -582,24 +555,75 @@
                     const company = companies[0] || {};
                     if (company.name) {
                         companyName = company.name;
-                        document.getElementById('heroTitle').textContent = `Join ${company.name}`;
-                        document.title = `Careers at ${company.name}`;
-                        const ogTitle = `Careers at ${company.name} — ${allJobs.length} Open Positions`;
-                        const ogDesc = `Browse ${allJobs.length} open positions at ${company.name}. Apply directly and join the team.`;
-                        document.getElementById('ogTitle')?.setAttribute('content', ogTitle);
-                        document.getElementById('ogDesc')?.setAttribute('content', ogDesc);
-                        document.getElementById('twTitle')?.setAttribute('content', ogTitle);
-                        document.getElementById('twDesc')?.setAttribute('content', ogDesc);
-                        document.querySelector('meta[name="description"]')?.setAttribute('content', ogDesc);
+                        
+                        // Dynamic UI auto-trigger for company header & SEO meta
+                        const heroTitle = document.getElementById('heroTitle');
+                        if (heroTitle) heroTitle.textContent = `Join ${company.name}`;
+                        
+                        const metaTitle = `Careers at ${company.name} — Open Positions`;
+                        const metaDesc = company.description 
+                            ? `${company.description.substring(0, 150)}... Explore open positions at ${company.name} and apply online.`
+                            : `Browse current career opportunities and job openings at ${company.name}. Powered by Simpatico HR ATS.`;
+
+                        document.title = metaTitle;
+                        document.getElementById('ogTitle')?.setAttribute('content', metaTitle);
+                        document.getElementById('ogDesc')?.setAttribute('content', metaDesc);
+                        document.getElementById('twTitle')?.setAttribute('content', metaTitle);
+                        document.getElementById('twDesc')?.setAttribute('content', metaDesc);
+                        document.querySelector('meta[name="description"]')?.setAttribute('content', metaDesc);
+                        
+                        const siteNameMeta = document.querySelector('meta[property="og:site_name"]');
+                        if (siteNameMeta) siteNameMeta.setAttribute('content', `${company.name} Careers`);
                     }
                     if (company.logo_url) {
-                        document.getElementById('heroLogo').innerHTML = `<img src="${company.logo_url}" alt="Logo" style="width:32px;height:32px;object-fit:contain;border-radius:6px;">`;
+                        const logoEl = document.getElementById('heroLogo');
+                        if (logoEl) logoEl.innerHTML = `<img src="${company.logo_url}" alt="${company.name} Logo" style="width:36px;height:36px;object-fit:contain;border-radius:8px;background:#fff;padding:2px;">`;
                         document.getElementById('ogImage')?.setAttribute('content', company.logo_url);
                         document.getElementById('twImage')?.setAttribute('content', company.logo_url);
                     }
+                    if (company.primary_color && !params.get('color')) {
+                        setBrandTheme(company.primary_color);
+                    }
                 }
             } catch (e) {
-                // Branding is optional — fail silently
+                console.warn('[Branding] Optional branding load failed:', e);
+            }
+        }
+
+        async function loadJobs() {
+            try {
+                const SB_URL = window.SIMPATICO_CONFIG?.supabaseUrl || 'https://cvkxtsvgnynxexmemfuy.supabase.co';
+                const SB_KEY = window.SIMPATICO_CONFIG?.supabaseAnonKey;
+                
+                // Fetch jobs isolated strictly by tenant company_id
+                const res = await fetch(
+                    `${SB_URL}/rest/v1/jobs?company_id=eq.${companyId}&is_active=eq.true&status=in.(open,active)&select=id,title,department,location,employment_type,level,description,skills,skills_required,salary_min,salary_max,company_name,created_at&order=created_at.desc`,
+                    { headers: { 'apikey': SB_KEY, 'Authorization': 'Bearer ' + SB_KEY } }
+                );
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                allJobs = await res.json();
+
+                // Populate UI components
+                populateFilters(allJobs);
+                updateStats(allJobs);
+                renderJobs(allJobs);
+
+                // Update page title with exact job count
+                if (companyName) {
+                    document.title = `Careers at ${companyName} (${allJobs.length} Open Position${allJobs.length !== 1 ? 's' : ''})`;
+                }
+
+                // Inject Google Jobs JSON-LD structured data for Google Search SEO reach
+                injectJobStructuredData(allJobs);
+
+            } catch (err) {
+                console.error('Failed to load jobs:', err);
+                document.getElementById('jobsList').innerHTML = `
+                    <div class="error-state">
+                        <div class="error-icon">😞</div>
+                        <h3>Couldn't load positions</h3>
+                        <p>There was a problem fetching job listings for this organization. Please refresh or check back later.</p>
+                    </div>`;
             }
         }
 
@@ -609,34 +633,43 @@
             const types = [...new Set(jobs.map(j => j.employment_type).filter(Boolean))].sort();
 
             const deptSelect = document.getElementById('filterDept');
-            depts.forEach(d => {
-                const opt = document.createElement('option');
-                opt.value = d;
-                opt.textContent = d;
-                deptSelect.appendChild(opt);
-            });
+            if (deptSelect) {
+                deptSelect.innerHTML = '<option value="">All Departments</option>';
+                depts.forEach(d => {
+                    const opt = document.createElement('option');
+                    opt.value = d;
+                    opt.textContent = d;
+                    deptSelect.appendChild(opt);
+                });
+            }
 
             const locSelect = document.getElementById('filterLocation');
-            locations.forEach(l => {
-                const opt = document.createElement('option');
-                opt.value = l;
-                opt.textContent = l;
-                locSelect.appendChild(opt);
-            });
+            if (locSelect) {
+                locSelect.innerHTML = '<option value="">All Locations</option>';
+                locations.forEach(l => {
+                    const opt = document.createElement('option');
+                    opt.value = l;
+                    opt.textContent = l;
+                    locSelect.appendChild(opt);
+                });
+            }
 
             const typeSelect = document.getElementById('filterType');
-            types.forEach(t => {
-                const opt = document.createElement('option');
-                opt.value = t;
-                opt.textContent = formatType(t);
-                typeSelect.appendChild(opt);
-            });
+            if (typeSelect) {
+                typeSelect.innerHTML = '<option value="">All Job Types</option>';
+                types.forEach(t => {
+                    const opt = document.createElement('option');
+                    opt.value = t;
+                    opt.textContent = formatType(t);
+                    typeSelect.appendChild(opt);
+                });
+            }
         }
 
         function updateStats(jobs) {
             document.getElementById('statOpen').textContent = jobs.length;
-            document.getElementById('statDepts').textContent = new Set(jobs.map(j => j.department).filter(Boolean)).size || 1;
-            document.getElementById('statLocations').textContent = new Set(jobs.map(j => j.location).filter(Boolean)).size || 1;
+            document.getElementById('statDepts').textContent = new Set(jobs.map(j => j.department).filter(Boolean)).size || (jobs.length ? 1 : 0);
+            document.getElementById('statLocations').textContent = new Set(jobs.map(j => j.location).filter(Boolean)).size || (jobs.length ? 1 : 0);
         }
 
         function renderJobs(jobs) {
@@ -644,12 +677,12 @@
             const countEl = document.getElementById('jobsCount');
 
             if (!jobs || jobs.length === 0) {
-                countEl.textContent = '';
+                countEl.textContent = '0 open positions';
                 container.innerHTML = `
                     <div class="empty-state">
                         <div class="empty-icon">🔍</div>
-                        <h3>No positions found</h3>
-                        <p>There are currently no open positions matching your criteria. Try adjusting your filters or check back later.</p>
+                        <h3>No open positions right now</h3>
+                        <p>There are currently no active openings matching your selection. Please check back soon or try clearing search filters.</p>
                     </div>`;
                 return;
             }
@@ -669,7 +702,7 @@
                 const desc = stripHtml(job.description || '');
 
                 return `
-                <div class="job-card" style="animation-delay: ${i * 0.06}s" onclick="window.location.href='${detailUrl}'">
+                <div class="job-card" style="animation-delay: ${i * 0.05}s" onclick="window.location.href='${applyLink}'">
                     <div class="job-card-top">
                         <div>
                             <h3 class="job-title">${escapeHtml(job.title)}</h3>
@@ -694,10 +727,7 @@
                     <div class="job-footer">
                         <span class="job-date">Posted ${postDate}</span>
                         <div style="display:flex;gap:8px">
-                            <a href="${detailUrl}" class="btn-apply" style="background:#475569" onclick="event.stopPropagation()">
-                                View Details
-                            </a>
-                            <a href="${applyLink}" target="_blank" class="btn-apply" onclick="event.stopPropagation()">
+                            <a href="${applyLink}" class="btn-apply" onclick="event.stopPropagation()">
                                 Apply Now
                                 <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7l5 5m0 0l-5 5m5-5H6"/></svg>
                             </a>
@@ -708,10 +738,10 @@
         }
 
         // ── Filtering ──────────────────────────
-        document.getElementById('searchInput').addEventListener('input', applyFilters);
-        document.getElementById('filterDept').addEventListener('change', applyFilters);
-        document.getElementById('filterLocation').addEventListener('change', applyFilters);
-        document.getElementById('filterType').addEventListener('change', applyFilters);
+        document.getElementById('searchInput')?.addEventListener('input', applyFilters);
+        document.getElementById('filterDept')?.addEventListener('change', applyFilters);
+        document.getElementById('filterLocation')?.addEventListener('change', applyFilters);
+        document.getElementById('filterType')?.addEventListener('change', applyFilters);
 
         function applyFilters() {
             const q = document.getElementById('searchInput').value.toLowerCase().trim();
@@ -767,14 +797,31 @@
         }
 
         function stripHtml(str) {
-            return str.replace(/<[^>]*>/g, '').replace(/<!--[\s\S]*?-->/g, '').trim();
+            return (str || '').replace(/<[^>]*>/g, '').replace(/<!--[\s\S]*?-->/g, '').trim();
+        }
+
+        // Helper to infer country code for Google Jobs Schema based on location text
+        function detectCountryCode(locStr) {
+            if (!locStr) return 'IN';
+            const loc = locStr.toLowerCase();
+            if (loc.includes('united states') || loc.includes('usa') || loc.includes('us')) return 'US';
+            if (loc.includes('united kingdom') || loc.includes('uk') || loc.includes('london')) return 'GB';
+            if (loc.includes('united arab emirates') || loc.includes('uae') || loc.includes('dubai') || loc.includes('abu dhabi')) return 'AE';
+            if (loc.includes('saudi') || loc.includes('riyadh')) return 'SA';
+            if (loc.includes('qatar') || loc.includes('doha')) return 'QA';
+            if (loc.includes('singapore')) return 'SG';
+            if (loc.includes('canada')) return 'CA';
+            if (loc.includes('australia')) return 'AU';
+            if (loc.includes('germany') || loc.includes('berlin')) return 'DE';
+            return 'IN'; // Default to India
         }
 
         // ── Google Jobs JSON-LD Structured Data ──────────
-        // This makes each job appear in Google Search "Jobs" results
-        // Schema: https://developers.google.com/search/docs/appearance/structured-data/job-posting
         function injectJobStructuredData(jobs) {
             if (!jobs || jobs.length === 0) return;
+
+            // Remove existing injected JSON-LD scripts to avoid duplicates on refetch
+            document.querySelectorAll('script[data-seo="google-job"]').forEach(el => el.remove());
 
             const employmentTypeMap = {
                 'full_time': 'FULL_TIME',
@@ -789,12 +836,13 @@
                 'remote': 'FULL_TIME'
             };
 
-            const structuredJobs = jobs.map(job => {
+            jobs.forEach(job => {
                 const desc = stripHtml(job.description || job.title);
-                const loc = job.location || 'India';
+                const loc = job.location || 'Remote';
                 const isRemote = loc.toLowerCase().includes('remote');
+                const countryCode = detectCountryCode(loc);
                 const posted = job.created_at ? new Date(job.created_at).toISOString().split('T')[0] : new Date().toISOString().split('T')[0];
-                const validThrough = new Date(Date.now() + 60 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]; // 60 days
+                const validThrough = new Date(Date.now() + 60 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
                 const empType = employmentTypeMap[(job.employment_type || '').toLowerCase()] || 'FULL_TIME';
 
                 const jsonLd = {
@@ -807,31 +855,33 @@
                     'employmentType': empType,
                     'hiringOrganization': {
                         '@type': 'Organization',
-                        'name': companyName || 'Company',
-                        'sameAs': window.location.origin
+                        'name': companyName || 'Simpatico HR Client',
+                        'sameAs': canonicalUrl
                     },
                     'applicantLocationRequirements': {
                         '@type': 'Country',
-                        'name': 'India'
-                    },
-                    'jobLocationType': isRemote ? 'TELECOMMUTE' : undefined,
-                    'jobLocation': {
-                        '@type': 'Place',
-                        'address': {
-                            '@type': 'PostalAddress',
-                            'addressLocality': isRemote ? '' : loc.split(',')[0]?.trim(),
-                            'addressRegion': loc.split(',')[1]?.trim() || '',
-                            'addressCountry': 'IN'
-                        }
+                        'name': countryCode
                     },
                     'directApply': true
                 };
 
-                // Add salary if available
+                if (isRemote) {
+                    jsonLd.jobLocationType = 'TELECOMMUTE';
+                } else {
+                    jsonLd.jobLocation = {
+                        '@type': 'Place',
+                        'address': {
+                            '@type': 'PostalAddress',
+                            'addressLocality': loc.split(',')[0]?.trim() || loc,
+                            'addressCountry': countryCode
+                        }
+                    };
+                }
+
                 if (job.salary_min) {
                     jsonLd.baseSalary = {
                         '@type': 'MonetaryAmount',
-                        'currency': 'INR',
+                        'currency': countryCode === 'US' ? 'USD' : countryCode === 'GB' ? 'GBP' : countryCode === 'AE' ? 'AED' : 'INR',
                         'value': {
                             '@type': 'QuantitativeValue',
                             'value': job.salary_min,
@@ -840,21 +890,14 @@
                     };
                 }
 
-                // Clean undefined values
-                if (!isRemote) delete jsonLd.jobLocationType;
-
-                return jsonLd;
-            });
-
-            // Inject one script tag per job (Google recommends individual tags)
-            structuredJobs.forEach(data => {
                 const script = document.createElement('script');
                 script.type = 'application/ld+json';
-                script.textContent = JSON.stringify(data);
+                script.setAttribute('data-seo', 'google-job');
+                script.textContent = JSON.stringify(jsonLd);
                 document.head.appendChild(script);
             });
 
-            console.log(`[SEO] Injected ${structuredJobs.length} Google Jobs JSON-LD entries`);
+            console.log(`[SEO] Successfully injected ${jobs.length} Google Jobs JSON-LD entries for ${companyName}`);
         }
     </script>
 </body>
