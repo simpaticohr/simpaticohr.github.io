@@ -545,3 +545,60 @@ ALTER TABLE subscriptions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE payment_transactions ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "Service role full access" ON subscriptions FOR ALL TO service_role USING (true);
 CREATE POLICY "Service role full access" ON payment_transactions FOR ALL TO service_role USING (true);
+
+-- ════════════════════════════════════════════════════════
+-- CANDIDATE TALENT BANK & CERT VERIFICATION
+-- ════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS candidate_profiles (
+  id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  full_name           TEXT NOT NULL,
+  email               TEXT NOT NULL UNIQUE,
+  phone               TEXT,
+  location_city       TEXT,
+  location_country    TEXT DEFAULT 'IN',
+  headline            TEXT,
+  years_experience    INT DEFAULT 0,
+  skills              TEXT[] DEFAULT '{}',
+  resume_key          TEXT,
+  
+  -- Cert-Interview Verification
+  cert_verified       BOOLEAN DEFAULT false,
+  cert_score          INT CHECK (cert_score BETWEEN 0 AND 100),
+  cert_date           TIMESTAMPTZ,
+  cert_hash           TEXT,
+  cert_band           TEXT,
+  
+  -- Visibility & Status
+  is_actively_looking BOOLEAN DEFAULT true,
+  created_at          TIMESTAMPTZ DEFAULT NOW(),
+  updated_at          TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS employer_credits (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  company_id      UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+  credits_total   INT DEFAULT 10,
+  credits_used    INT DEFAULT 0,
+  created_at      TIMESTAMPTZ DEFAULT NOW(),
+  updated_at      TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE (company_id)
+);
+
+CREATE TABLE IF NOT EXISTS profile_unlocks (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  company_id      UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+  candidate_id    UUID NOT NULL REFERENCES candidate_profiles(id) ON DELETE CASCADE,
+  unlocked_at     TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE (company_id, candidate_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_cand_skills ON candidate_profiles USING GIN (skills);
+CREATE INDEX IF NOT EXISTS idx_cand_verified ON candidate_profiles(cert_verified, cert_score);
+ALTER TABLE candidate_profiles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE employer_credits ENABLE ROW LEVEL SECURITY;
+ALTER TABLE profile_unlocks ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Service role full access" ON candidate_profiles FOR ALL TO service_role USING (true);
+CREATE POLICY "Service role full access" ON employer_credits FOR ALL TO service_role USING (true);
+CREATE POLICY "Service role full access" ON profile_unlocks FOR ALL TO service_role USING (true);
+
