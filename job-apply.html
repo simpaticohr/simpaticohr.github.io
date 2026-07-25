@@ -742,26 +742,27 @@
         const SUPABASE_ANON_KEY = window.SIMPATICO_CONFIG?.supabaseAnonKey;
         const WORKER_URL        = window.SIMPATICO_CONFIG?.workerUrl || 'https://simpatico-hr-ats.simpaticohrconsultancy.workers.dev';
         const _isUuid           = (s) => typeof s === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
-        const rawTenant         = window.SIMPATICO_CONFIG?.tenantId || 'SIMP_PRO_MAIN';
-        const TENANT_ID         = _isUuid(rawTenant) ? rawTenant : '00000000-0000-0000-0000-000000000000';
-
-        const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-
+        const rawTenant   = window.SIMPATICO_CONFIG?.tenantId || 'SIMP_PRO_MAIN';
         const urlParams   = new URLSearchParams(window.location.search);
         const appliedRole = urlParams.get('role') || 'General Application';
-        const jobId       = urlParams.get('job_id') || null;
+        const jobId       = urlParams.get('job_id') || urlParams.get('id') || null;
+        const rawCompany  = urlParams.get('company_id') || urlParams.get('tenant_id') || window.SIMPATICO_CONFIG?.tenantId;
+        const TENANT_ID   = _isUuid(rawCompany) ? rawCompany : (_isUuid(rawTenant) ? rawTenant : '00000000-0000-0000-0000-000000000000');
 
         document.getElementById('jobContext').innerHTML =
             `You are applying for the <strong>${appliedRole}</strong> position.`;
 
-        if (jobId && !urlParams.get('role')) {
-            supabaseClient.from('jobs').select('title').eq('id', jobId).single()
+        if (jobId) {
+            supabaseClient.from('jobs').select('title, company_id, company_name').eq('id', jobId).single()
                 .then(({data, error}) => {
                     if (data && data.title) {
                         document.getElementById('jobContext').innerHTML =
-                            `You are applying for the <strong>${data.title}</strong> position.`;
+                            `You are applying for the <strong>${data.title}</strong> position${data.company_name ? ' at ' + data.company_name : ''}.`;
                     }
                 });
+        } else {
+            document.getElementById('jobContext').innerHTML =
+                `<span style="color:#ef4444;">⚠️ No position selected. Please select an open position from the <a href="jobs.html" style="color:var(--primary);text-decoration:underline;">Jobs Board</a>.</span>`;
         }
 
         function openLinkedInModal() {
