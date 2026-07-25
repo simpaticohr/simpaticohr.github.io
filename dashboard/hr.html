@@ -1797,6 +1797,64 @@
                         <button class="btn-primary-custom" style="background:#dc2626;" id="btnDisconnectSlack" onclick="disconnectSlack()" title="Remove Slack integration"><i class="fas fa-unlink"></i> Disconnect</button>
                     </div>
                 </div>
+            <!-- Tenant-Isolated Company Profile & Brand Branding -->
+            <div class="card" style="margin-bottom: 24px;">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h4 style="margin:0;"><i class="fas fa-building" style="color:var(--primary);margin-right:8px;"></i> Company Profile & Brand Branding</h4>
+                    <span style="font-size:0.75rem;padding:4px 10px;border-radius:20px;background:#e0e7ff;color:#4338ca;font-weight:700;">Tenant Isolated</span>
+                </div>
+                <div class="card-body">
+                    <p style="font-size: 14px; color: #4b5563; margin-bottom: 20px;">
+                        Customize your registered company name, brand logo, and primary color shown on your dedicated career portal (<code>careers.html?company_id=...</code>) and public job listings.
+                    </p>
+
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <div class="form-group">
+                                <label style="font-weight:600;font-size:13px;margin-bottom:6px;display:block;">Registered Company Name <span style="color:var(--danger)">*</span></label>
+                                <input type="text" class="form-control-custom" id="settingCompanyName" placeholder="e.g. Acme Corporation">
+                            </div>
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <div class="form-group">
+                                <label style="font-weight:600;font-size:13px;margin-bottom:6px;display:block;">Brand Primary Color</label>
+                                <div class="d-flex gap-2 align-items-center">
+                                    <input type="color" id="settingCompanyColor" value="#4f46e5" style="width:40px;height:38px;padding:0;border:1px solid #d1d5db;border-radius:8px;cursor:pointer;" onchange="document.getElementById('settingCompanyColorHex').value = this.value">
+                                    <input type="text" class="form-control-custom" id="settingCompanyColorHex" placeholder="#4f46e5" value="#4f46e5" oninput="if(/^#[0-9a-fA-F]{6}$/.test(this.value)) document.getElementById('settingCompanyColor').value = this.value">
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="form-group mb-3">
+                        <label style="font-weight:600;font-size:13px;margin-bottom:6px;display:block;">Company Brand Logo (Optional)</label>
+                        <p style="font-size: 12px; color: #6b7280; margin-bottom: 10px;">Upload a PNG/SVG logo image or paste a direct Image URL for your brand.</p>
+                        <div class="d-flex gap-3 align-items-center flex-wrap">
+                            <div id="companyLogoPreviewBadge" style="width:56px;height:56px;border-radius:12px;border:1.5px solid #e2e8f0;background:#f8fafc;display:flex;align-items:center;justify-content:center;overflow:hidden;flex-shrink:0;">
+                                <i class="fas fa-building" style="font-size:1.4rem;color:#94a3b8;"></i>
+                            </div>
+                            <div style="flex:1;min-width:240px;">
+                                <input type="url" class="form-control-custom mb-2" id="settingCompanyLogoUrl" placeholder="https://example.com/logo.png" oninput="updateCompanyLogoPreview(this.value)">
+                                <div class="d-flex gap-2 align-items-center">
+                                    <input type="file" id="settingCompanyLogoFile" accept="image/*" style="display:none;" onchange="handleCompanyLogoFileUpload(event)">
+                                    <button type="button" class="btn-outline-custom" onclick="document.getElementById('settingCompanyLogoFile').click()" style="font-size:0.8rem;padding:6px 14px;">
+                                        <i class="fas fa-upload me-1"></i> Upload Image File
+                                    </button>
+                                    <span style="font-size:0.75rem;color:#6b7280;">Max 2MB (PNG, JPG, SVG)</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="form-group mb-3">
+                        <label style="font-weight:600;font-size:13px;margin-bottom:6px;display:block;">Company Description</label>
+                        <textarea class="form-control-custom" id="settingCompanyDesc" rows="3" placeholder="Briefly describe your company, culture, and mission..."></textarea>
+                    </div>
+
+                    <button class="btn-primary-custom" id="btnSaveCompanyProfile" onclick="saveCompanyProfileSettings()">
+                        <i class="fas fa-save me-1"></i> Save Company Profile
+                    </button>
+                </div>
             </div>
 
             <div class="card" style="margin-bottom: 24px;">
@@ -2191,6 +2249,123 @@
                     
                     document.getElementById('syndicateLinkedIn').checked = localStorage.getItem('simpatico_syn_linkedin') === 'true';
                     document.getElementById('syndicateIndeed').checked = localStorage.getItem('simpatico_syn_indeed') === 'true';
+
+                    // Load Company Profile & Brand Branding settings
+                    loadCompanyProfileSettings();
+                }
+
+                async function loadCompanyProfileSettings() {
+                    const user = JSON.parse(localStorage.getItem('simpatico_user') || '{}');
+                    const companyId = user.company_id || user.tenant_id;
+                    let comp = JSON.parse(localStorage.getItem('simpatico_company') || '{}');
+
+                    if (companyId) {
+                        try {
+                            const db = (typeof getSupabaseClient === 'function' ? getSupabaseClient() : null) || window.SimpaticoDB || window._supabaseClient;
+                            if (db) {
+                                const { data } = await db.from('companies').select('id, name, logo_url, primary_color, description').eq('id', companyId).maybeSingle();
+                                if (data) comp = { ...comp, ...data };
+                            }
+                        } catch(e){}
+                    }
+
+                    const nameInput = document.getElementById('settingCompanyName');
+                    if (nameInput) nameInput.value = comp.name || user.company_name || user.company || '';
+
+                    const logoInput = document.getElementById('settingCompanyLogoUrl');
+                    if (logoInput) {
+                        logoInput.value = comp.logo_url || '';
+                        updateCompanyLogoPreview(comp.logo_url || '');
+                    }
+
+                    const colorInput = document.getElementById('settingCompanyColor');
+                    const colorHexInput = document.getElementById('settingCompanyColorHex');
+                    if (colorInput && comp.primary_color) {
+                        colorInput.value = comp.primary_color;
+                        if (colorHexInput) colorHexInput.value = comp.primary_color;
+                    }
+
+                    const descInput = document.getElementById('settingCompanyDesc');
+                    if (descInput) descInput.value = comp.description || '';
+                }
+
+                function updateCompanyLogoPreview(url) {
+                    const badge = document.getElementById('companyLogoPreviewBadge');
+                    if (!badge) return;
+                    if (url && url.trim()) {
+                        badge.innerHTML = `<img src="${url.trim()}" style="width:100%;height:100%;object-fit:contain;padding:2px;" onerror="this.onerror=null;this.parentNode.innerHTML='<i class=\\'fas fa-image\\' style=\\'color:#ef4444\\'></i>';">`;
+                    } else {
+                        badge.innerHTML = `<i class="fas fa-building" style="font-size:1.4rem;color:#94a3b8;"></i>`;
+                    }
+                }
+
+                function handleCompanyLogoFileUpload(e) {
+                    const file = e.target.files?.[0];
+                    if (!file) return;
+                    if (file.size > 2 * 1024 * 1024) {
+                        showToast('Logo file size must be less than 2MB', 'error');
+                        return;
+                    }
+                    const reader = new FileReader();
+                    reader.onload = function(evt) {
+                        const base64Url = evt.target.result;
+                        document.getElementById('settingCompanyLogoUrl').value = base64Url;
+                        updateCompanyLogoPreview(base64Url);
+                        showToast('🖼️ Logo image selected! Click "Save Company Profile" to apply.', 'info');
+                    };
+                    reader.readAsDataURL(file);
+                }
+
+                async function saveCompanyProfileSettings() {
+                    const btn = document.getElementById('btnSaveCompanyProfile');
+                    const origHtml = btn.innerHTML;
+                    btn.disabled = true;
+                    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving...';
+
+                    try {
+                        const name = document.getElementById('settingCompanyName').value.trim();
+                        const logoUrl = document.getElementById('settingCompanyLogoUrl').value.trim();
+                        const color = document.getElementById('settingCompanyColor').value;
+                        const desc = document.getElementById('settingCompanyDesc').value.trim();
+
+                        if (!name) throw new Error("Company name is required");
+
+                        const user = JSON.parse(localStorage.getItem('simpatico_user') || '{}');
+                        const companyId = user.company_id || user.tenant_id;
+
+                        if (companyId) {
+                            const db = (typeof getSupabaseClient === 'function' ? getSupabaseClient() : null) || window.SimpaticoDB || window._supabaseClient;
+                            if (db) {
+                                const { error } = await db.from('companies').update({
+                                    name: name,
+                                    logo_url: logoUrl || null,
+                                    primary_color: color || null,
+                                    description: desc || null
+                                }).eq('id', companyId);
+
+                                if (error) console.warn('[CompanyProfile] DB update error:', error.message);
+                            }
+                        }
+
+                        user.company_name = name;
+                        user.company = name;
+                        localStorage.setItem('simpatico_user', JSON.stringify(user));
+
+                        const compData = JSON.parse(localStorage.getItem('simpatico_company') || '{}');
+                        compData.id = companyId;
+                        compData.name = name;
+                        compData.logo_url = logoUrl;
+                        compData.primary_color = color;
+                        compData.description = desc;
+                        localStorage.setItem('simpatico_company', JSON.stringify(compData));
+
+                        showToast('✨ Company Profile & Brand Logo saved successfully!', 'success');
+                    } catch(err) {
+                        showToast('Error saving profile: ' + err.message, 'error');
+                    } finally {
+                        btn.disabled = false;
+                        btn.innerHTML = origHtml;
+                    }
                 }
 
                 function toggleCareersWidget() {
