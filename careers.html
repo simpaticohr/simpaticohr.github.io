@@ -640,13 +640,42 @@
                 const SB_URL = window.SIMPATICO_CONFIG?.supabaseUrl || 'https://cvkxtsvgnynxexmemfuy.supabase.co';
                 const SB_KEY = window.SIMPATICO_CONFIG?.supabaseAnonKey;
                 
+                // Fetch company subscription status to check trial validity
+                let companyPlan = 'trial';
+                const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(companyId);
+                const queryFilter = isUuid ? `id=eq.${companyId}` : `slug=eq.${encodeURIComponent(companyId)}`;
+
+                try {
+                    const compRes = await fetch(
+                        `${SB_URL}/rest/v1/companies?${queryFilter}&select=id,subscription_plan`,
+                        { headers: { 'apikey': SB_KEY, 'Authorization': 'Bearer ' + SB_KEY } }
+                    );
+                    if (compRes.ok) {
+                        const cArr = await compRes.json();
+                        if (cArr?.[0]?.subscription_plan) companyPlan = cArr[0].subscription_plan.toLowerCase();
+                    }
+                } catch(e){}
+
                 // Fetch jobs isolated strictly by tenant company_id
-                const res = await fetch(
-                    `${SB_URL}/rest/v1/jobs?company_id=eq.${companyId}&is_active=eq.true&status=in.(open,active)&select=id,title,department,location,employment_type,level,description,skills,skills_required,salary_min,salary_max,company_name,created_at&order=created_at.desc`,
-                    { headers: { 'apikey': SB_KEY, 'Authorization': 'Bearer ' + SB_KEY } }
-                );
+                const jobsQuery = isUuid
+                    ? `${SB_URL}/rest/v1/jobs?company_id=eq.${companyId}&is_active=eq.true&status=in.(open,active)&select=id,title,department,location,employment_type,level,description,skills,skills_required,salary_min,salary_max,company_name,created_at&order=created_at.desc`
+                    : `${SB_URL}/rest/v1/jobs?is_active=eq.true&status=in.(open,active)&select=id,title,department,location,employment_type,level,description,skills,skills_required,salary_min,salary_max,company_name,created_at&order=created_at.desc&limit=100`;
+
+                const res = await fetch(jobsQuery, { headers: { 'apikey': SB_KEY, 'Authorization': 'Bearer ' + SB_KEY } });
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
-                allJobs = await res.json();
+                const fetchedJobs = await res.json();
+
+                // 2-Day Trial Guard Filter:
+                // Unsubscribed trial clients can only display jobs posted within the last 48 hours.
+                const isPaid = ['starter', 'professional', 'enterprise', 'pro', 'business', 'premium'].includes(companyPlan);
+                const nowMs = Date.now();
+                const TWO_DAYS_MS = 2 * 24 * 60 * 60 * 1000;
+
+                allJobs = fetchedJobs.filter(j => {
+                    if (isPaid) return true;
+                    const createdMs = j.created_at ? new Date(j.created_at).getTime() : nowMs;
+                    return (nowMs - createdMs) <= TWO_DAYS_MS;
+                });
 
                 // Populate UI components
                 populateFilters(allJobs);
