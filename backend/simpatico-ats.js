@@ -4124,8 +4124,19 @@ async function handleCreateJob(request, env, ctx) {
     : [];
 
   const rawPayload = sanitize(body);
-  
+
   // Clean payload so only valid jobs table columns are sent to Supabase REST API
+  let companyName = rawPayload.company_name || ctx.user?.company_name || ctx.user?.company || null;
+  if (!companyName && targetCompanyId && targetCompanyId !== 'a0000000-0000-0000-0000-000000000001') {
+    try {
+      const compRes = await sbFetch(env, "GET", `/rest/v1/companies?id=eq.${targetCompanyId}&select=name`, null, false, targetCompanyId);
+      if (compRes.ok) {
+        const compData = await compRes.json();
+        if (compData && compData[0]?.name) companyName = compData[0].name;
+      }
+    } catch (e) { }
+  }
+
   const jobPayload = {
     title: rawPayload.title,
     department: rawPayload.department || rawPayload.category || "General",
@@ -4135,6 +4146,7 @@ async function handleCreateJob(request, env, ctx) {
     employment_type: rawPayload.employment_type || "Full-time",
     status: jobStatus,
     company_id: targetCompanyId,
+    company_name: companyName,
     created_by: ctx.actorId || null,
   };
 
