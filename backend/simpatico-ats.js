@@ -4134,7 +4134,9 @@ async function handleCreateJob(request, env, ctx) {
     status: jobStatus,
     company_id: targetCompanyId,
     created_by: ctx.actorId || null,
-    syndication_targets: syndicationTargets,
+    tenant_id: targetCompanyId,
+    syndicated_platforms: syndicationTargets,
+    syndication_status: syndicationTargets.length > 0 ? "queued" : "none",
   };
 
   if (rawPayload.salary_min !== undefined && rawPayload.salary_min !== null) jobPayload.salary_min = rawPayload.salary_min;
