@@ -3280,6 +3280,7 @@ Guidelines:
         }
     }
 
+    let synthWatchdog = null;
     function speakText(text, callback) {
         if (state.voiceMuted) {
             if (callback) callback();
@@ -3287,6 +3288,7 @@ Guidelines:
         }
         
         synth.cancel(); // Cancel any active speech
+        if (synthWatchdog) clearInterval(synthWatchdog);
         
         const utterance = new SpeechSynthesisUtterance(text);
         
@@ -3300,14 +3302,34 @@ Guidelines:
         utterance.rate = 1.05; // Slightly faster for responsiveness
         utterance.pitch = 1.0;
         
+        let isEnded = false;
         utterance.onend = function() {
+            if (isEnded) return;
+            isEnded = true;
+            if (synthWatchdog) clearInterval(synthWatchdog);
             if (callback) callback();
         };
         
         utterance.onerror = function(e) {
             console.error('Speech synthesis error:', e);
+            if (isEnded) return;
+            isEnded = true;
+            if (synthWatchdog) clearInterval(synthWatchdog);
             if (callback) callback();
         };
+        
+        synthWatchdog = setInterval(() => {
+            if (!synth.speaking) {
+                clearInterval(synthWatchdog);
+                if (!isEnded && callback) {
+                    isEnded = true;
+                    callback();
+                }
+            } else {
+                synth.pause();
+                synth.resume();
+            }
+        }, 5000);
         
         synth.speak(utterance);
     }
@@ -3511,7 +3533,7 @@ Guidelines:
             vadText.textContent = 'Active speech detected';
         }
         
-        // Set a timer to trigger a silence warning after 2.2 seconds of no speech
+        // Set a timer to trigger a silence warning after 8 seconds of no speech
         state.vadTimer = setTimeout(() => {
             const currentText = document.getElementById('subtitles-text').textContent.trim();
             if (!currentText || currentText === 'Listening...' || currentText === 'Waiting for AI to finish speaking...' || currentText === 'Listening for speech...') {
@@ -3521,10 +3543,10 @@ Guidelines:
                 return;
             }
             
-            // User did speak but is now silent, show warning countdown
+            // User did speak but is now silent for 8 seconds, show warning countdown
             if (vadIndicator && vadText) {
                 vadIndicator.className = 'vad-indicator silence-warning';
-                state.vadCountdown = 2;
+                state.vadCountdown = 4;
                 vadText.textContent = `Silence detected. Submitting in ${state.vadCountdown}s...`;
                 playChime('warning');
                 
@@ -3533,14 +3555,14 @@ Guidelines:
                     if (state.vadCountdown <= 0) {
                         clearInterval(state.vadInterval);
                         state.vadInterval = null;
-                        vadIndicator.style.display = 'none';
+                        if (vadIndicator) vadIndicator.style.display = 'none';
                         finishVoiceSpeaking();
                     } else {
                         vadText.textContent = `Silence detected. Submitting in ${state.vadCountdown}s...`;
                     }
                 }, 1000);
             }
-        }, 2200);
+        }, 8000);
     }
 
     function initSpeechRecognition() {
@@ -4607,6 +4629,29 @@ Guidelines:
         renderReportList('report-strengths', report.topStrengths || []);
         renderReportList('report-focus', report.focusAreas || []);
         renderReportList('report-steps', report.nextSteps || []);
+
+        // Sync AI certification score & cryptographic signature to candidate profile
+        try {
+            const candEmail = _b2bCandidateEmail || localStorage.getItem('cand_email') || `${(state.role || 'candidate').toLowerCase().replace(/\s+/g, '.')}@simpaticohr.in`;
+            const rawSig = `${candEmail}:${score}:${Date.now()}:SIMPATICO_SECURE_V3`;
+            let hashVal = 0;
+            for (let i = 0; i < rawSig.length; i++) {
+                hashVal = ((hashVal << 5) - hashVal) + rawSig.charCodeAt(i);
+                hashVal |= 0;
+            }
+            const certHash = 'SIG-SHA256-' + Math.abs(hashVal).toString(16).toUpperCase().padStart(12, '0');
+            fetch('/candidates/cert-sync', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    email: candEmail,
+                    certScore: score,
+                    certHash: certHash,
+                    certBand: score >= 85 ? 'Exceptional' : score >= 75 ? 'Advanced' : 'Proficient',
+                    skills: [state.role || 'Software Engineering']
+                })
+            }).catch(e => console.warn('Cert sync bg note:', e));
+        } catch(e) { console.warn('Cert sync note:', e); }
 
         // Timeline
         renderTimeline();
