@@ -752,14 +752,19 @@
         document.getElementById('jobContext').innerHTML =
             `You are applying for the <strong>${appliedRole}</strong> position.`;
 
+        // Initialize Supabase client from shared-utils
+        const supabaseClient = (typeof getSupabaseClient === 'function' && getSupabaseClient()) || window.SimpaticoDB || window._supabaseClient;
+
         if (jobId) {
-            supabaseClient.from('jobs').select('title, company_id, company_name').eq('id', jobId).single()
-                .then(({data, error}) => {
-                    if (data && data.title) {
-                        document.getElementById('jobContext').innerHTML =
-                            `You are applying for the <strong>${data.title}</strong> position${data.company_name ? ' at ' + data.company_name : ''}.`;
-                    }
-                });
+            if (supabaseClient) {
+                supabaseClient.from('jobs').select('title, company_id, company_name').eq('id', jobId).single()
+                    .then(({data, error}) => {
+                        if (data && data.title) {
+                            document.getElementById('jobContext').innerHTML =
+                                `You are applying for the <strong>${data.title}</strong> position${data.company_name ? ' at ' + data.company_name : ''}.`;
+                        }
+                    });
+            }
         } else {
             document.getElementById('jobContext').innerHTML =
                 `<span style="color:#ef4444;">⚠️ No position selected. Please select an open position from the <a href="jobs.html" style="color:var(--primary);text-decoration:underline;">Jobs Board</a>.</span>`;
@@ -971,6 +976,13 @@
 
         document.getElementById('applyForm').addEventListener('submit', async e => {
             e.preventDefault();
+
+            // ★ Block submission if no job is selected (prevents FK violation on backend)
+            if (!jobId || !_isUuid(jobId)) {
+                showToast('No position selected. Please choose a job from the Jobs Board first.', 'warning');
+                document.getElementById('jobContext').scrollIntoView({ behavior: 'smooth', block: 'center' });
+                return;
+            }
 
             if (!validateForm()) {
                 showToast('Please fill in all required fields.', 'warning');
