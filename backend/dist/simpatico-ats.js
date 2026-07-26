@@ -22583,7 +22583,9 @@ async function handleCreateApplication(request, env, ctx) {
       }
     } catch(e) {}
 
-    if (!targetJobId) targetJobId = "a0000000-0000-0000-0000-000000000001";
+    if (!targetJobId || targetJobId === "null" || targetJobId === "undefined" || targetJobId === "00000000-0000-0000-0000-000000000000") {
+      throw new ValidationError("No valid job_id provided and no open positions found for this company. Please select a position from the Jobs Board.");
+    }
     body.job_id = targetJobId;
   }
   let secureFileKey = null;

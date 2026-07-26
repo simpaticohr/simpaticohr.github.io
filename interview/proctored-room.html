@@ -2291,6 +2291,10 @@
                         <i class="fas fa-code"></i>
                         <span class="vc-tooltip">Code Editor</span>
                     </button>
+                    <button class="vc-btn" id="vcRecord" onclick="toggleRecording()" title="Toggle interview recording (optional)">
+                        <i class="fas fa-circle" id="vcRecordIcon"></i>
+                        <span class="vc-tooltip">Record</span>
+                    </button>
                     <button class="vc-btn" onclick="goFullscreen()">
                         <i class="fas fa-expand"></i>
                         <span class="vc-tooltip">Fullscreen</span>
@@ -2463,6 +2467,16 @@
                 lastAnalysis: null,
                 analysisCount: 0,
                 flags: [],
+            },
+            recording: {
+                enabled: false,
+                mediaRecorder: null,
+                chunks: [],
+                blob: null,
+                uploading: false,
+                uploadProgress: 0,
+                url: null,
+                fileId: null,
             },
         };
 
@@ -3527,6 +3541,7 @@ ${config.rules}
             }
 
             state.session.started = true;
+            startRecordingIfEnabled();
             state.session.timerInt = setInterval(tick, 1000);
             startProctoring();
             initAudioVisualizer();
@@ -4531,6 +4546,56 @@ ${config.rules}
         }
 
         // ══════════════════════════════════════════════════════════════
+        // RECORDING HELPERS (ImageKit Integration)
+        // ══════════════════════════════════════════════════════════════
+        function toggleRecording() {
+            if (state.session.started) {
+                showToast('warning', 'Recording setting cannot be changed after interview starts');
+                return;
+            }
+            state.recording.enabled = !state.recording.enabled;
+            const btn = document.getElementById('vcRecord');
+            const icon = document.getElementById('vcRecordIcon');
+            if (state.recording.enabled) {
+                if (btn) btn.classList.add('active-mic');
+                if (icon) icon.style.color = '#ef4444';
+                showToast('info', '📹 Video recording enabled for this session');
+            } else {
+                if (btn) btn.classList.remove('active-mic');
+                if (icon) icon.style.color = '';
+                showToast('info', 'Video recording disabled');
+            }
+        }
+
+        function startRecordingIfEnabled() {
+            if (!state.recording.enabled || !state.media.stream) return;
+            try {
+                state.recording.chunks = [];
+                const options = { videoBitsPerSecond: 500000 };
+                if (MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus')) {
+                    options.mimeType = 'video/webm;codecs=vp9,opus';
+                } else if (MediaRecorder.isTypeSupported('video/webm')) {
+                    options.mimeType = 'video/webm';
+                } else if (MediaRecorder.isTypeSupported('video/mp4')) {
+                    options.mimeType = 'video/mp4';
+                }
+
+                const recorder = new MediaRecorder(state.media.stream, options);
+                recorder.ondataavailable = (e) => {
+                    if (e.data && e.data.size > 0) {
+                        state.recording.chunks.push(e.data);
+                    }
+                };
+                recorder.start(5000); // 5s timeslices
+                state.recording.mediaRecorder = recorder;
+                console.log('[Recording] MediaRecorder started with mimeType:', options.mimeType);
+            } catch (err) {
+                console.warn('[Recording] Could not start MediaRecorder:', err.message);
+                state.recording.enabled = false;
+            }
+        }
+
+        // ══════════════════════════════════════════════════════════════
         // SUPABASE HELPERS
         // ══════════════════════════════════════════════════════════════
         function sbPatch(table, filter, data) {
@@ -4569,6 +4634,13 @@ ${config.rules}
             state.voice.isProcessing = true;
             state.voice.isListening = false;
 
+            // Stop recording if active
+            if (state.recording.mediaRecorder && state.recording.mediaRecorder.state !== 'inactive') {
+                state.recording.mediaRecorder.stop();
+                // Wait for final dataavailable event
+                await new Promise(r => setTimeout(r, 500));
+            }
+
             try { state.voice.synth.cancel(); } catch (e) { }
             stopTTSKeepAlive();
             clearTimeout(state.voice.silenceTimer);
@@ -4598,6 +4670,7 @@ ${config.rules}
                     violation_log: state.proctoring.logs,
                     completed_at: new Date().toISOString(),
                     client_id: user.client_id || state.meta.interview?.client_id || null,
+                    recording_enabled: state.recording.enabled,
                     feedback: {
                         total_questions: engine.questionCount,
                         skill_scores: engine.skillsCovered,
@@ -4623,6 +4696,92 @@ ${config.rules}
                     })),
                 });
             } catch (e) { console.warn('Save error:', e); }
+
+            // Upload recording to ImageKit (if enabled and has data)
+            if (state.recording.enabled && state.recording.chunks.length > 0) {
+                try {
+                    state.recording.uploading = true;
+                    const blob = new Blob(state.recording.chunks, { type: 'video/webm' });
+                    state.recording.blob = blob;
+
+                    // Show upload progress
+                    const uploadOverlay = document.createElement('div');
+                    uploadOverlay.id = 'recordingUploadOverlay';
+                    uploadOverlay.innerHTML = `
+                        <div style="position:fixed;inset:0;background:rgba(7,7,12,0.95);display:flex;align-items:center;justify-content:center;z-index:9999">
+                            <div style="text-align:center;color:#e8e8f0;font-family:Inter,sans-serif">
+                                <div style="width:48px;height:48px;border:3px solid #252540;border-top-color:#6366f1;border-radius:50%;animation:spin 1s linear infinite;margin:0 auto 16px"></div>
+                                <div style="font-size:16px;font-weight:600;margin-bottom:4px">Uploading Interview Recording...</div>
+                                <div style="font-size:13px;color:#8b8ba7" id="uploadSizeInfo">${(blob.size / (1024 * 1024)).toFixed(1)} MB</div>
+                            </div>
+                        </div>`;
+                    document.body.appendChild(uploadOverlay);
+
+                    // Get auth token from Worker
+                    const interviewId = state.meta.interview?.id || magicToken;
+                    const authRes = await fetch(`${API}/imagekit/auth`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            folder: '/interviews/',
+                            fileName: `interview_${interviewId}_${Date.now()}.webm`
+                        }),
+                    });
+                    const auth = await authRes.json();
+
+                    if (auth.success) {
+                        // Get ImageKit config
+                        const cfgRes = await fetch(`${API}/imagekit/config`);
+                        const cfg = await cfgRes.json();
+
+                        // Upload to ImageKit
+                        const formData = new FormData();
+                        formData.append('file', blob, auth.fileName);
+                        formData.append('fileName', auth.fileName);
+                        formData.append('folder', auth.folder);
+                        formData.append('publicKey', cfg.publicKey);
+                        formData.append('token', auth.token);
+                        formData.append('signature', auth.signature);
+                        formData.append('expire', auth.expire);
+                        formData.append('useUniqueFileName', 'true');
+
+                        const uploadRes = await fetch('https://upload.imagekit.io/api/v1/files/upload', {
+                            method: 'POST',
+                            body: formData,
+                        });
+                        const uploadData = await uploadRes.json();
+
+                        if (uploadData.url || uploadData.fileId) {
+                            state.recording.url = uploadData.url;
+                            state.recording.fileId = uploadData.fileId;
+
+                            // Save recording URL to interview record
+                            const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+                            await sbPatch('interviews', `token=eq.${encodeURIComponent(magicToken)}`, {
+                                recording_url: uploadData.url,
+                                recording_file_id: uploadData.fileId,
+                                recording_size_bytes: blob.size,
+                                recording_expires_at: expiresAt,
+                            });
+                            console.log('[Recording] Upload complete:', uploadData.url);
+                        } else {
+                            console.warn('[Recording] Upload response missing URL:', uploadData);
+                        }
+                    } else {
+                        console.warn('[Recording] Auth failed:', auth.error);
+                    }
+
+                    // Remove upload overlay
+                    const overlay = document.getElementById('recordingUploadOverlay');
+                    if (overlay) overlay.remove();
+                } catch (recErr) {
+                    console.warn('[Recording] Upload error (non-fatal):', recErr.message);
+                    const overlay = document.getElementById('recordingUploadOverlay');
+                    if (overlay) overlay.remove();
+                } finally {
+                    state.recording.uploading = false;
+                }
+            }
 
             if (state.media.stream) state.media.stream.getTracks().forEach(t => t.stop());
             if (state.media.screen) state.media.screen.getTracks().forEach(t => t.stop());

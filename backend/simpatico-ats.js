@@ -1507,6 +1507,11 @@ route("POST", "/api/interview/match-resume", handleInterviewMatchResume);
 
 route("POST", "/attendance/records/upsert", handleUpsertAttendance);
 
+// ── ImageKit Interview Recording ──
+route("POST", "/imagekit/auth", handleImageKitAuth);
+route("GET", "/imagekit/config", handleImageKitConfig);
+route("POST", "/imagekit/cleanup", handleImageKitCleanup);
+
 // ===============================================================
 // § 13.  MAIN ENTRY POINT
 // ===============================================================
@@ -2164,6 +2169,44 @@ export default {
       } catch (e) {
         console.error("[CRON] Failed to auto-expire subscriptions:", e.message);
       }
+
+      // ── ImageKit Recording Cleanup (delete recordings older than 30 days) ──
+      try {
+        if (env.IMAGEKIT_PRIVATE_KEY) {
+          const ikAuth = btoa(env.IMAGEKIT_PRIVATE_KEY + ':');
+          const cutoffDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+
+          const expiredRes = await fetch(
+            `${env.SUPABASE_URL}/rest/v1/interviews?recording_file_id=not.is.null&recording_expires_at=lt.${cutoffDate}&select=id,recording_file_id&limit=100`,
+            { headers: { apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}` } }
+          );
+
+          if (expiredRes.ok) {
+            const expired = await expiredRes.json();
+            if (expired.length > 0) {
+              const fileIds = expired.map(e => e.recording_file_id).filter(Boolean);
+              if (fileIds.length > 0) {
+                await fetch('https://api.imagekit.io/v1/files/batch/deleteByFileIds', {
+                  method: 'POST',
+                  headers: { Authorization: `Basic ${ikAuth}`, 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ fileIds }),
+                });
+              }
+              for (const iid of expired.map(e => e.id)) {
+                await fetch(`${env.SUPABASE_URL}/rest/v1/interviews?id=eq.${iid}`, {
+                  method: 'PATCH',
+                  headers: { apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`, 'Content-Type': 'application/json', Prefer: 'return=minimal' },
+                  body: JSON.stringify({ recording_url: null, recording_file_id: null, recording_size_bytes: null }),
+                });
+              }
+              console.log(`[CRON] Cleaned ${expired.length} expired interview recording(s)`);
+            }
+          }
+        }
+      } catch (ikErr) {
+        console.error('[CRON] ImageKit cleanup error:', ikErr.message);
+      }
+
     } catch (err) {
       console.error("[CRON] Scheduled handler error:", err.stack || err.message);
     }
@@ -4407,7 +4450,10 @@ async function handleCreateApplication(request, env, ctx) {
       }
     } catch(e) {}
 
-    if (!targetJobId) targetJobId = "a0000000-0000-0000-0000-000000000001";
+    // ★ If no open job found for tenant, return a clear error instead of using a non-existent fallback UUID
+    if (!targetJobId || targetJobId === "null" || targetJobId === "undefined" || targetJobId === "00000000-0000-0000-0000-000000000000") {
+      throw new ValidationError("No valid job_id provided and no open positions found for this company. Please select a position from the Jobs Board.");
+    }
     body.job_id = targetJobId;
   }
 
@@ -11320,4 +11366,112 @@ async function handleInterviewMatchResume(request, env, ctx) {
     missingSkills: ["Kubernetes", "GraphQL"],
     summary: `Resume parsed successfully (${words} words). High alignment for target role ${role} (${level}).`
   });
+}
+
+// ── ImageKit Interview Recording Handlers ──────────────────────────────────
+
+async function handleImageKitAuth(request, env) {
+  const corsHdrs = getCorsHeaders(request);
+  try {
+    const privateKey = env.IMAGEKIT_PRIVATE_KEY;
+    if (!privateKey) {
+      return Response.json({ success: false, error: 'ImageKit not configured' }, { status: 503, headers: corsHdrs });
+    }
+
+    const body = await request.json().catch(() => ({}));
+    const folder = body.folder || '/interviews/';
+    const fileName = body.fileName || `interview_${Date.now()}.webm`;
+
+    // Generate HMAC-SHA1 signature for ImageKit V1 upload auth
+    const token = crypto.randomUUID();
+    const expire = Math.floor(Date.now() / 1000) + 3600; // 1 hour
+    const signaturePayload = token + expire;
+
+    const encoder = new TextEncoder();
+    const key = await crypto.subtle.importKey(
+      'raw', encoder.encode(privateKey),
+      { name: 'HMAC', hash: 'SHA-1' }, false, ['sign']
+    );
+    const sig = await crypto.subtle.sign('HMAC', key, encoder.encode(signaturePayload));
+    const signature = Array.from(new Uint8Array(sig)).map(b => b.toString(16).padStart(2, '0')).join('');
+
+    return Response.json({
+      success: true,
+      token,
+      signature,
+      expire,
+      folder,
+      fileName,
+    }, { headers: corsHdrs });
+  } catch (err) {
+    return Response.json({ success: false, error: err.message }, { status: 500, headers: corsHdrs });
+  }
+}
+
+async function handleImageKitConfig(request, env) {
+  const corsHdrs = getCorsHeaders(request);
+  const publicKey = env.IMAGEKIT_PUBLIC_KEY || '';
+  const urlEndpoint = env.IMAGEKIT_URL_ENDPOINT || '';
+  const configured = !!(publicKey && urlEndpoint && env.IMAGEKIT_PRIVATE_KEY);
+
+  return Response.json({
+    success: true,
+    configured,
+    publicKey,
+    urlEndpoint,
+    maxFileSizeMB: 100,
+    retentionDays: 30,
+  }, { headers: corsHdrs });
+}
+
+async function handleImageKitCleanup(request, env, ctx) {
+  const corsHdrs = getCorsHeaders(request);
+  try {
+    requireAuth(ctx);
+    requireRole(ctx, 'super_admin', 'superadmin', 'admin');
+  } catch (e) {
+    return Response.json({ success: false, error: e.message }, { status: e.status || 401, headers: corsHdrs });
+  }
+
+  if (!env.IMAGEKIT_PRIVATE_KEY) {
+    return Response.json({ success: false, error: 'ImageKit not configured' }, { status: 503, headers: corsHdrs });
+  }
+
+  try {
+    const ikAuth = btoa(env.IMAGEKIT_PRIVATE_KEY + ':');
+    const cutoffDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+
+    const expiredRes = await fetch(
+      `${env.SUPABASE_URL}/rest/v1/interviews?recording_file_id=not.is.null&recording_expires_at=lt.${cutoffDate}&select=id,recording_file_id&limit=100`,
+      { headers: { apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}` } }
+    );
+
+    const expired = expiredRes.ok ? await expiredRes.json() : [];
+    const fileIds = expired.map(e => e.recording_file_id).filter(Boolean);
+    let deleted = 0;
+
+    if (fileIds.length > 0) {
+      await fetch('https://api.imagekit.io/v1/files/batch/deleteByFileIds', {
+        method: 'POST',
+        headers: { Authorization: `Basic ${ikAuth}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fileIds }),
+      });
+
+      for (const iid of expired.map(e => e.id)) {
+        await fetch(`${env.SUPABASE_URL}/rest/v1/interviews?id=eq.${iid}`, {
+          method: 'PATCH',
+          headers: {
+            apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
+            'Content-Type': 'application/json', Prefer: 'return=minimal',
+          },
+          body: JSON.stringify({ recording_url: null, recording_file_id: null, recording_size_bytes: null }),
+        });
+      }
+      deleted = fileIds.length;
+    }
+
+    return Response.json({ success: true, deleted, message: `Cleaned ${deleted} expired recording(s)` }, { headers: corsHdrs });
+  } catch (err) {
+    return Response.json({ success: false, error: err.message }, { status: 500, headers: corsHdrs });
+  }
 }
