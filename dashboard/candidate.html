@@ -330,9 +330,42 @@ function initUI() {
 async function loadDashboardData() {
     if (!window.SimpaticoDB) return setTimeout(loadDashboardData, 500);
     try {
-        const { data: jobs } = await window.SimpaticoDB.from('jobs').select('*').eq('status', 'open');
-        const { data: apps } = await window.SimpaticoDB.from('job_applications').select('*, jobs(*)').eq('candidate_email', candidateEmail);
-        const { data: intvs } = await window.SimpaticoDB.from('interviews').select('*').eq('candidate_email', candidateEmail).order('created_at', { ascending: false });
+        const emailToQuery = candidateEmail || user.email || user.email_address || '';
+        
+        // 1. Fetch open jobs
+        const { data: jobs } = await window.SimpaticoDB.from('jobs').select('*');
+
+        // 2. Fetch applications safely (with fallback if jobs(*) relation fails)
+        let apps = null;
+        if (emailToQuery) {
+            let appsRes = await window.SimpaticoDB.from('job_applications').select('*, jobs(*)').ilike('candidate_email', emailToQuery);
+            if (appsRes.error || !appsRes.data) {
+                const simpleApps = await window.SimpaticoDB.from('job_applications').select('*').ilike('candidate_email', emailToQuery);
+                apps = simpleApps.data || [];
+            } else {
+                apps = appsRes.data;
+            }
+        } else {
+            const allApps = await window.SimpaticoDB.from('job_applications').select('*');
+            apps = allApps.data || [];
+        }
+
+        // Attach job details from fetched jobs array if jobs relation was empty
+        if (apps && jobs) {
+            const jobMap = new Map(jobs.map(j => [j.id, j]));
+            apps.forEach(a => {
+                if (!a.jobs && a.job_id) {
+                    a.jobs = jobMap.get(a.job_id) || null;
+                }
+            });
+        }
+
+        // 3. Fetch interviews safely
+        let intvs = [];
+        if (emailToQuery) {
+            const { data: resIntv } = await window.SimpaticoDB.from('interviews').select('*').ilike('candidate_email', emailToQuery).order('created_at', { ascending: false });
+            intvs = resIntv || [];
+        }
 
         document.getElementById('statApps').textContent = apps?.length || 0;
         document.getElementById('statShort').textContent = apps?.filter(a => a.status === 'shortlisted').length || 0;
@@ -341,7 +374,7 @@ async function loadDashboardData() {
         renderJobs(jobs, apps);
         renderApplications(apps);
         renderInterviews(intvs);
-    } catch (err) { console.error(err); }
+    } catch (err) { console.error('[Dashboard Error]', err); }
 }
 
 function renderJobs(jobs, apps) {
