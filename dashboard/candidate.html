@@ -324,17 +324,20 @@
 <script src="../js/hr-config.js"></script>
 <script src="../js/shared-utils.js"></script>
 <script src="../js/supabase-client.js"></script>
-
 <script>
 const user = JSON.parse(localStorage.getItem('simpatico_user') || sessionStorage.getItem('simpatico_user') || '{}');
+let _initDone = false;
 
 async function initUI() {
+    if (_initDone) return;
+    _initDone = true;
+
     const urlParams = new URLSearchParams(window.location.search);
     let candidateEmail = urlParams.get('email') || user.email || user.email_address || user.candidate_email || localStorage.getItem('candidate_email_last_applied') || '';
     let name = user.full_name || user.name || user.candidate_name || '';
     if (!name && candidateEmail) name = candidateEmail.split('@')[0];
     if (!name) name = 'Candidate';
-    
+
     // Check active Supabase auth session if available
     try {
         const client = window.SimpaticoDB || (typeof getSupabaseClient === 'function' ? getSupabaseClient() : null);
@@ -348,43 +351,53 @@ async function initUI() {
 
     document.getElementById('userName').textContent = name;
     document.getElementById('userInitials').textContent = (name || 'C').charAt(0).toUpperCase();
+    console.log('[CandidatePortal] initUI email=' + candidateEmail + ' name=' + name);
     loadDashboardData(candidateEmail, name);
-}
-
-// Ensure initUI runs automatically on DOM load
-document.addEventListener('DOMContentLoaded', initUI);
-if (document.readyState === 'interactive' || document.readyState === 'complete') {
-    initUI();
 }
 
 async function loadDashboardData(cEmail, cName) {
     if (!window.SimpaticoDB) return setTimeout(() => loadDashboardData(cEmail, cName), 500);
     try {
         const urlParams = new URLSearchParams(window.location.search);
-        const emailToQuery = (cEmail || urlParams.get('email') || user.email || user.email_address || user.candidate_email || localStorage.getItem('candidate_email_last_applied') || '').trim();
-        const nameToQuery  = (cName  || user.full_name || user.name || '').trim();
-        
-        // 1. Fetch open jobs
+        const emailToQuery = (cEmail || urlParams.get('email') || user.email || user.email_address || user.candidate_email || localStorage.getItem('candidate_email_last_applied') || '').trim().toLowerCase();
+        const nameToQuery  = (cName || user.full_name || user.name || '').trim();
+
+        console.log('[CandidatePortal] loadDashboardData email=' + emailToQuery + ' name=' + nameToQuery);
+
+        // 1. Fetch all jobs
         const { data: jobs } = await window.SimpaticoDB.from('jobs').select('*');
 
-        // 2. Fetch applications robustly for this candidate
+        // 2. Fetch applications — DB has both "email" and "candidate_email" columns
         const appMap = new Map();
         if (emailToQuery) {
-            const res1 = await window.SimpaticoDB.from('job_applications').select('*').ilike('candidate_email', emailToQuery);
-            if (res1.data) res1.data.forEach(item => appMap.set(item.id, item));
-            
-            const res2 = await window.SimpaticoDB.from('job_applications').select('*').ilike('email', emailToQuery);
-            if (res2.data) res2.data.forEach(item => appMap.set(item.id, item));
+            // Try candidate_email column
+            const r1 = await window.SimpaticoDB.from('job_applications').select('*').ilike('candidate_email', emailToQuery);
+            console.log('[CandidatePortal] candidate_email query:', r1.error ? r1.error.message : (r1.data?.length + ' rows'));
+            if (r1.data) r1.data.forEach(item => appMap.set(item.id, item));
+
+            // Try email column
+            try {
+                const r2 = await window.SimpaticoDB.from('job_applications').select('*').ilike('email', emailToQuery);
+                if (r2.data) r2.data.forEach(item => appMap.set(item.id, item));
+            } catch(e) { }
         }
 
+        // Fallback: try name match
         if (appMap.size === 0 && nameToQuery && nameToQuery !== 'Candidate') {
-            const res3 = await window.SimpaticoDB.from('job_applications').select('*').ilike('candidate_name', `%${nameToQuery}%`);
-            if (res3.data) res3.data.forEach(item => appMap.set(item.id, item));
+            try {
+                const r3 = await window.SimpaticoDB.from('job_applications').select('*').ilike('candidate_name', '%' + nameToQuery + '%');
+                if (r3.data) r3.data.forEach(item => appMap.set(item.id, item));
+            } catch(e) {}
+            try {
+                const r4 = await window.SimpaticoDB.from('job_applications').select('*').ilike('name', '%' + nameToQuery + '%');
+                if (r4.data) r4.data.forEach(item => appMap.set(item.id, item));
+            } catch(e) {}
         }
 
         let apps = Array.from(appMap.values());
+        console.log('[CandidatePortal] total applications found:', apps.length);
 
-        // Attach job details from fetched jobs array
+        // Attach job details
         if (apps.length && jobs) {
             const jobMap = new Map(jobs.map(j => [j.id, j]));
             apps.forEach(a => {
@@ -394,19 +407,23 @@ async function loadDashboardData(cEmail, cName) {
             });
         }
 
-        // 3. Fetch interviews robustly for this candidate
+        // 3. Fetch interviews — ONLY for this candidate
         const intvMap = new Map();
         if (emailToQuery) {
-            const resIntv1 = await window.SimpaticoDB.from('interviews').select('*').ilike('candidate_email', emailToQuery);
-            if (resIntv1.data) resIntv1.data.forEach(item => intvMap.set(item.id, item));
+            try {
+                const ri1 = await window.SimpaticoDB.from('interviews').select('*').ilike('candidate_email', emailToQuery);
+                if (ri1.data) ri1.data.forEach(item => intvMap.set(item.id, item));
+            } catch(e) {}
         }
         if (intvMap.size === 0 && nameToQuery && nameToQuery !== 'Candidate') {
-            const resIntv2 = await window.SimpaticoDB.from('interviews').select('*').ilike('candidate_name', `%${nameToQuery}%`);
-            if (resIntv2.data) resIntv2.data.forEach(item => intvMap.set(item.id, item));
+            try {
+                const ri2 = await window.SimpaticoDB.from('interviews').select('*').ilike('candidate_name', '%' + nameToQuery + '%');
+                if (ri2.data) ri2.data.forEach(item => intvMap.set(item.id, item));
+            } catch(e) {}
         }
         let intvs = Array.from(intvMap.values());
 
-        // Update statistics counters
+        // Update stat counters
         document.getElementById('statApps').textContent = apps.length;
         document.getElementById('statShort').textContent = apps.filter(a => a.status === 'shortlisted').length;
         document.getElementById('statIntv').textContent = intvs.length;
@@ -414,7 +431,9 @@ async function loadDashboardData(cEmail, cName) {
         renderJobs(jobs, apps);
         renderApplications(apps);
         renderInterviews(intvs);
-    } catch (err) { console.error('[Dashboard Error]', err); }
+    } catch (err) {
+        console.error('[Dashboard Error]', err);
+    }
 }
 
 function renderJobs(jobs, apps) {
@@ -429,7 +448,7 @@ function renderJobs(jobs, apps) {
             <h3>${job.title}</h3>
             <p style="color:var(--text-muted); margin: 8px 0;">${job.location || 'Remote'} • ${job.employment_type || 'Full-time'}</p>
             <div style="margin-top:16px;">
-                ${appliedIds.includes(job.id) 
+                ${appliedIds.includes(job.id)
                     ? '<button class="btn btn-outline" disabled>Applied</button>'
                     : `<button class="btn btn-primary" onclick="window.location.href='/job-apply.html?job_id=${job.id}'">Apply</button>`
                 }
@@ -440,14 +459,14 @@ function renderJobs(jobs, apps) {
 
 function renderApplications(apps) {
     const container = document.getElementById('applicationsList');
+    const savedEmail = localStorage.getItem('candidate_email_last_applied') || user.email || '';
     if (!apps?.length) {
-        const savedEmail = localStorage.getItem('candidate_email_last_applied') || user.email || '';
         container.innerHTML = `
             <div class="empty-state">
                 <i class="fas fa-file-alt"></i>
                 <p>No applications found for your current profile.</p>
                 <div style="margin-top:16px; display:inline-flex; gap:10px; align-items:center;">
-                    <input type="email" id="searchCandidateEmail" placeholder="Enter your application email..." value="${savedEmail}" style="padding:10px 14px; border-radius:10px; border:1px solid var(--border); background:rgba(255,255,255,0.05); color:white; font-size:0.9rem;">
+                    <input type="email" id="searchCandidateEmail" placeholder="Enter your application email..." value="${savedEmail}" style="padding:10px 14px; border-radius:10px; border:1px solid var(--border); background:rgba(255,255,255,0.05); color:white; font-size:0.9rem; width:280px;">
                     <button class="btn btn-primary" onclick="searchCandidateApps()">Find My Applications</button>
                 </div>
             </div>
@@ -455,10 +474,10 @@ function renderApplications(apps) {
         return;
     }
     container.innerHTML = apps.map(app => `
-        <div style="padding:16px; border:1px solid var(--border); border-radius:12px; margin-bottom:12px; display:flex; justify-content:space-between;">
+        <div style="padding:16px; border:1px solid var(--border); border-radius:12px; margin-bottom:12px; display:flex; justify-content:space-between; align-items:center;">
             <div>
-                <strong>${app.jobs?.title || 'Position'}</strong>
-                <div style="font-size:0.8rem; color:var(--text-muted);">Applied: ${app.created_at ? new Date(app.created_at).toLocaleDateString() : '—'}</div>
+                <strong>${app.jobs?.title || app.applied_for || app.job_role || 'Position'}</strong>
+                <div style="font-size:0.8rem; color:var(--text-muted);">Applied: ${(app.applied_at || app.created_at) ? new Date(app.applied_at || app.created_at).toLocaleDateString() : '—'}</div>
             </div>
             <span class="badge badge-primary" style="text-transform:capitalize;">${app.status || 'Pending'}</span>
         </div>
@@ -467,11 +486,13 @@ function renderApplications(apps) {
 
 function renderInterviews(intvs) {
     const container = document.getElementById('upcomingInterviews');
+    const tabContainer = document.getElementById('interviewsTabList');
     if (!intvs?.length) {
         container.innerHTML = '<div class="empty-state"><p>No upcoming interviews.</p></div>';
+        if (tabContainer) tabContainer.innerHTML = '<div class="empty-state"><p>No interviews scheduled.</p></div>';
         return;
     }
-    container.innerHTML = intvs.map(intv => `
+    const html = intvs.map(intv => `
         <div style="padding:16px; border:1px solid var(--border); border-radius:12px; margin-bottom:12px; display:flex; justify-content:space-between; align-items:center;">
             <div>
                 <strong>${intv.interview_role || 'General'} Interview</strong>
@@ -480,6 +501,8 @@ function renderInterviews(intvs) {
             ${intv.status !== 'completed' ? `<a href="${intv.token ? '/interview/ready.html?token=' + intv.token : '#'}" class="btn btn-primary btn-sm" style="padding:8px 16px;">Join Now</a>` : '<span class="badge badge-success">Completed</span>'}
         </div>
     `).join('');
+    container.innerHTML = html;
+    if (tabContainer) tabContainer.innerHTML = html;
 }
 
 function switchTab(tabId, el) {
@@ -495,11 +518,6 @@ function signOut() {
     window.location.href = '/platform/login.html?role=candidate';
 }
 
-initUI();
-</script>
-</body>
-</html>
-
 function searchCandidateApps() {
     const input = document.getElementById('searchCandidateEmail');
     const val = input ? input.value.trim() : '';
@@ -510,3 +528,12 @@ function searchCandidateApps() {
     localStorage.setItem('simpatico_user', JSON.stringify(user));
     loadDashboardData(val, user.full_name || val.split('@')[0]);
 }
+
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initUI);
+} else {
+    initUI();
+}
+</script>
+</body>
+</html>
