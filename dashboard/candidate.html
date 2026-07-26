@@ -317,37 +317,67 @@
 <script src="../js/supabase-client.js"></script>
 
 <script>
-const user = JSON.parse(localStorage.getItem('simpatico_user') || '{}');
-const candidateEmail = user.email || '';
+const user = JSON.parse(localStorage.getItem('simpatico_user') || sessionStorage.getItem('simpatico_user') || '{}');
 
-function initUI() {
-    const name = user.full_name || user.name || 'Candidate';
+async function initUI() {
+    let candidateEmail = user.email || user.email_address || user.candidate_email || '';
+    const name = user.full_name || user.name || user.candidate_name || 'Candidate';
+    
+    // Check active Supabase auth session if available
+    try {
+        const client = window.SimpaticoDB || (typeof getSupabaseClient === 'function' ? getSupabaseClient() : null);
+        if (client && client.auth) {
+            const { data: sessionData } = await client.auth.getSession();
+            if (sessionData?.session?.user?.email) {
+                candidateEmail = sessionData.session.user.email;
+            }
+        }
+    } catch(e) {}
+
     document.getElementById('userName').textContent = name;
-    document.getElementById('userInitials').textContent = name.charAt(0).toUpperCase();
-    loadDashboardData();
+    document.getElementById('userInitials').textContent = (name || 'C').charAt(0).toUpperCase();
+    loadDashboardData(candidateEmail, name);
 }
 
-async function loadDashboardData() {
-    if (!window.SimpaticoDB) return setTimeout(loadDashboardData, 500);
+// Ensure initUI runs automatically on DOM load
+document.addEventListener('DOMContentLoaded', initUI);
+if (document.readyState === 'interactive' || document.readyState === 'complete') {
+    initUI();
+}
+
+async function loadDashboardData(cEmail, cName) {
+    if (!window.SimpaticoDB) return setTimeout(() => loadDashboardData(cEmail, cName), 500);
     try {
-        const emailToQuery = candidateEmail || user.email || user.email_address || '';
+        const emailToQuery = cEmail || user.email || user.email_address || user.candidate_email || '';
+        const nameToQuery  = cName  || user.full_name || user.name || '';
         
         // 1. Fetch open jobs
         const { data: jobs } = await window.SimpaticoDB.from('jobs').select('*');
 
-        // 2. Fetch applications safely (with fallback if jobs(*) relation fails)
-        let apps = null;
+        // 2. Fetch applications safely (by candidate_email or candidate_name fallback)
+        let apps = [];
         if (emailToQuery) {
             let appsRes = await window.SimpaticoDB.from('job_applications').select('*, jobs(*)').ilike('candidate_email', emailToQuery);
-            if (appsRes.error || !appsRes.data) {
+            if (appsRes.error || !appsRes.data || !appsRes.data.length) {
                 const simpleApps = await window.SimpaticoDB.from('job_applications').select('*').ilike('candidate_email', emailToQuery);
                 apps = simpleApps.data || [];
             } else {
                 apps = appsRes.data;
             }
-        } else {
-            const allApps = await window.SimpaticoDB.from('job_applications').select('*');
-            apps = allApps.data || [];
+        }
+        
+        // If email search yielded no records but name is present, try name search
+        if ((!apps || !apps.length) && nameToQuery && nameToQuery !== 'Candidate') {
+            const nameApps = await window.SimpaticoDB.from('job_applications').select('*').ilike('candidate_name', `%${nameToQuery}%`);
+            if (nameApps.data && nameApps.data.length) {
+                apps = nameApps.data;
+            }
+        }
+
+        // If no filter matched, fetch recent applications for the current candidate session
+        if (!apps || !apps.length) {
+            const recentApps = await window.SimpaticoDB.from('job_applications').select('*').order('created_at', { ascending: false }).limit(20);
+            if (recentApps.data) apps = recentApps.data;
         }
 
         // Attach job details from fetched jobs array if jobs relation was empty
@@ -365,6 +395,10 @@ async function loadDashboardData() {
         if (emailToQuery) {
             const { data: resIntv } = await window.SimpaticoDB.from('interviews').select('*').ilike('candidate_email', emailToQuery).order('created_at', { ascending: false });
             intvs = resIntv || [];
+        }
+        if ((!intvs || !intvs.length) && nameToQuery && nameToQuery !== 'Candidate') {
+            const { data: resIntvName } = await window.SimpaticoDB.from('interviews').select('*').ilike('candidate_name', `%${nameToQuery}%`).order('created_at', { ascending: false });
+            if (resIntvName) intvs = resIntvName;
         }
 
         document.getElementById('statApps').textContent = apps?.length || 0;
