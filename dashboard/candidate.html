@@ -354,7 +354,7 @@ async function loadDashboardData(cEmail, cName) {
         // 1. Fetch open jobs
         const { data: jobs } = await window.SimpaticoDB.from('jobs').select('*');
 
-        // 2. Fetch applications safely (by candidate_email or candidate_name fallback)
+        // 2. Fetch applications STRICTLY belonging to this candidate
         let apps = [];
         if (emailToQuery) {
             let appsRes = await window.SimpaticoDB.from('job_applications').select('*, jobs(*)').ilike('candidate_email', emailToQuery);
@@ -366,18 +366,12 @@ async function loadDashboardData(cEmail, cName) {
             }
         }
         
-        // If email search yielded no records but name is present, try name search
+        // If email match returned nothing but candidate name is set, try candidate name search
         if ((!apps || !apps.length) && nameToQuery && nameToQuery !== 'Candidate') {
-            const nameApps = await window.SimpaticoDB.from('job_applications').select('*').ilike('candidate_name', `%${nameToQuery}%`);
+            const nameApps = await window.SimpaticoDB.from('job_applications').select('*').ilike('candidate_name', nameToQuery);
             if (nameApps.data && nameApps.data.length) {
                 apps = nameApps.data;
             }
-        }
-
-        // If no filter matched, fetch recent applications for the current candidate session
-        if (!apps || !apps.length) {
-            const recentApps = await window.SimpaticoDB.from('job_applications').select('*').order('created_at', { ascending: false }).limit(20);
-            if (recentApps.data) apps = recentApps.data;
         }
 
         // Attach job details from fetched jobs array if jobs relation was empty
@@ -390,15 +384,15 @@ async function loadDashboardData(cEmail, cName) {
             });
         }
 
-        // 3. Fetch interviews safely
+        // 3. Fetch interviews STRICTLY belonging to this candidate
         let intvs = [];
         if (emailToQuery) {
             const { data: resIntv } = await window.SimpaticoDB.from('interviews').select('*').ilike('candidate_email', emailToQuery).order('created_at', { ascending: false });
             intvs = resIntv || [];
         }
         if ((!intvs || !intvs.length) && nameToQuery && nameToQuery !== 'Candidate') {
-            const { data: resIntvName } = await window.SimpaticoDB.from('interviews').select('*').ilike('candidate_name', `%${nameToQuery}%`).order('created_at', { ascending: false });
-            if (resIntvName) intvs = resIntvName;
+            const { data: resIntvName } = await window.SimpaticoDB.from('interviews').select('*').ilike('candidate_name', nameToQuery).order('created_at', { ascending: false });
+            if (resIntvName) intvs = resIntvName || [];
         }
 
         document.getElementById('statApps').textContent = apps?.length || 0;
