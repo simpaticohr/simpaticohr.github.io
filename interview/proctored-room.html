@@ -2887,6 +2887,42 @@ ${Object.entries(this.skillsCovered).map(([s, d]) => `- ${s}: Score ${d.score}/1
 ## INTERVIEW RULES
 ${config.rules}
 
+const askedQuestions = this.history.filter(h => h.role === 'ai').map((h, i) => `${i + 1}. "${h.content}"`).join('\n') || 'None yet';
+
+        return `${config.persona} You are conducting a LIVE voice interview that the candidate takes seriously.
+
+${languageInstructions}
+
+## YOUR PERSONA
+${config.personaTraits}
+
+## POSITION
+Role: "${this.jobTitle}"
+Level: ${this.level}
+${roundLabel}
+
+## JOB DESCRIPTION
+${this.jobContext || 'Assess competencies relevant to this role.'}
+
+## CANDIDATE BACKGROUND
+${this.resumeContext || 'Discover their background through conversation.'}
+
+## KEY SKILLS TO ASSESS
+${this.skillsToProbe.length ? this.skillsToProbe.map((s, i) => `${i + 1}. ${s}`).join('\n') : config.skillsFallback}
+
+## SKILLS ALREADY COVERED
+${Object.entries(this.skillsCovered).map(([s, d]) => `- ${s}: Score ${d.score}/100, Depth ${d.depth}`).join('\n') || 'None yet'}
+
+## PREVIOUSLY ASKED QUESTIONS (STRICT DO NOT REPEAT LIST)
+${askedQuestions}
+
+## INTERVIEW RULES
+${config.rules}
+
+## CRITICAL ANTI-REPETITION MANDATE
+- NEVER repeat or rephrase any question from PREVIOUSLY ASKED QUESTIONS.
+- Every question MUST explore a NEW topic, skill, or scenario.
+
 ## CURRENT STATE
 - Questions asked: ${this.questionCount}/${this.maxQuestions}
 - Phase: ${this.phase}
@@ -3060,14 +3096,23 @@ ${config.rules}
             },
 
             getFallbackQuestion() {
-                const uncovered = this.skillsToProbe.filter(s => !this.skillsCovered[s]);
-                if (uncovered.length > 0) {
-                    return `Let's talk about ${uncovered[0]}. Can you walk me through a specific project where you used it and what you learned?`;
-                }
+                const askedCount = this.questionCount;
+                const uncovered = this.skillsToProbe.filter(s => !this.skillsCovered[s] || !this.skillsCovered[s].turns);
+                const targetSkill = uncovered[(askedCount - 1) % Math.max(1, uncovered.length)] || this.skillsToProbe[(askedCount - 1) % Math.max(1, this.skillsToProbe.length)] || 'your experience';
+                
                 if (this.phase === 'closing') {
-                    return `Thank you so much for your time — you gave some really thoughtful answers. Our team will review everything and reach out within a few business days. It was great speaking with you!`;
+                    return `Thank you so much for your time today — you gave some really thoughtful responses. Our hiring team will review your interview performance and reach out soon. Have a great day!`;
                 }
-                return `Can you tell me about a challenging technical problem you've solved recently? What was your approach and what was the outcome?`;
+
+                const fallbackPool = [
+                    `Can you walk me through a specific project where you applied ${targetSkill} and what key challenges you overcame?`,
+                    `Regarding ${targetSkill}, how do you usually approach trade-offs when working under tight deadlines?`,
+                    `Could you share a real-world scenario where you had to debug or resolve a complex issue involving ${targetSkill}?`,
+                    `Looking at your experience with ${targetSkill}, what is one key principle or pattern you follow and why?`,
+                    `Tell me about a situation when a project involving ${targetSkill} didn't go as planned and how you adapted.`
+                ];
+
+                return fallbackPool[(askedCount - 1) % fallbackPool.length];
             },
 
             recordSkillAssessment(skill, score, depth) {
