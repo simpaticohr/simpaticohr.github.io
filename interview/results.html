@@ -720,6 +720,7 @@
         </div>
     </div>
 
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="../js/hr-config.js"></script>
 <script>
 'use strict';
@@ -768,6 +769,27 @@ async function load() {
 
         interviewData = interview;
         render(interview);
+
+        // Real-time polling & monitoring if interview is currently in_progress
+        if (interview.status === 'in_progress' && !window._livePollInt) {
+            console.log('[LiveMonitor] Interview is in progress. Starting live status updates...');
+            window._livePollInt = setInterval(async () => {
+                try {
+                    const pollRes = await fetch(`${SB_URL}/rest/v1/interviews?${filter}&select=*&limit=1`, {
+                        headers: { 'apikey': SB_KEY, 'Authorization': 'Bearer ' + SB_KEY }
+                    });
+                    const pollData = await pollRes.json();
+                    if (pollData?.[0]) {
+                        interviewData = pollData[0];
+                        render(interviewData);
+                        if (interviewData.status === 'completed') {
+                            clearInterval(window._livePollInt);
+                            window._livePollInt = null;
+                        }
+                    }
+                } catch (pe) { console.warn('[LiveMonitor] Poll error:', pe); }
+            }, 8000); // 8s polling
+        }
     } catch (e) {
         console.error('Load error:', e);
         document.getElementById('content').innerHTML = renderError('Failed to load interview data.');

@@ -2964,6 +2964,11 @@ ${config.rules}
                         meta: { phase: this.phase, questionNum: this.questionCount }
                     });
 
+                    // Trigger non-blocking partial update to Supabase for live dashboard monitoring
+                    if (typeof pushPartialUpdate === 'function') {
+                        pushPartialUpdate();
+                    }
+
                     return question;
                 } catch (err) {
                     console.error('[Engine] Generation failed:', err.message);
@@ -3230,6 +3235,17 @@ ${config.rules}
                             state.voice.recognition.lang = state.interviewLanguage;
                             console.log('[STT] Updated recognition lang to:', state.interviewLanguage);
                         }
+                    }
+
+                    // Auto-enable recording based on employer settings (defaults to true)
+                    const proctorCfg = state.meta.interview.proctor_settings || {};
+                    if (proctorCfg.auto_record !== false) {
+                        state.recording.enabled = true;
+                        console.log('[Recording] Auto-record enabled by employer config');
+                        const btn = document.getElementById('vcRecord');
+                        const icon = document.getElementById('vcRecordIcon');
+                        if (btn) btn.classList.add('active-mic');
+                        if (icon) icon.style.color = '#ef4444';
                     }
                 }
             } catch (e) {
@@ -4930,6 +4946,11 @@ ${config.rules}
         // RECORDING HELPERS (ImageKit Integration)
         // ══════════════════════════════════════════════════════════════
         function toggleRecording() {
+            const proctorCfg = state.meta.interview?.proctor_settings || {};
+            if (proctorCfg.auto_record !== false) {
+                showToast('info', '📹 Video recording is mandatory for this proctored interview session.');
+                return;
+            }
             if (state.session.started) {
                 showToast('warning', 'Recording setting cannot be changed after interview starts');
                 return;
@@ -4952,7 +4973,7 @@ ${config.rules}
             if (!state.recording.enabled || !state.media.stream) return;
             try {
                 state.recording.chunks = [];
-                const options = { videoBitsPerSecond: 500000 };
+                const options = { videoBitsPerSecond: 800000 };
                 if (MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus')) {
                     options.mimeType = 'video/webm;codecs=vp9,opus';
                 } else if (MediaRecorder.isTypeSupported('video/webm')) {
@@ -4961,11 +4982,17 @@ ${config.rules}
                     options.mimeType = 'video/mp4';
                 }
 
-                // Prevent Android Chrome mic conflict ("Speech recording... cannot record as Chrome is recording audio")
-                let recordStream = state.media.stream;
-                if (state.isMobile && state.media.stream.getVideoTracks().length > 0) {
-                    recordStream = new MediaStream(state.media.stream.getVideoTracks());
+                const tracks = [];
+                if (state.media.stream.getVideoTracks().length > 0) {
+                    tracks.push(state.media.stream.getVideoTracks()[0]);
                 }
+
+                // If audio tracks exist, mix mic stream
+                if (!state.isMobile && state.media.stream.getAudioTracks().length > 0) {
+                    tracks.push(state.media.stream.getAudioTracks()[0]);
+                }
+
+                const recordStream = tracks.length > 0 ? new MediaStream(tracks) : state.media.stream;
 
                 const recorder = new MediaRecorder(recordStream, options);
                 recorder.ondataavailable = (e) => {
@@ -4975,7 +5002,7 @@ ${config.rules}
                 };
                 recorder.start(5000); // 5s timeslices
                 state.recording.mediaRecorder = recorder;
-                console.log('[Recording] MediaRecorder started with mimeType:', options.mimeType);
+                console.log('[Recording] MediaRecorder started with composite tracks:', tracks.length, 'mimeType:', options.mimeType);
             } catch (err) {
                 console.warn('[Recording] Could not start MediaRecorder:', err.message);
                 state.recording.enabled = false;
@@ -4985,6 +5012,35 @@ ${config.rules}
         // ══════════════════════════════════════════════════════════════
         // SUPABASE HELPERS
         // ══════════════════════════════════════════════════════════════
+        let lastPartialPush = 0;
+        async function pushPartialUpdate() {
+            if (!magicToken || (Date.now() - lastPartialPush < 15000)) return; // Throttle: 15s min interval
+            lastPartialPush = Date.now();
+            try {
+                const score = engine.getOverallScore();
+                const violations = state.proctoring.logs.filter(l => l.level === 'danger').length;
+                await sbPatch('interviews', `token=eq.${encodeURIComponent(magicToken)}`, {
+                    overall_score: score,
+                    trust_score: state.session.trust,
+                    violation_count: violations,
+                    feedback: {
+                        total_questions: engine.questionCount,
+                        skill_scores: engine.skillsCovered,
+                        strong_areas: engine.strongAreas,
+                        weak_areas: engine.weakAreas,
+                        job_title: engine.jobTitle,
+                        level: engine.level,
+                        conversation_turns: engine.history.length,
+                        _partial: true,
+                        _updated_at: new Date().toISOString(),
+                    }
+                });
+                console.log('[Partial] Realtime score update synced to Supabase:', score);
+            } catch (e) {
+                console.warn('[Partial] Realtime update skipped/error:', e.message);
+            }
+        }
+
         function sbPatch(table, filter, data) {
             return fetch(`${SB_URL}/rest/v1/${table}?${filter}`, {
                 method: 'PATCH',
