@@ -3386,6 +3386,15 @@ ${config.rules}
                 state.voice.recognition.onresult = handleSpeechResult;
                 state.voice.recognition.onerror = (e) => {
                     console.warn('[STT] Speech error:', e.error);
+                    if (e.error === 'audio-capture' && state.isMobile) {
+                        console.warn('[STT] Android mic collision handled — retrying recognition shortly...');
+                        setTimeout(() => {
+                            if (state.voice.isListening && !state.voice.isProcessing) {
+                                try { state.voice.recognition.start(); } catch (err) {}
+                            }
+                        }, 800);
+                        return;
+                    }
                     // Restart on any recoverable error — not just the original 3
                     const fatal = ['not-allowed', 'service-not-allowed', 'language-not-supported'];
                     if (!fatal.includes(e.error) && state.voice.isListening && !state.voice.isProcessing) {
@@ -4647,7 +4656,13 @@ ${config.rules}
                     options.mimeType = 'video/mp4';
                 }
 
-                const recorder = new MediaRecorder(state.media.stream, options);
+                // Prevent Android Chrome mic conflict ("Speech recording... cannot record as Chrome is recording audio")
+                let recordStream = state.media.stream;
+                if (state.isMobile && state.media.stream.getVideoTracks().length > 0) {
+                    recordStream = new MediaStream(state.media.stream.getVideoTracks());
+                }
+
+                const recorder = new MediaRecorder(recordStream, options);
                 recorder.ondataavailable = (e) => {
                     if (e.data && e.data.size > 0) {
                         state.recording.chunks.push(e.data);
