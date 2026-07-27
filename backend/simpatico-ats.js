@@ -1512,6 +1512,17 @@ route("POST", "/imagekit/auth", handleImageKitAuth);
 route("GET", "/imagekit/config", handleImageKitConfig);
 route("POST", "/imagekit/cleanup", handleImageKitCleanup);
 
+// ── Agentic AI Engine ──
+route("GET",  "/agents/config",                handleAgentConfigGet);
+route("POST", "/agents/config",                handleAgentConfigSave);
+route("POST", "/agents/toggle",                handleAgentToggle);
+route("GET",  "/agents/runs",                  handleListAgentRuns);
+route("GET",  "/agents/actions",               handleListAgentActions);
+route("POST", "/agents/actions/:id/approve",   handleApproveAgentAction);
+route("POST", "/agents/actions/:id/reject",    handleRejectAgentAction);
+route("POST", "/agents/run-now",               handleRunAgentsNow);
+route("GET",  "/agents/stats",                 handleAgentStats);
+
 // ===============================================================
 // § 13.  MAIN ENTRY POINT
 // ===============================================================
@@ -2205,6 +2216,32 @@ export default {
         }
       } catch (ikErr) {
         console.error('[CRON] ImageKit cleanup error:', ikErr.message);
+      }
+
+      // ==========================================
+      // 5. Agentic AI — Daily Agent Orchestrator
+      // Runs agents for all tenants with agent_mode=true
+      // ==========================================
+      try {
+        const agentCompRes = await fetch(
+          `${env.SUPABASE_URL}/rest/v1/companies?agent_mode=eq.true&is_active=eq.true&select=id,subscription_plan,agent_daily_limit`,
+          { headers: { apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}` } }
+        );
+        if (agentCompRes.ok) {
+          const agentCompanies = await agentCompRes.json();
+          let agentRan = 0;
+          for (const comp of agentCompanies) {
+            try {
+              await runAgentOrchestrator(env, comp.id, comp.subscription_plan, comp.agent_daily_limit, "cron");
+              agentRan++;
+            } catch (agentErr) {
+              console.error(`[CRON-AGENT] Agent run failed for tenant ${comp.id}:`, agentErr.message);
+            }
+          }
+          if (agentRan > 0) console.log(`[CRON-AGENT] Ran agents for ${agentRan} tenant(s)`);
+        }
+      } catch (agentCronErr) {
+        console.error('[CRON-AGENT] Agent orchestrator cron error:', agentCronErr.message);
       }
 
     } catch (err) {
@@ -6201,41 +6238,68 @@ Return ONLY valid JSON in this exact format (no markdown, no code fences, no ext
   }
 
   // Robust JSON extraction from AI response
-  let responseText = aiResponse.response.trim();
+  let responseText = (typeof aiResponse === "string" ? aiResponse : aiResponse.response || "").trim();
 
-  // Strip markdown code fences (```json ... ``` or ``` ... ```)
+  // Strip ALL markdown code fences (handles ```json, ```JSON, ``` and nested cases)
   responseText = responseText
-    .replace(/^```(?:json)?\s*\n?/i, "")
-    .replace(/\n?\s*```\s*$/i, "")
+    .replace(/^```+(?:json|JSON|javascript|js)?\s*\n?/gm, "")
+    .replace(/\n?\s*```+\s*$/gm, "")
     .trim();
 
-  // If there's still non-JSON text, try to extract the JSON object
+  // Strip leading/trailing prose — find the outermost { ... } with balanced braces
   if (!responseText.startsWith("{")) {
-    const jsonStart = responseText.indexOf("{");
-    const jsonEnd = responseText.lastIndexOf("}");
-    if (jsonStart !== -1 && jsonEnd > jsonStart) {
-      responseText = responseText.substring(jsonStart, jsonEnd + 1);
+    let depth = 0, start = -1, end = -1;
+    for (let i = 0; i < responseText.length; i++) {
+      if (responseText[i] === "{") { if (depth === 0) start = i; depth++; }
+      else if (responseText[i] === "}") { depth--; if (depth === 0 && start !== -1) { end = i; break; } }
+    }
+    if (start !== -1 && end > start) {
+      responseText = responseText.substring(start, end + 1);
     }
   }
+
+  // Fix common LLM JSON issues: trailing commas, escaped single quotes
+  responseText = responseText
+    .replace(/,\s*([\]\}])/g, "$1")
+    .replace(/\\'/g, "'");
 
   let assessment;
   try {
     assessment = JSON.parse(responseText);
   } catch (parseError) {
-    console.error("[assessment] JSON parse failed:", {
+    console.error("[assessment] JSON parse failed (attempt 1):", {
       error: parseError.message,
-      rawResponse: responseText.substring(0, 500),
+      rawResponse: responseText.substring(0, 800),
     });
-    throw new AppError(
-      "AI returned invalid JSON. Please try generating again.",
-      HTTP.SERVER_ERROR,
-      "AI_PARSE_ERROR",
-    );
+
+    // Retry with a simpler, shorter prompt
+    try {
+      const retryMessages = [
+        { role: "system", content: "Respond with ONLY a JSON object. No text before or after. No markdown." },
+        { role: "user", content: `Generate ${question_count || 5} assessment questions for "${job_title}" role as JSON: {"assessment_title":"...","questions":[{"id":"q1","type":"mcq","question":"...","options":["A","B","C","D"],"correct_answer":"A","scoring_rubric":"..."}]}` },
+      ];
+      const retryResult = await runLLM(env, ctx.tenantId, retryMessages, 2000);
+      let retryText = (typeof retryResult === "string" ? retryResult : retryResult.response || "").trim()
+        .replace(/^```+(?:json|JSON)?\s*\n?/gm, "").replace(/\n?\s*```+\s*$/gm, "").trim();
+      if (!retryText.startsWith("{")) {
+        const s = retryText.indexOf("{"), e = retryText.lastIndexOf("}");
+        if (s !== -1 && e > s) retryText = retryText.substring(s, e + 1);
+      }
+      retryText = retryText.replace(/,\s*([\]\}])/g, "$1");
+      assessment = JSON.parse(retryText);
+      console.log("[assessment] Retry succeeded!");
+    } catch (retryErr) {
+      console.error("[assessment] Retry also failed:", retryErr.message);
+      throw new AppError(
+        "AI returned invalid JSON after 2 attempts. Please try again — shorter job titles work better.",
+        HTTP.SERVER_ERROR,
+        "AI_PARSE_ERROR",
+      );
+    }
   }
 
   // Validate and normalize assessment structure
   if (!assessment.assessment_title || typeof assessment.assessment_title !== "string") {
-    // Auto-generate a title if missing
     assessment.assessment_title = `${difficulty || "Mid-Level"} ${job_title} Assessment`;
   }
 
@@ -6249,18 +6313,15 @@ Return ONLY valid JSON in this exact format (no markdown, no code fences, no ext
 
   // Lenient validation: fix up questions rather than failing hard
   assessment.questions = assessment.questions.map((q, idx) => {
-    // Ensure required fields exist
     if (!q.id) q.id = `q${idx + 1}`;
     if (!q.type) q.type = Array.isArray(q.options) ? "mcq" : "short_answer";
-    if (!q.question && q.text) q.question = q.text; // common AI alias
+    if (!q.question && q.text) q.question = q.text;
 
-    // For MCQs, ensure options exist
     if (q.type === "mcq" && (!Array.isArray(q.options) || q.options.length === 0)) {
-      q.type = "short_answer"; // Downgrade to short answer if no options
+      q.type = "short_answer";
       delete q.options;
     }
 
-    // Don't require correct_answer for short-answer (rubric is enough)
     if (!q.correct_answer && q.type === "short_answer") {
       q.correct_answer = q.scoring_rubric || "See rubric for grading criteria";
     }
@@ -6268,7 +6329,6 @@ Return ONLY valid JSON in this exact format (no markdown, no code fences, no ext
     return q;
   });
 
-  // Filter out any questions that still lack a question text
   assessment.questions = assessment.questions.filter((q) => q.question);
 
   if (assessment.questions.length === 0) {
@@ -11474,4 +11534,647 @@ async function handleImageKitCleanup(request, env, ctx) {
   } catch (err) {
     return Response.json({ success: false, error: err.message }, { status: 500, headers: corsHdrs });
   }
+}
+
+// ===============================================================
+// § 20.  AGENTIC AI ENGINE
+// ===============================================================
+
+// ── Plan-based agent access control ──
+const AGENT_PLAN_LIMITS = {
+  trial:        { allowed: false, agents: [], dailyLimit: 0, canAutoApprove: false },
+  free:         { allowed: false, agents: [], dailyLimit: 0, canAutoApprove: false },
+  expired_trial:{ allowed: false, agents: [], dailyLimit: 0, canAutoApprove: false },
+  starter:      { allowed: false, agents: [], dailyLimit: 0, canAutoApprove: false },
+  professional: { allowed: true, agents: ['recruitment','onboarding','debrief'], dailyLimit: 50, canAutoApprove: false },
+  enterprise:   { allowed: true, agents: ['recruitment','onboarding','debrief','leave','anomaly','ticket'], dailyLimit: 999, canAutoApprove: true },
+};
+
+function getAgentPlanLimits(plan) {
+  const normalized = (plan || 'free').toLowerCase().replace(/[\s-]/g, '_');
+  return AGENT_PLAN_LIMITS[normalized] || AGENT_PLAN_LIMITS.free;
+}
+
+// ── Agent Orchestrator Engine ──
+async function runAgentOrchestrator(env, tenantId, plan, dailyLimitOverride, trigger = "cron") {
+  const startTime = Date.now();
+  const planLimits = getAgentPlanLimits(plan);
+
+  if (!planLimits.allowed) {
+    console.log(`[AGENT] Skipping tenant ${tenantId}: plan "${plan}" does not include agents`);
+    return;
+  }
+
+  const dailyLimit = dailyLimitOverride || planLimits.dailyLimit;
+
+  // Check daily action count
+  const todayStart = new Date();
+  todayStart.setUTCHours(0, 0, 0, 0);
+  const countRes = await fetch(
+    `${env.SUPABASE_URL}/rest/v1/agent_actions?company_id=eq.${tenantId}&created_at=gte.${todayStart.toISOString()}&select=id`,
+    { headers: { apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}` } }
+  );
+  const todayActions = countRes.ok ? (await countRes.json()).length : 0;
+  if (todayActions >= dailyLimit) {
+    console.log(`[AGENT] Tenant ${tenantId} hit daily limit (${todayActions}/${dailyLimit}). Skipping.`);
+    return;
+  }
+  const actionsRemaining = dailyLimit - todayActions;
+
+  // Create run record
+  const runRes = await fetch(`${env.SUPABASE_URL}/rest/v1/agent_runs`, {
+    method: "POST",
+    headers: { apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`, "Content-Type": "application/json", Prefer: "return=representation" },
+    body: JSON.stringify({ company_id: tenantId, trigger_type: trigger, status: "running", tenant_id: tenantId }),
+  });
+  const runData = runRes.ok ? (await runRes.json())?.[0] : null;
+  const runId = runData?.id;
+  if (!runId) { console.error(`[AGENT] Failed to create run record for tenant ${tenantId}`); return; }
+
+  // Load agent configs
+  const cfgRes = await fetch(
+    `${env.SUPABASE_URL}/rest/v1/agent_config?company_id=eq.${tenantId}&enabled=eq.true&select=*`,
+    { headers: { apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}` } }
+  );
+  let agentConfigs = cfgRes.ok ? await cfgRes.json() : [];
+
+  // Filter by plan-allowed agents
+  agentConfigs = agentConfigs.filter(c => planLimits.agents.includes(c.agent_type));
+
+  // If no configs exist, create defaults for allowed agents
+  if (agentConfigs.length === 0) {
+    for (const agentType of planLimits.agents) {
+      agentConfigs.push({ agent_type: agentType, enabled: true, auto_approve: false, config_json: {} });
+    }
+  }
+
+  let totalActions = 0;
+  let totalPending = 0;
+  const summaryParts = [];
+  let llmProvider = null;
+
+  for (const cfg of agentConfigs) {
+    if (totalActions >= actionsRemaining) break;
+    try {
+      const canAutoApprove = cfg.auto_approve && planLimits.canAutoApprove;
+      const result = await executeAgent(env, tenantId, runId, cfg.agent_type, canAutoApprove, cfg.config_json || {}, actionsRemaining - totalActions);
+      totalActions += result.executed || 0;
+      totalPending += result.pending || 0;
+      if (result.provider) llmProvider = result.provider;
+      if (result.summary) summaryParts.push(`${cfg.agent_type}: ${result.summary}`);
+    } catch (agentErr) {
+      console.error(`[AGENT] ${cfg.agent_type} failed for tenant ${tenantId}:`, agentErr.message);
+      summaryParts.push(`${cfg.agent_type}: FAILED — ${agentErr.message}`);
+      await dlqPush(env, tenantId, { action: `agent_${cfg.agent_type}`, error: agentErr.message, rule_name: `Agent: ${cfg.agent_type}` });
+    }
+  }
+
+  // Update run record
+  const durationMs = Date.now() - startTime;
+  await fetch(`${env.SUPABASE_URL}/rest/v1/agent_runs?id=eq.${runId}`, {
+    method: "PATCH",
+    headers: { apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`, "Content-Type": "application/json", Prefer: "return=minimal" },
+    body: JSON.stringify({
+      status: totalActions > 0 || totalPending > 0 ? "completed" : "completed",
+      actions_taken: totalActions,
+      actions_pending: totalPending,
+      summary: summaryParts.join(' | ') || 'No actionable items found',
+      duration_ms: durationMs,
+      llm_provider: llmProvider,
+      completed_at: new Date().toISOString(),
+    }),
+  });
+
+  console.log(`[AGENT] Run complete for tenant ${tenantId}: ${totalActions} executed, ${totalPending} pending, ${durationMs}ms`);
+}
+
+// ── Agent Executor — Routes to specific agent module ──
+async function executeAgent(env, tenantId, runId, agentType, canAutoApprove, config, maxActions) {
+  switch (agentType) {
+    case 'recruitment': return await agentRecruitment(env, tenantId, runId, canAutoApprove, config, maxActions);
+    case 'onboarding':  return await agentOnboarding(env, tenantId, runId, canAutoApprove, config, maxActions);
+    case 'debrief':     return await agentDebrief(env, tenantId, runId, canAutoApprove, config, maxActions);
+    case 'leave':       return await agentLeave(env, tenantId, runId, canAutoApprove, config, maxActions);
+    case 'anomaly':     return await agentAnomaly(env, tenantId, runId, canAutoApprove, config, maxActions);
+    case 'ticket':      return await agentTicket(env, tenantId, runId, canAutoApprove, config, maxActions);
+    default: return { executed: 0, pending: 0, summary: `Unknown agent: ${agentType}` };
+  }
+}
+
+// Helper: log an agent action
+async function logAgentAction(env, runId, tenantId, agentType, actionType, targetType, targetId, description, inputCtx, outputRes, status) {
+  await fetch(`${env.SUPABASE_URL}/rest/v1/agent_actions`, {
+    method: "POST",
+    headers: { apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`, "Content-Type": "application/json", Prefer: "return=minimal" },
+    body: JSON.stringify({
+      run_id: runId, company_id: tenantId, agent_type: agentType,
+      action_type: actionType, target_type: targetType, target_id: targetId,
+      description, input_context: inputCtx || {}, output_result: outputRes || {},
+      status, tenant_id: tenantId,
+    }),
+  });
+}
+
+// ── AGENT 1: RECRUITMENT ──
+// Scans pending applications, scores resumes against JD via LLM, shortlists high scorers
+async function agentRecruitment(env, tenantId, runId, canAutoApprove, config, maxActions) {
+  // Fetch open jobs with auto_shortlist enabled
+  const jobsRes = await fetch(
+    `${env.SUPABASE_URL}/rest/v1/jobs?company_id=eq.${tenantId}&is_active=eq.true&auto_shortlist=eq.true&select=id,title,description,skills_required,auto_shortlist_threshold`,
+    { headers: { apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}` } }
+  );
+  const jobs = jobsRes.ok ? await jobsRes.json() : [];
+  if (!jobs.length) return { executed: 0, pending: 0, summary: 'No auto-shortlist jobs' };
+
+  let executed = 0, pending = 0, provider = null;
+
+  for (const job of jobs) {
+    if (executed + pending >= maxActions) break;
+    // Fetch unscored applications for this job
+    const appsRes = await fetch(
+      `${env.SUPABASE_URL}/rest/v1/applications?job_id=eq.${job.id}&status=eq.new&ai_score=is.null&select=id,candidate_name,candidate_email,resume_text&limit=10`,
+      { headers: { apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}` } }
+    );
+    const apps = appsRes.ok ? await appsRes.json() : [];
+
+    for (const app of apps) {
+      if (executed + pending >= maxActions) break;
+      if (!app.resume_text) continue;
+
+      try {
+        const messages = [
+          { role: 'system', content: 'You are an AI recruitment specialist. Score the candidate resume against the job description. Return ONLY valid JSON: {"score": 0-100, "strengths": ["..."], "gaps": ["..."], "recommendation": "shortlist|review|reject"}' },
+          { role: 'user', content: `Job Title: ${job.title}\nJob Description: ${job.description || 'N/A'}\nRequired Skills: ${job.skills_required || 'N/A'}\n\nCandidate Resume:\n${app.resume_text.substring(0, 3000)}` }
+        ];
+        const llmResult = await runLLM(env, tenantId, messages, 512);
+        const responseText = llmResult.response || llmResult;
+        provider = llmResult._provider || 'cloudflare';
+
+        let parsed;
+        try {
+          const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+          parsed = JSON.parse(jsonMatch ? jsonMatch[0] : responseText);
+        } catch { parsed = { score: 50, recommendation: 'review' }; }
+
+        const score = Math.min(100, Math.max(0, parseInt(parsed.score) || 50));
+        const threshold = job.auto_shortlist_threshold || 70;
+
+        // Update application with AI score
+        await fetch(`${env.SUPABASE_URL}/rest/v1/applications?id=eq.${app.id}`, {
+          method: "PATCH",
+          headers: { apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`, "Content-Type": "application/json", Prefer: "return=minimal" },
+          body: JSON.stringify({ ai_score: score, ai_summary: JSON.stringify(parsed) }),
+        });
+
+        if (score >= threshold) {
+          const actionStatus = canAutoApprove ? 'executed' : 'pending_approval';
+          if (canAutoApprove) {
+            // Actually shortlist
+            await fetch(`${env.SUPABASE_URL}/rest/v1/applications?id=eq.${app.id}`, {
+              method: "PATCH",
+              headers: { apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`, "Content-Type": "application/json", Prefer: "return=minimal" },
+              body: JSON.stringify({ status: 'shortlisted' }),
+            });
+            executed++;
+          } else {
+            pending++;
+          }
+          await logAgentAction(env, runId, tenantId, 'recruitment', 'shortlist_candidate', 'application', app.id,
+            `Shortlist ${app.candidate_name} for ${job.title} (score: ${score}/${threshold})`,
+            { job_id: job.id, job_title: job.title, resume_preview: app.resume_text?.substring(0, 200) },
+            parsed, actionStatus);
+        } else {
+          await logAgentAction(env, runId, tenantId, 'recruitment', 'score_candidate', 'application', app.id,
+            `Scored ${app.candidate_name} for ${job.title}: ${score}/100 (below threshold ${threshold})`,
+            { job_id: job.id }, parsed, 'executed');
+          executed++;
+        }
+      } catch (llmErr) {
+        console.warn(`[AGENT-RECRUIT] LLM scoring failed for app ${app.id}:`, llmErr.message);
+      }
+    }
+  }
+
+  return { executed, pending, provider, summary: `Scored ${executed + pending} candidate(s), ${pending} pending approval` };
+}
+
+// ── AGENT 2: ONBOARDING ──
+// Finds overdue onboarding tasks, sends nudge reminders
+async function agentOnboarding(env, tenantId, runId, canAutoApprove, config, maxActions) {
+  const tasksRes = await fetch(
+    `${env.SUPABASE_URL}/rest/v1/onboarding_tasks?status=eq.pending&due_date=lt.${new Date().toISOString().split('T')[0]}&select=id,title,due_date,onboarding_record_id,assigned_to&limit=20`,
+    { headers: { apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}` } }
+  );
+  const overdueTasks = tasksRes.ok ? await tasksRes.json() : [];
+  if (!overdueTasks.length) return { executed: 0, pending: 0, summary: 'No overdue onboarding tasks' };
+
+  let executed = 0;
+  for (const task of overdueTasks) {
+    if (executed >= maxActions) break;
+    await logAgentAction(env, runId, tenantId, 'onboarding', 'flag_overdue_task', 'onboarding_task', task.id,
+      `Overdue: "${task.title}" was due ${task.due_date}`,
+      { due_date: task.due_date, assigned_to: task.assigned_to }, {}, 'executed');
+    executed++;
+  }
+
+  return { executed, pending: 0, summary: `Flagged ${executed} overdue onboarding task(s)` };
+}
+
+// ── AGENT 3: INTERVIEW DEBRIEF ──
+// Generates structured scorecards for completed interviews without reports
+async function agentDebrief(env, tenantId, runId, canAutoApprove, config, maxActions) {
+  const intRes = await fetch(
+    `${env.SUPABASE_URL}/rest/v1/interviews?company_id=eq.${tenantId}&status=eq.completed&report=is.null&select=id,candidate_name,role,level,transcript&limit=5`,
+    { headers: { apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}` } }
+  );
+  const interviews = intRes.ok ? await intRes.json() : [];
+  if (!interviews.length) return { executed: 0, pending: 0, summary: 'No interviews pending debrief' };
+
+  let executed = 0, provider = null;
+
+  for (const iv of interviews) {
+    if (executed >= maxActions) break;
+    if (!iv.transcript) continue;
+
+    try {
+      const messages = [
+        { role: 'system', content: 'You are a senior technical interviewer. Generate a structured debrief report from the interview transcript. Return JSON: {"overall_score": 1-10, "recommendation": "strong_hire|hire|maybe|no_hire", "technical_depth": 1-10, "communication": 1-10, "problem_solving": 1-10, "key_strengths": ["..."], "concerns": ["..."], "summary": "2-3 sentence summary"}' },
+        { role: 'user', content: `Role: ${iv.role || 'Software Engineer'}\nLevel: ${iv.level || 'Mid'}\n\nTranscript:\n${iv.transcript.substring(0, 4000)}` }
+      ];
+      const llmResult = await runLLM(env, tenantId, messages, 1024);
+      const responseText = llmResult.response || llmResult;
+      provider = llmResult._provider || 'cloudflare';
+
+      let report;
+      try {
+        const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+        report = JSON.parse(jsonMatch ? jsonMatch[0] : responseText);
+      } catch { report = { summary: responseText.substring(0, 500), overall_score: 5 }; }
+
+      // Save report to interview
+      await fetch(`${env.SUPABASE_URL}/rest/v1/interviews?id=eq.${iv.id}`, {
+        method: "PATCH",
+        headers: { apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`, "Content-Type": "application/json", Prefer: "return=minimal" },
+        body: JSON.stringify({ report: JSON.stringify(report) }),
+      });
+
+      await logAgentAction(env, runId, tenantId, 'debrief', 'generate_scorecard', 'interview', iv.id,
+        `Generated debrief for ${iv.candidate_name}: ${report.recommendation || 'scored'} (${report.overall_score}/10)`,
+        { role: iv.role, level: iv.level }, report, 'executed');
+      executed++;
+    } catch (llmErr) {
+      console.warn(`[AGENT-DEBRIEF] Failed for interview ${iv.id}:`, llmErr.message);
+    }
+  }
+
+  return { executed, pending: 0, provider, summary: `Generated ${executed} interview debrief(s)` };
+}
+
+// ── AGENT 4: LEAVE (Enterprise only) ──
+// Auto-processes simple leave requests
+async function agentLeave(env, tenantId, runId, canAutoApprove, config, maxActions) {
+  const leaveRes = await fetch(
+    `${env.SUPABASE_URL}/rest/v1/leave_requests?status=eq.pending&select=id,employee_id,type,days,from_date,to_date,reason&limit=15`,
+    { headers: { apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}` } }
+  );
+  const pending = leaveRes.ok ? await leaveRes.json() : [];
+  if (!pending.length) return { executed: 0, pending: 0, summary: 'No pending leave requests' };
+
+  let executed = 0, pendingCount = 0;
+
+  for (const req of pending) {
+    if (executed + pendingCount >= maxActions) break;
+    // Simple heuristic: auto-approve casual/annual leaves <= 2 days
+    const isSimple = (req.type === 'annual' || req.type === 'sick') && (req.days || 1) <= 2;
+
+    if (isSimple && canAutoApprove) {
+      await fetch(`${env.SUPABASE_URL}/rest/v1/leave_requests?id=eq.${req.id}`, {
+        method: "PATCH",
+        headers: { apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`, "Content-Type": "application/json", Prefer: "return=minimal" },
+        body: JSON.stringify({ status: 'approved' }),
+      });
+      await logAgentAction(env, runId, tenantId, 'leave', 'auto_approve_leave', 'leave_request', req.id,
+        `Auto-approved ${req.type} leave (${req.days || 1} day(s))`, { type: req.type, days: req.days }, {}, 'executed');
+      executed++;
+    } else {
+      const status = canAutoApprove ? 'executed' : 'pending_approval';
+      if (status === 'pending_approval') pendingCount++; else executed++;
+      await logAgentAction(env, runId, tenantId, 'leave', isSimple ? 'approve_leave' : 'escalate_leave', 'leave_request', req.id,
+        isSimple ? `Recommend approving ${req.type} leave (${req.days || 1} day(s))` : `Escalate: ${req.type} leave ${req.days || 1} day(s) — needs manager review`,
+        { type: req.type, days: req.days, reason: req.reason }, {}, status);
+    }
+  }
+
+  return { executed, pending: pendingCount, summary: `Processed ${executed + pendingCount} leave request(s)` };
+}
+
+// ── AGENT 5: ANOMALY DETECTION (Enterprise only) ──
+// Flags salary outliers and attendance gaps
+async function agentAnomaly(env, tenantId, runId, canAutoApprove, config, maxActions) {
+  // Check for employees with no attendance in last 7 days
+  const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+  const empRes = await fetch(
+    `${env.SUPABASE_URL}/rest/v1/employees?tenant_id=eq.${tenantId}&status=eq.active&select=id,first_name,last_name,email&limit=200`,
+    { headers: { apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}` } }
+  );
+  const employees = empRes.ok ? await empRes.json() : [];
+  if (!employees.length) return { executed: 0, pending: 0, summary: 'No employees to check' };
+
+  let executed = 0;
+
+  // Salary outlier detection: find employees with salary > 3x median
+  const salRes = await fetch(
+    `${env.SUPABASE_URL}/rest/v1/employees?tenant_id=eq.${tenantId}&status=eq.active&salary=not.is.null&select=id,first_name,last_name,salary,job_title&order=salary.desc&limit=200`,
+    { headers: { apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}` } }
+  );
+  const withSalary = salRes.ok ? await salRes.json() : [];
+
+  if (withSalary.length >= 5) {
+    const salaries = withSalary.map(e => parseFloat(e.salary)).filter(s => s > 0).sort((a, b) => a - b);
+    const median = salaries[Math.floor(salaries.length / 2)];
+    const upperBound = median * 3;
+
+    for (const emp of withSalary) {
+      if (executed >= maxActions) break;
+      if (parseFloat(emp.salary) > upperBound) {
+        await logAgentAction(env, runId, tenantId, 'anomaly', 'salary_outlier', 'employee', emp.id,
+          `Salary outlier: ${emp.first_name} ${emp.last_name} (${emp.job_title}) — salary ${emp.salary} is >3x median ${median.toFixed(0)}`,
+          { salary: emp.salary, median, threshold: upperBound }, {}, 'executed');
+        executed++;
+      }
+    }
+  }
+
+  return { executed, pending: 0, summary: `Detected ${executed} anomalie(s)` };
+}
+
+// ── AGENT 6: TICKET TRIAGE (Enterprise only) ──
+// Escalates old unresolved HR tickets
+async function agentTicket(env, tenantId, runId, canAutoApprove, config, maxActions) {
+  const twoDaysAgo = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
+  const ticketRes = await fetch(
+    `${env.SUPABASE_URL}/rest/v1/hr_tickets?status=eq.open&created_at=lt.${twoDaysAgo}&select=id,subject,priority,category,created_at&limit=20`,
+    { headers: { apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}` } }
+  );
+  const oldTickets = ticketRes.ok ? await ticketRes.json() : [];
+  if (!oldTickets.length) return { executed: 0, pending: 0, summary: 'No stale tickets' };
+
+  let executed = 0;
+
+  for (const ticket of oldTickets) {
+    if (executed >= maxActions) break;
+    const ageHours = Math.round((Date.now() - new Date(ticket.created_at).getTime()) / (1000 * 60 * 60));
+    await logAgentAction(env, runId, tenantId, 'ticket', 'escalate_ticket', 'hr_ticket', ticket.id,
+      `Escalate: "${ticket.subject}" open for ${ageHours}h (priority: ${ticket.priority || 'normal'})`,
+      { age_hours: ageHours, priority: ticket.priority, category: ticket.category }, {}, 'executed');
+    executed++;
+  }
+
+  return { executed, pending: 0, summary: `Escalated ${executed} stale ticket(s)` };
+}
+
+// ── AGENT API HANDLERS ──
+
+async function handleAgentToggle(request, env, ctx) {
+  requireAuth(ctx);
+  requireRole(ctx, 'admin', 'company_admin', 'super_admin');
+  const corsHdrs = getCorsHeaders(request);
+  const tenantId = ctx.tenantId;
+
+  const body = await request.json();
+  const enabled = !!body.enabled;
+
+  // Check plan allows agents
+  const compRes = await fetch(
+    `${env.SUPABASE_URL}/rest/v1/companies?id=eq.${tenantId}&select=subscription_plan`,
+    { headers: { apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}` } }
+  );
+  const comp = compRes.ok ? (await compRes.json())?.[0] : null;
+  const planLimits = getAgentPlanLimits(comp?.subscription_plan);
+
+  if (enabled && !planLimits.allowed) {
+    return Response.json({ success: false, error: 'AI Agents require Professional plan or higher. Please upgrade.' }, { status: 403, headers: corsHdrs });
+  }
+
+  await fetch(`${env.SUPABASE_URL}/rest/v1/companies?id=eq.${tenantId}`, {
+    method: "PATCH",
+    headers: { apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`, "Content-Type": "application/json", Prefer: "return=minimal" },
+    body: JSON.stringify({ agent_mode: enabled }),
+  });
+
+  await audit(env, ctx, enabled ? 'agent_mode_enabled' : 'agent_mode_disabled', 'company', tenantId, { enabled });
+
+  return Response.json({ success: true, data: { agent_mode: enabled, plan: comp?.subscription_plan, allowed_agents: planLimits.agents } }, { headers: corsHdrs });
+}
+
+async function handleAgentConfigGet(request, env, ctx) {
+  requireAuth(ctx);
+  const corsHdrs = getCorsHeaders(request);
+  const tenantId = ctx.tenantId;
+
+  // Get company agent_mode + plan
+  const compRes = await fetch(
+    `${env.SUPABASE_URL}/rest/v1/companies?id=eq.${tenantId}&select=agent_mode,subscription_plan,agent_daily_limit`,
+    { headers: { apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}` } }
+  );
+  const comp = compRes.ok ? (await compRes.json())?.[0] : {};
+  const planLimits = getAgentPlanLimits(comp?.subscription_plan);
+
+  // Get per-agent configs
+  const cfgRes = await fetch(
+    `${env.SUPABASE_URL}/rest/v1/agent_config?company_id=eq.${tenantId}&select=*`,
+    { headers: { apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}` } }
+  );
+  const configs = cfgRes.ok ? await cfgRes.json() : [];
+
+  return Response.json({ success: true, data: {
+    agent_mode: comp?.agent_mode || false,
+    plan: comp?.subscription_plan || 'free',
+    daily_limit: comp?.agent_daily_limit || planLimits.dailyLimit,
+    plan_limits: planLimits,
+    configs,
+  }}, { headers: corsHdrs });
+}
+
+async function handleAgentConfigSave(request, env, ctx) {
+  requireAuth(ctx);
+  requireRole(ctx, 'admin', 'company_admin', 'super_admin');
+  const corsHdrs = getCorsHeaders(request);
+  const tenantId = ctx.tenantId;
+
+  const body = await request.json();
+  const { agent_type, enabled, auto_approve, config_json } = body;
+
+  if (!agent_type) return Response.json({ success: false, error: 'agent_type required' }, { status: 400, headers: corsHdrs });
+
+  // Upsert config
+  const upsertData = {
+    company_id: tenantId, tenant_id: tenantId, agent_type,
+    enabled: enabled !== undefined ? !!enabled : true,
+    auto_approve: auto_approve !== undefined ? !!auto_approve : false,
+    config_json: config_json || {}, updated_at: new Date().toISOString(),
+  };
+
+  await fetch(`${env.SUPABASE_URL}/rest/v1/agent_config`, {
+    method: "POST",
+    headers: { apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`, "Content-Type": "application/json", Prefer: "resolution=merge-duplicates,return=minimal" },
+    body: JSON.stringify(upsertData),
+  });
+
+  return Response.json({ success: true, data: upsertData }, { headers: corsHdrs });
+}
+
+async function handleListAgentRuns(request, env, ctx) {
+  requireAuth(ctx);
+  const corsHdrs = getCorsHeaders(request);
+  const tenantId = ctx.tenantId;
+  const url = new URL(request.url);
+  const limit = Math.min(parseInt(url.searchParams.get('limit') || '20'), 50);
+
+  const res = await fetch(
+    `${env.SUPABASE_URL}/rest/v1/agent_runs?company_id=eq.${tenantId}&select=*&order=created_at.desc&limit=${limit}`,
+    { headers: { apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}` } }
+  );
+  const runs = res.ok ? await res.json() : [];
+  return Response.json({ success: true, data: runs }, { headers: corsHdrs });
+}
+
+async function handleListAgentActions(request, env, ctx) {
+  requireAuth(ctx);
+  const corsHdrs = getCorsHeaders(request);
+  const tenantId = ctx.tenantId;
+  const url = new URL(request.url);
+  const limit = Math.min(parseInt(url.searchParams.get('limit') || '30'), 100);
+  const status = url.searchParams.get('status'); // optional filter
+
+  let query = `${env.SUPABASE_URL}/rest/v1/agent_actions?company_id=eq.${tenantId}&select=*&order=created_at.desc&limit=${limit}`;
+  if (status) query += `&status=eq.${status}`;
+
+  const res = await fetch(query, { headers: { apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}` } });
+  const actions = res.ok ? await res.json() : [];
+  return Response.json({ success: true, data: actions }, { headers: corsHdrs });
+}
+
+async function handleApproveAgentAction(request, env, ctx, [actionId]) {
+  requireAuth(ctx);
+  requireRole(ctx, 'admin', 'company_admin', 'hr_manager', 'super_admin');
+  const corsHdrs = getCorsHeaders(request);
+  const tenantId = ctx.tenantId;
+
+  // Fetch the action
+  const actRes = await fetch(
+    `${env.SUPABASE_URL}/rest/v1/agent_actions?id=eq.${actionId}&company_id=eq.${tenantId}&status=eq.pending_approval&select=*`,
+    { headers: { apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}` } }
+  );
+  const actions = actRes.ok ? await actRes.json() : [];
+  if (!actions.length) return Response.json({ success: false, error: 'Action not found or already processed' }, { status: 404, headers: corsHdrs });
+
+  const action = actions[0];
+
+  // Execute the approved action
+  if (action.action_type === 'shortlist_candidate' && action.target_id) {
+    await fetch(`${env.SUPABASE_URL}/rest/v1/applications?id=eq.${action.target_id}`, {
+      method: "PATCH",
+      headers: { apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`, "Content-Type": "application/json", Prefer: "return=minimal" },
+      body: JSON.stringify({ status: 'shortlisted' }),
+    });
+  } else if (action.action_type === 'approve_leave' && action.target_id) {
+    await fetch(`${env.SUPABASE_URL}/rest/v1/leave_requests?id=eq.${action.target_id}`, {
+      method: "PATCH",
+      headers: { apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`, "Content-Type": "application/json", Prefer: "return=minimal" },
+      body: JSON.stringify({ status: 'approved' }),
+    });
+  }
+
+  // Mark action as approved
+  await fetch(`${env.SUPABASE_URL}/rest/v1/agent_actions?id=eq.${actionId}`, {
+    method: "PATCH",
+    headers: { apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`, "Content-Type": "application/json", Prefer: "return=minimal" },
+    body: JSON.stringify({ status: 'approved', approved_by: ctx.actorId, approved_at: new Date().toISOString() }),
+  });
+
+  await audit(env, ctx, 'agent_action_approved', 'agent_action', actionId, { action_type: action.action_type, target_id: action.target_id });
+
+  return Response.json({ success: true, data: { id: actionId, status: 'approved' } }, { headers: corsHdrs });
+}
+
+async function handleRejectAgentAction(request, env, ctx, [actionId]) {
+  requireAuth(ctx);
+  requireRole(ctx, 'admin', 'company_admin', 'hr_manager', 'super_admin');
+  const corsHdrs = getCorsHeaders(request);
+  const tenantId = ctx.tenantId;
+
+  await fetch(`${env.SUPABASE_URL}/rest/v1/agent_actions?id=eq.${actionId}&company_id=eq.${tenantId}`, {
+    method: "PATCH",
+    headers: { apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`, "Content-Type": "application/json", Prefer: "return=minimal" },
+    body: JSON.stringify({ status: 'rejected', approved_by: ctx.actorId, approved_at: new Date().toISOString() }),
+  });
+
+  return Response.json({ success: true, data: { id: actionId, status: 'rejected' } }, { headers: corsHdrs });
+}
+
+async function handleRunAgentsNow(request, env, ctx) {
+  requireAuth(ctx);
+  requireRole(ctx, 'admin', 'company_admin', 'super_admin');
+  const corsHdrs = getCorsHeaders(request);
+  const tenantId = ctx.tenantId;
+
+  // Rate limit: 1 manual run per hour
+  if (env.HR_KV) {
+    const rateLimitKey = `agent_manual:${tenantId}`;
+    const lastRun = await env.HR_KV.get(rateLimitKey);
+    if (lastRun) {
+      return Response.json({ success: false, error: 'Manual agent run limited to once per hour. Please wait.' }, { status: 429, headers: corsHdrs });
+    }
+    await env.HR_KV.put(rateLimitKey, new Date().toISOString(), { expirationTtl: 3600 });
+  }
+
+  // Fetch company plan
+  const compRes = await fetch(
+    `${env.SUPABASE_URL}/rest/v1/companies?id=eq.${tenantId}&select=subscription_plan,agent_mode,agent_daily_limit`,
+    { headers: { apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}` } }
+  );
+  const comp = compRes.ok ? (await compRes.json())?.[0] : null;
+
+  if (!comp?.agent_mode) {
+    return Response.json({ success: false, error: 'Agent mode is not enabled. Enable it first.' }, { status: 400, headers: corsHdrs });
+  }
+
+  try {
+    await runAgentOrchestrator(env, tenantId, comp.subscription_plan, comp.agent_daily_limit, "manual");
+    return Response.json({ success: true, data: { message: 'Agent run triggered successfully. Check runs for results.' } }, { headers: corsHdrs });
+  } catch (err) {
+    return Response.json({ success: false, error: err.message }, { status: 500, headers: corsHdrs });
+  }
+}
+
+async function handleAgentStats(request, env, ctx) {
+  requireAuth(ctx);
+  const corsHdrs = getCorsHeaders(request);
+  const tenantId = ctx.tenantId;
+
+  const todayStart = new Date();
+  todayStart.setUTCHours(0, 0, 0, 0);
+
+  const [actionsRes, pendingRes, runsRes] = await Promise.all([
+    fetch(`${env.SUPABASE_URL}/rest/v1/agent_actions?company_id=eq.${tenantId}&created_at=gte.${todayStart.toISOString()}&select=id,status`, { headers: { apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}` } }),
+    fetch(`${env.SUPABASE_URL}/rest/v1/agent_actions?company_id=eq.${tenantId}&status=eq.pending_approval&select=id`, { headers: { apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}` } }),
+    fetch(`${env.SUPABASE_URL}/rest/v1/agent_runs?company_id=eq.${tenantId}&created_at=gte.${todayStart.toISOString()}&select=id,duration_ms`, { headers: { apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}` } }),
+  ]);
+
+  const todayActions = actionsRes.ok ? await actionsRes.json() : [];
+  const pendingActions = pendingRes.ok ? await pendingRes.json() : [];
+  const todayRuns = runsRes.ok ? await runsRes.json() : [];
+
+  const totalMs = todayRuns.reduce((sum, r) => sum + (r.duration_ms || 0), 0);
+  const autoApproved = todayActions.filter(a => a.status === 'executed').length;
+
+  return Response.json({ success: true, data: {
+    actions_today: todayActions.length,
+    auto_approved: autoApproved,
+    pending_review: pendingActions.length,
+    time_saved_minutes: Math.round(todayActions.length * 5), // ~5 min per manual action
+    runs_today: todayRuns.length,
+    total_duration_ms: totalMs,
+  }}, { headers: corsHdrs });
 }
