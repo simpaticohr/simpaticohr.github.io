@@ -3581,7 +3581,7 @@ ${config.rules}
                             if (state.voice.isListening && !state.voice.isProcessing) {
                                 try { state.voice.recognition.start(); } catch (err) {}
                             }
-                        }, 800);
+                        }, 2000);
                         return;
                     }
                     // Restart on any recoverable error — not just the original 3
@@ -3595,13 +3595,22 @@ ${config.rules}
                         ' isSpeaking=' + state.voice.isSpeaking + ' isProcessing=' + state.voice.isProcessing);
                     // Restart recognition if we SHOULD be listening and aren't processing
                     if (state.voice.isListening && !state.voice.isProcessing) {
+                        // On MOBILE: only auto-restart if user was mid-speech (has active transcript).
+                        // Otherwise Android plays the mic activation sound on every .start() call,
+                        // causing an annoying continuous clicking during idle/silence periods.
+                        // The explicit startListening() call after AI finishes speaking handles
+                        // the initial recognition start — no need to loop here during idle.
+                        if (state.isMobile && !state.voice.finalTranscript && !state.voice.currentTranscript && state.voice.lastSpeechTime === 0) {
+                            console.log('[STT] Mobile idle — skipping auto-restart to avoid mic sound loop');
+                            return;
+                        }
                         setTimeout(() => {
                             if (state.voice.isListening && !state.voice.isProcessing) {
                                 try { state.voice.recognition.start(); } catch (e) {
                                     console.warn('[STT] Failed to restart recognition:', e.message);
                                 }
                             }
-                        }, 200);
+                        }, state.isMobile ? 600 : 200);
                     }
                 };
             } else {
