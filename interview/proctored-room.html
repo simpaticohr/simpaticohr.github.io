@@ -2102,6 +2102,42 @@
         }
         .results-btn:hover { transform: translateY(-2px); box-shadow: 0 10px 30px rgba(99,102,241,.55); }
 
+        /* — Mobile Responsive Adaptation — */
+        @media (max-width: 768px) {
+            html, body, .app {
+                height: 100dvh !important;
+                overflow-y: auto !important;
+            }
+            .topbar {
+                height: 48px !important;
+                padding: 0 12px !important;
+            }
+            .topbar .tb-logo {
+                font-size: 13px !important;
+            }
+            .topbar .tb-badge {
+                display: none !important;
+            }
+            .timer-pill {
+                padding: 4px 10px !important;
+                font-size: 11px !important;
+            }
+            .setup-modal {
+                width: 95% !important;
+                padding: 20px 16px !important;
+                max-height: 90vh !important;
+                overflow-y: auto !important;
+            }
+            .vc-btn {
+                min-height: 48px !important;
+                padding: 10px 16px !important;
+            }
+            .self-cam-preview {
+                width: 100px !important;
+                height: 130px !important;
+            }
+        }
+
         /* — Toasts — */
         .toast-container > * { animation: pr-rise .3s ease both; }
     </style>
@@ -2394,6 +2430,7 @@
         // STATE MANAGEMENT
         // ══════════════════════════════════════════════════════════════
         const state = {
+            isMobile: /iPhone|iPad|iPod|Android/i.test(navigator.userAgent) || window.innerWidth <= 768,
             media: {
                 stream: null,
                 screen: null,
@@ -3257,9 +3294,11 @@ ${config.rules}
                     state.media.stream = null;
                 }
 
+                const idealW = state.isMobile ? 640 : 1280;
+                const idealH = state.isMobile ? 480 : 720;
                 const constraints = attempt <= 1
-                    ? { video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' }, audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } }
-                    : { video: true, audio: true }; // Simplified constraints on retry
+                    ? { video: { width: { ideal: idealW }, height: { ideal: idealH }, facingMode: 'user' }, audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } }
+                    : { video: { facingMode: 'user' }, audio: true }; // Simplified constraints on retry
 
                 return navigator.mediaDevices.getUserMedia(constraints);
             }
@@ -3267,9 +3306,14 @@ ${config.rules}
             let mediaAcquired = false;
             for (let attempt = 1; attempt <= 3 && !mediaAcquired; attempt++) {
                 try {
-                    console.log(`[Media] Attempt ${attempt}/3...`);
+                    console.log(`[Media] Attempt ${attempt}/3... (isMobile=${state.isMobile})`);
                     state.media.stream = await tryGetMedia(attempt);
-                    document.getElementById('setupVid').srcObject = state.media.stream;
+                    const sVid = document.getElementById('setupVid');
+                    if (sVid) {
+                        sVid.setAttribute('playsinline', 'true');
+                        sVid.setAttribute('webkit-playsinline', 'true');
+                        sVid.srcObject = state.media.stream;
+                    }
                     setChk('c1', 'pass');
                     setChk('c2', 'pass');
                     mediaAcquired = true;
@@ -3288,8 +3332,13 @@ ${config.rules}
                         // Last attempt or unknown error — try video-only or audio-only
                         try {
                             console.log('[Media] Trying video-only...');
-                            state.media.stream = await navigator.mediaDevices.getUserMedia({ video: true });
-                            document.getElementById('setupVid').srcObject = state.media.stream;
+                            state.media.stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
+                            const sVid = document.getElementById('setupVid');
+                            if (sVid) {
+                                sVid.setAttribute('playsinline', 'true');
+                                sVid.setAttribute('webkit-playsinline', 'true');
+                                sVid.srcObject = state.media.stream;
+                            }
                             setChk('c1', 'pass');
                             setChk('c2', 'fail');
                             showSetupError('Microphone unavailable. Camera is active but voice interview requires a microphone.');
@@ -3318,7 +3367,9 @@ ${config.rules}
                         state.meta.interview?.status === 'in_progress' ||
                         (state.meta.interview?.expires_at && new Date(state.meta.interview.expires_at) < new Date());
                     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-                    document.getElementById('btnBegin').disabled = hasBlockingError || !token || !SR;
+                    // Mobile support: allow proceed if native SR is present OR fallback MediaRecorder stream is ready
+                    const speechAvailable = SR || (state.isMobile && state.media.stream);
+                    document.getElementById('btnBegin').disabled = hasBlockingError || !token || !speechAvailable;
                 }, 2800);
             }
 
@@ -3437,8 +3488,12 @@ ${config.rules}
                     return;
                 }
 
-                // Request screen share first since it is required
-                if (!state.media.screen) {
+                // Request screen share (bypassed on mobile devices)
+                if (state.isMobile) {
+                    setChk('c-screen', 'pass');
+                    state.media.screenShared = false;
+                    console.log('[Media] Mobile device detected: Screen share bypassed, Mobile Fullscreen & Visibility Guard active.');
+                } else if (!state.media.screen) {
                     try {
                         state.media.screen = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
                         setChk('c-screen', 'pass');
@@ -3464,8 +3519,12 @@ ${config.rules}
 
                 document.getElementById('setupOverlay').style.display = 'none';
                 document.getElementById('interviewApp').style.display = 'flex';
-                document.getElementById('selfVid').srcObject = state.media.stream;
-                document.getElementById('screenVid').srcObject = state.media.screen;
+                const selfV = document.getElementById('selfVid');
+                if (selfV) { selfV.setAttribute('playsinline', 'true'); selfV.setAttribute('webkit-playsinline', 'true'); selfV.srcObject = state.media.stream; }
+                if (state.media.screen) {
+                    const scrV = document.getElementById('screenVid');
+                    if (scrV) { scrV.setAttribute('playsinline', 'true'); scrV.setAttribute('webkit-playsinline', 'true'); scrV.srcObject = state.media.screen; }
+                }
 
                 state.session.started = true;
                 state.session.timerInt = setInterval(tick, 1000);
@@ -3501,8 +3560,12 @@ ${config.rules}
                 _ttsUnlocked = true;
             }
 
-            // Request screen share
-            if (!state.media.screen) {
+            // Request screen share (bypassed on mobile devices)
+            if (state.isMobile) {
+                setChk('c-screen', 'pass');
+                state.media.screenShared = false;
+                console.log('[Media] Mobile device detected: Screen share bypassed, Mobile Fullscreen & Visibility Guard active.');
+            } else if (!state.media.screen) {
                 try {
                     state.media.screen = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
                     setChk('c-screen', 'pass');
@@ -3529,8 +3592,12 @@ ${config.rules}
 
             document.getElementById('setupOverlay').style.display = 'none';
             document.getElementById('interviewApp').style.display = 'flex';
-            document.getElementById('selfVid').srcObject = state.media.stream;
-            document.getElementById('screenVid').srcObject = state.media.screen;
+            const selfV = document.getElementById('selfVid');
+            if (selfV) { selfV.setAttribute('playsinline', 'true'); selfV.setAttribute('webkit-playsinline', 'true'); selfV.srcObject = state.media.stream; }
+            if (state.media.screen) {
+                const scrV = document.getElementById('screenVid');
+                if (scrV) { scrV.setAttribute('playsinline', 'true'); scrV.setAttribute('webkit-playsinline', 'true'); scrV.srcObject = state.media.screen; }
+            }
 
             // Mark started
             if (state.meta.interview?.id) {
