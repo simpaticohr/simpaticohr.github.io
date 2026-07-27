@@ -3471,6 +3471,19 @@ ${config.rules}
 
                 const idealW = state.isMobile ? 640 : 1280;
                 const idealH = state.isMobile ? 480 : 720;
+
+                // ── MOBILE FIX: Request VIDEO-ONLY for proctoring ──
+                // On Android/iOS Chrome, a combined {video, audio} getUserMedia locks
+                // the hardware mic, preventing webkitSpeechRecognition (external Google
+                // Play Services) from acquiring it. By requesting video-only here,
+                // SpeechRecognition can natively manage mic access without conflicts.
+                if (state.isMobile) {
+                    console.log('[Media] Mobile: requesting VIDEO-ONLY (mic reserved for SpeechRecognition)');
+                    return navigator.mediaDevices.getUserMedia({
+                        video: { width: { ideal: idealW }, height: { ideal: idealH }, facingMode: 'user' }
+                    });
+                }
+
                 const constraints = attempt <= 1
                     ? { video: { width: { ideal: idealW }, height: { ideal: idealH }, facingMode: 'user' }, audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } }
                     : { video: { facingMode: 'user' }, audio: true }; // Simplified constraints on retry
@@ -3622,8 +3635,14 @@ ${config.rules}
                 state.audio.analyser = state.audio.ctx.createAnalyser();
                 state.audio.analyser.fftSize = 256;
                 state.audio.analyser.smoothingTimeConstant = 0.8;
-                state.audio.micSource = state.audio.ctx.createMediaStreamSource(state.media.stream);
-                state.audio.micSource.connect(state.audio.analyser);
+                // On mobile with video-only proctoring, stream has no audio tracks
+                const audioTracks = state.media.stream ? state.media.stream.getAudioTracks() : [];
+                if (audioTracks.length > 0) {
+                    state.audio.micSource = state.audio.ctx.createMediaStreamSource(state.media.stream);
+                    state.audio.micSource.connect(state.audio.analyser);
+                } else {
+                    console.log('[AudioViz] No audio tracks in stream (mobile video-only) — using CSS animations');
+                }
                 animateViz();
             } catch (e) { console.warn('Audio viz error:', e); }
         }
@@ -3954,7 +3973,6 @@ ${config.rules}
                     if (engine.phase === 'closing') {
                         state.voice.isListening = false;
                         try { if (state.voice.recognition) state.voice.recognition.stop(); } catch (e) { }
-                        console.log('[TTS] finishSpeaking → closing phase, no listener restart');
                     } else {
                         // Force-stop any stale recognition immediately
                         try { if (state.voice.recognition) state.voice.recognition.stop(); } catch (e) { }
@@ -4009,6 +4027,13 @@ ${config.rules}
                 }
 
                 // â”€â”€ FALLBACK: Browser speechSynthesis â”€â”€
+                // On MOBILE, skip speechSynthesis entirely — it conflicts with active
+                // media streams and causes "cannot record" errors on Android Chrome.
+                if (state.isMobile) {
+                    console.log('[TTS] Mobile: skipping browser speechSynthesis to avoid mic conflict');
+                    finishSpeaking();
+                    return;
+                }
                 console.log('[TTS] Using browser speechSynthesis fallback');
 
                 if (!state.voice.preferredVoice) {
@@ -5321,14 +5346,22 @@ ${config.rules}
                 const AudioContextClass = window.AudioContext || window.webkitAudioContext;
                 state.duplex.audioCtx = new AudioContextClass({ sampleRate: 16000 });
                 
-                // Get Microphone Access
-                state.duplex.micStream = await navigator.mediaDevices.getUserMedia({
-                    audio: {
-                        echoCancellation: true,
-                        noiseSuppression: true,
-                        autoGainControl: true
-                    }
-                });
+                // Get Microphone Access — on mobile, reuse proctoring stream's audio
+                // tracks to avoid opening a conflicting second getUserMedia({ audio })
+                const existingAudioTracks = state.media.stream ? state.media.stream.getAudioTracks() : [];
+                if (state.isMobile && existingAudioTracks.length > 0) {
+                    console.log('[Duplex] Mobile: reusing proctoring stream audio tracks');
+                    state.duplex.micStream = new MediaStream(existingAudioTracks);
+                } else {
+                    console.log('[Duplex] Acquiring fresh mic stream for duplex');
+                    state.duplex.micStream = await navigator.mediaDevices.getUserMedia({
+                        audio: {
+                            echoCancellation: true,
+                            noiseSuppression: true,
+                            autoGainControl: true
+                        }
+                    });
+                }
                 const source = state.duplex.audioCtx.createMediaStreamSource(state.duplex.micStream);
 
                 // Create Analyser for Avatar Engine Lip Sync

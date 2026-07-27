@@ -3393,6 +3393,10 @@ Guidelines:
 
     // ── Premium Voice Mode Helpers ──
     let synth = window.speechSynthesis;
+    const _isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent) ||
+        (navigator.maxTouchPoints > 1 && /Mac/.test(navigator.userAgent));
+    let _cloudTTSAvailable = null; // null = untested, true/false = tested
+    let _cloudTTSFailCount = 0;
 
     function toggleModeDetails() {
         const mode = document.getElementById('mode-select').value;
@@ -3404,13 +3408,65 @@ Guidelines:
         }
     }
 
+    // ── Cloud TTS via Cloudflare Workers (plays via HTML5 Audio — no mic conflict) ──
+    async function speakTextCloud(text) {
+        const cleanText = text.replace(/\*\*/g, '').replace(/\n/g, ' ').replace(/\s+/g, ' ').trim();
+        console.log('[CloudTTS] Requesting speech:', cleanText.substring(0, 60) + '...');
+        const res = await fetch(`${API_BASE}/ai/tts`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text: cleanText, lang: 'en-US' })
+        });
+        if (!res.ok) {
+            const errText = await res.text().catch(() => 'unknown');
+            throw new Error(`HTTP ${res.status}: ${errText.substring(0, 200)}`);
+        }
+        const audioBlob = await res.blob();
+        if (audioBlob.size < 100) throw new Error('Audio response too small');
+        const audioUrl = URL.createObjectURL(audioBlob);
+        const audio = new Audio(audioUrl);
+        audio.volume = 1.0;
+        return new Promise((resolve, reject) => {
+            const timeout = setTimeout(() => { URL.revokeObjectURL(audioUrl); resolve(); }, 60000);
+            audio.onended = () => { clearTimeout(timeout); URL.revokeObjectURL(audioUrl); console.log('[CloudTTS] Playback complete'); resolve(); };
+            audio.onerror = (e) => { clearTimeout(timeout); URL.revokeObjectURL(audioUrl); reject(new Error('Audio playback failed')); };
+            audio.play().catch(err => { clearTimeout(timeout); URL.revokeObjectURL(audioUrl); reject(err); });
+        });
+    }
+
     let synthWatchdog = null;
     function speakText(text, callback) {
         if (state.voiceMuted) {
             if (callback) callback();
             return;
         }
-        
+
+        // ── MOBILE: Use Cloud TTS to avoid speechSynthesis + mic conflict ──
+        if (_isMobile && _cloudTTSAvailable !== false) {
+            (async () => {
+                try {
+                    await speakTextCloud(text);
+                    _cloudTTSAvailable = true;
+                    _cloudTTSFailCount = 0;
+                    if (callback) callback();
+                } catch (err) {
+                    console.warn('[TTS] Cloud TTS failed on mobile, falling back to browser:', err.message);
+                    _cloudTTSFailCount++;
+                    if (_cloudTTSFailCount >= 3) {
+                        _cloudTTSAvailable = false;
+                        setTimeout(() => { _cloudTTSAvailable = null; _cloudTTSFailCount = 0; }, 60000);
+                    }
+                    // Fall through to browser speechSynthesis
+                    speakTextBrowser(text, callback);
+                }
+            })();
+            return;
+        }
+
+        speakTextBrowser(text, callback);
+    }
+
+    function speakTextBrowser(text, callback) {
         synth.cancel(); // Cancel any active speech
         if (synthWatchdog) clearInterval(synthWatchdog);
         
@@ -3423,7 +3479,7 @@ Guidelines:
                              voices.find(v => v.lang.startsWith('en'));
         if (englishVoice) utterance.voice = englishVoice;
         
-        utterance.rate = 1.05; // Slightly faster for responsiveness
+        utterance.rate = 1.05;
         utterance.pitch = 1.0;
         
         let isEnded = false;
@@ -3478,6 +3534,16 @@ Guidelines:
         try {
             const ctx = getAudioContext();
             if (ctx.state === 'suspended') await ctx.resume();
+
+            // On mobile, skip opening a separate mic stream to avoid
+            // conflicting with webkitSpeechRecognition's mic access.
+            // Use CSS-animated bars driven by SpeechRecognition events instead.
+            if (_isMobile) {
+                console.log('[Waveform] Mobile detected — using CSS waveform (no getUserMedia)');
+                const canvas = document.getElementById('waveform-canvas');
+                if (canvas) canvas.classList.add('active');
+                return;
+            }
 
             if (!micStream) {
                 micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -3737,6 +3803,25 @@ Guidelines:
         
         rec.onerror = function(event) {
             console.error('Speech recognition error:', event.error);
+            // Mobile Chrome: mic conflict with proctoring camera stream
+            if (event.error === 'audio-capture' && _isMobile) {
+                console.warn('[STT] Mobile mic collision — retrying recognition in 800ms...');
+                setTimeout(() => {
+                    if (state.voiceMode && !state.recognitionActive) {
+                        try { rec.start(); } catch (err) { console.warn('[STT] Retry failed:', err.message); }
+                    }
+                }, 800);
+                return;
+            }
+            // Fatal errors — don't retry
+            const fatal = ['not-allowed', 'service-not-allowed', 'language-not-supported'];
+            if (!fatal.includes(event.error) && state.voiceMode) {
+                setTimeout(() => {
+                    if (state.voiceMode && !state.recognitionActive) {
+                        try { rec.start(); } catch (err) {}
+                    }
+                }, 500);
+            }
         };
         
         rec.onend = function() {
@@ -3744,11 +3829,13 @@ Guidelines:
             // Restart if we are still in listening state and user hasn't submitted yet
             const visualizer = document.getElementById('visualizer-container');
             if (state.voiceMode && visualizer && visualizer.classList.contains('listening')) {
-                try {
-                    rec.start();
-                } catch(e) {
-                    console.error('Failed to restart recognition:', e);
-                }
+                setTimeout(() => {
+                    try {
+                        rec.start();
+                    } catch(e) {
+                        console.error('Failed to restart recognition:', e);
+                    }
+                }, _isMobile ? 300 : 100);
             }
         };
         
