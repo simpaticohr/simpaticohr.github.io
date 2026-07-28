@@ -8670,7 +8670,16 @@ async function handleValidateInterview(request, env, ctx) {
     return apiResponse({ valid: false, reason: "Interview link has expired" });
   }
 
-  if (interview.max_attempts && interview.attempts_used >= interview.max_attempts) {
+  // Single-use token session expiry: if started, lock link once duration + grace period ends
+  if (interview.started_at && (interview.token_type === "single" || interview.max_attempts === 1)) {
+    const durationMins = (interview.duration_minutes || 30) + 15;
+    const elapsedMins = (Date.now() - new Date(interview.started_at).getTime()) / (1000 * 60);
+    if (elapsedMins > durationMins) {
+      return apiResponse({ valid: false, reason: "Single-use interview link session has expired" });
+    }
+  }
+
+  if (interview.max_attempts && interview.attempts_used >= interview.max_attempts && interview.status === "completed") {
     return apiResponse({ valid: false, reason: "Maximum attempts reached" });
   }
 
