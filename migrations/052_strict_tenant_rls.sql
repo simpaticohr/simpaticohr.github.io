@@ -107,11 +107,7 @@ CREATE POLICY "tenant_delete_jobs" ON public.jobs
   FOR DELETE TO authenticated
   USING (company_id::text = public.get_my_tenant_id());
 
--- Also allow tenant_id-based access (some rows use tenant_id instead)
-DROP POLICY IF EXISTS "tenant_read_jobs_by_tenant_id" ON public.jobs;
-CREATE POLICY "tenant_read_jobs_by_tenant_id" ON public.jobs
-  FOR SELECT TO authenticated
-  USING (tenant_id = public.get_my_tenant_id());
+
 
 -- ─── INTERVIEWS ────────────────────────────────────────────────────────────
 DROP POLICY IF EXISTS "tenant_read_interviews" ON public.interviews;
@@ -222,9 +218,21 @@ CREATE POLICY "companies_update_own" ON public.companies
 -- ============================================================================
 
 DROP POLICY IF EXISTS "public_read_active_jobs" ON public.jobs;
-CREATE POLICY "public_read_active_jobs" ON public.jobs
-  FOR SELECT TO anon
-  USING (status = 'active' OR status = 'published');
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns 
+    WHERE table_schema = 'public' AND table_name = 'jobs' AND column_name = 'status'
+  ) THEN
+    EXECUTE 'CREATE POLICY "public_read_active_jobs" ON public.jobs
+      FOR SELECT TO anon
+      USING (status = ''active'' OR status = ''published'')';
+  ELSE
+    EXECUTE 'CREATE POLICY "public_read_active_jobs" ON public.jobs
+      FOR SELECT TO anon
+      USING (true)';
+  END IF;
+END $$;
 
 -- ============================================================================
 -- PART 6: Reload PostgREST schema cache
