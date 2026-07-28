@@ -2573,11 +2573,23 @@
         // ──────────────────────────────────────────────────────────
         // UTILITY: Inline error display
         // ──────────────────────────────────────────────────────────
-        function showSetupError(msg) {
+        function showSetupError(msg, isBlocking = true) {
             const el = document.getElementById('setupError');
-            el.innerHTML = `<i class="fas fa-exclamation-triangle" style="font-size:18px;margin-top:1px;flex-shrink:0"></i><div>${msg}</div>`;
-            el.classList.add('show');
+            if (el) {
+                el.innerHTML = `<i class="fas fa-exclamation-triangle" style="font-size:18px;margin-top:1px;flex-shrink:0"></i><div>${msg}</div>`;
+                el.classList.add('show');
+            }
             console.error('[Setup]', msg);
+            if (isBlocking) {
+                state.meta.blocked = true;
+                const btn = document.getElementById('btnBegin');
+                if (btn) {
+                    btn.disabled = true;
+                    btn.style.opacity = '0.5';
+                    btn.style.cursor = 'not-allowed';
+                    btn.innerHTML = '<i class="fas fa-lock" style="margin-right:8px"></i> Interview Completed / Expired';
+                }
+            }
         }
 
         let token = magicToken || localStorage.getItem('simpatico_token') || '';
@@ -3689,15 +3701,23 @@ Candidate's response: "${item.content}".
                 }, 1800);
                 setTimeout(() => {
                     setChk('c4', 'pass');
-                    const hasBlockingError = state.meta.interview === null ||
+                    const hasBlockingError = state.meta.blocked ||
+                        state.meta.interview === null ||
                         state.meta.interview?.status === 'completed' ||
-                        state.meta.interview?.status === 'in_progress' ||
                         (state.meta.interview?.expires_at && new Date(state.meta.interview.expires_at) < new Date());
                     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
                     // Voice answers use SpeechRecognition when available; otherwise the
                     // typed-answer fallback is used (iOS Safari, Firefox) — only require mic/cam stream
                     const speechAvailable = SR || !!state.media.stream;
-                    document.getElementById('btnBegin').disabled = hasBlockingError || !token || !speechAvailable;
+                    const btn = document.getElementById('btnBegin');
+                    if (btn) {
+                        btn.disabled = hasBlockingError || !token || !speechAvailable;
+                        if (hasBlockingError) {
+                            btn.style.opacity = '0.5';
+                            btn.style.cursor = 'not-allowed';
+                            btn.innerHTML = '<i class="fas fa-lock" style="margin-right:8px"></i> Interview Completed / Expired';
+                        }
+                    }
                 }, 2800);
             }
 
@@ -3842,6 +3862,10 @@ Candidate's response: "${item.content}".
         }
 
         async function startSession() {
+            if (state.meta.blocked || state.meta.interview?.status === 'completed') {
+                showSetupError('This interview link has already been completed and cannot be accessed again.');
+                return;
+            }
             applyMobileUI();
             // Re-entry guard (duplex→classic fallback recurses into startSession)
             if (state.session.timerInt) { clearInterval(state.session.timerInt); state.session.timerInt = null; }

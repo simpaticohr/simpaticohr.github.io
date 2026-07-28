@@ -5133,11 +5133,12 @@ async function handleInterviewQuestion(request, env, ctx) {
   if (token && typeof token === "string" && token.length >= 8) {
     const iv = await fetchInterviewByToken(env, token);
     if (!iv) throw new AppError("Invalid interview token", HTTP.FORBIDDEN, "INVALID_TOKEN");
-    // Allow reusable tokens for candidate practice / re-entry
-    // if (iv.status === "completed") throw new AppError("Interview already completed", HTTP.FORBIDDEN, "COMPLETED");
+    if (iv.status === "completed" && iv.token_type !== "practice" && iv.token_type !== "demo") {
+      throw new AppError("This interview has already been completed.", HTTP.FORBIDDEN, "COMPLETED");
+    }
     if (iv.expires_at && new Date(iv.expires_at) < new Date()) throw new AppError("Interview link expired", HTTP.FORBIDDEN, "EXPIRED");
     // Enforce single-use / max-attempts — prevent question generation after limit
-    if (iv.max_attempts && iv.max_attempts > 0 && (iv.attempts_used || 0) >= iv.max_attempts && iv.status === "completed") {
+    if (iv.max_attempts && iv.max_attempts > 0 && (iv.attempts_used || 0) >= iv.max_attempts) {
       throw new AppError("Maximum attempts reached", HTTP.FORBIDDEN, "MAX_ATTEMPTS_REACHED");
     }
     await rateLimitInterview(env, `iq:${token}`, 60, 3600);
