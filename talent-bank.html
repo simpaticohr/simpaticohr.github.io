@@ -280,10 +280,62 @@
       flex: 1; padding: 12px; background: var(--gradient-primary); border: none;
       border-radius: 12px; color: #fff; font-weight: 700; cursor: pointer;
     }
+    /* ── UPGRADE OVERLAY ── */
+    .upgrade-overlay {
+      position: fixed; inset: 0; z-index: 500;
+      background: rgba(6,8,15,0.95); backdrop-filter: blur(20px);
+      display: none; align-items: center; justify-content: center;
+      padding: 2rem; text-align: center;
+    }
+    .upgrade-overlay.active { display: flex; }
+    .upgrade-card {
+      background: var(--bg-card); border: 1px solid var(--border-glow);
+      border-radius: 28px; padding: 3rem 2.5rem; max-width: 520px; width: 100%;
+      box-shadow: 0 25px 60px rgba(99,102,241,0.15);
+    }
+    .upgrade-icon {
+      width: 80px; height: 80px; border-radius: 50%; margin: 0 auto 1.5rem;
+      background: rgba(99,102,241,0.15); border: 2px solid rgba(99,102,241,0.4);
+      display: flex; align-items: center; justify-content: center;
+      color: var(--primary-light); font-size: 2rem;
+    }
+    .upgrade-card h2 {
+      font-family: 'Space Grotesk', sans-serif; font-size: 1.6rem;
+      font-weight: 800; color: #fff; margin-bottom: 0.75rem;
+    }
+    .upgrade-card p {
+      color: var(--text-sec); font-size: 0.95rem; line-height: 1.6;
+      margin-bottom: 2rem; max-width: 400px; margin-left: auto; margin-right: auto;
+    }
+    .btn-upgrade {
+      display: inline-flex; align-items: center; gap: 8px;
+      background: var(--gradient-primary); color: #fff; font-weight: 700;
+      font-size: 1rem; padding: 14px 32px; border-radius: 14px; border: none;
+      cursor: pointer; transition: all 0.2s; text-decoration: none;
+    }
+    .btn-upgrade:hover { transform: translateY(-2px); box-shadow: 0 8px 25px rgba(99,102,241,0.4); }
+    .btn-back {
+      display: inline-flex; align-items: center; gap: 6px;
+      color: var(--text-sec); font-size: 0.85rem; font-weight: 600;
+      margin-top: 1rem; text-decoration: none; transition: color 0.2s;
+    }
+    .btn-back:hover { color: #fff; }
   </style>
 </head>
 <body>
   <div class="bg-glow"></div>
+
+  <!-- UPGRADE REQUIRED OVERLAY -->
+  <div class="upgrade-overlay" id="upgradeOverlay">
+    <div class="upgrade-card">
+      <div class="upgrade-icon"><i class="fas fa-lock"></i></div>
+      <h2>Subscription Required</h2>
+      <p>The Talent Data Bank is available exclusively to subscribed employers. Upgrade your plan to search verified, AI-certified candidate profiles and unlock contact details.</p>
+      <a href="platform/pricing.html" class="btn-upgrade"><i class="fas fa-rocket"></i> View Plans & Upgrade</a>
+      <br>
+      <a href="employers.html" class="btn-back"><i class="fas fa-arrow-left"></i> Back to Employers</a>
+    </div>
+  </div>
 
   <!-- NAVIGATION -->
   <nav class="nav">
@@ -382,10 +434,80 @@
     </div>
   </div>
 
+  <script src="js/hr-config.js"></script>
+  <script src="js/shared-utils.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="js/supabase-client.js"></script>
   <script>
+    // ── Auth guard ── redirect unauthenticated users to login
+    if (!localStorage.getItem('simpatico_token') && !(typeof getAuthToken === 'function' && getAuthToken())) {
+      location.replace('/platform/login.html');
+    }
+
+    const CONFIG = window.SIMPATICO_CONFIG || {};
+    const API_BASE = CONFIG.workerUrl || '';
+
     let activeSkills = new Set();
     let currentUnlockTargetId = null;
-    let availableCredits = 8;
+    let availableCredits = 0;
+
+    // ── Get auth headers for API calls ──
+    function getHeaders() {
+      if (typeof authHeaders === 'function') return authHeaders();
+      const token = (typeof getAuthToken === 'function') ? getAuthToken() : localStorage.getItem('simpatico_token') || '';
+      const hdrs = { 'Content-Type': 'application/json' };
+      if (token) hdrs['Authorization'] = 'Bearer ' + token;
+      if (CONFIG.supabaseAnonKey) hdrs['apikey'] = CONFIG.supabaseAnonKey;
+      const tenantId = CONFIG.tenantId || ((typeof getCompanyId === 'function') ? getCompanyId() : null);
+      if (tenantId) hdrs['X-Tenant-ID'] = tenantId;
+      return hdrs;
+    }
+
+    // ── Subscription gate ── checks plan before rendering
+    async function checkSubscription() {
+      try {
+        const res = await fetch(API_BASE + '/billing/subscription', { headers: getHeaders() });
+        if (res.status === 401) {
+          // Token expired or invalid — redirect to login
+          location.replace('/platform/login.html');
+          return false;
+        }
+        const data = await res.json();
+        const sub = data?.data || data;
+        const plan = (sub?.plan || 'trial').toLowerCase();
+        const status = (sub?.status || 'trial').toLowerCase();
+
+        // Allow only active paid subscriptions
+        const blockedPlans = ['trial', 'expired_trial', 'free'];
+        const blockedStatuses = ['cancelled', 'expired', 'suspended'];
+
+        if (blockedPlans.includes(plan) || blockedStatuses.includes(status)) {
+          document.getElementById('upgradeOverlay').classList.add('active');
+          return false;
+        }
+        return true;
+      } catch (e) {
+        console.warn('Subscription check error:', e);
+        // If we can't verify, block access to be safe
+        document.getElementById('upgradeOverlay').classList.add('active');
+        return false;
+      }
+    }
+
+    // ── Load real credit balance from server ──
+    async function loadCredits() {
+      try {
+        const res = await fetch(API_BASE + '/employer/credits', { headers: getHeaders() });
+        if (res.ok) {
+          const data = await res.json();
+          const d = data?.data || data;
+          availableCredits = d?.credits_remaining ?? 0;
+          document.getElementById('navCreditsCount').textContent = availableCredits;
+        }
+      } catch (e) {
+        console.warn('Credits fetch note:', e);
+      }
+    }
 
     async function loadCandidates() {
       const query = document.getElementById('searchInput').value;
@@ -397,13 +519,18 @@
       container.innerHTML = '<div style="grid-column: 1/-1; text-align:center; padding: 4rem; color: var(--text-sec);"><i class="fas fa-spinner fa-spin fa-2x"></i><br><br>Searching verified candidate data bank...</div>';
 
       try {
-        const res = await fetch('/talent-bank/search', {
+        const res = await fetch(API_BASE + '/talent-bank/search', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ query, minScore, verifiedStatus, skill, companyId: 'demo-company-1' })
+          headers: getHeaders(),
+          body: JSON.stringify({ query, minScore, verifiedStatus, skill })
         });
+        if (res.status === 401) {
+          location.replace('/platform/login.html');
+          return;
+        }
         const data = await res.json();
-        renderCandidates(data.candidates || []);
+        const candidates = data?.data?.candidates || data?.candidates || [];
+        renderCandidates(candidates);
       } catch(e) {
         console.warn('API fetch note:', e);
         renderCandidates([]);
@@ -517,24 +644,39 @@
       if(!currentUnlockTargetId) return;
 
       try {
-        const res = await fetch(`/talent-bank/unlock/${currentUnlockTargetId}`, {
+        const res = await fetch(API_BASE + `/talent-bank/unlock/${currentUnlockTargetId}`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ companyId: 'demo-company-1' })
+          headers: getHeaders()
         });
+
+        if (res.status === 401) {
+          location.replace('/platform/login.html');
+          return;
+        }
+
         const data = await res.json();
-        
-        availableCredits = Math.max(0, availableCredits - 1);
-        document.getElementById('navCreditsCount').textContent = availableCredits;
-        
+        const d = data?.data || data;
+
+        if (d?.credits_remaining !== undefined) {
+          availableCredits = d.credits_remaining;
+          document.getElementById('navCreditsCount').textContent = availableCredits;
+        } else {
+          // Fallback: re-fetch credits from server
+          await loadCredits();
+        }
+
+        if (!data.success && data.code === 'INSUFFICIENT_CREDITS') {
+          alert('No unlock credits remaining. Please upgrade your subscription.');
+          closeModal();
+          return;
+        }
+
         closeModal();
         loadCandidates();
       } catch(e) {
         console.warn('Unlock API error:', e);
-        availableCredits = Math.max(0, availableCredits - 1);
-        document.getElementById('navCreditsCount').textContent = availableCredits;
         closeModal();
-        loadCandidates();
+        alert('Failed to unlock profile. Please try again.');
       }
     }
 
@@ -542,7 +684,13 @@
       alert(`⚡ Current Balance: ${availableCredits} Unlock Credits Available.\n\nTo purchase additional credits, visit your Billing Settings in Client Portal.`);
     }
 
-    document.addEventListener('DOMContentLoaded', loadCandidates);
+    // ── Page init: check subscription → load credits → load candidates ──
+    document.addEventListener('DOMContentLoaded', async () => {
+      const hasAccess = await checkSubscription();
+      if (!hasAccess) return; // Overlay is shown, stop here
+      await loadCredits();
+      loadCandidates();
+    });
   </script>
 </body>
 </html>

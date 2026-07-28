@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title id="pageTitle">Job Details | Simpatico HR</title>
   <meta name="description" id="metaDesc" content="View job details and apply. AI-powered recruitment by Simpatico HR.">
-  <meta name="robots" content="index, follow">
+  <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1">
 
   <!-- Open Graph -->
   <meta property="og:type" content="website">
@@ -259,9 +259,10 @@ async function loadJob() {
     // Check trial expiration (2 days / 48 hours for unsubscribed trial accounts)
     if (job.company_id) {
       try {
-        const cRes = await fetch(`${SB_URL}/rest/v1/companies?id=eq.${job.company_id}&select=subscription_plan`, { headers: SB_HDR });
+        const cRes = await fetch(`${SB_URL}/rest/v1/companies?id=eq.${job.company_id}&select=subscription_plan,name,logo_url,description`, { headers: SB_HDR });
         if (cRes.ok) {
           const cArr = await cRes.json();
+          window._jobCompany = cArr?.[0] || null; // brand: name/logo for SEO + badge
           const plan = (cArr?.[0]?.subscription_plan || 'trial').toLowerCase();
           const isPaid = ['starter', 'professional', 'enterprise', 'pro', 'business', 'premium'].includes(plan);
           const createdMs = job.created_at ? new Date(job.created_at).getTime() : Date.now();
@@ -286,8 +287,20 @@ async function loadJob() {
 // ---------------------------------------------------------------
 // RENDER JOB
 // ---------------------------------------------------------------
+// Brand resolver: the company record (name/logo uploaded in Settings) wins
+// over any denormalized job fields.
+function getBrand(job) {
+  const co = window._jobCompany || {};
+  return {
+    name: co.name || job.company_name || job.department || 'Simpatico HR',
+    logo: co.logo_url || null,
+    desc: co.description || '',
+  };
+}
+
 function renderJob(job) {
-  const company = job.company_name || job.department || 'Simpatico HR';
+  const brand = getBrand(job);
+  const company = brand.name;
   const location = job.location || 'Remote';
   const type = job.employment_type || job.job_type || 'Full-time';
   const level = job.level || '';
@@ -316,7 +329,7 @@ function renderJob(job) {
           <span>${job.title || 'Job Details'}</span>
         </div>
         <a class="company-badge" href="${companyLink}">
-          <span class="co-logo">${company.charAt(0).toUpperCase()}</span>
+          <span class="co-logo">${brand.logo ? `<img src="${brand.logo}" alt="${company}" style="width:100%;height:100%;object-fit:cover;border-radius:8px">` : company.charAt(0).toUpperCase()}</span>
           ${company}
           <i class="fa fa-arrow-right" style="font-size:.65rem;opacity:.5"></i>
         </a>
@@ -444,10 +457,15 @@ function isRemoteJob(location) {
 }
 
 function injectSEO(job) {
-  const company = job.company_name || job.department || 'Simpatico HR';
+  const brand = getBrand(job);
+  const company = brand.name;
   const location = job.location || 'Remote';
-  const title = `${job.title} at ${company} — ${location} | Simpatico HR`;
-  const desc = (job.description || '').substring(0, 160).replace(/[*#_\n]/g, '').replace(/<!--[\s\S]*?-->/g, '') + '...';
+  const type = job.employment_type || job.job_type || 'Full-time';
+  const salary = formatSalary(job.salary_min, job.salary_max);
+  // "Title in Location" pattern — matches how candidates actually search (GEO)
+  const title = `${job.title} in ${location} — ${company} | Simpatico HR`;
+  const snippet = (job.description || '').replace(/<!--[\s\S]*?-->/g, '').replace(/[*#_\n]/g, ' ').replace(/\s+/g, ' ').trim().substring(0, 100);
+  const desc = `Apply for ${job.title} at ${company} in ${location}. ${type}${salary ? ` · ${salary}` : ''}. ${snippet}`.substring(0, 165);
   const url = window.location.origin + getCleanJobUrl(job);
   const country = detectCountry(location);
 
@@ -460,6 +478,16 @@ function injectSEO(job) {
   document.getElementById('twTitle')?.setAttribute('content', title);
   document.getElementById('twDesc')?.setAttribute('content', desc);
   document.getElementById('canonical')?.setAttribute('href', url);
+
+  // Social cards carry the employer's own logo when uploaded
+  if (brand.logo) {
+    [['property', 'og:image'], ['name', 'twitter:image']].forEach(([attr, n]) => {
+      const el = document.createElement('meta');
+      el.setAttribute(attr, n);
+      el.setAttribute('content', brand.logo);
+      document.head.appendChild(el);
+    });
+  }
 
   // Geo meta tags for global SEO
   const geoMeta = [
@@ -478,10 +506,14 @@ function injectSEO(job) {
 }
 
 function injectJsonLD(job) {
-  const company = job.company_name || job.department || 'Simpatico HR';
+  const brand = getBrand(job);
+  const company = brand.name;
   const location = job.location || 'Remote';
   const country = detectCountry(location);
   const remote = isRemoteJob(location);
+  const portalUrl = job.company_id
+    ? `${window.location.origin}/company/${slugify(company)}-${job.company_id}`
+    : window.location.origin;
 
   // validThrough: 60 days from posting, or 90 days from now
   const posted = job.created_at ? new Date(job.created_at) : new Date();
@@ -498,8 +530,8 @@ function injectJsonLD(job) {
     "hiringOrganization": {
       "@type": "Organization",
       "name": company,
-      "sameAs": window.location.origin,
-      "logo": window.location.origin + '/favicon-96x96.png'
+      "sameAs": portalUrl,
+      "logo": brand.logo || (window.location.origin + '/favicon-96x96.png')
     },
     "jobLocation": {
       "@type": "Place",
@@ -561,6 +593,18 @@ function injectJsonLD(job) {
   el.type = 'application/ld+json';
   el.textContent = JSON.stringify(schema);
   document.head.appendChild(el);
+
+  // Breadcrumb schema — richer SERP display (Home > Jobs > Company > Job)
+  const crumbItems = [
+    { "@type": "ListItem", "position": 1, "name": "Home", "item": window.location.origin + '/' },
+    { "@type": "ListItem", "position": 2, "name": "Jobs", "item": window.location.origin + '/jobs.html' },
+  ];
+  if (job.company_id) crumbItems.push({ "@type": "ListItem", "position": 3, "name": company, "item": portalUrl });
+  crumbItems.push({ "@type": "ListItem", "position": crumbItems.length + 1, "name": job.title, "item": window.location.origin + getCleanJobUrl(job) });
+  const crumbEl = document.createElement('script');
+  crumbEl.type = 'application/ld+json';
+  crumbEl.textContent = JSON.stringify({ "@context": "https://schema.org/", "@type": "BreadcrumbList", "itemListElement": crumbItems });
+  document.head.appendChild(crumbEl);
 }
 
 // ---------------------------------------------------------------

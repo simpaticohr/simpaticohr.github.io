@@ -285,10 +285,65 @@ function debounce(fn, ms) { let t; return function(...a) { clearTimeout(t); t = 
 
 function injectSEO() {
   const name = companyData.name || 'Company';
-  const title = `Careers at ${name} — ${allJobs.length} Open Positions | Simpatico HR`;
+  const locations = [...new Set(allJobs.map(j => j.location).filter(Boolean))];
+  const locStr = locations.slice(0, 3).join(', ');
+  const title = `Careers at ${name} — ${allJobs.length} Job${allJobs.length !== 1 ? 's' : ''}${locStr ? ` in ${locStr}` : ''} | Simpatico HR`;
+  const desc = `Explore ${allJobs.length} open position${allJobs.length !== 1 ? 's' : ''} at ${name}${locStr ? ` in ${locStr}` : ''}. Apply online and get AI-screened instantly.`;
+  const pageUrl = window.location.href.split('#')[0];
+
   document.title = title;
+  document.getElementById('metaDesc')?.setAttribute('content', desc);
   document.getElementById('ogTitle')?.setAttribute('content', title);
-  document.getElementById('ogDesc')?.setAttribute('content', `Browse ${allJobs.length} open positions at ${name}. Apply and get AI-screened instantly.`);
+  document.getElementById('ogDesc')?.setAttribute('content', desc);
+
+  // Twitter + canonical + OG extras
+  const extra = [
+    ['name', 'twitter:card', 'summary'],
+    ['name', 'twitter:title', title],
+    ['name', 'twitter:description', desc],
+    ['property', 'og:url', pageUrl],
+    ['property', 'og:site_name', name],
+  ];
+  if (companyData.logo_url) {
+    extra.push(['property', 'og:image', companyData.logo_url], ['name', 'twitter:image', companyData.logo_url]);
+  }
+  extra.forEach(([attr, n, c]) => {
+    const el = document.createElement('meta');
+    el.setAttribute(attr, n); el.setAttribute('content', c);
+    document.head.appendChild(el);
+  });
+  const canon = document.createElement('link');
+  canon.rel = 'canonical'; canon.href = pageUrl;
+  document.head.appendChild(canon);
+
+  // Organization schema — the employer's own brand in search results
+  const org = {
+    "@context": "https://schema.org/",
+    "@type": "Organization",
+    "name": name,
+    "url": pageUrl,
+    ...(companyData.logo_url ? { "logo": companyData.logo_url } : {}),
+    ...(companyData.description ? { "description": companyData.description } : {}),
+  };
+  // ItemList of open roles — Google can deep-link each job card
+  const items = {
+    "@context": "https://schema.org/",
+    "@type": "ItemList",
+    "name": `Open positions at ${name}`,
+    "numberOfItems": allJobs.length,
+    "itemListElement": allJobs.map((j, i) => ({
+      "@type": "ListItem",
+      "position": i + 1,
+      "name": j.title,
+      "url": window.location.origin + getJobUrl(j),
+    })),
+  };
+  [org, items].forEach(schema => {
+    const el = document.createElement('script');
+    el.type = 'application/ld+json';
+    el.textContent = JSON.stringify(schema);
+    document.head.appendChild(el);
+  });
 }
 
 init();
