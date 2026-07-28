@@ -3399,6 +3399,31 @@ async function initApp() {
                     
                     const profile = profiles?.[0];
                     if (profile?.company_id) {
+                        // Verify that company_id actually belongs to a company owned by this user OR user is explicitly linked by email
+                        const { data: compVerification } = await db
+                            .from('companies')
+                            .select('id, email')
+                            .eq('id', profile.company_id)
+                            .limit(1);
+                        
+                        const targetComp = compVerification?.[0];
+                        if (targetComp && targetComp.email && targetComp.email.toLowerCase() !== (authUser.email || '').toLowerCase()) {
+                            // User is not company owner — verify explicit user email match in users table
+                            const { data: emailMatch } = await db
+                                .from('users')
+                                .select('id')
+                                .eq('email', authUser.email)
+                                .eq('company_id', profile.company_id)
+                                .limit(1);
+                            
+                            if (!emailMatch || emailMatch.length === 0) {
+                                console.warn('[init] 🚨 Unverified company_id rejected for user:', authUser.email);
+                                profile.company_id = null;
+                            }
+                        }
+                    }
+
+                    if (profile?.company_id) {
                         realUser.company_id = profile.company_id;
                         realUser.tenant_id = profile.company_id;
                         if (profile.role) realUser.role = profile.role;
@@ -3568,6 +3593,32 @@ async function syncWithSupabase() {
     try {
         const { data: comp } = await db.from('companies').select('*').eq('id', companyId).limit(1);
         if (comp?.[0]) {
+            // STRICT TENANT ISOLATION: Verify user either owns this company or is explicitly a registered member
+            const companyOwnerEmail = (comp[0].email || '').toLowerCase();
+            const userEmail = (user.email || '').toLowerCase();
+            if (companyOwnerEmail && userEmail && companyOwnerEmail !== userEmail) {
+                // User is not the owner — verify if users table has an explicit member record for this user and company
+                const { data: memberCheck } = await db.from('users')
+                    .select('id, company_id')
+                    .eq('email', userEmail)
+                    .eq('company_id', companyId)
+                    .limit(1);
+                if (!memberCheck || memberCheck.length === 0) {
+                    console.error('[sync] 🚨 TENANT LEAK PREVENTED: User', userEmail, 'is neither owner nor registered member of company', companyId);
+                    user.company_id = null;
+                    user.tenant_id = null;
+                    localStorage.setItem('simpatico_user', JSON.stringify(user));
+                    localStorage.removeItem('simpatico_company');
+                    DataStore.update(data => {
+                        data.jobs = [];
+                        data.interviews = [];
+                        data.job_applications = [];
+                        data.stats.totalEmployees = 0;
+                    });
+                    appData = DataStore.get();
+                    return;
+                }
+            }
             localStorage.setItem('simpatico_company', JSON.stringify(comp[0]));
         }
     } catch(e) {}
