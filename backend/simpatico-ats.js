@@ -593,6 +593,8 @@ async function getCompanyAIConfig(env, tenantId) {
  */
 // Deprecated / sunset models → working replacements
 const DEPRECATED_MODELS = {
+  "gemini-3.6-flash": "gemini-2.5-flash",
+  "gemini-3.5-flash": "gemini-2.5-flash",
   "gemini-1.5-flash": "gemini-2.5-flash",
   "gemini-1.5-pro": "gemini-2.5-pro",
   "gemini-1.0-pro": "gemini-2.5-flash",
@@ -1297,6 +1299,7 @@ function matchRoute(method, path) {
 // Health & Meta (Trigger GH Action)
 route("GET", "/health", handleHealth);
 route("GET", "/version", handleVersion);
+route("GET", "/sitemap-jobs.xml", handleJobsSitemap);
 route("GET", "/api/fix-rls", handleFixRLS);
 route("POST", "/users/ensure-profile", handleEnsureProfile);
 route("POST", "/webhooks/register", handleRegisterWebhook);
@@ -1504,6 +1507,8 @@ route("POST", "/api/interview/evaluate", handleInterviewEvaluate);
 route("POST", "/api/interview/report", handleInterviewReport);
 route("POST", "/api/interview/report-from-transcript", handleInterviewReportFromTranscript);
 route("POST", "/api/interview/match-resume", handleInterviewMatchResume);
+route("POST", "/api/interview/save", handleInterviewSave);
+route("POST", "/ai/interview-score", handleInterviewScore);
 
 route("POST", "/attendance/records/upsert", handleUpsertAttendance);
 
@@ -1540,6 +1545,20 @@ export default {
         status: 204,
         headers: getCorsHeaders(request),
       });
+
+    // ── Gemini Live WS proxy: early intercept — a 101 WebSocket response must
+    // not pass through the router (rate-limit headers would mutate it) ──
+    if (path === "/api/interview/live" && method === "GET") {
+      try {
+        return await handleInterviewLive(request, env);
+      } catch (err) {
+        console.error("[InterviewLive] Error:", err.stack || err.message);
+        return Response.json(
+          { success: false, error: err.message },
+          { status: 500, headers: getCorsHeaders(request) },
+        );
+      }
+    }
 
     // ── Wise Webhook: Early intercept (bypasses auth, rate limiting, tenant context) ──
     // NOTE: Wise webhooks must bypass auth — they are server-to-server calls from Wise.
@@ -5106,6 +5125,24 @@ async function handleInterviewQuestion(request, env, ctx) {
   if (!Array.isArray(messages))
     throw new ValidationError("messages array required");
 
+  // Token validation + per-token rate limit: callers must hold a real,
+  // unexpired, unfinished interview link. Tokenless callers (legacy pages)
+  // get a strict per-IP cap instead of free rein over the LLM.
+  if (token && typeof token === "string" && token.length >= 8) {
+    const iv = await fetchInterviewByToken(env, token);
+    if (!iv) throw new AppError("Invalid interview token", HTTP.FORBIDDEN, "INVALID_TOKEN");
+    // Allow reusable tokens for candidate practice / re-entry
+    // if (iv.status === "completed") throw new AppError("Interview already completed", HTTP.FORBIDDEN, "COMPLETED");
+    if (iv.expires_at && new Date(iv.expires_at) < new Date()) throw new AppError("Interview link expired", HTTP.FORBIDDEN, "EXPIRED");
+    // Enforce single-use / max-attempts — prevent question generation after limit
+    if (iv.max_attempts && iv.max_attempts > 0 && (iv.attempts_used || 0) >= iv.max_attempts && iv.status === "completed") {
+      throw new AppError("Maximum attempts reached", HTTP.FORBIDDEN, "MAX_ATTEMPTS_REACHED");
+    }
+    await rateLimitInterview(env, `iq:${token}`, 60, 3600);
+  } else {
+    await rateLimitInterview(env, `iq:ip:${ctx.ip || "unknown"}`, 20, 3600);
+  }
+
   // Resolve tenant: prefer X-Tenant-ID header, fallback to interview token lookup
   let tenantId = ctx.tenantId;
   if ((!tenantId || tenantId === "default") && token && env.SUPABASE_URL) {
@@ -5196,6 +5233,13 @@ async function handleTTS(request, env, ctx) {
   const { text, lang } = body;
   if (!text || typeof text !== 'string' || text.trim().length === 0) {
     throw new ValidationError("text is required");
+  }
+
+  // Per-token cap for interview sessions; anonymous callers get a per-IP cap
+  if (body.token && typeof body.token === "string" && body.token.length >= 8) {
+    await rateLimitInterview(env, `tts:${body.token}`, 120, 3600);
+  } else {
+    await rateLimitInterview(env, `tts:ip:${ctx.ip || "unknown"}`, 30, 3600);
   }
 
   if (!env.AI) throw new ServiceUnavailableError("AI");
@@ -5716,8 +5760,10 @@ function maskProfile(candidate, isUnlocked) {
 }
 
 async function handleTalentBankSearch(request, env, ctx) {
+  requireAuth(ctx);
   const body = await safeJson(request) || {};
-  const { query = "", skill = "", minScore = 0, verifiedStatus = "all", companyId = "demo-company-1" } = body;
+  const { query = "", skill = "", minScore = 0, verifiedStatus = "all" } = body;
+  const companyId = ctx.tenantId;
 
   let candidates = [];
   try {
@@ -5777,12 +5823,31 @@ async function handleTalentBankSearch(request, env, ctx) {
 }
 
 async function handleTalentBankUnlock(request, env, ctx, [candidateId]) {
-  const body = await safeJson(request) || {};
-  const companyId = body.companyId || "demo-company-1";
+  requireAuth(ctx);
+  const companyId = ctx.tenantId;
 
+  // ── Server-side credit check ──
+  let currentCredits = 0;
+  try {
+    const credRes = await sbFetch(env, "GET", `/rest/v1/companies?select=talent_bank_credits&id=eq.${companyId}`, null, false, companyId);
+    if (credRes.ok) {
+      const credData = await credRes.json();
+      if (Array.isArray(credData) && credData[0]) {
+        currentCredits = credData[0].talent_bank_credits ?? 0;
+      }
+    }
+  } catch (e) {
+    console.warn("Credit check DB note:", e.message);
+  }
+
+  if (currentCredits <= 0) {
+    return errorResponse(new AppError("No unlock credits remaining. Upgrade your subscription or purchase additional credits.", HTTP.FORBIDDEN, "INSUFFICIENT_CREDITS"), ctx.requestId);
+  }
+
+  // ── Check candidate exists ──
   let candidate = null;
   try {
-    const res = await sbFetch(env, "GET", `/rest/v1/candidate_profiles?select=*&id=eq.${candidateId}`, null, false, ctx.tenantId);
+    const res = await sbFetch(env, "GET", `/rest/v1/candidate_profiles?select=*&id=eq.${candidateId}`, null, false, companyId);
     if (res.ok) {
       const data = await res.json();
       if (Array.isArray(data) && data[0]) candidate = data[0];
@@ -5795,19 +5860,62 @@ async function handleTalentBankUnlock(request, env, ctx, [candidateId]) {
     return errorResponse(new NotFoundError("Candidate profile"), ctx.requestId);
   }
 
+  // ── Check if already unlocked (don't double-charge) ──
+  try {
+    const dupRes = await sbFetch(env, "GET", `/rest/v1/profile_unlocks?select=id&company_id=eq.${companyId}&candidate_id=eq.${candidateId}`, null, false, companyId);
+    if (dupRes.ok) {
+      const dupData = await dupRes.json();
+      if (Array.isArray(dupData) && dupData.length > 0) {
+        // Already unlocked — return success without deducting
+        return apiResponse({
+          success: true,
+          message: "Candidate profile already unlocked",
+          candidate: { ...candidate, is_unlocked: true },
+          credits_remaining: currentCredits
+        });
+      }
+    }
+  } catch (e) {
+    console.warn("Duplicate unlock check note:", e.message);
+  }
+
+  // ── Record the unlock ──
   try {
     await sbFetch(env, "POST", "/rest/v1/profile_unlocks", {
       company_id: companyId,
-      candidate_id: candidateId
-    }, false, ctx.tenantId);
+      candidate_id: candidateId,
+      unlocked_by: ctx.actorId || null
+    }, false, companyId);
   } catch (e) {
     console.warn("Record unlock note:", e.message);
+  }
+
+  // ── Deduct 1 credit ──
+  const newCredits = Math.max(0, currentCredits - 1);
+  try {
+    await sbFetch(env, "PATCH", `/rest/v1/companies?id=eq.${companyId}`, {
+      talent_bank_credits: newCredits
+    }, false, companyId);
+  } catch (e) {
+    console.warn("Credit deduction note:", e.message);
+  }
+
+  // ── Audit trail ──
+  try {
+    await audit(env, ctx, "talent_bank.profile_unlocked", "candidate_profiles", candidateId, {
+      company_id: companyId,
+      credits_before: currentCredits,
+      credits_after: newCredits
+    });
+  } catch (e) {
+    console.warn("Audit note:", e.message);
   }
 
   return apiResponse({
     success: true,
     message: "Candidate profile unlocked successfully",
-    candidate: { ...candidate, is_unlocked: true }
+    candidate: { ...candidate, is_unlocked: true },
+    credits_remaining: newCredits
   });
 }
 
@@ -5843,11 +5951,38 @@ async function handleCandidateCertSync(request, env, ctx) {
 }
 
 async function handleGetEmployerCredits(request, env, ctx) {
+  requireAuth(ctx);
+  const companyId = ctx.tenantId;
+
+  let credits = 0;
+  try {
+    const res = await sbFetch(env, "GET", `/rest/v1/companies?select=talent_bank_credits&id=eq.${companyId}`, null, false, companyId);
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data) && data[0]) {
+        credits = data[0].talent_bank_credits ?? 0;
+      }
+    }
+  } catch (e) {
+    console.warn("Credits DB query note:", e.message);
+  }
+
+  // Count how many unlocks this company has made
+  let used = 0;
+  try {
+    const uRes = await sbFetch(env, "GET", `/rest/v1/profile_unlocks?select=id&company_id=eq.${companyId}`, null, false, companyId);
+    if (uRes.ok) {
+      const uData = await uRes.json();
+      if (Array.isArray(uData)) used = uData.length;
+    }
+  } catch (e) {
+    console.warn("Unlock count query note:", e.message);
+  }
+
   return apiResponse({
     success: true,
-    credits_total: 10,
-    credits_used: 2,
-    credits_remaining: 8
+    credits_remaining: credits,
+    credits_used: used
   });
 }
 
@@ -9628,14 +9763,20 @@ async function executeCompletePayment(env, tx, gatewayPaymentId, ctx) {
     }
 
     if (tx.plan !== "consulting_monthly") {
+      // ── Determine talent bank credits allocation based on plan tier ──
+      const PLAN_CREDITS = { starter: 5, professional: 15, enterprise: 50 };
+      const planKey = (tx.plan || "starter").toLowerCase();
+      const creditsToAllocate = PLAN_CREDITS[planKey] || 5;
+
       const compRes = await fetch(`${env.SUPABASE_URL}/rest/v1/companies?id=eq.${companyId}`, {
         method: "PATCH", headers: {
           apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
           "Content-Type": "application/json", Prefer: "return=minimal",
         },
-        body: JSON.stringify({ subscription_plan: tx.plan || "starter" }),
+        body: JSON.stringify({ subscription_plan: tx.plan || "starter", talent_bank_credits: creditsToAllocate }),
       });
       if (!compRes.ok) console.error(`[Billing] Failed to update company plan: ${compRes.status}`);
+      else console.log(`[Billing] Allocated ${creditsToAllocate} talent bank credits to company ${companyId} (plan: ${planKey})`);
     }
 
     // Notify customer
@@ -10849,12 +10990,384 @@ async function handleBYOKConfigSave(request, env, ctx) {
   });
 }
 
+// ── Interview Session Security (token-validated, service-key mediated) ─────
+// The candidate's browser never writes to Supabase directly, and the company's
+// Gemini key never leaves this Worker.
+
+const INTERVIEW_PATCH_FIELDS = new Set([
+  "status", "started_at", "completed_at",
+  "overall_score", "trust_score", "violation_count", "violation_log",
+  "feedback", "conversation_log", "job_title", "attempts_used",
+  "recording_enabled", "recording_url", "recording_file_id",
+  "recording_size_bytes", "recording_expires_at",
+]);
+const INTERVIEW_WRITABLE_STATUS = new Set(["in_progress", "completed", "abandoned"]);
+
+async function fetchInterviewByToken(env, token) {
+  if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_KEY)
+    throw new ServiceUnavailableError("Database");
+  const res = await fetch(
+    `${env.SUPABASE_URL}/rest/v1/interviews?token=eq.${encodeURIComponent(token)}&select=id,client_id,company_id,status,expires_at,max_attempts,attempts_used,token_type&limit=1`,
+    { headers: { apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}` } },
+  );
+  if (!res.ok) return null;
+  const rows = await res.json().catch(() => null);
+  return rows?.[0] || null;
+}
+
+// Per-token sliding-window limiter (best-effort; KV is eventually consistent)
+async function rateLimitInterview(env, key, limit, windowSec) {
+  if (!env.HR_KV) return;
+  const k = `rl:iv:${key}`;
+  const cur = parseInt(await env.HR_KV.get(k), 10) || 0;
+  if (cur >= limit) throw new RateLimitError(windowSec);
+  await env.HR_KV.put(k, String(cur + 1), { expirationTtl: windowSec });
+}
+
+function clampScore(v) {
+  const n = Math.round(Number(v));
+  return Number.isFinite(n) ? Math.min(100, Math.max(0, n)) : 0;
+}
+
+/**
+ * POST /api/interview/save — token-validated, field-whitelisted writes for
+ * interview sessions. Body: { token, patch?, answers? }.
+ */
+async function handleInterviewSave(request, env, ctx) {
+  const body = (await safeJson(request)) || {};
+  const { token, patch, answers } = body;
+  if (!token || typeof token !== "string" || token.length < 8)
+    throw new ValidationError("valid token required");
+  if (!patch && !Array.isArray(answers))
+    throw new ValidationError("patch or answers required");
+
+  await rateLimitInterview(env, `save:${token}`, 240, 3600);
+
+  const iv = await fetchInterviewByToken(env, token);
+  if (!iv) throw new NotFoundError("Interview");
+  if (iv.expires_at && new Date(iv.expires_at) < new Date())
+    throw new AppError("Interview link expired", HTTP.FORBIDDEN, "EXPIRED");
+
+  // ── Single-use / max-attempts enforcement on first start ──
+  // When the interview transitions TO 'in_progress' for the first time,
+  // check whether the candidate has remaining attempts and consume one.
+  if (patch && patch.status === "in_progress" && iv.status !== "in_progress") {
+    const maxAttempts = iv.max_attempts || 0;
+    const usedAttempts = iv.attempts_used || 0;
+    if (maxAttempts > 0 && usedAttempts >= maxAttempts) {
+      throw new AppError(
+        "Maximum attempts reached for this interview link",
+        HTTP.FORBIDDEN,
+        "MAX_ATTEMPTS_REACHED",
+      );
+    }
+    // Atomically increment attempts_used alongside the status change
+    if (!patch._skipAttemptIncrement) {
+      patch.attempts_used = usedAttempts + 1;
+    }
+  }
+
+  const sbHeaders = {
+    apikey: env.SUPABASE_SERVICE_KEY,
+    Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
+    "Content-Type": "application/json",
+    Prefer: "return=minimal",
+  };
+
+  let patched = 0;
+  if (patch && typeof patch === "object") {
+    const clean = {};
+    for (const [k, v] of Object.entries(patch)) {
+      if (INTERVIEW_PATCH_FIELDS.has(k)) clean[k] = v;
+    }
+    if (clean.status && !INTERVIEW_WRITABLE_STATUS.has(clean.status)) delete clean.status;
+    for (const f of ["overall_score", "trust_score", "violation_count"]) {
+      if (clean[f] != null) clean[f] = clampScore(clean[f]);
+    }
+    if (Array.isArray(clean.conversation_log)) clean.conversation_log = clean.conversation_log.slice(-40);
+    if (Array.isArray(clean.violation_log)) clean.violation_log = clean.violation_log.slice(-100);
+    if (clean.feedback && JSON.stringify(clean.feedback).length > 80000) {
+      // keep the signal, drop the bulk
+      if (clean.feedback.room_analysis) delete clean.feedback.room_analysis;
+      if (clean.feedback.code_submissions) delete clean.feedback.code_submissions;
+    }
+    // client_id may only be backfilled when genuinely missing — never moved
+    if (!iv.client_id && typeof patch.client_id === "string" && patch.client_id.length < 64) {
+      clean.client_id = patch.client_id;
+    }
+
+    // A completed interview is sealed — only late recording uploads may still land
+    if (iv.status === "completed") {
+      for (const k of Object.keys(clean)) {
+        if (!k.startsWith("recording_")) delete clean[k];
+      }
+    }
+
+    if (Object.keys(clean).length) {
+      const res = await fetch(`${env.SUPABASE_URL}/rest/v1/interviews?id=eq.${iv.id}`, {
+        method: "PATCH", headers: sbHeaders, body: JSON.stringify(clean),
+      });
+      if (!res.ok) {
+        const t = await res.text().catch(() => "");
+        throw new AppError(`Save failed: ${t.slice(0, 200)}`, HTTP.SERVER_ERROR, "SAVE_FAILED");
+      }
+      patched = Object.keys(clean).length;
+    }
+  }
+
+  let inserted = 0;
+  if (Array.isArray(answers) && answers.length && iv.status !== "completed") {
+    const rows = answers.slice(0, 5).map((a) => ({
+      interview_id: iv.id, // server-enforced — never trust the client's id
+      question_number: Math.min(100, Math.max(0, parseInt(a?.question_number, 10) || 0)),
+      answer_text: String(a?.answer_text || "").slice(0, 8000),
+      score: clampScore(a?.score),
+      word_count: Math.min(100000, Math.max(0, parseInt(a?.word_count, 10) || 0)),
+      flags: Array.isArray(a?.flags) ? a.flags.slice(0, 20).map((f) => String(f).slice(0, 50)) : [],
+      phase: String(a?.phase || "").slice(0, 30),
+      detected_skill: String(a?.detected_skill || "").slice(0, 100),
+    }));
+    const res = await fetch(`${env.SUPABASE_URL}/rest/v1/interview_answers`, {
+      method: "POST", headers: sbHeaders, body: JSON.stringify(rows),
+    });
+    if (!res.ok) {
+      const t = await res.text().catch(() => "");
+      throw new AppError(`Answer save failed: ${t.slice(0, 200)}`, HTTP.SERVER_ERROR, "SAVE_FAILED");
+    }
+    inserted = rows.length;
+  }
+
+  return apiResponse({ patched, inserted });
+}
+
+/**
+ * POST /ai/interview-score — holistic LLM rubric scoring of a finished
+ * interview transcript. Result is merged into interviews.feedback.holistic.
+ */
+async function handleInterviewScore(request, env, ctx) {
+  const body = (await safeJson(request)) || {};
+  const { token, transcript = [], role = "", level = "", skills = [] } = body;
+  if (!token || typeof token !== "string" || token.length < 8)
+    throw new ValidationError("valid token required");
+  if (!Array.isArray(transcript) || !transcript.length)
+    throw new ValidationError("transcript required");
+
+  await rateLimitInterview(env, `score:${token}`, 6, 86400);
+
+  const iv = await fetchInterviewByToken(env, token);
+  if (!iv) throw new NotFoundError("Interview");
+  const tenantId = iv.company_id || iv.client_id || "default";
+
+  const convo = transcript.slice(-40).map((t) => ({
+    role: t.role === "ai" ? "interviewer" : "candidate",
+    text: String(t.content || "").slice(0, 1000),
+  }));
+
+  const system = `You are a senior hiring panel producing a structured interview assessment.
+Score the candidate strictly from the transcript evidence. Return ONLY valid JSON (no markdown) with:
+{
+  "overall": <0-100 integer>,
+  "per_skill": [{"skill": "<name>", "score": <0-100>, "note": "<one sentence of evidence>"}],
+  "summary": "<3-4 sentence panel summary>",
+  "recommendation": "<strong-hire|hire|lean-hire|no-hire>"
+}
+Rules: judge answer substance, specificity, technical depth and communication. Penalize vagueness and buzzword-only answers. Be calibrated — 50 is average, 80+ is exceptional.`;
+
+  const user = `Role: ${role || "unknown"} (level: ${level || "unknown"})
+Skills assessed: ${(Array.isArray(skills) ? skills : []).join(", ") || "general"}
+Transcript (oldest to newest):
+${convo.map((t) => `${t.role.toUpperCase()}: ${t.text}`).join("\n")}`;
+
+  const result = await runLLM(env, tenantId, [
+    { role: "system", content: system },
+    { role: "user", content: user },
+  ], 1500);
+
+  let assessment;
+  try {
+    const txt = (result.response || "").replace(/```json|```/g, "").trim();
+    const parsed = JSON.parse(txt);
+    assessment = {
+      overall: clampScore(parsed.overall),
+      per_skill: Array.isArray(parsed.per_skill)
+        ? parsed.per_skill.slice(0, 12).map((s) => ({
+            skill: String(s.skill || "").slice(0, 60),
+            score: clampScore(s.score),
+            note: String(s.note || "").slice(0, 300),
+          }))
+        : [],
+      summary: String(parsed.summary || "").slice(0, 1500),
+      recommendation: ["strong-hire", "hire", "lean-hire", "no-hire"].includes(parsed.recommendation)
+        ? parsed.recommendation : "lean-hire",
+      generated_at: new Date().toISOString(),
+    };
+  } catch (e) {
+    throw new AppError("Scoring produced unparseable output", HTTP.SERVER_ERROR, "SCORE_PARSE_ERROR");
+  }
+
+  // Merge into feedback.holistic (read-modify-write with service key)
+  try {
+    const curRes = await fetch(
+      `${env.SUPABASE_URL}/rest/v1/interviews?id=eq.${iv.id}&select=feedback&limit=1`,
+      { headers: { apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}` } },
+    );
+    const cur = (await curRes.json())?.[0]?.feedback || {};
+    const merged = { ...cur, holistic: assessment };
+    await fetch(`${env.SUPABASE_URL}/rest/v1/interviews?id=eq.${iv.id}`, {
+      method: "PATCH",
+      headers: { apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`, "Content-Type": "application/json", Prefer: "return=minimal" },
+      body: JSON.stringify({ feedback: merged }),
+    });
+  } catch (e) {
+    console.warn("[interview-score] feedback merge failed:", e.message);
+  }
+
+  return apiResponse({ holistic: assessment });
+}
+
+/**
+ * GET /api/interview/live — WebSocket proxy to Gemini Live (BidiGenerateContent).
+ * The company's Gemini key stays server-side; the browser only sees this Worker.
+ */
+async function handleInterviewLive(request, env) {
+  const corsHdrs = getCorsHeaders(request);
+  const json = (error, status) => Response.json({ success: false, error }, { status, headers: corsHdrs });
+
+  if (request.headers.get("Upgrade") !== "websocket") return json("WebSocket upgrade required", 426);
+
+  // WebSocket has no CORS — enforce the origin allowlist manually
+  const origin = request.headers.get("Origin");
+  if (origin && !ALLOWED_ORIGINS.includes(origin)) return json("Origin not allowed", 403);
+
+  const url = new URL(request.url);
+  const token = url.searchParams.get("token") || "";
+  if (token.length < 8) return json("Missing or invalid token", 400);
+
+  const iv = await fetchInterviewByToken(env, token);
+  if (!iv) return json("Interview not found", 404);
+  if (iv.status === "completed") return json("Interview already completed", 403);
+  if (iv.expires_at && new Date(iv.expires_at) < new Date()) return json("Interview link expired", 403);
+
+  // Session-start cap — generous for refresh/resume, abusive loops get cut off
+  if (env.HR_KV) {
+    const k = `rl:iv:live:${token}`;
+    const cur = parseInt(await env.HR_KV.get(k), 10) || 0;
+    if (cur >= 20) return json("Too many live sessions for this interview", 429);
+    await env.HR_KV.put(k, String(cur + 1), { expirationTtl: 86400 });
+  }
+
+  const companyId = iv.company_id || iv.client_id;
+  if (!companyId) return json("No company associated with this interview", 404);
+
+  const cfgRes = await fetch(
+    `${env.SUPABASE_URL}/rest/v1/companies?id=eq.${companyId}&select=ai_provider,ai_api_key,ai_model&limit=1`,
+    { headers: { apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}` } },
+  );
+  const company = cfgRes.ok ? (await cfgRes.json())?.[0] : null;
+  const provider = (company?.ai_provider || "").toLowerCase();
+  if (!company?.ai_api_key || (provider !== "gemini" && provider !== "google")) {
+    return json("Live voice AI is not configured for this company", 404);
+  }
+
+  const geminiUrl =
+    "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent?key=" +
+    company.ai_api_key;
+
+  const pair = new WebSocketPair();
+  const [client, server] = Object.values(pair);
+  server.accept();
+
+  const upstream = new WebSocket(geminiUrl);
+  const pending = [];
+  let upstreamOpen = false;
+
+  upstream.addEventListener("open", () => {
+    upstreamOpen = true;
+    while (pending.length) {
+      try { upstream.send(pending.shift()); } catch (e) { /* socket died mid-flush */ }
+    }
+  });
+  upstream.addEventListener("message", (ev) => {
+    try { server.send(ev.data); } catch (e) { /* client gone */ }
+  });
+  upstream.addEventListener("close", (ev) => {
+    try { server.close(ev.code || 1000, String(ev.reason || "upstream closed").slice(0, 120)); } catch (e) {}
+  });
+  upstream.addEventListener("error", () => {
+    try { server.close(1011, "upstream error"); } catch (e) {}
+  });
+
+  server.addEventListener("message", (ev) => {
+    if (upstreamOpen && upstream.readyState === 1) {
+      try { upstream.send(ev.data); } catch (e) {}
+    } else if (pending.length < 500) {
+      pending.push(ev.data); // buffer setup + first frames until upstream connects
+    }
+  });
+  server.addEventListener("close", () => { try { upstream.close(); } catch (e) {} });
+  server.addEventListener("error", () => { try { upstream.close(); } catch (e) {} });
+
+  return new Response(null, { status: 101, webSocket: client });
+}
+
+/**
+ * GET /sitemap-jobs.xml — dynamic sitemap of every active job + company portal.
+ * Static hosting (GitHub Pages) can't generate this on the fly, so the Worker
+ * serves it. Referenced from robots.txt so Google discovers all job postings.
+ * Optional ?base=https://example.com override (defaults to SITE_URL var or the
+ * main production domain).
+ */
+async function handleJobsSitemap(request, env) {
+  if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_KEY)
+    return new Response("Service unavailable", { status: 503 });
+  const url = new URL(request.url);
+  const base = (url.searchParams.get("base") || env.SITE_URL || "https://simpaticohr.in").replace(/\/+$/, "");
+  const slugify = (t) => (t || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "job";
+  const sbHeaders = { apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}` };
+
+  const jobsRes = await fetch(
+    `${env.SUPABASE_URL}/rest/v1/jobs?is_active=eq.true&status=in.(open,active)&select=id,title,created_at,company_id&order=created_at.desc&limit=5000`,
+    { headers: sbHeaders },
+  );
+  const jobs = jobsRes.ok ? await jobsRes.json() : [];
+
+  // Resolve portal slugs without assuming a jobs→companies FK embed exists
+  const compIds = [...new Set((jobs || []).map((j) => j.company_id).filter(Boolean))];
+  const compNames = {};
+  for (let i = 0; i < compIds.length; i += 100) {
+    const chunk = compIds.slice(i, i + 100);
+    const cRes = await fetch(
+      `${env.SUPABASE_URL}/rest/v1/companies?id=in.(${chunk.join(",")})&select=id,name`,
+      { headers: sbHeaders },
+    );
+    if (cRes.ok) for (const c of await cRes.json()) compNames[c.id] = c.name;
+  }
+
+  const today = new Date().toISOString().slice(0, 10);
+  const urls = [];
+  const seenPortals = new Set();
+  for (const j of jobs || []) {
+    const lastmod = String(j.created_at || today).slice(0, 10);
+    urls.push(`  <url><loc>${base}/job/${slugify(j.title)}-${j.id}</loc><lastmod>${lastmod}</lastmod><changefreq>daily</changefreq><priority>0.9</priority></url>`);
+    if (j.company_id && !seenPortals.has(j.company_id)) {
+      seenPortals.add(j.company_id);
+      const cname = compNames[j.company_id] || "company";
+      urls.push(`  <url><loc>${base}/company/${slugify(cname)}-${j.company_id}</loc><lastmod>${today}</lastmod><changefreq>daily</changefreq><priority>0.8</priority></url>`);
+    }
+  }
+
+  const xml = `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls.join("\n")}\n</urlset>`;
+  return new Response(xml, {
+    headers: { "Content-Type": "application/xml; charset=utf-8", "Cache-Control": "public, max-age=3600" },
+  });
+}
+
 /**
  * GET /api/interview/ai-config — Fetch company's Gemini BYOK config for an interview session.
  * Query: ?token=<interview_token>
  * No auth required — validates via interview token.
- * Returns: { available, provider?, model?, apiKey? }
- * Only returns the key if the company has Gemini configured.
+ * Returns: { available, provider?, model? } — the key itself stays server-side
+ * (Live sessions are proxied via /api/interview/live).
  */
 async function handleInterviewAIConfig(request, env, ctx, params, url) {
   const interviewToken = url.searchParams.get("token");
@@ -10914,11 +11427,12 @@ async function handleInterviewAIConfig(request, env, ctx, params, url) {
     return apiResponse({ available: false, reason: "Company AI provider is not Gemini" });
   }
 
+  // NOTE: the Gemini key is intentionally NOT returned — Live sessions are
+  // proxied through /api/interview/live so company keys never reach browsers.
   return apiResponse({
     available: true,
     provider: "gemini",
     model: company.ai_model || "gemini-3.1-flash",
-    apiKey: company.ai_api_key,
   });
 }
 

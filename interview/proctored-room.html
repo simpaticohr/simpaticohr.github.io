@@ -2480,6 +2480,7 @@
                         <i class="fas fa-microphone"></i>
                         <span class="vc-tooltip">Microphone</span>
                     </button>
+
                     <button class="vc-btn active-mic" id="vcScreen" onclick="toggleScreenShare()">
                         <i class="fas fa-desktop"></i>
                         <span class="vc-tooltip">Screen Share</span>
@@ -2731,7 +2732,7 @@
                     return 'final_round';
                 // Default: infer from job title
                 const jt = (this.jobTitle || '').toLowerCase();
-                const nonTechRoles = ['sales', 'marketing', 'receptionist', 'hr', 'admin', 'support', 'customer', 'manager', 'executive', 'coordinator', 'assistant', 'analyst', 'consultant', 'finance', 'accounting', 'operations', 'logistics', 'procurement', 'legal', 'compliance', 'content', 'writer', 'editor', 'teacher', 'nurse', 'driver', 'clerk'];
+                const nonTechRoles = ['sales', 'marketing', 'receptionist', 'hr', 'admin', 'support', 'customer', 'manager', 'executive', 'coordinator', 'assistant', 'analyst', 'consultant', 'finance', 'accounting', 'billing', 'accounts', 'cashier', 'payroll', 'claims', 'operations', 'logistics', 'procurement', 'legal', 'compliance', 'content', 'writer', 'editor', 'teacher', 'nurse', 'driver', 'clerk'];
                 if (nonTechRoles.some(nr => jt.includes(nr)))
                     return 'hr_behavioral';
                 return 'technical'; // default for engineering roles
@@ -2924,16 +2925,33 @@ ${config.rules}
 
                 const phaseInstructions = this.getPhaseInstructions();
 
+                // Build clean message thread without consecutive user messages
+                // This ensures OpenAI/Gemini/DeepSeek APIs process candidate answers directly.
+                const historyMapped = [];
+                for (let i = 0; i < this.history.length; i++) {
+                    const item = this.history[i];
+                    const role = item.role === 'ai' ? 'assistant' : 'user';
+                    // If candidate answer is the last item, combine with interviewer directive
+                    if (i === this.history.length - 1 && role === 'user') {
+                        historyMapped.push({
+                            role: 'user',
+                            content: `${item.content}\n\n[INTERVIEWER DIRECTIVE: React directly and specifically to the candidate's answer above. Acknowledge key points they mentioned, then ask ONE relevant follow-up question. Phase: ${this.phase}. Keep it to 1-3 natural spoken sentences.]`
+                        });
+                    } else {
+                        historyMapped.push({ role, content: item.content });
+                    }
+                }
+
+                if (historyMapped.length === 0) {
+                    historyMapped.push({
+                        role: 'user',
+                        content: '[INTERVIEWER DIRECTIVE: Start the interview now. Greet the candidate warmly, introduce yourself as Aisha, and ask your first question.]'
+                    });
+                }
+
                 const messages = [
                     { role: 'system', content: this.buildSystemPrompt() },
-                    ...this.history.map(h => ({
-                        role: h.role === 'ai' ? 'assistant' : h.role,
-                        content: h.content
-                    })),
-                    {
-                        role: 'user',
-                        content: `[INTERVIEWER NOTE — NOT SPOKEN]\n\n${phaseInstructions}\n\n${answerAnalysis ? `Last answer scored ${answerAnalysis.score}/100. Words: ${answerAnalysis.words}. Flags: ${answerAnalysis.flags.join(', ')}.` : ''}\n\nRespond DIRECTLY to the candidate with 1-3 natural spoken sentences. Ask exactly ONE question.${this.phase === 'closing' ? ' Wrap up warmly.' : ''}`
-                    }
+                    ...historyMapped
                 ];
 
                 try {
@@ -3240,6 +3258,9 @@ ${config.rules}
                     showSetupError('This interview has already been completed.');
                 } else if (state.meta.interview.expires_at && new Date(state.meta.interview.expires_at) < new Date()) {
                     showSetupError('This interview link has expired.');
+                } else if (state.meta.interview.max_attempts && state.meta.interview.max_attempts > 0 &&
+                           (state.meta.interview.attempts_used || 0) >= state.meta.interview.max_attempts) {
+                    showSetupError('Maximum attempts reached for this interview. Please contact HR for a new invitation.');
                 } else {
                     user = {
                         id: state.meta.interview.candidate_email || 'candidate',
@@ -3362,7 +3383,30 @@ ${config.rules}
                 }
                 document.getElementById('qTrackerMax').textContent = engine.maxQuestions;
             } else if (state.meta.interview) {
-                document.getElementById('sjcTitle').textContent = state.meta.interview.job_title || 'Interview';
+                // No job listing linked — populate engine from interview metadata
+                // so questions are relevant to the designation/role
+                const iv = state.meta.interview;
+                const designation = iv.interview_role || iv.job_title || 'General Interview';
+                document.getElementById('sjcTitle').textContent = designation;
+
+                engine.jobTitle = designation;
+                engine.jobContext = `Title: ${designation}\nRound: ${iv.interview_level || 'General'}\nType: ${iv.interview_type || 'ai_voice'}\nLanguage: ${iv.interview_language || 'en'}`;
+                engine.interviewRound = iv.interview_level || '';
+                console.log('[Engine] No job linked — using interview metadata. Role:', designation, 'Round:', engine.interviewRound, '→ style:', engine.getRoundStyle());
+
+                // Set experience level from interview metadata
+                if (iv.experience_level) {
+                    const expMap = { fresher: 'fresher/entry-level', junior: 'junior (1-3 years)', mid: 'mid-level (3-6 years)', senior: 'senior (6-10 years)', lead: 'staff/lead (10+ years)', executive: 'executive/director' };
+                    engine.level = expMap[iv.experience_level] || iv.experience_level;
+                }
+
+                // Use configured question_count
+                const configuredCount = iv.question_count;
+                if (configuredCount && configuredCount >= 3) {
+                    engine.maxQuestions = Math.min(configuredCount, 20);
+                    console.log('[Engine] Using configured question count:', engine.maxQuestions);
+                }
+                document.getElementById('qTrackerMax').textContent = engine.maxQuestions;
             }
 
             if (state.meta.resume) engine.resumeContext = state.meta.resume.slice(0, 2000);
@@ -3976,69 +4020,99 @@ ${config.rules}
             const cleanText = text.replace(/\*\*/g, '').replace(/\n/g, ' ').replace(/\s+/g, ' ').trim();
             console.log('[CloudTTS] Requesting speech:', cleanText.substring(0, 60) + '...');
 
-            try {
-                const res = await fetch(`${API}/ai/tts`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ text: cleanText, lang: state.interviewLanguage || 'en-US', token: magicToken || undefined })
-                });
+            // ── Retry logic: up to 3 attempts with 1.5s delay on mobile ──
+            const maxRetries = state.isMobile ? 3 : 1;
+            let lastErr = null;
 
-                if (!res.ok) {
-                    const errText = await res.text().catch(() => 'unknown');
-                    throw new Error(`HTTP ${res.status}: ${errText.substring(0, 200)}`);
-                }
+            for (let attempt = 1; attempt <= maxRetries; attempt++) {
+                try {
+                    if (attempt > 1) {
+                        console.log(`[CloudTTS] Retry attempt ${attempt}/${maxRetries} after 1.5s...`);
+                        await new Promise(r => setTimeout(r, 1500));
+                    }
 
-                const audioBlob = await res.blob();
-                if (audioBlob.size < 100) {
-                    throw new Error('Audio response too small');
-                }
-
-                const audioUrl = URL.createObjectURL(audioBlob);
-                // On mobile, reuse the gesture-unlocked <audio> element.
-                // new Audio() creates a fresh element that was never played in a
-                // user gesture — mobile browsers will block its .play() call.
-                // The _unlockedAudio element was primed with a silent WAV during
-                // the "Begin Interview" tap, so .play() is permanently allowed on it.
-                const audio = state.voice._unlockedAudio || new Audio();
-                audio.src = audioUrl;
-                audio.volume = 1.0;
-                // Tracked so barge-in can stop playback instantly (stopCloudAudio)
-                state.voice.currentAudio = audio;
-
-                return new Promise((resolve, reject) => {
-                    let settled = false;
-                    const settle = (fn, val) => {
-                        if (settled) return;
-                        settled = true;
-                        clearTimeout(timeout);
-                        if (state.voice.currentAudio === audio) state.voice.currentAudio = null;
-                        URL.revokeObjectURL(audioUrl);
-                        // Do NOT destroy the audio element — it may be _unlockedAudio
-                        // which needs to stay alive for the next TTS call on mobile
-                        fn(val);
-                    };
-                    audio.onended = () => {
-                        console.log('[CloudTTS] Playback complete');
-                        settle(resolve, true);
-                    };
-                    audio.onerror = (e) => {
-                        console.warn('[CloudTTS] Playback error:', e);
-                        settle(reject, new Error('Audio playback failed'));
-                    };
-                    // Timeout safety: if audio doesn't end in 60s, stop it and resolve anyway
-                    const timeout = setTimeout(() => {
-                        console.warn('[CloudTTS] Playback timeout — stopping audio');
-                        try { audio.pause(); } catch (e) { }
-                        settle(resolve, true);
-                    }, 60000);
-                    audio.play().catch(err => {
-                        settle(reject, err);
+                    const res = await fetch(`${API}/ai/tts`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ text: cleanText, lang: state.interviewLanguage || 'en-US', token: magicToken || undefined })
                     });
-                });
-            } catch (err) {
-                console.warn('[CloudTTS] Failed:', err.message);
-                throw err;
+
+                    if (!res.ok) {
+                        const errText = await res.text().catch(() => 'unknown');
+                        throw new Error(`HTTP ${res.status}: ${errText.substring(0, 200)}`);
+                    }
+
+                    const audioBlob = await res.blob();
+                    if (audioBlob.size < 100) {
+                        throw new Error('Audio response too small');
+                    }
+
+                    const audioUrl = URL.createObjectURL(audioBlob);
+
+                    // Re-validate _unlockedAudio — recreate if it was garbage-collected or errored
+                    if (state.isMobile && (!state.voice._unlockedAudio || state.voice._unlockedAudio.error)) {
+                        try {
+                            const silentWav = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=';
+                            state.voice._unlockedAudio = new Audio(silentWav);
+                            state.voice._unlockedAudio.volume = 0.01;
+                            await state.voice._unlockedAudio.play().catch(() => {});
+                            console.log('[CloudTTS] Re-created _unlockedAudio element');
+                        } catch (e) {
+                            console.warn('[CloudTTS] _unlockedAudio re-creation failed:', e.message);
+                        }
+                    }
+
+                    // On mobile, reuse the gesture-unlocked <audio> element.
+                    // new Audio() creates a fresh element that was never played in a
+                    // user gesture — mobile browsers will block its .play() call.
+                    // The _unlockedAudio element was primed with a silent WAV during
+                    // the "Begin Interview" tap, so .play() is permanently allowed on it.
+                    const audio = state.voice._unlockedAudio || new Audio();
+                    audio.src = audioUrl;
+                    audio.volume = 1.0;
+                    // Tracked so barge-in can stop playback instantly (stopCloudAudio)
+                    state.voice.currentAudio = audio;
+
+                    return new Promise((resolve, reject) => {
+                        let settled = false;
+                        const settle = (fn, val) => {
+                            if (settled) return;
+                            settled = true;
+                            clearTimeout(timeout);
+                            if (state.voice.currentAudio === audio) state.voice.currentAudio = null;
+                            URL.revokeObjectURL(audioUrl);
+                            // Do NOT destroy the audio element — it may be _unlockedAudio
+                            // which needs to stay alive for the next TTS call on mobile
+                            fn(val);
+                        };
+                        audio.onended = () => {
+                            console.log('[CloudTTS] Playback complete');
+                            settle(resolve, true);
+                        };
+                        audio.onerror = (e) => {
+                            console.warn('[CloudTTS] Playback error:', e);
+                            settle(reject, new Error('Audio playback failed'));
+                        };
+                        // Timeout safety: if audio doesn't end in 60s, stop it and resolve anyway
+                        const timeout = setTimeout(() => {
+                            console.warn('[CloudTTS] Playback timeout — stopping audio');
+                            try { audio.pause(); } catch (e) { }
+                            settle(resolve, true);
+                        }, 60000);
+                        audio.play().catch(err => {
+                            settle(reject, err);
+                        });
+                    });
+                } catch (err) {
+                    console.warn(`[CloudTTS] Attempt ${attempt}/${maxRetries} failed:`, err.message);
+                    lastErr = err;
+                    // Continue to next retry
+                }
             }
+
+            // All retries exhausted
+            console.warn('[CloudTTS] All retries failed:', lastErr?.message);
+            throw lastErr || new Error('Cloud TTS failed after retries');
         }
 
         // Stop the active cloud-TTS <audio> element immediately (barge-in).
@@ -4143,11 +4217,11 @@ ${config.rules}
                         console.warn('[TTS] Cloud TTS failed, falling back to browser:', cloudErr.message);
                         _cloudTTSFailCount++;
                         // Don't permanently disable — retry after 3 consecutive failures
-                        if (_cloudTTSFailCount >= 3) {
+                        if (_cloudTTSFailCount >= 5) {
                             _cloudTTSAvailable = false;
-                            console.warn('[TTS] Cloud TTS disabled after 3 failures. Will retry periodically.');
-                            // Re-enable after 60 seconds to try again
-                            setTimeout(() => { _cloudTTSAvailable = null; _cloudTTSFailCount = 0; }, 60000);
+                            console.warn('[TTS] Cloud TTS disabled after 5 failures. Will retry periodically.');
+                            // Re-enable after 30 seconds to try again (faster recovery on spotty networks)
+                            setTimeout(() => { _cloudTTSAvailable = null; _cloudTTSFailCount = 0; }, 30000);
                         }
                     }
                 }
@@ -4157,8 +4231,22 @@ ${config.rules}
                 // mic access and causes "cannot record" errors on Android Chrome.
                 // Cloud TTS (<audio> playback) is the only voice path on mobile.
                 if (state.isMobile) {
-                    console.warn('[TTS] Mobile: Cloud TTS unavailable and speechSynthesis skipped — no audio this turn');
-                    showToast('warn', '🔇 Voice playback unavailable — check your connection. You can still answer.');
+                    console.warn('[TTS] Mobile: Cloud TTS unavailable and speechSynthesis skipped — showing text fallback');
+                    // Graceful text-only fallback: show the question prominently and
+                    // auto-advance to listening after a calculated reading delay
+                    showToast('info', '📖 Reading mode — voice unavailable. Read the question below and answer when ready.');
+                    const subtitle = document.getElementById('aiSubtitleText');
+                    if (subtitle) {
+                        subtitle.textContent = cleanText;
+                        subtitle.classList.add('show');
+                        subtitle.style.fontSize = '1.1em';
+                        subtitle.style.opacity = '1';
+                    }
+                    // Calculate reading time: ~200 words/min = 300ms/word, min 4s, max 15s
+                    const wordCount = cleanText.split(/\s+/).length;
+                    const readingDelayMs = Math.min(15000, Math.max(4000, wordCount * 300));
+                    console.log(`[TTS] Text fallback: ${wordCount} words, ${readingDelayMs}ms reading delay`);
+                    await new Promise(r => setTimeout(r, readingDelayMs));
                     finishSpeaking();
                     return;
                 }
@@ -4450,7 +4538,7 @@ ${config.rules}
             if (!state.voice.isSpeaking) setOrbState('listening');
             const statusEl = document.getElementById('aiStatusText');
             if (statusEl && !state.voice.isSpeaking) statusEl.textContent = 'TYPE YOUR ANSWER';
-            bar.classList.add('show');
+            bar.classList.toggle('show');
             const input = document.getElementById('answerInput');
             if (input && !input.dataset.bound) {
                 input.dataset.bound = '1';
@@ -6071,6 +6159,18 @@ ${config.rules}
             // Update UI Counters
             engine.questionCount++;
             engine.updatePhase(analysis);
+
+            // Dispatch control directive over WebSocket so Aisha reacts dynamically to answer in Duplex mode
+            if (engine.questionCount < engine.maxQuestions && !state.duplex.wrapUpRequested) {
+                const nextSkill = engine.skillsToProbe[Math.min(engine.questionCount, engine.skillsToProbe.length - 1)] || 'your background';
+                sendDuplexControlMessage(`The candidate just answered: "${text}". React specifically to details in their answer and ask a direct follow-up question related to ${this.jobTitle || 'the role'} and ${nextSkill}. Keep it short (1-3 sentences).`);
+            }
+
+            // Dispatch control directive over WebSocket so Aisha reacts dynamically to answer in Duplex mode
+            if (engine.questionCount < engine.maxQuestions && !state.duplex.wrapUpRequested) {
+                const nextSkill = engine.skillsToProbe[Math.min(engine.questionCount, engine.skillsToProbe.length - 1)] || 'your background';
+                sendDuplexControlMessage(`The candidate just answered: "${text}". React specifically to details in their answer and ask a direct follow-up question related to ${this.jobTitle || 'the role'} and ${nextSkill}. Keep it short (1-3 sentences).`);
+            }
 
             document.getElementById('qCounter').innerHTML = `Q <strong>${engine.questionCount}</strong> / ~${engine.maxQuestions}`;
             document.getElementById('qTrackerNum').textContent = engine.questionCount;
