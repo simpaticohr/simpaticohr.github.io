@@ -3536,6 +3536,19 @@ async function syncWithSupabase() {
     const user = JSON.parse(userJson);
     const companyId = user.company_id || user.tenant_id || null;
 
+    // ★★ SYNC-LEVEL TENANT VERIFICATION — last defense before data fetch
+    try {
+        const { data: syncSession } = await db.auth.getSession();
+        const syncEmail = syncSession?.session?.user?.email;
+        if (syncEmail && user.email && syncEmail.toLowerCase() !== user.email.toLowerCase()) {
+            console.error('[sync] 🚨 TENANT MISMATCH at sync! SDK:', syncEmail, 'user:', user.email);
+            try { await db.auth.signOut(); } catch(e) {}
+            _nuclearCleanup();
+            window.location.href = '/platform/login.html?role=hr&reason=sync_mismatch';
+            return;
+        }
+    } catch(e) { console.warn('[sync] Session verify failed:', e.message); }
+
     // ★ STRICT ISOLATION: If no company_id, user has no tenant — show empty dashboard
     if (!companyId) {
         console.warn('[sync] No company_id in session — enforcing empty dashboard (strict isolation)');

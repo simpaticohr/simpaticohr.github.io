@@ -1079,10 +1079,26 @@ document.querySelectorAll('.modal-overlay').forEach(overlay => {
 // ═══════════════════════════════════════════════════════════════════
 function signOut() {
     if (confirm('Sign out?')) {
-        ['simpatico_token','simpatico_user','simpatico_refresh','simpatico_company'].forEach(k => {
-            localStorage.removeItem(k); sessionStorage.removeItem(k);
-        });
-        window.location.href = 'login.html';
+        // ★ NUCLEAR CLEANUP — Multi-Tenant Isolation Fix
+        const db = window.SimpaticoDB || window._supabaseClient;
+        const doCleanup = () => {
+            const keysToRemove = [];
+            for (let i = 0; i < localStorage.length; i++) {
+                const k = localStorage.key(i);
+                if (!k) continue;
+                if (k.startsWith('simpatico_') || k.startsWith('sh_') || k.startsWith('simpaticoHR_data')) { keysToRemove.push(k); continue; }
+                if (k.startsWith('sb-') && k.endsWith('-auth-token')) { keysToRemove.push(k); continue; }
+                if (k === 'cfg_features') { keysToRemove.push(k); continue; }
+            }
+            keysToRemove.forEach(k => localStorage.removeItem(k));
+            sessionStorage.clear();
+            window.location.href = 'login.html';
+        };
+        if (db) {
+            db.auth.signOut().catch(() => {}).finally(() => doCleanup());
+        } else {
+            doCleanup();
+        }
     }
 }
 
