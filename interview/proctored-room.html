@@ -2860,62 +2860,9 @@ Therefore, you MUST speak in ENGLISH only — do NOT use ${lang.name} script.
                 const config = roundConfig[roundStyle] || roundConfig.technical;
                 const roundLabel = this.interviewRound ? `\n## INTERVIEW ROUND\n${this.interviewRound}` : '';
 
+                const askedQuestions = this.history.filter(h => h.role === 'ai').map((h, i) => `${i + 1}. "${h.content}"`).join('\n') || 'None yet';
+
                 return `${config.persona} You are conducting a LIVE voice interview that the candidate takes seriously.
-
-${languageInstructions}
-
-## YOUR PERSONA
-${config.personaTraits}
-
-## POSITION
-Role: "${this.jobTitle}"
-Level: ${this.level}
-${roundLabel}
-
-## JOB DESCRIPTION
-${this.jobContext || 'Assess competencies relevant to this role.'}
-
-## CANDIDATE BACKGROUND
-${this.resumeContext || 'Discover their background through conversation.'}
-
-## KEY SKILLS TO ASSESS
-${this.skillsToProbe.length ? this.skillsToProbe.map((s, i) => `${i + 1}. ${s}`).join('\n') : config.skillsFallback}
-
-## SKILLS ALREADY COVERED
-${Object.entries(this.skillsCovered).map(([s, d]) => `- ${s}: Score ${d.score}/100, Depth ${d.depth}`).join('\n') || 'None yet'}
-
-## INTERVIEW RULES
-${config.rules}
-
-const askedQuestions = this.history.filter(h => h.role === 'ai').map((h, i) => `${i + 1}. "${h.content}"`).join('\n') || 'None yet';
-
-        return `${config.persona} You are conducting a LIVE voice interview that the candidate takes seriously.
-
-${languageInstructions}
-
-## YOUR PERSONA
-${config.personaTraits}
-
-## POSITION
-Role: "${this.jobTitle}"
-Level: ${this.level}
-${roundLabel}
-
-## JOB DESCRIPTION
-${this.jobContext || 'Assess competencies relevant to this role.'}
-
-## CANDIDATE BACKGROUND
-${this.resumeContext || 'Discover their background through conversation.'}
-
-## KEY SKILLS TO ASSESS
-${this.skillsToProbe.length ? this.skillsToProbe.map((s, i) => `${i + 1}. ${s}`).join('\n') : config.skillsFallback}
-
-## SKILLS ALREADY COVERED
-${Object.entries(this.skillsCovered).map(([s, d]) => `- ${s}: Score ${d.score}/100, Depth ${d.depth}`).join('\n') || 'None yet'}
-
-        const askedQuestions = this.history.filter(h => h.role === 'ai').map((h, i) => `${i + 1}. "${h.content}"`).join('\n') || 'None yet';
-
-        return `${config.persona} You are conducting a LIVE voice interview that the candidate takes seriously.
 
 ${languageInstructions}
 
@@ -3291,8 +3238,6 @@ ${config.rules}
                     showSetupError('Interview not found or the link has expired. Please contact HR for a new invitation.');
                 } else if (state.meta.interview.status === 'completed') {
                     showSetupError('This interview has already been completed.');
-                } else if (state.meta.interview.status === 'in_progress') {
-                    showSetupError('This interview is already in progress in another window.');
                 } else if (state.meta.interview.expires_at && new Date(state.meta.interview.expires_at) < new Date()) {
                     showSetupError('This interview link has expired.');
                 } else {
@@ -3301,7 +3246,8 @@ ${config.rules}
                         full_name: state.meta.interview.candidate_name || 'Candidate',
                         client_id: state.meta.interview.client_id || null,
                     };
-                    state.session.seconds = Math.min((state.meta.interview.duration_minutes || 15), 20) * 60;
+                    state.session.seconds = Math.min((state.meta.interview.duration_minutes || 15), 60) * 60;
+                    state.session.totalSeconds = state.session.seconds;
                     // Apply saved interview language
                     if (state.meta.interview.interview_language) {
                         state.interviewLanguage = state.meta.interview.interview_language;
@@ -3324,6 +3270,15 @@ ${config.rules}
                         const icon = document.getElementById('vcRecordIcon');
                         if (btn) btn.classList.add('active-mic');
                         if (icon) icon.style.color = '#ef4444';
+                    }
+
+                    // Resume after refresh/network drop: restore progress instead of
+                    // locking the candidate out (was an "already in progress" dead-end).
+                    // If restore fails the interview simply starts fresh (safe fallback).
+                    if (state.meta.interview.status === 'in_progress' || state.meta.interview.status === 'abandoned') {
+                        if (restoreSessionFromRow(state.meta.interview)) {
+                            showToast('info', '👋 Welcome back! Your progress was restored — continue your interview.');
+                        }
                     }
                 }
             } catch (e) {
@@ -3726,6 +3681,7 @@ ${config.rules}
         // AUDIO VISUALIZER
         // ══════════════════════════════════════════════════════════════
         function initAudioVisualizer() {
+            if (state.audio.vizBars.length) return; // already initialized (fallback recursion)
             const vizEl = document.getElementById('listenViz');
             for (let i = 0; i < 48; i++) {
                 const bar = document.createElement('div');
@@ -3797,15 +3753,13 @@ ${config.rules}
 
         async function startSession() {
             applyMobileUI();
-            const duplexToggled = document.getElementById('voiceDuplexToggle')?.checked;
-            if (duplexToggled) {
-                // Get Gemini Key from company BYOK config (fetched from server during init)
-                const key = state.duplex.companyApiKey || '';
+            // Re-entry guard (duplex→classic fallback recurses into startSession)
+            if (state.session.timerInt) { clearInterval(state.session.timerInt); state.session.timerInt = null; }
 
-                if (!key || key.length < 5) {
-                    showSetupError('Full-Duplex Voice is not available. Your company has not configured a Gemini API key in Dashboard Settings.');
-                    return;
-                }
+            const duplexToggled = document.getElementById('voiceDuplexToggle')?.checked;
+            if (duplexToggled && state.duplex.available) {
+                // Full-duplex mode: proxied Gemini Live session — the company's
+                // Gemini key stays server-side (/api/interview/live).
 
                 // Request screen share (bypassed on mobile devices)
                 if (state.isMobile) {
@@ -3845,12 +3799,26 @@ ${config.rules}
                     if (scrV) { scrV.setAttribute('playsinline', 'true'); scrV.setAttribute('webkit-playsinline', 'true'); scrV.srcObject = state.media.screen; }
                 }
 
+                // Mark started — same contract as the classic path (was missing,
+                // which broke live polling on the results page for duplex sessions)
+                if (state.meta.interview?.id) {
+                    const startPatch = { status: 'in_progress' };
+                    if (!state.session.resumed) startPatch.started_at = new Date().toISOString();
+                    interviewSave(startPatch).catch(e => console.warn('Start patch error:', e));
+                }
+
                 state.session.started = true;
                 state.session.timerInt = setInterval(tick, 1000);
                 startProctoring();
+                initAudioVisualizer();
                 initCodeEditor();
 
-                await startLiveVoiceCallDuplex(key);
+                try { await document.documentElement.requestFullscreen(); } catch (e) { }
+
+                await startLiveVoiceCallDuplex();
+                // Start evidence recording AFTER the duplex audio graph exists so
+                // Aisha's voice is mixed in (two-sided recording)
+                startRecordingIfEnabled();
                 return;
             }
 
@@ -3877,6 +3845,28 @@ ${config.rules}
             } catch (e) {
                 console.error('[TTS-Init] Exception:', e);
                 _ttsUnlocked = true;
+            }
+
+            // ── MOBILE: Pre-unlock an <audio> element for Cloud TTS ──
+            // Mobile browsers (Android Chrome, iOS Safari) require audio.play()
+            // within a user gesture context. That context expires after the first
+            // await (requestFullscreen, generateNextQuestion, etc.).
+            // By playing a tiny silent WAV on this element NOW (synchronous in
+            // the tap handler), the element becomes permanently "unlocked" —
+            // all subsequent .src + .play() calls will work even after async gaps.
+            if (state.isMobile) {
+                try {
+                    const silentWav = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=';
+                    state.voice._unlockedAudio = new Audio(silentWav);
+                    state.voice._unlockedAudio.volume = 0.01;
+                    state.voice._unlockedAudio.play().then(() => {
+                        console.log('[TTS-Init] Mobile <audio> element UNLOCKED via silent play');
+                    }).catch(e => {
+                        console.warn('[TTS-Init] Mobile audio unlock failed:', e.message);
+                    });
+                } catch (e) {
+                    console.warn('[TTS-Init] Mobile audio unlock exception:', e);
+                }
             }
 
             // Request screen share (bypassed on mobile devices)
@@ -3918,12 +3908,12 @@ ${config.rules}
                 if (scrV) { scrV.setAttribute('playsinline', 'true'); scrV.setAttribute('webkit-playsinline', 'true'); scrV.srcObject = state.media.screen; }
             }
 
-            // Mark started
+            // Mark started (keep the original started_at on a resumed session so
+            // total elapsed time stays accurate across refreshes)
             if (state.meta.interview?.id) {
-                sbPatch('interviews', `token=eq.${encodeURIComponent(token)}`, {
-                    status: 'in_progress',
-                    started_at: new Date().toISOString()
-                }).catch(e => console.warn('Start patch error:', e));
+                const startPatch = { status: 'in_progress' };
+                if (!state.session.resumed) startPatch.started_at = new Date().toISOString();
+                interviewSave(startPatch).catch(e => console.warn('Start patch error:', e));
             }
 
             state.session.started = true;
@@ -3976,7 +3966,7 @@ ${config.rules}
             if (_ttsKeepAliveInt) { clearInterval(_ttsKeepAliveInt); _ttsKeepAliveInt = null; }
         }
 
-        // â”€â”€ Cloud TTS (primary) with speechSynthesis fallback â”€â”€
+        // ── Cloud TTS (primary) with speechSynthesis fallback ──
         // Uses Cloudflare Workers AI @cf/deepgram/aura-1 to generate audio
         // Falls back to browser speechSynthesis if cloud TTS fails
         let _cloudTTSAvailable = null; // null = untested, true/false = tested
@@ -3990,7 +3980,7 @@ ${config.rules}
                 const res = await fetch(`${API}/ai/tts`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ text: cleanText, lang: state.interviewLanguage || 'en-US' })
+                    body: JSON.stringify({ text: cleanText, lang: state.interviewLanguage || 'en-US', token: magicToken || undefined })
                 });
 
                 if (!res.ok) {
@@ -4004,41 +3994,62 @@ ${config.rules}
                 }
 
                 const audioUrl = URL.createObjectURL(audioBlob);
-                const audio = new Audio(audioUrl);
+                // On mobile, reuse the gesture-unlocked <audio> element.
+                // new Audio() creates a fresh element that was never played in a
+                // user gesture — mobile browsers will block its .play() call.
+                // The _unlockedAudio element was primed with a silent WAV during
+                // the "Begin Interview" tap, so .play() is permanently allowed on it.
+                const audio = state.voice._unlockedAudio || new Audio();
+                audio.src = audioUrl;
                 audio.volume = 1.0;
+                // Tracked so barge-in can stop playback instantly (stopCloudAudio)
+                state.voice.currentAudio = audio;
 
                 return new Promise((resolve, reject) => {
-                    audio.onended = () => {
+                    let settled = false;
+                    const settle = (fn, val) => {
+                        if (settled) return;
+                        settled = true;
+                        clearTimeout(timeout);
+                        if (state.voice.currentAudio === audio) state.voice.currentAudio = null;
                         URL.revokeObjectURL(audioUrl);
+                        // Do NOT destroy the audio element — it may be _unlockedAudio
+                        // which needs to stay alive for the next TTS call on mobile
+                        fn(val);
+                    };
+                    audio.onended = () => {
                         console.log('[CloudTTS] Playback complete');
-                        resolve(true);
+                        settle(resolve, true);
                     };
                     audio.onerror = (e) => {
-                        URL.revokeObjectURL(audioUrl);
                         console.warn('[CloudTTS] Playback error:', e);
-                        reject(new Error('Audio playback failed'));
+                        settle(reject, new Error('Audio playback failed'));
                     };
-                    // Timeout safety: if audio doesn't end in 60s, resolve anyway
+                    // Timeout safety: if audio doesn't end in 60s, stop it and resolve anyway
                     const timeout = setTimeout(() => {
-                        URL.revokeObjectURL(audioUrl);
-                        resolve(true);
+                        console.warn('[CloudTTS] Playback timeout — stopping audio');
+                        try { audio.pause(); } catch (e) { }
+                        settle(resolve, true);
                     }, 60000);
-                    audio.onended = () => {
-                        clearTimeout(timeout);
-                        URL.revokeObjectURL(audioUrl);
-                        console.log('[CloudTTS] Playback complete');
-                        resolve(true);
-                    };
                     audio.play().catch(err => {
-                        clearTimeout(timeout);
-                        URL.revokeObjectURL(audioUrl);
-                        reject(err);
+                        settle(reject, err);
                     });
                 });
             } catch (err) {
                 console.warn('[CloudTTS] Failed:', err.message);
                 throw err;
             }
+        }
+
+        // Stop the active cloud-TTS <audio> element immediately (barge-in).
+        // Dispatching 'ended' settles aiSpeakCloud's promise through the normal path,
+        // so aiSpeak() continues into finishSpeaking() exactly as a natural end would.
+        function stopCloudAudio() {
+            const a = state.voice.currentAudio;
+            if (!a) return;
+            state.voice.currentAudio = null;
+            try { a.pause(); } catch (e) { }
+            try { a.dispatchEvent(new Event('ended')); } catch (e) { }
         }
 
         function aiSpeak(text) {
@@ -4076,6 +4087,11 @@ ${config.rules}
                     if (engine.phase === 'closing') {
                         state.voice.isListening = false;
                         try { if (state.voice.recognition) state.voice.recognition.stop(); } catch (e) { }
+                    } else if (state.voice.bargedIn) {
+                        // Candidate interrupted Aisha — recognition is already capturing
+                        // their answer. Do NOT stop/reset it or the answer is lost.
+                        state.voice.bargedIn = false;
+                        console.log('[TTS] finishSpeaking after barge-in — keeping live recognition');
                     } else {
                         // Force-stop any stale recognition immediately
                         try { if (state.voice.recognition) state.voice.recognition.stop(); } catch (e) { }
@@ -4098,18 +4114,25 @@ ${config.rules}
                 }
 
                 // -- PRIMARY: Try Cloud TTS --
-                // Deepgram Aura is ENGLISH-ONLY. For Malayalam, Hindi, French, German, etc.
-                // skip cloud TTS and use browser speechSynthesis which has native voices.
+                // Cloud TTS uses <audio> element playback — works on all platforms
+                // including mobile, with NO mic/SpeechRecognition conflict.
+                // On DESKTOP for non-English interviews, prefer browser speechSynthesis
+                // which has native-language voices. On MOBILE we MUST try cloud TTS
+                // regardless of language since speechSynthesis conflicts with the mic.
                 const _ttsLangBase = (state.interviewLanguage || 'en').split('-')[0];
                 const _isEnglishInterview = (_ttsLangBase === 'en');
 
-                if (!_isEnglishInterview) {
-                    console.log('[TTS] Non-English interview (' + state.interviewLanguage + '), skipping Cloud TTS -> using browser voices');
+                // On mobile: always try Cloud TTS (it's the only working audio path).
+                // On desktop: only try Cloud TTS for English (non-English uses speechSynthesis native voices).
+                const _shouldTryCloudTTS = state.isMobile || _isEnglishInterview;
+
+                if (!_shouldTryCloudTTS) {
+                    console.log('[TTS] Desktop non-English interview (' + state.interviewLanguage + '), skipping Cloud TTS -> using browser voices');
                 }
 
-                if (_isEnglishInterview && _cloudTTSAvailable !== false) {
+                if (_shouldTryCloudTTS && _cloudTTSAvailable !== false) {
                     try {
-                        console.log('[TTS] Trying Cloud TTS...');
+                        console.log('[TTS] Trying Cloud TTS...' + (state.isMobile ? ' (mobile — primary audio path)' : ''));
                         await aiSpeakCloud(cleanText);
                         _cloudTTSAvailable = true;
                         _cloudTTSFailCount = 0;
@@ -4129,11 +4152,13 @@ ${config.rules}
                     }
                 }
 
-                // â”€â”€ FALLBACK: Browser speechSynthesis â”€â”€
-                // On MOBILE, skip speechSynthesis entirely — it conflicts with active
-                // media streams and causes "cannot record" errors on Android Chrome.
+                // ── FALLBACK: Browser speechSynthesis ──
+                // On MOBILE, skip speechSynthesis — it conflicts with SpeechRecognition
+                // mic access and causes "cannot record" errors on Android Chrome.
+                // Cloud TTS (<audio> playback) is the only voice path on mobile.
                 if (state.isMobile) {
-                    console.log('[TTS] Mobile: skipping browser speechSynthesis to avoid mic conflict');
+                    console.warn('[TTS] Mobile: Cloud TTS unavailable and speechSynthesis skipped — no audio this turn');
+                    showToast('warn', '🔇 Voice playback unavailable — check your connection. You can still answer.');
                     finishSpeaking();
                     return;
                 }
@@ -4353,7 +4378,9 @@ ${config.rules}
                 const wordsExt = tempText.split(/\s+/).filter(Boolean);
 
                 if (wordsExt.length > 2) {
+                    state.voice.bargedIn = true;
                     state.voice.synth.cancel();
+                    stopCloudAudio(); // stop cloud-TTS <audio> too, not just speechSynthesis
                     state.voice.isSpeaking = false;
                     document.getElementById('aiSubtitleText').classList.remove('show');
                     setOrbState('listening');
@@ -4478,9 +4505,9 @@ ${config.rules}
             const skillToRecord = analysis.detectedSkill || currentTargetSkill;
             engine.recordSkillAssessment(skillToRecord, analysis.score, analysis.techHits > 0 ? 2 : 1);
 
-            // Save answer
+            // Save answer (server-mediated — interview_id enforced server-side)
             if (state.meta.interview?.id) {
-                sbInsert('interview_answers', {
+                answerSave({
                     interview_id: state.meta.interview.id,
                     question_number: engine.questionCount,
                     answer_text: text,
@@ -4521,6 +4548,8 @@ ${config.rules}
         // PROCTORING
         // ══════════════════════════════════════════════════════════════
         function startProctoring() {
+            if (state.session._proctoringStarted) return; // re-entry guard (fallback recursion)
+            state.session._proctoringStarted = true;
             // Tab switching / app switching
             document.addEventListener('visibilitychange', () => {
                 if (!state.session.started || state.session.ended) return;
@@ -4965,7 +4994,7 @@ ${config.rules}
         // CODE EDITOR
         // ══════════════════════════════════════════════════════════════
         function initCodeEditor() {
-            if (typeof require === 'undefined') return;
+            if (typeof require === 'undefined' || state.code.editor) return;
             require.config({ paths: { 'vs': 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.45.0/min/vs' } });
             require(['vs/editor/editor.main'], function () {
                 state.code.editor = monaco.editor.create(document.getElementById('monacoContainer'), {
@@ -5048,7 +5077,8 @@ ${config.rules}
         function startRecordingIfEnabled() {
             if (!state.recording.enabled || !state.media.stream) return;
             try {
-                state.recording.chunks = [];
+                // Retain earlier chunks across recorder restarts (duplex→classic fallback)
+                state.recording.chunks = state.recording.chunks || [];
                 const options = { videoBitsPerSecond: 800000 };
                 if (MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus')) {
                     options.mimeType = 'video/webm;codecs=vp9,opus';
@@ -5063,8 +5093,12 @@ ${config.rules}
                     tracks.push(state.media.stream.getVideoTracks()[0]);
                 }
 
-                // If audio tracks exist, mix mic stream
-                if (!state.isMobile && state.media.stream.getAudioTracks().length > 0) {
+                // Audio: duplex mode uses the two-sided mix (candidate + Aisha);
+                // otherwise the proctoring stream's mic track.
+                if (state.duplex.active && state.duplex.recMix && state.duplex.recMix.stream.getAudioTracks().length > 0) {
+                    tracks.push(state.duplex.recMix.stream.getAudioTracks()[0]);
+                    console.log('[Recording] Using duplex two-sided audio mix');
+                } else if (!state.isMobile && state.media.stream.getAudioTracks().length > 0) {
                     tracks.push(state.media.stream.getAudioTracks()[0]);
                 }
 
@@ -5095,7 +5129,7 @@ ${config.rules}
             try {
                 const score = engine.getOverallScore();
                 const violations = state.proctoring.logs.filter(l => l.level === 'danger').length;
-                await sbPatch('interviews', `token=eq.${encodeURIComponent(magicToken)}`, {
+                await interviewSave({
                     overall_score: score,
                     trust_score: state.session.trust,
                     violation_count: violations,
@@ -5109,7 +5143,14 @@ ${config.rules}
                         conversation_turns: engine.history.length,
                         _partial: true,
                         _updated_at: new Date().toISOString(),
-                    }
+                    },
+                    // Compact recent transcript so a refresh-resume can rebuild context
+                    conversation_log: engine.history.slice(-15).map(h => ({
+                        role: h.role,
+                        content: (h.content || '').slice(0, 500),
+                        phase: h.meta?.phase,
+                        score: h.meta?.analysis?.score,
+                    })),
                 });
                 console.log('[Partial] Realtime score update synced to Supabase:', score);
             } catch (e) {
@@ -5137,6 +5178,79 @@ ${config.rules}
                 },
                 body: JSON.stringify(data)
             });
+        }
+
+        // ── Server-mediated interview writes ──
+        // Scores/answers go through the Worker (token-validated, field-whitelisted,
+        // service key) so the browser never writes interview rows with the anon key.
+        async function interviewSave(patch, { keepalive = false } = {}) {
+            if (!magicToken) return;
+            const body = JSON.stringify({ token: magicToken, patch });
+            if (keepalive) {
+                try {
+                    return await fetch(`${API}/api/interview/save`, {
+                        method: 'POST', headers: { 'Content-Type': 'application/json' },
+                        body, keepalive: true,
+                    });
+                } catch (e) {
+                    try {
+                        navigator.sendBeacon(`${API}/api/interview/save`,
+                            new Blob([body], { type: 'application/json' }));
+                    } catch (e2) { }
+                }
+                return;
+            }
+            return fetch(`${API}/api/interview/save`, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' }, body,
+            });
+        }
+
+        function answerSave(row) {
+            if (!magicToken) return Promise.resolve();
+            return fetch(`${API}/api/interview/save`, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ token: magicToken, answers: [row] }),
+            });
+        }
+
+        // Restore a session after refresh/network drop from the interview row's
+        // partial snapshot (feedback.*), compact conversation_log, and started_at.
+        function restoreSessionFromRow(row) {
+            try {
+                const fb = row.feedback || {};
+                engine.questionCount = fb.total_questions || 0;
+                engine.skillsCovered = fb.skill_scores || {};
+                engine.strongAreas = fb.strong_areas || [];
+                engine.weakAreas = fb.weak_areas || [];
+
+                // Rebuild conversation so the AI sees prior Q&A and never repeats
+                if (Array.isArray(row.conversation_log) && row.conversation_log.length) {
+                    engine.history = row.conversation_log.map(t => ({
+                        role: t.role === 'ai' ? 'ai' : 'user',
+                        content: t.content || '',
+                        meta: { phase: t.phase, analysis: typeof t.score === 'number' ? { score: t.score } : undefined }
+                    }));
+                }
+
+                if (typeof row.trust_score === 'number') state.session.trust = row.trust_score;
+
+                // Count already-elapsed time against the session budget
+                if (row.started_at) {
+                    const elapsed = Math.floor((Date.now() - new Date(row.started_at).getTime()) / 1000);
+                    if (elapsed > 0) {
+                        state.session.seconds = Math.max(120, (state.session.totalSeconds || state.session.seconds) - elapsed);
+                    }
+                }
+
+                engine.updatePhase();
+                state.session.resumed = true;
+                console.log('[Resume] Restored session — questions:', engine.questionCount,
+                    'history turns:', engine.history.length, 'phase:', engine.phase);
+                return true;
+            } catch (e) {
+                console.warn('[Resume] Could not restore session, starting fresh:', e.message);
+                return false;
+            }
         }
 
         function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
@@ -5181,7 +5295,7 @@ ${config.rules}
             const violations = state.proctoring.logs.filter(l => l.level === 'danger').length;
 
             try {
-                await sbPatch('interviews', `token=eq.${encodeURIComponent(magicToken)}`, {
+                await interviewSave({
                     status: 'completed',
                     overall_score: score,
                     trust_score: state.session.trust,
@@ -5215,6 +5329,22 @@ ${config.rules}
                     })),
                 });
             } catch (e) { console.warn('Save error:', e); }
+
+            // Holistic AI panel scoring (fire-and-forget) — the Worker merges a
+            // rubric-scored assessment into feedback.holistic for the results page
+            if (magicToken && engine.history.length > 3) {
+                fetch(`${API}/ai/interview-score`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        token: magicToken,
+                        role: engine.jobTitle,
+                        level: engine.level,
+                        skills: engine.skillsToProbe,
+                        transcript: engine.history.slice(-40).map(h => ({ role: h.role, content: (h.content || '').slice(0, 1000) })),
+                    }),
+                }).catch(e => console.warn('[Score] Holistic scoring skipped:', e.message));
+            }
 
             // Upload recording to ImageKit (if enabled and has data)
             if (state.recording.enabled && state.recording.chunks.length > 0) {
@@ -5276,7 +5406,7 @@ ${config.rules}
 
                             // Save recording URL to interview record
                             const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
-                            await sbPatch('interviews', `token=eq.${encodeURIComponent(magicToken)}`, {
+                            await interviewSave({
                                 recording_url: uploadData.url,
                                 recording_file_id: uploadData.fileId,
                                 recording_size_bytes: blob.size,
@@ -5328,7 +5458,7 @@ ${config.rules}
                         <div class="results-stat-label">Skills Assessed</div>
                     </div>
                     <div class="results-stat">
-                        <div class="results-stat-val">${Math.floor((15 * 60 - state.session.seconds) / 60)}m</div>
+                        <div class="results-stat-val">${Math.floor(((state.session.totalSeconds || 900) - state.session.seconds) / 60)}m</div>
                         <div class="results-stat-label">Duration</div>
                     </div>
                 </div>
@@ -5387,36 +5517,20 @@ ${config.rules}
                 })),
             };
 
-            // fetch with keepalive survives page unload in modern browsers
-            // sendBeacon cannot set custom headers (Supabase needs apikey + Authorization)
-            const url = `${SB_URL}/rest/v1/interviews?token=eq.${encodeURIComponent(magicToken)}`;
-
             try {
-                // Primary: fetch with keepalive (supports headers, survives tab close)
-                fetch(url, {
-                    method: 'PATCH',
-                    headers: {
-                        'apikey': SB_KEY,
-                        'Authorization': 'Bearer ' + SB_KEY,
-                        'Content-Type': 'application/json',
-                        'Prefer': 'return=minimal',
-                    },
-                    body: JSON.stringify(payload),
-                    keepalive: true,
-                }).catch(() => {
-                    // Fallback: try our backend endpoint as relay
-                    navigator.sendBeacon(
-                        `${API}/interview-emergency-save`,
-                        new Blob([JSON.stringify({ token: magicToken, payload })], { type: 'application/json' })
-                    );
-                });
+                // Server-mediated save (service key stays on the Worker); keepalive
+                // survives tab close, sendBeacon fallback lives inside interviewSave.
+                interviewSave(payload, { keepalive: true });
                 console.log('[Emergency] Partial results saved (keepalive fetch)');
             } catch (e) {
                 console.warn('[Emergency] Save failed:', e.message);
             }
         }
 
-        // Fire on tab close, navigation away, or app switch
+        // Fire on real page exit only (tab close / navigation away).
+        // NOTE: visibilitychange is intentionally NOT wired to emergencySave —
+        // a tab/app switch is not an exit, and emergencySave marks the interview
+        // 'abandoned'. App switches sync a throttled partial snapshot instead.
         window.addEventListener('beforeunload', (e) => {
             if (state.session.started && !state.session.ended) {
                 emergencySave();
@@ -5429,7 +5543,8 @@ ${config.rules}
 
         document.addEventListener('visibilitychange', () => {
             if (document.visibilityState === 'hidden' && state.session.started && !state.session.ended) {
-                emergencySave();
+                // Throttled internally (15s min interval) — safe on every tab switch
+                pushPartialUpdate();
             }
         });
 
@@ -5451,12 +5566,13 @@ ${config.rules}
                 if (!res.ok) throw new Error('Failed to fetch AI config');
                 const data = await res.json();
                 
-                if (data.available && data.provider === 'gemini' && data.apiKey) {
-                    // Store the key securely in state (never shown to candidate)
-                    state.duplex.companyApiKey = data.apiKey;
+                if (data.available && data.provider === 'gemini') {
+                    // The Gemini key stays on the Worker — Live sessions are proxied
+                    // via /api/interview/live, the browser never sees it.
+                    state.duplex.available = true;
                     state.duplex.companyModel = data.model || 'gemini-3.1-flash';
                     
-                    // Show the toggle card and auto-enable
+                    // Show the toggle card and auto-enable (candidate may opt out)
                     if (card) card.style.display = 'flex';
                     if (toggleSwitch) toggleSwitch.style.display = 'inline-block';
                     if (toggleSub) toggleSub.innerHTML = 'Talk naturally & interrupt Aisha in real-time';
@@ -5475,17 +5591,27 @@ ${config.rules}
             }
         }
 
-        async function startLiveVoiceCallDuplex(apiKey) {
+        async function startLiveVoiceCallDuplex() {
             console.log('[Duplex] Starting Gemini Live Full-Duplex Session...');
             state.duplex.active = true;
             state.duplex.playbackTime = 0;
             state.duplex.audioQueue = [];
             state.duplex.lastUserTranscript = '';
+            state.duplex.lastAiTranscript = '';
+            state.duplex.wrapUpRequested = false;
+            state.duplex.wrapUpTimer = null;
 
             try {
-                // Initialize AudioContext
+                // Initialize AudioContext at 16kHz (Gemini Live input rate).
+                // Older Safari rejects custom rates → fall back to the device rate
+                // and downsample in the capture handler instead.
                 const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-                state.duplex.audioCtx = new AudioContextClass({ sampleRate: 16000 });
+                try {
+                    state.duplex.audioCtx = new AudioContextClass({ sampleRate: 16000 });
+                } catch (ctxErr) {
+                    console.warn('[Duplex] 16kHz AudioContext unsupported, using device rate:', ctxErr.message);
+                    state.duplex.audioCtx = new AudioContextClass();
+                }
                 
                 // Get Microphone Access — on mobile, reuse proctoring stream's audio
                 // tracks to avoid opening a conflicting second getUserMedia({ audio })
@@ -5493,6 +5619,7 @@ ${config.rules}
                 if (state.isMobile && existingAudioTracks.length > 0) {
                     console.log('[Duplex] Mobile: reusing proctoring stream audio tracks');
                     state.duplex.micStream = new MediaStream(existingAudioTracks);
+                    state.duplex.ownsMicStream = false; // tracks belong to the proctoring stream
                 } else {
                     console.log('[Duplex] Acquiring fresh mic stream for duplex');
                     state.duplex.micStream = await navigator.mediaDevices.getUserMedia({
@@ -5502,6 +5629,7 @@ ${config.rules}
                             autoGainControl: true
                         }
                     });
+                    state.duplex.ownsMicStream = true;
                 }
                 const source = state.duplex.audioCtx.createMediaStreamSource(state.duplex.micStream);
 
@@ -5510,6 +5638,11 @@ ${config.rules}
                 state.duplex.analyser.fftSize = 512;
                 state.duplex.analyser.smoothingTimeConstant = 0.55;
                 state.duplex.analyser.connect(state.duplex.audioCtx.destination);
+
+                // Two-sided evidence mix: candidate mic + Aisha's voice end up in a
+                // single audio track the MediaRecorder can capture reliably.
+                state.duplex.recMix = state.duplex.audioCtx.createMediaStreamDestination();
+                source.connect(state.duplex.recMix);
                 
                 // Attach to AvatarEngine
                 if (window.AvatarEngine) {
@@ -5532,8 +5665,10 @@ ${config.rules}
                     AvatarEngine.setState('listening');
                 }
 
-                // Connect WebSocket
-                const wsUrl = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent?key=${apiKey}`;
+                // Connect via the Worker proxy — the company's Gemini key stays
+                // server-side; this page only ever talks to our own backend.
+                const wsBase = API.replace(/^http/i, 'ws');
+                const wsUrl = `${wsBase}/api/interview/live?token=${encodeURIComponent(magicToken)}`;
                 state.duplex.socket = new WebSocket(wsUrl);
 
                 state.duplex.socket.onopen = () => {
@@ -5541,21 +5676,20 @@ ${config.rules}
                     setOrbState('listening');
                     document.getElementById('voQuality').textContent = "Full-Duplex AI Session Active";
 
-                    // System instruction config
-                    const jobTitle = state.meta.job?.title || 'Candidate';
-                    const skills = (engine.skillsToProbe || []).join(', ') || 'general problem solving';
-                    
-                    const systemPrompt = `You are Aisha, the lead AI interviewer for Simpatico HR.
-Today's interview is for the position of: ${jobTitle}.
-Skills to evaluate: ${skills}.
-Maximum questions: ${engine.maxQuestions}.
+                    // Port the FULL interview brain (persona, round style, language &
+                    // cultural config, JD, resume, skills, anti-cliché rules) into the
+                    // Live session — the old generic 10-line prompt made duplex
+                    // interviews visibly dumber than the classic pipeline.
+                    const brainPrompt = engine.buildSystemPrompt();
+                    const systemPrompt = `${brainPrompt}
 
-RULES:
-1. Speak warmly, professionally, and naturally.
-2. Ask exactly ONE question at a time.
-3. Keep your spoken responses concise (1-3 sentences maximum).
-4. If the candidate answers, respond briefly to their answer and transition to the next question.
-5. Start the interview now by greeting the candidate, introducing yourself as Aisha, and asking the first interview question to get started.`;
+## LIVE FULL-DUPLEX VOICE RULES
+- You ARE the voice of Aisha — speak naturally and warmly, with light human fillers ("I see", "mm-hm", "got it") and genuine reactions to what the candidate says.
+- Keep every spoken turn SHORT (1-3 sentences). Ask exactly ONE question at a time.
+- If the candidate interrupts you, stop immediately and listen — never talk over them.
+- Briefly acknowledge each answer, then transition to the next question per the phase instructions.
+- If the candidate goes quiet or asks for clarification, rephrase patiently.
+- Start now: greet the candidate warmly, introduce yourself as Aisha, and ask your first question.`;
 
                     const setupMsg = {
                         setup: {
@@ -5563,6 +5697,7 @@ RULES:
                             generationConfig: {
                                 responseModalities: ["AUDIO"],
                                 speechConfig: {
+                                    languageCode: state.interviewLanguage || 'en-US',
                                     voiceConfig: {
                                         prebuiltVoiceConfig: {
                                             voiceName: "Kore"
@@ -5570,6 +5705,10 @@ RULES:
                                     }
                                 }
                             },
+                            // Required so both sides of the conversation arrive as text —
+                            // feeds subtitles AND the final saved transcript.
+                            inputAudioTranscription: {},
+                            outputAudioTranscription: {},
                             systemInstruction: {
                                 parts: [{ text: systemPrompt }]
                             }
@@ -5594,15 +5733,26 @@ RULES:
 
                         const serverContent = data.serverContent;
                         if (serverContent) {
-                            // User Transcription (Real-time STT)
+                            // User Transcription (Real-time STT) — chunks are INCREMENTAL
+                            // fragments and must be accumulated, never overwritten.
                             if (serverContent.inputTranscription && serverContent.inputTranscription.text) {
-                                const txt = serverContent.inputTranscription.text;
+                                state.duplex.lastUserTranscript += serverContent.inputTranscription.text;
                                 const transEl = document.getElementById('liveTranscript');
                                 if (transEl) {
-                                    transEl.textContent = txt;
+                                    const full = state.duplex.lastUserTranscript;
+                                    transEl.textContent = full.length > 140 ? '...' + full.slice(-140) : full;
                                     transEl.classList.add('active');
                                 }
-                                state.duplex.lastUserTranscript = txt;
+                            }
+
+                            // Aisha's speech, transcribed (enabled via outputAudioTranscription in setup)
+                            if (serverContent.outputTranscription && serverContent.outputTranscription.text) {
+                                state.duplex.lastAiTranscript += serverContent.outputTranscription.text;
+                                const subtitle = document.getElementById('aiSubtitleText');
+                                if (subtitle) {
+                                    subtitle.textContent = state.duplex.lastAiTranscript;
+                                    subtitle.classList.add('show');
+                                }
                             }
 
                             // Aisha Response Chunks
@@ -5637,6 +5787,17 @@ RULES:
                                 setOrbState('listening');
                                 if (window.AvatarEngine) AvatarEngine.setState('listening');
 
+                                // Record Aisha's completed turn so the saved transcript is complete
+                                const aiTurn = (state.duplex.lastAiTranscript || '').trim();
+                                if (aiTurn.length > 1) {
+                                    engine.history.push({
+                                        role: 'ai',
+                                        content: aiTurn,
+                                        meta: { phase: engine.phase, questionNum: engine.questionCount, duplex: true }
+                                    });
+                                }
+                                state.duplex.lastAiTranscript = '';
+
                                 // Submit user answer if accumulated
                                 if (state.duplex.lastUserTranscript.trim().length > 5) {
                                     submitVoiceAnswerDuplex(state.duplex.lastUserTranscript);
@@ -5647,11 +5808,22 @@ RULES:
                                         if (transEl) transEl.textContent = '';
                                     }, 2000);
                                 }
-                                
+
                                 // Clear subtitle text buffer for next question
                                 const subtitle = document.getElementById('aiSubtitleText');
                                 if (subtitle) {
                                     setTimeout(() => { subtitle.textContent = ''; }, 3000);
+                                }
+
+                                // Farewell turn after a wrap-up request → let the audio
+                                // queue finish playing, then end (no more hard 8s cutoff)
+                                if (state.duplex.wrapUpRequested && !state.session.ended) {
+                                    clearTimeout(state.duplex.wrapUpTimer);
+                                    const ctx = state.duplex.audioCtx;
+                                    const drainMs = ctx
+                                        ? Math.max(0, (state.duplex.playbackTime - ctx.currentTime) * 1000) + 800
+                                        : 1500;
+                                    setTimeout(() => { endLiveVoiceCallDuplex(); endSession(); }, Math.min(drainMs, 12000));
                                 }
                             }
                         }
@@ -5662,19 +5834,36 @@ RULES:
 
                 state.duplex.socket.onerror = (err) => {
                     console.error('[Duplex] WebSocket error:', err);
-                    showToast('Connection error, closing voice session', 'danger');
-                    endLiveVoiceCallDuplex();
+                    if (state.duplex.wrapUpRequested) {
+                        // Socket died mid-farewell → still land on the completion screen
+                        endLiveVoiceCallDuplex();
+                        if (!state.session.ended && !isEnding) endSession();
+                    } else {
+                        // Mid-interview failure → interview continues on classic pipeline
+                        fallbackToClassic('socket error');
+                    }
                 };
 
                 state.duplex.socket.onclose = () => {
                     console.log('[Duplex] WebSocket closed.');
-                    endLiveVoiceCallDuplex();
+                    if (state.session.ended || isEnding) return;
+                    if (state.duplex.wrapUpRequested) {
+                        endLiveVoiceCallDuplex();
+                        endSession();
+                    } else if (state.duplex.active) {
+                        fallbackToClassic('connection closed');
+                    }
                 };
 
             } catch (err) {
                 console.error('[Duplex] failed initialization:', err);
-                showToast('Microphone access denied or connection error.', 'danger');
-                endLiveVoiceCallDuplex();
+                if (state.session.started && !state.session.ended) {
+                    // Interview already began — continue on the classic pipeline
+                    fallbackToClassic(err.message || 'init failed');
+                } else {
+                    showToast('danger', 'Microphone access denied or connection error.');
+                    endLiveVoiceCallDuplex();
+                }
             }
         }
 
@@ -5682,6 +5871,8 @@ RULES:
             if (!state.duplex.active) return;
             console.log('[Duplex] Ending voice session...');
             state.duplex.active = false;
+            clearTimeout(state.duplex.wrapUpTimer);
+            state.duplex.wrapUpTimer = null;
 
             if (state.duplex.socket) {
                 try { state.duplex.socket.close(); } catch(e){}
@@ -5689,7 +5880,11 @@ RULES:
             }
 
             if (state.duplex.micStream) {
-                state.duplex.micStream.getTracks().forEach(t => t.stop());
+                // Only stop tracks we created — on mobile they belong to the
+                // proctoring stream (stopping them kills webcam mic + recording)
+                if (state.duplex.ownsMicStream !== false) {
+                    state.duplex.micStream.getTracks().forEach(t => t.stop());
+                }
                 state.duplex.micStream = null;
             }
 
@@ -5714,6 +5909,32 @@ RULES:
             if (orbWrapper) orbWrapper.style.display = '';
         }
 
+        // Duplex died (or never connected) → continue the SAME interview on the
+        // classic TTS + SpeechRecognition pipeline. engine.history already holds
+        // every duplex turn (P1.6), so the AI picks up where it left off.
+        let _classicFallbackStarted = false;
+        function fallbackToClassic(reason) {
+            if (_classicFallbackStarted || state.session.ended) return;
+            _classicFallbackStarted = true;
+            console.warn('[Duplex] Falling back to classic pipeline:', reason);
+            state.duplex.available = false;
+            const t = document.getElementById('voiceDuplexToggle');
+            if (t) t.checked = false;
+            endLiveVoiceCallDuplex();
+
+            // Restart evidence recording with the proctoring mic — the duplex mix
+            // track goes silent once the duplex AudioContext closes. Chunks so far
+            // are retained (they accumulate in state.recording.chunks).
+            if (state.recording.mediaRecorder && state.recording.mediaRecorder.state !== 'inactive') {
+                try { state.recording.mediaRecorder.stop(); } catch (e) { }
+                state.recording.mediaRecorder = null;
+                setTimeout(() => startRecordingIfEnabled(), 300);
+            }
+
+            showToast('warn', '⚡ Live voice dropped — switching to standard mode, the interview continues.');
+            startSession();
+        }
+
         function startRecordingAudioDuplex(source) {
             state.duplex.scriptNode = state.duplex.audioCtx.createScriptProcessor(2048, 1, 1);
             source.connect(state.duplex.scriptNode);
@@ -5721,8 +5942,20 @@ RULES:
 
             state.duplex.scriptNode.onaudioprocess = (e) => {
                 if (!state.duplex.active || !state.duplex.socket || state.duplex.socket.readyState !== WebSocket.OPEN) return;
-                
-                const inputData = e.inputBuffer.getChannelData(0);
+
+                let inputData = e.inputBuffer.getChannelData(0);
+
+                // Gemini expects 16kHz PCM — downsample if the context runs at the
+                // device rate (fallback path for browsers rejecting 16kHz contexts)
+                const srcRate = state.duplex.audioCtx.sampleRate;
+                if (srcRate !== 16000) {
+                    const ratio = srcRate / 16000;
+                    const outLen = Math.floor(inputData.length / ratio);
+                    const ds = new Float32Array(outLen);
+                    for (let i = 0; i < outLen; i++) ds[i] = inputData[Math.floor(i * ratio)];
+                    inputData = ds;
+                }
+
                 const pcmData = new Int16Array(inputData.length);
                 for (let i = 0; i < inputData.length; i++) {
                     const s = Math.max(-1, Math.min(1, inputData[i]));
@@ -5761,6 +5994,8 @@ RULES:
             
             // Connect to analyser so lip sync works, and analyser feeds destination
             sourceNode.connect(state.duplex.analyser);
+            // Also feed the evidence-recording mix so Aisha's voice is captured
+            if (state.duplex.recMix) sourceNode.connect(state.duplex.recMix);
 
             state.duplex.audioQueue.push(sourceNode);
             sourceNode.onended = () => {
@@ -5803,18 +6038,25 @@ RULES:
 
         async function submitVoiceAnswerDuplex(text) {
             if (!text || text.trim().length < 5) return;
-            
+
             const words = text.split(/\s+/).filter(Boolean).length;
             const analysis = analyzeAnswer(text);
+
+            // Record the candidate's turn so the saved transcript is complete
+            engine.history.push({
+                role: 'user',
+                content: text,
+                meta: { phase: engine.phase, analysis, questionNum: engine.questionCount, duplex: true }
+            });
 
             // Always record skill progress so uncovered skills list advances on every turn
             const currentTargetSkill = engine.skillsToProbe[Math.min(engine.questionCount - 1, engine.skillsToProbe.length - 1)] || 'general';
             const skillToRecord = analysis.detectedSkill || currentTargetSkill;
             engine.recordSkillAssessment(skillToRecord, analysis.score, analysis.techHits > 0 ? 2 : 1);
 
-            // Save answer to Supabase
+            // Save answer (server-mediated — interview_id enforced server-side)
             if (state.meta.interview?.id) {
-                sbInsert('interview_answers', {
+                answerSave({
                     interview_id: state.meta.interview.id,
                     question_number: engine.questionCount,
                     answer_text: text,
@@ -5829,38 +6071,24 @@ RULES:
             // Update UI Counters
             engine.questionCount++;
             engine.updatePhase(analysis);
-            
+
             document.getElementById('qCounter').innerHTML = `Q <strong>${engine.questionCount}</strong> / ~${engine.maxQuestions}`;
             document.getElementById('qTrackerNum').textContent = engine.questionCount;
             const progress = Math.min(100, (engine.questionCount / engine.maxQuestions) * 100);
             document.getElementById('qProgressFill').style.width = progress + '%';
 
-            // Check if max questions reached
-            if (engine.questionCount >= engine.maxQuestions) {
-                sendDuplexControlMessage("Wrap up the interview now. Say goodbye and announce that the interview is completed.");
-                setTimeout(() => {
+            // Max questions reached → ask Aisha to say goodbye. The interview ends
+            // when her farewell turn completes (see turnComplete handler); this is
+            // just a 12s safety cap in case the socket dies mid-farewell.
+            if (engine.questionCount >= engine.maxQuestions && !state.duplex.wrapUpRequested) {
+                state.duplex.wrapUpRequested = true;
+                sendDuplexControlMessage("Wrap up the interview now. Thank the candidate warmly, say goodbye and announce that the interview is completed.");
+                state.duplex.wrapUpTimer = setTimeout(() => {
                     endLiveVoiceCallDuplex();
                     endSession();
-                }, 8000);
+                }, 12000);
             }
         }
-
-        // Fire on tab close, navigation away, or app switch
-        window.addEventListener('beforeunload', (e) => {
-            if (state.session.started && !state.session.ended) {
-                emergencySave();
-            }
-        });
-
-        window.addEventListener('pagehide', () => {
-            emergencySave();
-        });
-
-        document.addEventListener('visibilitychange', () => {
-            if (document.visibilityState === 'hidden' && state.session.started && !state.session.ended) {
-                emergencySave();
-            }
-        });
 
         // ══════════════════════════════════════════════════════════════
         // BOOT
