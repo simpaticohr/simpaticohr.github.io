@@ -3349,6 +3349,26 @@ async function initApp() {
         localStorage.removeItem('simpaticoHR_data');
     }
 
+    // ★★ CROSS-TENANT GUARD — Verify Supabase session matches localStorage user
+    // This is the LAST LINE OF DEFENSE against stale session leaks
+    try {
+        const guardDb = (typeof getSupabaseClient === 'function' ? getSupabaseClient() : null) || window.SimpaticoDB || window._supabaseClient;
+        if (guardDb && realUser.email) {
+            const { data: guardSession } = await guardDb.auth.getSession();
+            const sessionEmail = guardSession?.session?.user?.email;
+            if (sessionEmail && sessionEmail.toLowerCase() !== realUser.email.toLowerCase()) {
+                console.error('[init] 🚨 TENANT MISMATCH! Supabase session:', sessionEmail, 'localStorage:', realUser.email);
+                // Nuclear cleanup — force fresh login
+                try { await guardDb.auth.signOut(); } catch(e) {}
+                _nuclearCleanup();
+                window.location.href = '/platform/login.html?role=hr&reason=tenant_mismatch';
+                return;
+            }
+        }
+    } catch(guardErr) {
+        console.warn('[init] Cross-tenant guard check failed:', guardErr.message);
+    }
+
     // ★ AUTO-RESOLVE company_id if missing (ROOT CAUSE FIX)
     // Without company_id, strict isolation blocks all employee/payroll operations
     if (!realUser.company_id && !realUser.tenant_id) {
@@ -4266,17 +4286,53 @@ function showLogoutConfirmation() {
 
 function hideLogoutConfirmation() { document.getElementById('logoutOverlay').classList.remove('open'); }
 
+/**
+ * Nuclear cleanup helper — removes ALL tenant-scoped data from localStorage/sessionStorage.
+ * Shared between performLogout() and the cross-tenant guard.
+ */
+function _nuclearCleanup() {
+    // 1. Clear DataStore for current tenant
+    try { DataStore.clear(); } catch(e) {}
+
+    // 2. Purge ALL tenant-keyed data from localStorage
+    const keysToRemove = [];
+    for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (!k) continue;
+        if (k.startsWith('simpatico_')) { keysToRemove.push(k); continue; }
+        if (k.startsWith('sh_')) { keysToRemove.push(k); continue; }
+        if (k.startsWith('simpaticoHR_data')) { keysToRemove.push(k); continue; }
+        if (k.startsWith('sb-') && k.endsWith('-auth-token')) { keysToRemove.push(k); continue; }
+        if (k === 'cfg_features') { keysToRemove.push(k); continue; }
+    }
+    keysToRemove.forEach(k => localStorage.removeItem(k));
+
+    // 3. Wipe sessionStorage entirely
+    sessionStorage.clear();
+
+    console.log('[logout] 🔒 Nuclear cleanup: removed', keysToRemove.length, 'keys');
+}
+
 function performLogout() {
     DataStore.update(data => { data.user.isLoggedIn = false; });
     hideLogoutConfirmation();
     showToast('Signed out successfully. Redirecting...', 'success');
-    ['simpatico_token','simpatico_user','simpatico_refresh','simpatico_company'].forEach(k=>{
-        localStorage.removeItem(k);
-        sessionStorage.removeItem(k);
-    });
-    setTimeout(() => {
-        window.location.href = '/platform/login.html?role=hr'; 
-    }, 1000);
+
+    // ★ Sign out of Supabase SDK to invalidate the auth session
+    const db = (typeof getSupabaseClient === 'function' ? getSupabaseClient() : null) || window.SimpaticoDB || window._supabaseClient;
+    const doRedirect = () => {
+        _nuclearCleanup();
+        window.location.href = '/platform/login.html?role=hr';
+    };
+
+    if (db) {
+        db.auth.signOut()
+            .then(() => console.log('[logout] Supabase signOut successful'))
+            .catch(e => console.warn('[logout] Supabase signOut error:', e.message))
+            .finally(() => setTimeout(doRedirect, 800));
+    } else {
+        setTimeout(doRedirect, 800);
+    }
 }
 
 // ===== MODE SELECTION =====

@@ -106,24 +106,35 @@ function setStatus(title, text) {
 }
 
 /**
- * Clear only Simpatico-specific keys — NOT the entire localStorage.
- * This preserves Supabase SDK auth storage (sb-*-auth-token).
+ * NUCLEAR SESSION CLEANUP — Multi-Tenant Isolation Fix
+ * Removes ALL previous tenant data to prevent cross-tenant data leakage.
+ * This MUST run before establishing a new authenticated session.
  */
 function clearPreviousSession() {
-  const simpaticoKeys = [
-    'simpatico_token', 'simpatico_user', 'simpatico_refresh',
-    'simpatico_company', 'sh_token', 'sh_user', 'sh_client',
-    'candidate_email_last_applied'
-  ];
-  simpaticoKeys.forEach(k => {
-    localStorage.removeItem(k);
-    sessionStorage.removeItem(k);
-  });
-  // Clear any cached AI settings from previous tenant
-  Object.keys(localStorage).forEach(k => {
-    if (k.startsWith('simpatico_ai_settings_')) localStorage.removeItem(k);
-  });
-  console.log('[auth-callback] Cleared previous Simpatico session and tenant keys');
+  // 1. Collect ALL keys that belong to any previous tenant
+  const keysToRemove = [];
+  for (let i = 0; i < localStorage.length; i++) {
+    const k = localStorage.key(i);
+    if (!k) continue;
+    // Remove ALL simpatico session/app keys
+    if (k.startsWith('simpatico_')) { keysToRemove.push(k); continue; }
+    // Remove legacy keys
+    if (k.startsWith('sh_')) { keysToRemove.push(k); continue; }
+    // Remove ALL DataStore caches (simpaticoHR_data_*)
+    if (k.startsWith('simpaticoHR_data')) { keysToRemove.push(k); continue; }
+    // Remove Supabase SDK auth sessions (sb-*-auth-token)
+    if (k.startsWith('sb-') && k.endsWith('-auth-token')) { keysToRemove.push(k); continue; }
+    // Remove tenant-scoped feature flags
+    if (k === 'cfg_features') { keysToRemove.push(k); continue; }
+    // Remove candidate tracking
+    if (k === 'candidate_email_last_applied') { keysToRemove.push(k); continue; }
+  }
+  keysToRemove.forEach(k => localStorage.removeItem(k));
+
+  // 2. Wipe sessionStorage entirely — new login = fresh session
+  sessionStorage.clear();
+
+  console.log('[auth-callback] 🔒 Nuclear cleanup: removed', keysToRemove.length, 'keys from localStorage + cleared sessionStorage');
 }
 
 // ─── Main ───────────────────────────────────────────────────────

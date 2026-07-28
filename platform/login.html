@@ -644,6 +644,28 @@
         // ═══════════════════════════════════════════════════════════════════
         let selectedRole = 'hr';
 
+        // ═══════════════════════════════════════════════════════════════════
+        // PRE-LOGIN CLEANUP — Clear stale tenant data on login page arrival
+        // ═══════════════════════════════════════════════════════════════════
+        (function cleanStaleSessionData() {
+            // If we're on the login page, any lingering tenant caches are stale
+            const keysToRemove = [];
+            for (let i = 0; i < localStorage.length; i++) {
+                const k = localStorage.key(i);
+                if (!k) continue;
+                // Remove DataStore caches from any previous tenant
+                if (k.startsWith('simpaticoHR_data')) { keysToRemove.push(k); continue; }
+                // Remove stale Supabase SDK auth sessions
+                if (k.startsWith('sb-') && k.endsWith('-auth-token')) { keysToRemove.push(k); continue; }
+                // Remove stale feature flags
+                if (k === 'cfg_features') { keysToRemove.push(k); continue; }
+            }
+            if (keysToRemove.length > 0) {
+                keysToRemove.forEach(k => localStorage.removeItem(k));
+                console.log('[login] 🔒 Pre-login cleanup: removed', keysToRemove.length, 'stale keys');
+            }
+        })();
+
         function updateRoleUI(role) {
             const subtitle = document.querySelector('.auth-form .subtitle');
             const emailInput = document.getElementById('email');
@@ -774,6 +796,8 @@
             
             const db = window.SimpaticoDB || window._supabaseClient;
             if (db) {
+                // ★ Sign out any previous session BEFORE starting new OAuth
+                try { await db.auth.signOut(); } catch(e) {}
                 await db.auth.signInWithOAuth({
                     provider: 'google',
                     options: {

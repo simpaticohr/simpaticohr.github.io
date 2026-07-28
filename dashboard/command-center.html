@@ -3353,10 +3353,32 @@ function showToast(msg, type) {
 }
 
 function signOut() {
-    localStorage.removeItem('simpatico_token');
-    localStorage.removeItem('sh_token');
-    localStorage.removeItem('simpatico_user');
-    window.location.href = '../platform/login.html';
+    // ★ NUCLEAR CLEANUP — Multi-Tenant Isolation Fix
+    const db = window.SimpaticoDB || window._supabaseClient;
+    const doCleanupAndRedirect = () => {
+        // Purge ALL tenant-keyed data from localStorage
+        const keysToRemove = [];
+        for (let i = 0; i < localStorage.length; i++) {
+            const k = localStorage.key(i);
+            if (!k) continue;
+            if (k.startsWith('simpatico_') || k.startsWith('sh_') || k.startsWith('simpaticoHR_data')) { keysToRemove.push(k); continue; }
+            if (k.startsWith('sb-') && k.endsWith('-auth-token')) { keysToRemove.push(k); continue; }
+            if (k === 'cfg_features') { keysToRemove.push(k); continue; }
+        }
+        keysToRemove.forEach(k => localStorage.removeItem(k));
+        sessionStorage.clear();
+        console.log('[logout] 🔒 Nuclear cleanup: removed', keysToRemove.length, 'keys');
+        window.location.href = '../platform/login.html';
+    };
+
+    if (db) {
+        db.auth.signOut()
+            .then(() => console.log('[logout] Supabase signOut successful'))
+            .catch(e => console.warn('[logout] Supabase signOut error:', e.message))
+            .finally(() => doCleanupAndRedirect());
+    } else {
+        doCleanupAndRedirect();
+    }
 }
 
 // User avatar
