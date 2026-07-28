@@ -766,6 +766,10 @@
 
         async function signInWithGoogle() {
             const role = selectedRole || 'hr';
+            // Persist target role so callback never loses portal context
+            sessionStorage.setItem('simpatico_auth_role', role);
+            localStorage.setItem('simpatico_auth_role', role);
+            
             const callback = window.location.origin + '/platform/auth-callback.html?role=' + role;
             
             const db = window.SimpaticoDB || window._supabaseClient;
@@ -925,22 +929,19 @@
                           .then(() => debug('Updated users table with company_id'))
                           .catch(() => {});
                     } else {
-                        // Try by email domain match
-                        const domain = authData.user.email?.split('@')[1];
-                        if (domain && domain !== 'gmail.com' && domain !== 'yahoo.com' && domain !== 'hotmail.com' && domain !== 'outlook.com') {
-                            const { data: domainCompanies } = await db
-                                .from('companies')
-                                .select('id, name')
-                                .ilike('domain', `%${domain}%`)
-                                .limit(1);
-                            if (domainCompanies?.[0]) {
-                                profile.company_id = domainCompanies[0].id;
-                                debug('Resolved company_id from email domain: ' + domainCompanies[0].id);
-                                db.from('users')
-                                  .update({ company_id: domainCompanies[0].id })
-                                  .eq('auth_id', authData.user.id)
-                                  .then(() => {}).catch(() => {});
-                            }
+                        // Strict tenant match by company email only (fuzzy domain match removed for security)
+                        const { data: exactCompany } = await db
+                            .from('companies')
+                            .select('id, name')
+                            .eq('email', authData.user.email.toLowerCase())
+                            .limit(1);
+                        if (exactCompany?.[0]) {
+                            profile.company_id = exactCompany[0].id;
+                            debug('Resolved company_id from exact email match: ' + exactCompany[0].id);
+                            db.from('users')
+                              .update({ company_id: exactCompany[0].id })
+                              .eq('auth_id', authData.user.id)
+                              .then(() => {}).catch(() => {});
                         }
                     }
                 } catch (e) {
