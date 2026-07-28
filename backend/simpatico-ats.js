@@ -12110,9 +12110,16 @@ async function handleBYOKValidate(request, env, ctx) {
 
 async function handleInterviewStart(request, env, ctx) {
   const body = await safeJson(request) || {};
-  const { role = "Software Engineer", level = "mid", count = 5 } = body;
+  const { role = "Software Engineer", level = "mid", count = 5, interview_level = "" } = body;
 
-  const defaultQuestions = [
+  // Determine if this is a non-technical interview based on interview_level
+  const il = (interview_level || "").toLowerCase();
+  const isNonTech = il.includes('hr') || il.includes('behavioral') || il.includes('culture') ||
+    il.includes('competency') || il.includes('screening') || il.includes('communication') ||
+    il.includes('role play') || il.includes('simulation') || il.includes('domain knowledge') ||
+    il.includes('client interaction');
+
+  const technicalQuestions = [
     {
       id: "q1",
       question: `Describe a complex system or project you built as a ${level} ${role}. What were the core architecture trade-offs and scalability challenges?`,
@@ -12145,6 +12152,41 @@ async function handleInterviewStart(request, env, ctx) {
     }
   ];
 
+  const nonTechnicalQuestions = [
+    {
+      id: "q1",
+      question: `Tell me about your experience in a ${role} role. What aspects of this type of work are you most passionate about?`,
+      type: "behavioral",
+      difficulty: "easy"
+    },
+    {
+      id: "q2",
+      question: `Describe a time when you had to handle a difficult situation with a colleague, client, or stakeholder. How did you resolve it?`,
+      type: "situational",
+      difficulty: "medium"
+    },
+    {
+      id: "q3",
+      question: `How do you prioritize your tasks when you have multiple deadlines and competing responsibilities?`,
+      type: "competency",
+      difficulty: "medium"
+    },
+    {
+      id: "q4",
+      question: `Can you share an example where you went above and beyond your job responsibilities to help your team or organization succeed?`,
+      type: "behavioral",
+      difficulty: "medium"
+    },
+    {
+      id: "q5",
+      question: `What motivates you in your career, and why are you interested in this particular role?`,
+      type: "motivational",
+      difficulty: "easy"
+    }
+  ];
+
+  const defaultQuestions = isNonTech ? nonTechnicalQuestions : technicalQuestions;
+
   return apiResponse({
     success: true,
     sessionId: `sess-${Math.random().toString(36).substring(2, 11)}`,
@@ -12156,14 +12198,14 @@ async function handleInterviewStart(request, env, ctx) {
 
 async function handleInterviewEvaluate(request, env, ctx) {
   const body = await safeJson(request) || {};
-  const { question = "", answer = "", role = "Software Engineer", level = "mid" } = body;
+  const { question = "", answer = "", role = "Software Engineer", level = "mid", interview_level = "" } = body;
 
   if (!answer || answer.trim().length === 0) {
     return apiResponse({
       score: 30,
       verdict: "weak",
       strengths: ["Attempted response"],
-      improvements: ["Provide a complete, structured answer with technical details"],
+      improvements: ["Provide a complete, structured answer with relevant details"],
       followUp: "Could you elaborate with a specific concrete example from your past experience?"
     });
   }
@@ -12172,16 +12214,32 @@ async function handleInterviewEvaluate(request, env, ctx) {
   const words = text.split(/\s+/).filter(w => w.length > 0);
   const wordCount = words.length;
 
+  // Determine if this is a non-technical interview
+  const il = (interview_level || "").toLowerCase();
+  const isNonTech = il.includes('hr') || il.includes('behavioral') || il.includes('culture') ||
+    il.includes('competency') || il.includes('screening') || il.includes('communication') ||
+    il.includes('role play') || il.includes('simulation') || il.includes('domain knowledge') ||
+    il.includes('client interaction');
+
   const techKeywords = [
     "architecture", "scalability", "latency", "throughput", "database", "index",
     "cache", "redis", "microservices", "async", "event", "pipeline", "docker",
     "kubernetes", "aws", "security", "auth", "testing", "monitoring", "metrics",
     "refactor", "optimization", "bottleneck", "concurrency", "queue", "schema"
   ];
+
+  const behavioralKeywords = [
+    "team", "collaboration", "communication", "stakeholder", "deadline", "priority",
+    "conflict", "leadership", "initiative", "feedback", "mentor", "goal", "challenge",
+    "customer", "client", "process", "improvement", "outcome", "result", "impact",
+    "responsibility", "decision", "adapt", "learn", "growth", "manage"
+  ];
+
+  const relevantKeywords = isNonTech ? behavioralKeywords : techKeywords;
   
   let keywordHits = 0;
   const lowerText = text.toLowerCase();
-  techKeywords.forEach(kw => {
+  relevantKeywords.forEach(kw => {
     if (lowerText.includes(kw)) keywordHits++;
   });
 
@@ -12195,21 +12253,15 @@ async function handleInterviewEvaluate(request, env, ctx) {
   let verdict = score >= 80 ? "strong" : score >= 65 ? "good" : "weak";
 
   const strengths = [];
-  if (wordCount > 30) strengths.push("Articulated response with thorough explanation");
-  if (keywordHits >= 2) strengths.push("Utilized precise domain terminology and architectural concepts");
+  if (wordCount > 30) strengths.push(isNonTech ? "Articulated response with thoughtful explanation" : "Articulated response with thorough explanation");
+  if (keywordHits >= 2) strengths.push(isNonTech ? "Demonstrated strong situational awareness and role-relevant competencies" : "Utilized precise domain terminology and architectural concepts");
   if (strengths.length === 0) strengths.push("Clear communication");
 
   const improvements = [];
-  if (wordCount < 25) improvements.push("Elaborate further with concrete metrics, latency targets, or system scale numbers");
-  if (keywordHits < 2) improvements.push("Incorporate specific technical tools, patterns, and trade-offs into your answer");
-  if (improvements.length === 0) improvements.push("Highlight edge cases and error recovery mechanisms");
+  if (wordCount < 25) improvements.push(isNonTech ? "Elaborate further with concrete examples, outcomes, and measurable impact" : "Elaborate further with concrete metrics, latency targets, or system scale numbers");
+  if (keywordHits < 2) improvements.push(isNonTech ? "Include specific examples of teamwork, problem-solving, and measurable outcomes" : "Incorporate specific technical tools, patterns, and trade-offs into your answer");
+  if (improvements.length === 0) improvements.push(isNonTech ? "Provide more detail on the specific actions you took and their outcomes" : "Highlight edge cases and error recovery mechanisms");
 
-  const followUps = [
-    "What specific metrics or telemetry did you monitor to verify this solution in production?",
-    "How would this architecture scale if traffic increased by 10x overnight?",
-    "What was the biggest technical trade-off or risk involved in this decision?",
-    "How did you ensure security, auth, and data integrity during this process?"
-  ];
   return apiResponse({
     score,
     verdict,
@@ -12221,7 +12273,14 @@ async function handleInterviewEvaluate(request, env, ctx) {
 
 async function handleInterviewReport(request, env, ctx) {
   const body = await safeJson(request) || {};
-  const { role = "Software Engineer", level = "mid", answers = [] } = body;
+  const { role = "Software Engineer", level = "mid", answers = [], interview_level = "" } = body;
+
+  // Determine if this is a non-technical interview
+  const il = (interview_level || "").toLowerCase();
+  const isNonTech = il.includes('hr') || il.includes('behavioral') || il.includes('culture') ||
+    il.includes('competency') || il.includes('screening') || il.includes('communication') ||
+    il.includes('role play') || il.includes('simulation') || il.includes('domain knowledge') ||
+    il.includes('client interaction');
 
   let overallScore = 75;
   if (Array.isArray(answers) && answers.length > 0) {
@@ -12230,6 +12289,28 @@ async function handleInterviewReport(request, env, ctx) {
   }
 
   const recommendation = overallScore >= 82 ? "strong-hire" : overallScore >= 70 ? "hire" : overallScore >= 55 ? "lean-hire" : "no-hire";
+
+  if (isNonTech) {
+    return apiResponse({
+      overallScore,
+      recommendation,
+      summary: `Candidate demonstrated ${overallScore >= 80 ? "exceptional" : "solid"} understanding of ${role} competencies. Showed strong communication and situational awareness.`,
+      topStrengths: [
+        "Clear communication and professional articulation",
+        "Demonstrated practical problem-solving in real-world scenarios",
+        "Proctored environment verification completed"
+      ],
+      focusAreas: [
+        "Provide more specific examples with measurable outcomes",
+        "Deeper exploration of stakeholder management scenarios"
+      ],
+      nextSteps: [
+        "Proceed to next interview round",
+        "Verify references for recent relevant roles"
+      ],
+      answers
+    });
+  }
 
   return apiResponse({
     overallScore,
@@ -12254,7 +12335,14 @@ async function handleInterviewReport(request, env, ctx) {
 
 async function handleInterviewReportFromTranscript(request, env, ctx) {
   const body = await safeJson(request) || {};
-  const { role = "Software Engineer", level = "mid", transcript = [] } = body;
+  const { role = "Software Engineer", level = "mid", transcript = [], interview_level = "" } = body;
+
+  // Determine if this is a non-technical interview
+  const il = (interview_level || "").toLowerCase();
+  const isNonTech = il.includes('hr') || il.includes('behavioral') || il.includes('culture') ||
+    il.includes('competency') || il.includes('screening') || il.includes('communication') ||
+    il.includes('role play') || il.includes('simulation') || il.includes('domain knowledge') ||
+    il.includes('client interaction');
 
   const userTurns = transcript.filter(t => t.role === "user");
   let totalWords = 0;
@@ -12280,11 +12368,11 @@ async function handleInterviewReportFromTranscript(request, env, ctx) {
     summary: `Candidate completed a live audio interview for ${role} (${level}). Exhibited ${userTurns.length} spoken responses with total word volume of ${totalWords} words.`,
     topStrengths: [
       "Fluid voice communication and active listening",
-      "Responsive technical engagement during live AI conversation",
+      isNonTech ? "Responsive engagement and situational awareness during live AI conversation" : "Responsive technical engagement during live AI conversation",
       "Proctored audio integrity verified"
     ],
     focusAreas: [
-      "Quantify scale and throughput metrics in spoken answers"
+      isNonTech ? "Provide more specific real-world examples with measurable outcomes" : "Quantify scale and throughput metrics in spoken answers"
     ],
     nextSteps: [
       "Review interview audio transcript in Client Portal",
@@ -12297,7 +12385,7 @@ async function handleInterviewReportFromTranscript(request, env, ctx) {
       score: overallScore,
       verdict: overallScore >= 75 ? "good" : "weak",
       strengths: ["Spoken response recorded"],
-      improvements: ["Detail system metrics"]
+      improvements: [isNonTech ? "Provide concrete examples with outcomes" : "Detail system metrics"]
     }))
   });
 }

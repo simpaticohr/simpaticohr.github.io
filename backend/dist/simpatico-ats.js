@@ -1509,6 +1509,8 @@ route("POST", "/api/interview/report-from-transcript", handleInterviewReportFrom
 route("POST", "/api/interview/match-resume", handleInterviewMatchResume);
 route("POST", "/api/interview/save", handleInterviewSave);
 route("POST", "/ai/interview-score", handleInterviewScore);
+route("GET",  "/api/interview/slots", handleListSlots);
+route("POST", "/api/interview/book-slot", handleBookSlot);
 
 route("POST", "/attendance/records/upsert", handleUpsertAttendance);
 
@@ -11146,7 +11148,372 @@ async function handleInterviewSave(request, env, ctx) {
     inserted = rows.length;
   }
 
+  // ── Multi-Round Auto-Progression ──
+  // When an interview completes, automatically evaluate the score and schedule
+  // the next pipeline round if the candidate passes the threshold.
+  if (patch && patch.status === "completed" && iv.status !== "completed") {
+    try {
+      const finalScore = typeof patch.overall_score === "number" ? patch.overall_score
+        : (patch.feedback?.holistic?.overall ?? patch.feedback?.skill_scores
+          ? Math.round(Object.values(patch.feedback.skill_scores).reduce((s, v) => s + (v.score || 0), 0) / Math.max(1, Object.keys(patch.feedback.skill_scores).length))
+          : null);
+      if (finalScore !== null) {
+        await autoProgressPipeline(env, iv, finalScore, patch).catch(e =>
+          console.warn("[Pipeline] Auto-progression failed (non-fatal):", e.message));
+      }
+    } catch (pipeErr) {
+      console.warn("[Pipeline] Score extraction for progression failed:", pipeErr.message);
+    }
+  }
+
   return apiResponse({ patched, inserted });
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// MULTI-ROUND INTERVIEW AUTO-PROGRESSION PIPELINE
+// When a round completes with score >= threshold, auto-create the next round.
+// Pipeline config is read from: job.pipeline_rounds > interview.pipeline_rounds > default.
+// ══════════════════════════════════════════════════════════════════════════════
+
+const DEFAULT_PIPELINE = [
+  { round: "Screening Call",   type: "ai_voice", threshold: 70, level: "screening" },
+  { round: "Technical Round",  type: "ai_voice", threshold: 60, level: "technical" },
+  { round: "HR Behavioral",   type: "ai_voice", threshold: 50, level: "hr_behavioral" },
+];
+
+async function autoProgressPipeline(env, iv, score, patch) {
+  const currentRound = iv.round_number || 1;
+  const sbHeaders = {
+    apikey: env.SUPABASE_SERVICE_KEY,
+    Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
+    "Content-Type": "application/json",
+    Prefer: "return=representation",
+  };
+
+  // 1. Resolve pipeline config: job → interview metadata → default
+  let pipeline = DEFAULT_PIPELINE;
+  if (iv.job_id) {
+    try {
+      const jobRes = await fetch(
+        `${env.SUPABASE_URL}/rest/v1/jobs?id=eq.${iv.job_id}&select=pipeline_rounds,title,department&limit=1`,
+        { headers: { apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}` } },
+      );
+      const [job] = await jobRes.json();
+      if (Array.isArray(job?.pipeline_rounds) && job.pipeline_rounds.length) {
+        pipeline = job.pipeline_rounds;
+      }
+    } catch (e) { console.warn("[Pipeline] Job lookup failed:", e.message); }
+  }
+
+  if (currentRound > pipeline.length) {
+    console.log(`[Pipeline] Round ${currentRound} exceeds pipeline length ${pipeline.length} — no progression.`);
+    return;
+  }
+
+  const currentConfig = pipeline[currentRound - 1];
+  const threshold = currentConfig?.threshold ?? 60;
+  const nextRoundNum = currentRound + 1;
+  const hasNextRound = nextRoundNum <= pipeline.length;
+
+  console.log(`[Pipeline] Interview ${iv.id}: round=${currentRound}, score=${score}, threshold=${threshold}, hasNext=${hasNextRound}`);
+
+  // 2. Score below threshold → pipeline rejection
+  if (score < threshold) {
+    console.log(`[Pipeline] Score ${score} < threshold ${threshold} — candidate did not pass.`);
+    // Update application status to rejected if linked
+    if (iv.application_id) {
+      try {
+        await fetch(`${env.SUPABASE_URL}/rest/v1/job_applications?id=eq.${iv.application_id}`, {
+          method: "PATCH", headers: sbHeaders,
+          body: JSON.stringify({ status: "rejected", updated_at: new Date().toISOString() }),
+        });
+      } catch (e) { console.warn("[Pipeline] App status update failed:", e.message); }
+    }
+    // Send professional rejection email
+    try {
+      const candidateEmail = iv.candidate_email;
+      const candidateName = iv.candidate_name || "Candidate";
+      const roleName = iv.interview_role || "the position";
+      if (candidateEmail) {
+        await sendEmail(env, {
+          to: candidateEmail,
+          subject: `Interview Update - ${roleName}`,
+          html: `<div style="max-width:600px;margin:0 auto;font-family:'Inter',Arial,sans-serif;background:#f8fafc;padding:32px 0;"><div style="background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,0.06);margin:0 16px;"><div style="background:linear-gradient(135deg,#1e293b,#334155);padding:32px 24px;text-align:center;"><h1 style="color:#fff;font-size:22px;margin:0;font-weight:800;">Interview Update</h1></div><div style="padding:32px 24px;"><p style="font-size:16px;color:#1f2937;margin:0 0 16px;">Hi <strong>${candidateName}</strong>,</p><p style="font-size:14px;color:#4b5563;line-height:1.7;margin:0 0 20px;">Thank you for taking the time to interview for the <strong>${roleName}</strong> position. After careful evaluation, we've decided to move forward with other candidates whose profile more closely matches our current requirements.</p><p style="font-size:14px;color:#4b5563;line-height:1.7;margin:0 0 20px;">We genuinely appreciate your effort and encourage you to apply for future roles that align with your skills.</p><p style="font-size:14px;color:#6b7280;margin:0;">Best regards,<br/><strong>SimpaticoHR Recruitment Team</strong></p></div><div style="background:#f1f5f9;padding:16px 24px;text-align:center;border-top:1px solid #e2e8f0;"><p style="font-size:12px;color:#94a3b8;margin:0;">&copy; ${new Date().getFullYear()} SimpaticoHR</p></div></div></div>`,
+        });
+        console.log(`[Pipeline] Rejection email sent to ${candidateEmail}`);
+      }
+    } catch (e) { console.warn("[Pipeline] Rejection email failed:", e.message); }
+    return;
+  }
+
+  // 3. Score >= threshold — auto-progress
+  if (!hasNextRound) {
+    // Final round passed → move to offer stage
+    console.log(`[Pipeline] Final round passed (score=${score})! Moving to offer stage.`);
+    if (iv.application_id) {
+      try {
+        await fetch(`${env.SUPABASE_URL}/rest/v1/job_applications?id=eq.${iv.application_id}`, {
+          method: "PATCH", headers: sbHeaders,
+          body: JSON.stringify({ status: "offer", updated_at: new Date().toISOString() }),
+        });
+      } catch (e) { console.warn("[Pipeline] Offer stage update failed:", e.message); }
+    }
+    // Send congratulations email
+    try {
+      if (iv.candidate_email) {
+        await sendEmail(env, {
+          to: iv.candidate_email,
+          subject: `Congratulations! - ${iv.interview_role || "Position"}`,
+          html: `<div style="max-width:600px;margin:0 auto;font-family:'Inter',Arial,sans-serif;background:#f8fafc;padding:32px 0;"><div style="background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,0.06);margin:0 16px;"><div style="background:linear-gradient(135deg,#059669,#10b981);padding:32px 24px;text-align:center;"><h1 style="color:#fff;font-size:22px;margin:0;font-weight:800;">🎉 Interview Complete!</h1></div><div style="padding:32px 24px;"><p style="font-size:16px;color:#1f2937;margin:0 0 16px;">Hi <strong>${iv.candidate_name || "there"}</strong>,</p><p style="font-size:14px;color:#4b5563;line-height:1.7;margin:0 0 20px;">Congratulations! You've successfully completed all interview rounds for the <strong>${iv.interview_role || "position"}</strong>. Our hiring team will be reaching out shortly with next steps.</p><p style="font-size:14px;color:#6b7280;margin:0;">Best regards,<br/><strong>SimpaticoHR Recruitment Team</strong></p></div></div></div>`,
+        });
+      }
+    } catch (e) { console.warn("[Pipeline] Congrats email failed:", e.message); }
+    return;
+  }
+
+  // 4. Create next round interview
+  const nextConfig = pipeline[nextRoundNum - 1];
+  const nextToken = Array.from(crypto.getRandomValues(new Uint8Array(24)))
+    .map(b => b.toString(36).padStart(2, "0")).join("").slice(0, 32);
+
+  const nextPayload = {
+    candidate_name: iv.candidate_name,
+    candidate_email: iv.candidate_email,
+    candidate_phone: iv.candidate_phone || null,
+    interview_role: iv.interview_role,
+    interview_level: nextConfig.level || nextConfig.round || "technical",
+    interview_type: nextConfig.type || "ai_voice",
+    token: nextToken,
+    token_type: "single",
+    status: "scheduled",
+    job_id: iv.job_id || null,
+    company_id: iv.company_id || iv.client_id || null,
+    application_id: iv.application_id || null,
+    round_number: nextRoundNum,
+    parent_interview_id: iv.id,
+    question_count: iv.question_count || 5,
+    max_attempts: 1,
+    attempts_used: 0,
+    interview_language: iv.interview_language || "en",
+    created_at: new Date().toISOString(),
+    expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+  };
+
+  try {
+    const createRes = await fetch(`${env.SUPABASE_URL}/rest/v1/interviews`, {
+      method: "POST", headers: sbHeaders, body: JSON.stringify(nextPayload),
+    });
+    if (!createRes.ok) {
+      const err = await createRes.text().catch(() => "");
+      console.error(`[Pipeline] Next round create failed: ${createRes.status} ${err}`);
+      return;
+    }
+    const [nextIv] = await createRes.json();
+    console.log(`[Pipeline] Auto-created round ${nextRoundNum} interview: ${nextIv?.id}, token: ${nextToken.slice(0, 8)}...`);
+
+    // 5. Send next-round invitation email with .ICS
+    const baseUrl = env.FRONTEND_URL || "https://simpaticohr.github.io";
+    const isHumanRound = nextConfig.type === "human" || nextConfig.type === "panel";
+    const meetingLink = isHumanRound
+      ? `${baseUrl}/interview/schedule.html?token=${nextToken}`
+      : `${baseUrl}/interview/proctored-room.html?token=${nextToken}`;
+
+    const roundLabel = nextConfig.round || `Round ${nextRoundNum}`;
+
+    // Generate ICS for 7 days from now as a placeholder
+    const scheduledDate = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000);
+    const icsContent = generateICS({
+      summary: `${roundLabel} Interview: ${iv.interview_role || "Position"}`,
+      description: `${roundLabel} for ${iv.candidate_name || "Candidate"} - ${iv.interview_role || "Position"}`,
+      location: meetingLink,
+      date: scheduledDate.toISOString().slice(0, 10),
+      startTime: "10:00",
+      endTime: "10:30",
+      organizer: "SimpaticoHR",
+      attendee: iv.candidate_email,
+    });
+
+    const ctaText = isHumanRound ? "Schedule Your Interview →" : "Start Next Round →";
+
+    await sendEmail(env, {
+      to: iv.candidate_email,
+      subject: `🎉 Congratulations! Next Round: ${roundLabel} - ${iv.interview_role || "Position"}`,
+      html: `<div style="max-width:600px;margin:0 auto;font-family:'Inter',Arial,sans-serif;background:#f8fafc;padding:32px 0;"><div style="background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,0.06);margin:0 16px;"><div style="background:linear-gradient(135deg,#4f46e5,#7c3aed);padding:32px 24px;text-align:center;"><h1 style="color:#fff;font-size:22px;margin:0;font-weight:800;">🎉 You've Advanced!</h1><p style="color:rgba(255,255,255,0.85);font-size:14px;margin:8px 0 0;">Round ${currentRound} Complete — Moving to ${roundLabel}</p></div><div style="padding:32px 24px;"><p style="font-size:16px;color:#1f2937;margin:0 0 16px;">Hi <strong>${iv.candidate_name || "there"}</strong>,</p><p style="font-size:14px;color:#4b5563;line-height:1.7;margin:0 0 20px;">Great news! You scored <strong>${score}%</strong> in your ${currentConfig.round || "previous round"} and have been advanced to the <strong>${roundLabel}</strong>.</p><div style="background:#f1f5f9;border-radius:12px;padding:20px;margin:0 0 24px;"><table style="width:100%;font-size:14px;color:#374151;" cellpadding="0" cellspacing="0"><tr><td style="padding:6px 0;color:#6b7280;width:120px;">Position</td><td style="padding:6px 0;font-weight:600;">${iv.interview_role || "Open Position"}</td></tr><tr><td style="padding:6px 0;color:#6b7280;">Next Round</td><td style="padding:6px 0;font-weight:600;">${roundLabel}</td></tr><tr><td style="padding:6px 0;color:#6b7280;">Format</td><td style="padding:6px 0;font-weight:600;">${isHumanRound ? "Panel Interview (Pick Your Slot)" : "AI Voice Interview (Proctored)"}</td></tr><tr><td style="padding:6px 0;color:#6b7280;">Deadline</td><td style="padding:6px 0;font-weight:600;">Within 7 days</td></tr></table></div><div style="text-align:center;margin:24px 0;"><a href="${meetingLink}" style="display:inline-block;background:linear-gradient(135deg,#4f46e5,#7c3aed);color:#fff;text-decoration:none;padding:14px 32px;border-radius:10px;font-weight:700;font-size:15px;">${ctaText}</a></div></div><div style="background:#f1f5f9;padding:16px 24px;text-align:center;border-top:1px solid #e2e8f0;"><p style="font-size:12px;color:#94a3b8;margin:0;">&copy; ${new Date().getFullYear()} SimpaticoHR</p></div></div></div>`,
+      attachments: [{
+        filename: "interview-invite.ics",
+        content: btoa(icsContent),
+        content_type: "text/calendar; method=REQUEST",
+      }],
+    });
+    console.log(`[Pipeline] Next-round email sent to ${iv.candidate_email}: ${roundLabel}`);
+
+  } catch (e) {
+    console.error("[Pipeline] Next-round creation/email failed:", e.message);
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// CANDIDATE SELF-SCHEDULING — Slot Listing & Booking
+// For human panel interviews, candidates pick available time slots.
+// ══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * GET /api/interview/slots?token=xxx — Available time slots for a given interview.
+ * Reads company's availability config or generates default business-hour slots.
+ */
+async function handleListSlots(request, env, ctx, _, url) {
+  const token = url.searchParams.get("token") || "";
+  if (token.length < 8) throw new ValidationError("valid token required");
+
+  const iv = await fetchInterviewByToken(env, token);
+  if (!iv) throw new NotFoundError("Interview");
+  if (iv.status === "completed") return apiResponse({ slots: [], reason: "Interview already completed" });
+  if (iv.scheduled_at) return apiResponse({ slots: [], booked: true, scheduled_at: iv.scheduled_at });
+
+  // Try to load company availability config
+  let slots = [];
+  const companyId = iv.company_id || iv.client_id;
+  if (companyId) {
+    try {
+      const cfgRes = await fetch(
+        `${env.SUPABASE_URL}/rest/v1/companies?id=eq.${companyId}&select=availability_slots&limit=1`,
+        { headers: { apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}` } },
+      );
+      const [company] = await cfgRes.json();
+      if (Array.isArray(company?.availability_slots) && company.availability_slots.length) {
+        slots = company.availability_slots;
+      }
+    } catch (e) { console.warn("[Slots] Company config fetch failed:", e.message); }
+  }
+
+  // Generate default business-hour slots for next 7 weekdays
+  if (!slots.length) {
+    const now = new Date();
+    for (let d = 1; d <= 10; d++) {
+      const date = new Date(now.getTime() + d * 24 * 60 * 60 * 1000);
+      const dow = date.getDay();
+      if (dow === 0 || dow === 6) continue; // skip weekends
+      const dateStr = date.toISOString().slice(0, 10);
+      for (const time of ["09:00", "10:00", "11:00", "14:00", "15:00", "16:00"]) {
+        slots.push({ date: dateStr, time, duration: 30, available: true });
+      }
+      if (slots.length >= 42) break; // 7 days × 6 slots
+    }
+  }
+
+  // Filter out past slots and already-booked slots (check KV)
+  const nowMs = Date.now();
+  const available = [];
+  for (const s of slots) {
+    const slotTime = new Date(`${s.date}T${s.time}:00`).getTime();
+    if (slotTime <= nowMs + 2 * 60 * 60 * 1000) continue; // Must be at least 2h in future
+    if (s.available === false) continue;
+    // Check if slot is booked by another candidate (KV lookup)
+    if (env.HR_KV) {
+      const key = `slot:${companyId || "default"}:${s.date}:${s.time}`;
+      const booked = await env.HR_KV.get(key);
+      if (booked) continue;
+    }
+    available.push(s);
+  }
+
+  return apiResponse({
+    slots: available,
+    interview: {
+      id: iv.id,
+      candidate_name: iv.candidate_name,
+      interview_role: iv.interview_role,
+      interview_level: iv.interview_level,
+      round_number: iv.round_number,
+    },
+  });
+}
+
+/**
+ * POST /api/interview/book-slot — Candidate books a time slot.
+ * Body: { token, date, time }
+ * Creates calendar event, sends .ICS to candidate + company, updates interview row.
+ */
+async function handleBookSlot(request, env, ctx) {
+  const body = await safeJson(request);
+  const { token, date, time } = body;
+  if (!token || token.length < 8) throw new ValidationError("valid token required");
+  if (!date || !time) throw new ValidationError("date and time required");
+
+  const iv = await fetchInterviewByToken(env, token);
+  if (!iv) throw new NotFoundError("Interview");
+  if (iv.status === "completed") throw new AppError("Interview already completed", HTTP.FORBIDDEN);
+  if (iv.scheduled_at) throw new AppError("Interview already scheduled", HTTP.CONFLICT);
+
+  // Verify slot is still available
+  const companyId = iv.company_id || iv.client_id;
+  if (env.HR_KV) {
+    const key = `slot:${companyId || "default"}:${date}:${time}`;
+    const existing = await env.HR_KV.get(key);
+    if (existing) throw new AppError("This time slot is no longer available", HTTP.CONFLICT);
+    // Reserve the slot
+    await env.HR_KV.put(key, JSON.stringify({
+      interview_id: iv.id,
+      candidate_name: iv.candidate_name,
+      booked_at: new Date().toISOString(),
+    }), { expirationTtl: 30 * 24 * 60 * 60 }); // 30 day TTL
+  }
+
+  // Calculate end time (30 min slot)
+  const [hh, mm] = time.split(":").map(Number);
+  const endH = String(hh + (mm >= 30 ? 1 : 0)).padStart(2, "0");
+  const endM = String((mm + 30) % 60).padStart(2, "0");
+  const endTime = `${endH}:${endM}`;
+
+  const scheduledAt = `${date}T${time}:00Z`;
+
+  // Update interview row with scheduled time
+  const sbHeaders = {
+    apikey: env.SUPABASE_SERVICE_KEY,
+    Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
+    "Content-Type": "application/json",
+    Prefer: "return=minimal",
+  };
+  await fetch(`${env.SUPABASE_URL}/rest/v1/interviews?id=eq.${iv.id}`, {
+    method: "PATCH", headers: sbHeaders,
+    body: JSON.stringify({ scheduled_at: scheduledAt, status: "scheduled" }),
+  });
+
+  // Generate .ICS
+  const baseUrl = env.FRONTEND_URL || "https://simpaticohr.github.io";
+  const meetingLink = `${baseUrl}/interview/proctored-room.html?token=${token}`;
+  const icsContent = generateICS({
+    summary: `Interview: ${iv.interview_role || "Position"} - ${iv.candidate_name || "Candidate"}`,
+    description: `${iv.interview_level || "Interview"} for ${iv.candidate_name}\nJoin: ${meetingLink}`,
+    location: meetingLink,
+    date,
+    startTime: time,
+    endTime,
+    organizer: "SimpaticoHR",
+    attendee: iv.candidate_email,
+  });
+
+  // Send confirmation email with .ICS
+  try {
+    await sendEmail(env, {
+      to: iv.candidate_email,
+      subject: `Interview Confirmed: ${iv.interview_role || "Position"} — ${date} at ${time}`,
+      html: `<div style="max-width:600px;margin:0 auto;font-family:'Inter',Arial,sans-serif;background:#f8fafc;padding:32px 0;"><div style="background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,0.06);margin:0 16px;"><div style="background:linear-gradient(135deg,#059669,#10b981);padding:32px 24px;text-align:center;"><h1 style="color:#fff;font-size:22px;margin:0;font-weight:800;">✅ Interview Scheduled!</h1></div><div style="padding:32px 24px;"><p style="font-size:16px;color:#1f2937;margin:0 0 16px;">Hi <strong>${iv.candidate_name || "there"}</strong>,</p><p style="font-size:14px;color:#4b5563;line-height:1.7;margin:0 0 20px;">Your interview has been confirmed:</p><div style="background:#f1f5f9;border-radius:12px;padding:20px;margin:0 0 24px;"><table style="width:100%;font-size:14px;color:#374151;" cellpadding="0" cellspacing="0"><tr><td style="padding:6px 0;color:#6b7280;width:120px;">Position</td><td style="padding:6px 0;font-weight:600;">${iv.interview_role || "Position"}</td></tr><tr><td style="padding:6px 0;color:#6b7280;">Date</td><td style="padding:6px 0;font-weight:600;">${date}</td></tr><tr><td style="padding:6px 0;color:#6b7280;">Time</td><td style="padding:6px 0;font-weight:600;">${time} — ${endTime}</td></tr><tr><td style="padding:6px 0;color:#6b7280;">Round</td><td style="padding:6px 0;font-weight:600;">${iv.interview_level || "Interview"}</td></tr></table></div><div style="text-align:center;margin:24px 0;"><a href="${meetingLink}" style="display:inline-block;background:linear-gradient(135deg,#4f46e5,#7c3aed);color:#fff;text-decoration:none;padding:14px 32px;border-radius:10px;font-weight:700;font-size:15px;">Join Interview →</a></div><p style="font-size:13px;color:#10b981;font-weight:600;text-align:center;">📅 A calendar invite (.ics) is attached to this email.</p></div></div></div>`,
+      attachments: [{
+        filename: "interview-invite.ics",
+        content: btoa(icsContent),
+        content_type: "text/calendar; method=REQUEST",
+      }],
+    });
+  } catch (e) { console.warn("[BookSlot] Confirmation email failed:", e.message); }
+
+  return apiResponse({
+    booked: true,
+    scheduled_at: scheduledAt,
+    date, time, endTime,
+    meeting_link: meetingLink,
+    ics_download: `${env.WORKER_URL || ""}/calendar/ics?summary=${encodeURIComponent(iv.interview_role || "Interview")}&date=${date}&startTime=${time}&endTime=${endTime}`,
+  });
 }
 
 /**
@@ -11743,9 +12110,16 @@ async function handleBYOKValidate(request, env, ctx) {
 
 async function handleInterviewStart(request, env, ctx) {
   const body = await safeJson(request) || {};
-  const { role = "Software Engineer", level = "mid", count = 5 } = body;
+  const { role = "Software Engineer", level = "mid", count = 5, interview_level = "" } = body;
 
-  const defaultQuestions = [
+  // Determine if this is a non-technical interview based on interview_level
+  const il = (interview_level || "").toLowerCase();
+  const isNonTech = il.includes('hr') || il.includes('behavioral') || il.includes('culture') ||
+    il.includes('competency') || il.includes('screening') || il.includes('communication') ||
+    il.includes('role play') || il.includes('simulation') || il.includes('domain knowledge') ||
+    il.includes('client interaction');
+
+  const technicalQuestions = [
     {
       id: "q1",
       question: `Describe a complex system or project you built as a ${level} ${role}. What were the core architecture trade-offs and scalability challenges?`,
@@ -11778,6 +12152,41 @@ async function handleInterviewStart(request, env, ctx) {
     }
   ];
 
+  const nonTechnicalQuestions = [
+    {
+      id: "q1",
+      question: `Tell me about your experience in a ${role} role. What aspects of this type of work are you most passionate about?`,
+      type: "behavioral",
+      difficulty: "easy"
+    },
+    {
+      id: "q2",
+      question: `Describe a time when you had to handle a difficult situation with a colleague, client, or stakeholder. How did you resolve it?`,
+      type: "situational",
+      difficulty: "medium"
+    },
+    {
+      id: "q3",
+      question: `How do you prioritize your tasks when you have multiple deadlines and competing responsibilities?`,
+      type: "competency",
+      difficulty: "medium"
+    },
+    {
+      id: "q4",
+      question: `Can you share an example where you went above and beyond your job responsibilities to help your team or organization succeed?`,
+      type: "behavioral",
+      difficulty: "medium"
+    },
+    {
+      id: "q5",
+      question: `What motivates you in your career, and why are you interested in this particular role?`,
+      type: "motivational",
+      difficulty: "easy"
+    }
+  ];
+
+  const defaultQuestions = isNonTech ? nonTechnicalQuestions : technicalQuestions;
+
   return apiResponse({
     success: true,
     sessionId: `sess-${Math.random().toString(36).substring(2, 11)}`,
@@ -11789,14 +12198,14 @@ async function handleInterviewStart(request, env, ctx) {
 
 async function handleInterviewEvaluate(request, env, ctx) {
   const body = await safeJson(request) || {};
-  const { question = "", answer = "", role = "Software Engineer", level = "mid" } = body;
+  const { question = "", answer = "", role = "Software Engineer", level = "mid", interview_level = "" } = body;
 
   if (!answer || answer.trim().length === 0) {
     return apiResponse({
       score: 30,
       verdict: "weak",
       strengths: ["Attempted response"],
-      improvements: ["Provide a complete, structured answer with technical details"],
+      improvements: ["Provide a complete, structured answer with relevant details"],
       followUp: "Could you elaborate with a specific concrete example from your past experience?"
     });
   }
@@ -11805,16 +12214,32 @@ async function handleInterviewEvaluate(request, env, ctx) {
   const words = text.split(/\s+/).filter(w => w.length > 0);
   const wordCount = words.length;
 
+  // Determine if this is a non-technical interview
+  const il = (interview_level || "").toLowerCase();
+  const isNonTech = il.includes('hr') || il.includes('behavioral') || il.includes('culture') ||
+    il.includes('competency') || il.includes('screening') || il.includes('communication') ||
+    il.includes('role play') || il.includes('simulation') || il.includes('domain knowledge') ||
+    il.includes('client interaction');
+
   const techKeywords = [
     "architecture", "scalability", "latency", "throughput", "database", "index",
     "cache", "redis", "microservices", "async", "event", "pipeline", "docker",
     "kubernetes", "aws", "security", "auth", "testing", "monitoring", "metrics",
     "refactor", "optimization", "bottleneck", "concurrency", "queue", "schema"
   ];
+
+  const behavioralKeywords = [
+    "team", "collaboration", "communication", "stakeholder", "deadline", "priority",
+    "conflict", "leadership", "initiative", "feedback", "mentor", "goal", "challenge",
+    "customer", "client", "process", "improvement", "outcome", "result", "impact",
+    "responsibility", "decision", "adapt", "learn", "growth", "manage"
+  ];
+
+  const relevantKeywords = isNonTech ? behavioralKeywords : techKeywords;
   
   let keywordHits = 0;
   const lowerText = text.toLowerCase();
-  techKeywords.forEach(kw => {
+  relevantKeywords.forEach(kw => {
     if (lowerText.includes(kw)) keywordHits++;
   });
 
@@ -11828,21 +12253,15 @@ async function handleInterviewEvaluate(request, env, ctx) {
   let verdict = score >= 80 ? "strong" : score >= 65 ? "good" : "weak";
 
   const strengths = [];
-  if (wordCount > 30) strengths.push("Articulated response with thorough explanation");
-  if (keywordHits >= 2) strengths.push("Utilized precise domain terminology and architectural concepts");
+  if (wordCount > 30) strengths.push(isNonTech ? "Articulated response with thoughtful explanation" : "Articulated response with thorough explanation");
+  if (keywordHits >= 2) strengths.push(isNonTech ? "Demonstrated strong situational awareness and role-relevant competencies" : "Utilized precise domain terminology and architectural concepts");
   if (strengths.length === 0) strengths.push("Clear communication");
 
   const improvements = [];
-  if (wordCount < 25) improvements.push("Elaborate further with concrete metrics, latency targets, or system scale numbers");
-  if (keywordHits < 2) improvements.push("Incorporate specific technical tools, patterns, and trade-offs into your answer");
-  if (improvements.length === 0) improvements.push("Highlight edge cases and error recovery mechanisms");
+  if (wordCount < 25) improvements.push(isNonTech ? "Elaborate further with concrete examples, outcomes, and measurable impact" : "Elaborate further with concrete metrics, latency targets, or system scale numbers");
+  if (keywordHits < 2) improvements.push(isNonTech ? "Include specific examples of teamwork, problem-solving, and measurable outcomes" : "Incorporate specific technical tools, patterns, and trade-offs into your answer");
+  if (improvements.length === 0) improvements.push(isNonTech ? "Provide more detail on the specific actions you took and their outcomes" : "Highlight edge cases and error recovery mechanisms");
 
-  const followUps = [
-    "What specific metrics or telemetry did you monitor to verify this solution in production?",
-    "How would this architecture scale if traffic increased by 10x overnight?",
-    "What was the biggest technical trade-off or risk involved in this decision?",
-    "How did you ensure security, auth, and data integrity during this process?"
-  ];
   return apiResponse({
     score,
     verdict,
@@ -11854,7 +12273,14 @@ async function handleInterviewEvaluate(request, env, ctx) {
 
 async function handleInterviewReport(request, env, ctx) {
   const body = await safeJson(request) || {};
-  const { role = "Software Engineer", level = "mid", answers = [] } = body;
+  const { role = "Software Engineer", level = "mid", answers = [], interview_level = "" } = body;
+
+  // Determine if this is a non-technical interview
+  const il = (interview_level || "").toLowerCase();
+  const isNonTech = il.includes('hr') || il.includes('behavioral') || il.includes('culture') ||
+    il.includes('competency') || il.includes('screening') || il.includes('communication') ||
+    il.includes('role play') || il.includes('simulation') || il.includes('domain knowledge') ||
+    il.includes('client interaction');
 
   let overallScore = 75;
   if (Array.isArray(answers) && answers.length > 0) {
@@ -11863,6 +12289,28 @@ async function handleInterviewReport(request, env, ctx) {
   }
 
   const recommendation = overallScore >= 82 ? "strong-hire" : overallScore >= 70 ? "hire" : overallScore >= 55 ? "lean-hire" : "no-hire";
+
+  if (isNonTech) {
+    return apiResponse({
+      overallScore,
+      recommendation,
+      summary: `Candidate demonstrated ${overallScore >= 80 ? "exceptional" : "solid"} understanding of ${role} competencies. Showed strong communication and situational awareness.`,
+      topStrengths: [
+        "Clear communication and professional articulation",
+        "Demonstrated practical problem-solving in real-world scenarios",
+        "Proctored environment verification completed"
+      ],
+      focusAreas: [
+        "Provide more specific examples with measurable outcomes",
+        "Deeper exploration of stakeholder management scenarios"
+      ],
+      nextSteps: [
+        "Proceed to next interview round",
+        "Verify references for recent relevant roles"
+      ],
+      answers
+    });
+  }
 
   return apiResponse({
     overallScore,
@@ -11887,7 +12335,14 @@ async function handleInterviewReport(request, env, ctx) {
 
 async function handleInterviewReportFromTranscript(request, env, ctx) {
   const body = await safeJson(request) || {};
-  const { role = "Software Engineer", level = "mid", transcript = [] } = body;
+  const { role = "Software Engineer", level = "mid", transcript = [], interview_level = "" } = body;
+
+  // Determine if this is a non-technical interview
+  const il = (interview_level || "").toLowerCase();
+  const isNonTech = il.includes('hr') || il.includes('behavioral') || il.includes('culture') ||
+    il.includes('competency') || il.includes('screening') || il.includes('communication') ||
+    il.includes('role play') || il.includes('simulation') || il.includes('domain knowledge') ||
+    il.includes('client interaction');
 
   const userTurns = transcript.filter(t => t.role === "user");
   let totalWords = 0;
@@ -11913,11 +12368,11 @@ async function handleInterviewReportFromTranscript(request, env, ctx) {
     summary: `Candidate completed a live audio interview for ${role} (${level}). Exhibited ${userTurns.length} spoken responses with total word volume of ${totalWords} words.`,
     topStrengths: [
       "Fluid voice communication and active listening",
-      "Responsive technical engagement during live AI conversation",
+      isNonTech ? "Responsive engagement and situational awareness during live AI conversation" : "Responsive technical engagement during live AI conversation",
       "Proctored audio integrity verified"
     ],
     focusAreas: [
-      "Quantify scale and throughput metrics in spoken answers"
+      isNonTech ? "Provide more specific real-world examples with measurable outcomes" : "Quantify scale and throughput metrics in spoken answers"
     ],
     nextSteps: [
       "Review interview audio transcript in Client Portal",
@@ -11930,7 +12385,7 @@ async function handleInterviewReportFromTranscript(request, env, ctx) {
       score: overallScore,
       verdict: overallScore >= 75 ? "good" : "weak",
       strengths: ["Spoken response recorded"],
-      improvements: ["Detail system metrics"]
+      improvements: [isNonTech ? "Provide concrete examples with outcomes" : "Detail system metrics"]
     }))
   });
 }
