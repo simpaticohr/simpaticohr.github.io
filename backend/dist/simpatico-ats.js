@@ -1606,6 +1606,12 @@ export default {
         const tx = txns?.[0];
         if (!tx) return Response.json({ success: false, error: "Order not found" }, { status: 404, headers: corsHdrs });
 
+        // ★ Guard: reject activation of failed/refunded/cancelled orders
+        const BLOCKED_STATUSES = ["failed", "refunded", "cancelled", "disputed", "expired"];
+        if (BLOCKED_STATUSES.includes((tx.status || "").toLowerCase())) {
+          return new Response(`<!DOCTYPE html><html><head><title>Payment Cannot Be Approved</title><meta name="viewport" content="width=device-width,initial-scale=1"></head><body style="font-family:sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#F8FAFC"><div style="background:#FFF;padding:32px;border-radius:16px;box-shadow:0 4px 6px -1px rgba(0,0,0,0.1);text-align:center;max-width:400px"><h1 style="color:#DC2626;margin-bottom:8px">❌ Cannot Approve</h1><p style="color:#475569;font-size:14px">Order <strong>${orderId}</strong> has status <strong>${tx.status}</strong> and cannot be activated.<br>Only pending/awaiting orders can be approved.</p></div></body></html>`, { status: 400, headers: { "Content-Type": "text/html" } });
+        }
+
         const systemCtx = { requestId: crypto.randomUUID(), tenantId: tx.company_id, actorEmail: "admin_email_1click", actorRole: "superadmin", actorId: "admin" };
         const completeResult = await executeCompletePayment(env, tx, `utr_approved_${Date.now()}`, systemCtx);
         const already = !!(completeResult && completeResult.already_paid);
@@ -9700,6 +9706,15 @@ async function handleConfirmPayment(request, env, ctx) {
     return apiResponse({ already_confirmed: true, plan: tx.plan, order_id });
   }
 
+  // ★ Guard: reject activation of failed/refunded/cancelled orders
+  const BLOCKED_STATUSES_CONFIRM = ["failed", "refunded", "cancelled", "disputed", "expired"];
+  if (BLOCKED_STATUSES_CONFIRM.includes((tx.status || "").toLowerCase())) {
+    throw new AppError(
+      `Cannot confirm order with status "${tx.status}". Only pending/awaiting orders can be activated.`,
+      HTTP.BAD_REQUEST, "PAYMENT_STATUS_BLOCKED"
+    );
+  }
+
   await executeCompletePayment(env, tx, transaction_reference || "manual_confirm", ctx);
 
   return apiResponse({ confirmed: true, plan: tx.plan, order_id });
@@ -9715,11 +9730,12 @@ async function executeCompletePayment(env, tx, gatewayPaymentId, ctx) {
   const actorEmail = ctx.actorEmail || "system_auto";
 
   // ★ ATOMIC IDEMPOTENCY CLAIM — only the FIRST caller transitions the order
-  // out of a non-paid state (conditional PATCH + row count). Webhook retries,
-  // polling races, double-clicks and repeated quick-approve clicks all see 0
-  // rows changed and exit here — no duplicate emails, no subscription reset.
+  // from a valid pre-payment state. Failed/refunded/cancelled/disputed orders
+  // are NEVER auto-activated — only awaiting_payment, awaiting_transfer, and
+  // pending are eligible. Webhook retries, polling races, double-clicks and
+  // repeated quick-approve clicks all see 0 rows changed and exit safely.
   const claimRes = await fetch(
-    `${env.SUPABASE_URL}/rest/v1/payment_transactions?gateway_order_id=eq.${order_id}&or=(status.neq.paid,status.is.null)`,
+    `${env.SUPABASE_URL}/rest/v1/payment_transactions?gateway_order_id=eq.${order_id}&or=(status.eq.awaiting_payment,status.eq.awaiting_transfer,status.eq.pending,status.is.null)`,
     {
       method: "PATCH",
       headers: {
