@@ -171,7 +171,6 @@
         initCalendar();
         updateOverviewStats();
         initKanbanDragDrop();
-        setupRealtimeCollaboration();
         if (typeof window.loadByokSettings === 'function') window.loadByokSettings();
         if (typeof initVoiceSettings === 'function') initVoiceSettings();
     });
@@ -3332,117 +3331,10 @@ Be professional, highly strategic, clear, and action-oriented. Keep your spoken 
     }
 
     async function initClientSelector() {
-        const user = JSON.parse(localStorage.getItem('simpatico_user') || '{}');
-        const role = user.role || '';
-        const isSuperAdmin = role === 'super_admin' || role === 'superadmin';
-
-        if (!isSuperAdmin) return;
-
-        const client = sb();
-        if (!client) return;
-
-        try {
-            // Fetch all companies
-            const { data: companies, error } = await client
-                .from('companies')
-                .select('id, name')
-                .order('name');
-
-            if (error || !companies || !companies.length) return;
-
-            const select = document.getElementById('tenantSelect');
-            const container = document.getElementById('tenantSelectorContainer');
-            if (!select || !container) return;
-
-            // Populate select dropdown
-            const activeTenant = sessionStorage.getItem('active_consulting_tenant') || '';
-            let options = '<option value="">-- Active Workspace (Self) --</option>';
-            companies.forEach(c => {
-                const selected = activeTenant === c.id ? ' selected' : '';
-                options += `<option value="${c.id}"${selected}>${c.name}</option>`;
-            });
-
-            select.innerHTML = options;
-            container.style.display = 'inline-flex';
-        } catch (e) {
-            console.warn('[consulting] Failed to init client selector:', e);
-        }
+        // Privacy: Client consulting data is private. Super admins cannot
+        // browse other tenants' KPIs, SWOT, assessments, or CRM data.
+        // The tenant selector has been removed for data privacy.
     }
-
-    let collabChannel = null;
-
-    function setupRealtimeCollaboration() {
-        const client = sb();
-        if (!client || typeof client.channel !== 'function') return;
-
-        if (collabChannel) {
-            try { client.removeChannel(collabChannel); } catch(e) {}
-        }
-
-        const cid = getTenantId();
-        if (!cid) return;
-
-        try {
-            collabChannel = client.channel('consulting-' + cid)
-                .on('postgres_changes', { event: '*', schema: 'public', table: 'consulting_projects', filter: 'tenant_id=eq.' + cid }, (payload) => {
-                    loadProjects().then(() => {
-                        renderProjects();
-                        updateVisualAnalytics();
-                    });
-                })
-                .on('postgres_changes', { event: '*', schema: 'public', table: 'consulting_kpis', filter: 'tenant_id=eq.' + cid }, (payload) => {
-                    loadKPIs();
-                })
-                .on('postgres_changes', { event: '*', schema: 'public', table: 'consulting_kpi_history', filter: 'tenant_id=eq.' + cid }, (payload) => {
-                    loadKPIHistory().then(() => {
-                        renderKPIs();
-                        updateVisualAnalytics();
-                    });
-                })
-                .on('postgres_changes', { event: '*', schema: 'public', table: 'consulting_swot', filter: 'tenant_id=eq.' + cid }, (payload) => {
-                    loadSwot().then(() => renderSwot());
-                })
-                .subscribe();
-        } catch (e) {
-            console.warn('[realtime] Subscription error:', e.message);
-        }
-    }
-
-    window.switchClientTenant = async function (tenantId) {
-        if (!tenantId) {
-            sessionStorage.removeItem('active_consulting_tenant');
-        } else {
-            sessionStorage.setItem('active_consulting_tenant', tenantId);
-        }
-
-        // Clear all cached data to prevent cross-tenant data leakage
-        cachedProjects = [];
-        cachedAssessment = null;
-        cachedSwot = { strengths: [], weaknesses: [], opportunities: [], threats: [] };
-        cachedKPIs = [];
-        cachedKPIHistory = [];
-        cachedDocuments = [];
-        cachedMeetings = [];
-        cachedActivity = [];
-        unreadCount = 0;
-
-        // Reload all data from DB for the new tenant
-        await Promise.all([
-            loadProjects(),
-            loadAssessment(),
-            loadSwot(),
-            loadKPIs(),
-            loadDocuments(),
-            loadMeetings(),
-            loadActivityLog(),
-            loadNotifications(),
-        ]);
-
-        initCalendar();
-        updateOverviewStats();
-        setupRealtimeCollaboration();
-        showToast('Switched client workspace', 'success');
-    };
 
     // ═══════════════════════════════════════════════════════════
     // § CRM MODULE — Contacts & Deal Pipeline
