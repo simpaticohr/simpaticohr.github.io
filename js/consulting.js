@@ -54,6 +54,8 @@
         documents: 'consulting_documents',
         meetings: 'consulting_meetings',
         activity: 'consulting_activity',
+        crm_contacts: 'consulting_crm_contacts',
+        crm_deals: 'consulting_crm_deals',
     };
 
     const LS_KEYS = {
@@ -64,6 +66,8 @@
         meetings: 'sc_meetings',
         assessment: 'sc_assessment_results',
         activity: 'sc_activity',
+        crm_contacts: 'sc_crm_contacts',
+        crm_deals: 'sc_crm_deals',
     };
 
     function lsLoad(key) {
@@ -161,6 +165,8 @@
             loadActivityLog(),
             loadNotifications(),
             loadConsultingInvoices(),
+            loadCRMContacts(),
+            loadCRMDeals(),
         ]);
         initCalendar();
         updateOverviewStats();
@@ -191,6 +197,7 @@
         scorecard: ['Strategy Scorecard', 'SWOT Analysis & KPI tracking'],
         documents: ['Document Hub', 'Manage consulting deliverables'],
         meetings: ['Meeting Scheduler', 'Schedule and track consulting sessions'],
+        crm: ['CRM', 'Manage contacts, leads, and deal pipeline'],
         advisor: ['AI Business Advisor', 'Get intelligent business insights'],
         billing: ['Billing & Invoices', 'View invoices and make payments'],
     };
@@ -3436,6 +3443,455 @@ Be professional, highly strategic, clear, and action-oriented. Keep your spoken 
         setupRealtimeCollaboration();
         showToast('Switched client workspace', 'success');
     };
+
+    // ═══════════════════════════════════════════════════════════
+    // § CRM MODULE — Contacts & Deal Pipeline
+    // ═══════════════════════════════════════════════════════════
+    let _crmContacts = [];
+    let _crmDeals = [];
+    let _crmContactFilter = 'all';
+    let _crmSearchQuery = '';
+
+    // — Load contacts —
+    async function loadCRMContacts() {
+        const dbData = await dbFetch(TABLES.crm_contacts, { col: 'created_at', asc: false });
+        if (dbData) {
+            _crmContacts = dbData;
+            lsSave(LS_KEYS.crm_contacts, dbData);
+        } else {
+            _crmContacts = lsLoad(LS_KEYS.crm_contacts) || [];
+        }
+        renderCRMContacts();
+        updateCRMStats();
+    }
+
+    // — Load deals —
+    async function loadCRMDeals() {
+        const dbData = await dbFetch(TABLES.crm_deals, { col: 'created_at', asc: false });
+        if (dbData) {
+            _crmDeals = dbData;
+            lsSave(LS_KEYS.crm_deals, dbData);
+        } else {
+            _crmDeals = lsLoad(LS_KEYS.crm_deals) || [];
+        }
+        renderCRMDealPipeline();
+        updateCRMStats();
+    }
+
+    // — Render contacts table —
+    function renderCRMContacts() {
+        const tbody = document.getElementById('crmContactsTableBody');
+        if (!tbody) return;
+
+        let filtered = _crmContacts;
+        if (_crmContactFilter !== 'all') {
+            filtered = filtered.filter(c => c.type === _crmContactFilter);
+        }
+        if (_crmSearchQuery) {
+            const q = _crmSearchQuery.toLowerCase();
+            filtered = filtered.filter(c =>
+                (c.name || '').toLowerCase().includes(q) ||
+                (c.company || '').toLowerCase().includes(q) ||
+                (c.email || '').toLowerCase().includes(q) ||
+                (c.phone || '').includes(q)
+            );
+        }
+
+        if (filtered.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;color:var(--text-muted);padding:40px;">
+                <i class="fas fa-address-book" style="font-size:2rem;display:block;margin-bottom:12px;opacity:.3;"></i>
+                ${_crmContacts.length === 0 ? 'No contacts yet. Add your first contact to get started.' : 'No contacts match your filters.'}
+            </td></tr>`;
+            return;
+        }
+
+        const typeBadge = (t) => {
+            const colors = { lead: '#8b5cf6', prospect: '#3b82f6', customer: '#10b981', partner: '#f59e0b' };
+            return `<span style="font-size:.7rem;font-weight:700;padding:3px 8px;border-radius:99px;background:${colors[t] || '#6b7280'}15;color:${colors[t] || '#6b7280'};text-transform:capitalize;">${t}</span>`;
+        };
+        const sourceBadge = (s) => {
+            const icons = { referral: 'fa-user-friends', website: 'fa-globe', whatsapp: 'fa-whatsapp', linkedin: 'fa-linkedin', cold: 'fa-snowflake', event: 'fa-calendar-star', other: 'fa-ellipsis-h' };
+            return `<span style="font-size:.75rem;color:var(--text-muted);text-transform:capitalize;"><i class="fas ${icons[s] || 'fa-tag'}" style="margin-right:3px;"></i>${s || 'N/A'}</span>`;
+        };
+
+        tbody.innerHTML = filtered.map(c => {
+            const lastContact = c.last_contacted ? new Date(c.last_contacted).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '<span style="color:var(--text-muted);font-size:.75rem;">Never</span>';
+            return `<tr>
+                <td>
+                    <div style="display:flex;align-items:center;gap:10px;">
+                        <div style="width:32px;height:32px;border-radius:50%;background:var(--primary-dim);color:var(--primary);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:.75rem;flex-shrink:0;">${(c.name || 'U').split(' ').map(w => w[0]).join('').substring(0, 2).toUpperCase()}</div>
+                        <div>
+                            <div style="font-weight:600;font-size:.85rem;">${c.name}</div>
+                            ${c.designation ? `<div style="font-size:.72rem;color:var(--text-muted);">${c.designation}</div>` : ''}
+                        </div>
+                    </div>
+                </td>
+                <td style="font-size:.82rem;">${c.company || '<span style="color:var(--text-muted);">—</span>'}</td>
+                <td>${typeBadge(c.type)}</td>
+                <td>${sourceBadge(c.source)}</td>
+                <td style="font-size:.82rem;">${c.email || '<span style="color:var(--text-muted);">—</span>'}</td>
+                <td style="font-size:.82rem;">${lastContact}</td>
+                <td>
+                    <div style="display:flex;gap:6px;">
+                        <button onclick="editCRMContact('${c.id}')" class="btn btn-sm btn-secondary" style="padding:4px 8px;font-size:.72rem;" title="Edit"><i class="fas fa-pen"></i></button>
+                        <button onclick="deleteCRMContact('${c.id}')" class="btn btn-sm" style="padding:4px 8px;font-size:.72rem;background:var(--danger-dim);color:var(--danger);border:1px solid rgba(239,68,68,.2);" title="Delete"><i class="fas fa-trash"></i></button>
+                    </div>
+                </td>
+            </tr>`;
+        }).join('');
+    }
+
+    // — Render deal pipeline Kanban —
+    function renderCRMDealPipeline() {
+        const stages = ['lead', 'qualified', 'proposal', 'negotiation', 'won', 'lost'];
+        const currSymbols = { INR: '₹', USD: '$', GBP: '£', EUR: '€', AED: 'د.إ', SAR: '﷼' };
+
+        stages.forEach(stage => {
+            const container = document.getElementById('crm' + 'Stage' + stage.charAt(0).toUpperCase() + stage.slice(1) + 'Cards');
+            const countEl = document.getElementById('crm' + 'Stage' + stage.charAt(0).toUpperCase() + stage.slice(1) + 'Count');
+            if (!container) return;
+
+            const stageDeals = _crmDeals.filter(d => d.stage === stage);
+            if (countEl) countEl.textContent = stageDeals.length;
+
+            if (stageDeals.length === 0) {
+                container.innerHTML = `<div style="font-size:.72rem;color:var(--text-muted);text-align:center;padding:20px 8px;opacity:.6;">No deals</div>`;
+                return;
+            }
+
+            container.innerHTML = stageDeals.map(d => {
+                const contact = _crmContacts.find(c => c.id === d.contact_id);
+                const sym = currSymbols[d.currency] || d.currency + ' ';
+                const valFormatted = d.value ? sym + Number(d.value).toLocaleString('en-IN') : '';
+                const closeDate = d.expected_close ? new Date(d.expected_close).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : '';
+                const probColor = d.probability >= 70 ? '#10b981' : d.probability >= 40 ? '#f59e0b' : '#ef4444';
+                return `<div class="crm-deal-card" draggable="true" data-deal-id="${d.id}" style="background:var(--bg-card);border:1px solid var(--border);border-radius:10px;padding:10px 12px;cursor:grab;transition:all .2s;box-shadow:var(--shadow-sm);" onmouseenter="this.style.boxShadow='var(--shadow)'" onmouseleave="this.style.boxShadow='var(--shadow-sm)'">
+                    <div style="font-size:.8rem;font-weight:600;color:var(--text-primary);margin-bottom:4px;line-height:1.3;">${d.title}</div>
+                    ${contact ? `<div style="font-size:.7rem;color:var(--text-muted);margin-bottom:6px;"><i class="fas fa-user" style="margin-right:3px;"></i>${contact.name}</div>` : ''}
+                    <div style="display:flex;align-items:center;justify-content:space-between;gap:6px;">
+                        ${valFormatted ? `<span style="font-size:.75rem;font-weight:700;color:var(--text-primary);">${valFormatted}</span>` : '<span></span>'}
+                        <span style="font-size:.65rem;font-weight:700;color:${probColor};">${d.probability || 0}%</span>
+                    </div>
+                    ${closeDate ? `<div style="font-size:.65rem;color:var(--text-muted);margin-top:4px;"><i class="fas fa-clock" style="margin-right:2px;"></i>${closeDate}</div>` : ''}
+                    <div style="display:flex;gap:4px;margin-top:6px;justify-content:flex-end;">
+                        <button onclick="event.stopPropagation();editCRMDeal('${d.id}')" style="background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:.7rem;padding:2px 4px;" title="Edit"><i class="fas fa-pen"></i></button>
+                        <button onclick="event.stopPropagation();deleteCRMDeal('${d.id}')" style="background:none;border:none;color:var(--danger);cursor:pointer;font-size:.7rem;padding:2px 4px;" title="Delete"><i class="fas fa-trash"></i></button>
+                    </div>
+                </div>`;
+            }).join('');
+        });
+
+        initCRMDealDragDrop();
+    }
+
+    // — Update CRM stats —
+    function updateCRMStats() {
+        const contactsEl = document.getElementById('crmStatContacts');
+        const dealsEl = document.getElementById('crmStatDeals');
+        const pipelineEl = document.getElementById('crmStatPipeline');
+        const winRateEl = document.getElementById('crmStatWinRate');
+
+        if (contactsEl) contactsEl.textContent = _crmContacts.length;
+
+        const activeDeals = _crmDeals.filter(d => d.stage !== 'won' && d.stage !== 'lost');
+        if (dealsEl) dealsEl.textContent = activeDeals.length;
+
+        const pipelineValue = activeDeals.reduce((sum, d) => sum + (parseFloat(d.value) || 0), 0);
+        if (pipelineEl) pipelineEl.textContent = '₹' + pipelineValue.toLocaleString('en-IN');
+
+        const closedDeals = _crmDeals.filter(d => d.stage === 'won' || d.stage === 'lost');
+        const wonDeals = _crmDeals.filter(d => d.stage === 'won');
+        const winRate = closedDeals.length > 0 ? Math.round((wonDeals.length / closedDeals.length) * 100) : 0;
+        if (winRateEl) winRateEl.textContent = winRate + '%';
+    }
+
+    // — Tab switching —
+    window.switchCRMTab = function (tab) {
+        const contactsView = document.getElementById('crmContactsView');
+        const dealsView = document.getElementById('crmDealsView');
+        const tabContacts = document.getElementById('crmTabContacts');
+        const tabDeals = document.getElementById('crmTabDeals');
+        if (tab === 'contacts') {
+            contactsView.style.display = '';
+            dealsView.style.display = 'none';
+            tabContacts.style.background = 'var(--primary)';
+            tabContacts.style.color = '#fff';
+            tabDeals.style.background = 'var(--bg-card)';
+            tabDeals.style.color = 'var(--text-secondary)';
+        } else {
+            contactsView.style.display = 'none';
+            dealsView.style.display = '';
+            tabDeals.style.background = 'var(--primary)';
+            tabDeals.style.color = '#fff';
+            tabContacts.style.background = 'var(--bg-card)';
+            tabContacts.style.color = 'var(--text-secondary)';
+        }
+    };
+
+    // — Filter contacts —
+    window.filterCRMContacts = function (type, el) {
+        _crmContactFilter = type;
+        document.querySelectorAll('#section-crm .doc-filters .doc-filter').forEach(b => b.classList.remove('active'));
+        if (el) el.classList.add('active');
+        renderCRMContacts();
+    };
+
+    // — Search contacts —
+    window.searchCRMContacts = function (query) {
+        _crmSearchQuery = query;
+        renderCRMContacts();
+    };
+
+    // — Open contact modal (add/edit) —
+    window.openCRMContactModal = function (contactId) {
+        document.getElementById('crmContactEditId').value = '';
+        document.getElementById('crmContactName').value = '';
+        document.getElementById('crmContactEmail').value = '';
+        document.getElementById('crmContactPhone').value = '';
+        document.getElementById('crmContactCompany').value = '';
+        document.getElementById('crmContactDesignation').value = '';
+        document.getElementById('crmContactType').value = 'lead';
+        document.getElementById('crmContactSource').value = 'website';
+        document.getElementById('crmContactNotes').value = '';
+        document.getElementById('crmContactModalTitle').textContent = 'Add Contact';
+        openModal('crmContactModal');
+    };
+
+    // — Save contact —
+    window.saveCRMContact = async function () {
+        const name = document.getElementById('crmContactName').value.trim();
+        if (!name) { showToast('Contact name is required', 'error'); return; }
+
+        const editId = document.getElementById('crmContactEditId').value;
+        const record = {
+            tenant_id: getTenantId(),
+            created_by: getUserInfo().name,
+            name,
+            email: document.getElementById('crmContactEmail').value.trim(),
+            phone: document.getElementById('crmContactPhone').value.trim(),
+            company: document.getElementById('crmContactCompany').value.trim(),
+            designation: document.getElementById('crmContactDesignation').value.trim(),
+            type: document.getElementById('crmContactType').value,
+            source: document.getElementById('crmContactSource').value,
+            notes: document.getElementById('crmContactNotes').value.trim(),
+            updated_at: new Date().toISOString(),
+        };
+
+        if (editId) {
+            const result = await dbUpdate(TABLES.crm_contacts, editId, record);
+            if (result) {
+                const idx = _crmContacts.findIndex(c => c.id === editId);
+                if (idx !== -1) Object.assign(_crmContacts[idx], record);
+            } else {
+                const idx = _crmContacts.findIndex(c => c.id === editId);
+                if (idx !== -1) Object.assign(_crmContacts[idx], record);
+            }
+            showToast('Contact updated', 'success');
+        } else {
+            record.id = crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2);
+            record.created_at = new Date().toISOString();
+            const result = await dbInsert(TABLES.crm_contacts, record);
+            if (result && result[0]) {
+                _crmContacts.unshift(result[0]);
+            } else {
+                _crmContacts.unshift(record);
+            }
+            showToast('Contact added', 'success');
+            logActivity('crm_contact_add', 'crm_contact', record.id, 'Added contact: ' + name);
+        }
+
+        lsSave(LS_KEYS.crm_contacts, _crmContacts);
+        renderCRMContacts();
+        updateCRMStats();
+        closeModal('crmContactModal');
+    };
+
+    // — Edit contact —
+    window.editCRMContact = function (id) {
+        const c = _crmContacts.find(x => x.id === id);
+        if (!c) return;
+        document.getElementById('crmContactEditId').value = c.id;
+        document.getElementById('crmContactName').value = c.name || '';
+        document.getElementById('crmContactEmail').value = c.email || '';
+        document.getElementById('crmContactPhone').value = c.phone || '';
+        document.getElementById('crmContactCompany').value = c.company || '';
+        document.getElementById('crmContactDesignation').value = c.designation || '';
+        document.getElementById('crmContactType').value = c.type || 'lead';
+        document.getElementById('crmContactSource').value = c.source || 'website';
+        document.getElementById('crmContactNotes').value = c.notes || '';
+        document.getElementById('crmContactModalTitle').textContent = 'Edit Contact';
+        openModal('crmContactModal');
+    };
+
+    // — Delete contact —
+    window.deleteCRMContact = async function (id) {
+        if (!confirm('Delete this contact? This cannot be undone.')) return;
+        await dbDelete(TABLES.crm_contacts, id);
+        _crmContacts = _crmContacts.filter(c => c.id !== id);
+        // Remove deals linked to this contact
+        const linkedDeals = _crmDeals.filter(d => d.contact_id === id);
+        for (const deal of linkedDeals) {
+            await dbDelete(TABLES.crm_deals, deal.id);
+        }
+        _crmDeals = _crmDeals.filter(d => d.contact_id !== id);
+        lsSave(LS_KEYS.crm_contacts, _crmContacts);
+        lsSave(LS_KEYS.crm_deals, _crmDeals);
+        renderCRMContacts();
+        renderCRMDealPipeline();
+        updateCRMStats();
+        showToast('Contact deleted', 'success');
+    };
+
+    // — Open deal modal —
+    window.openCRMDealModal = function () {
+        document.getElementById('crmDealEditId').value = '';
+        document.getElementById('crmDealTitle').value = '';
+        document.getElementById('crmDealValue').value = '0';
+        document.getElementById('crmDealCurrency').value = 'INR';
+        document.getElementById('crmDealStage').value = 'lead';
+        document.getElementById('crmDealProbability').value = '10';
+        document.getElementById('crmDealProbLabel').textContent = '10%';
+        document.getElementById('crmDealExpectedClose').value = '';
+        document.getElementById('crmDealNotes').value = '';
+        document.getElementById('crmDealModalTitle').textContent = 'Add Deal';
+        // Populate contact dropdown
+        const sel = document.getElementById('crmDealContact');
+        sel.innerHTML = '<option value="">— Select Contact —</option>' +
+            _crmContacts.map(c => `<option value="${c.id}">${c.name}${c.company ? ' (' + c.company + ')' : ''}</option>`).join('');
+        sel.value = '';
+        openModal('crmDealModal');
+    };
+
+    // — Save deal —
+    window.saveCRMDeal = async function () {
+        const title = document.getElementById('crmDealTitle').value.trim();
+        if (!title) { showToast('Deal title is required', 'error'); return; }
+
+        const editId = document.getElementById('crmDealEditId').value;
+        const record = {
+            tenant_id: getTenantId(),
+            created_by: getUserInfo().name,
+            title,
+            contact_id: document.getElementById('crmDealContact').value || null,
+            value: parseFloat(document.getElementById('crmDealValue').value) || 0,
+            currency: document.getElementById('crmDealCurrency').value,
+            stage: document.getElementById('crmDealStage').value,
+            probability: parseInt(document.getElementById('crmDealProbability').value) || 10,
+            expected_close: document.getElementById('crmDealExpectedClose').value || null,
+            notes: document.getElementById('crmDealNotes').value.trim(),
+            updated_at: new Date().toISOString(),
+        };
+
+        if (editId) {
+            const result = await dbUpdate(TABLES.crm_deals, editId, record);
+            if (result) {
+                const idx = _crmDeals.findIndex(d => d.id === editId);
+                if (idx !== -1) Object.assign(_crmDeals[idx], record);
+            } else {
+                const idx = _crmDeals.findIndex(d => d.id === editId);
+                if (idx !== -1) Object.assign(_crmDeals[idx], record);
+            }
+            showToast('Deal updated', 'success');
+        } else {
+            record.id = crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2);
+            record.created_at = new Date().toISOString();
+            const result = await dbInsert(TABLES.crm_deals, record);
+            if (result && result[0]) {
+                _crmDeals.unshift(result[0]);
+            } else {
+                _crmDeals.unshift(record);
+            }
+            showToast('Deal added', 'success');
+            logActivity('crm_deal_add', 'crm_deal', record.id, 'Added deal: ' + title);
+        }
+
+        lsSave(LS_KEYS.crm_deals, _crmDeals);
+        renderCRMDealPipeline();
+        updateCRMStats();
+        closeModal('crmDealModal');
+    };
+
+    // — Edit deal —
+    window.editCRMDeal = function (id) {
+        const d = _crmDeals.find(x => x.id === id);
+        if (!d) return;
+        document.getElementById('crmDealEditId').value = d.id;
+        document.getElementById('crmDealTitle').value = d.title || '';
+        document.getElementById('crmDealValue').value = d.value || 0;
+        document.getElementById('crmDealCurrency').value = d.currency || 'INR';
+        document.getElementById('crmDealStage').value = d.stage || 'lead';
+        document.getElementById('crmDealProbability').value = d.probability || 10;
+        document.getElementById('crmDealProbLabel').textContent = (d.probability || 10) + '%';
+        document.getElementById('crmDealExpectedClose').value = d.expected_close || '';
+        document.getElementById('crmDealNotes').value = d.notes || '';
+        document.getElementById('crmDealModalTitle').textContent = 'Edit Deal';
+        // Populate contact dropdown
+        const sel = document.getElementById('crmDealContact');
+        sel.innerHTML = '<option value="">— Select Contact —</option>' +
+            _crmContacts.map(c => `<option value="${c.id}">${c.name}${c.company ? ' (' + c.company + ')' : ''}</option>`).join('');
+        sel.value = d.contact_id || '';
+        openModal('crmDealModal');
+    };
+
+    // — Delete deal —
+    window.deleteCRMDeal = async function (id) {
+        if (!confirm('Delete this deal? This cannot be undone.')) return;
+        await dbDelete(TABLES.crm_deals, id);
+        _crmDeals = _crmDeals.filter(d => d.id !== id);
+        lsSave(LS_KEYS.crm_deals, _crmDeals);
+        renderCRMDealPipeline();
+        updateCRMStats();
+        showToast('Deal deleted', 'success');
+    };
+
+    // — Drag-and-drop for deal Kanban —
+    function initCRMDealDragDrop() {
+        const cards = document.querySelectorAll('.crm-deal-card');
+        const columns = document.querySelectorAll('#crmDealKanban .kanban-col');
+
+        cards.forEach(card => {
+            card.addEventListener('dragstart', function (e) {
+                e.dataTransfer.setData('text/plain', this.dataset.dealId);
+                this.style.opacity = '0.5';
+            });
+            card.addEventListener('dragend', function () {
+                this.style.opacity = '1';
+            });
+        });
+
+        columns.forEach(col => {
+            col.addEventListener('dragover', function (e) {
+                e.preventDefault();
+                this.style.background = 'rgba(139,92,246,0.06)';
+            });
+            col.addEventListener('dragleave', function () {
+                this.style.background = 'var(--bg-elevated)';
+            });
+            col.addEventListener('drop', async function (e) {
+                e.preventDefault();
+                this.style.background = 'var(--bg-elevated)';
+                const dealId = e.dataTransfer.getData('text/plain');
+                const newStage = this.dataset.stage;
+                if (!dealId || !newStage) return;
+
+                const deal = _crmDeals.find(d => d.id === dealId);
+                if (!deal || deal.stage === newStage) return;
+
+                deal.stage = newStage;
+                deal.updated_at = new Date().toISOString();
+
+                // Auto-adjust probability based on stage
+                const stageProbs = { lead: 10, qualified: 25, proposal: 50, negotiation: 70, won: 100, lost: 0 };
+                deal.probability = stageProbs[newStage] !== undefined ? stageProbs[newStage] : deal.probability;
+
+                await dbUpdate(TABLES.crm_deals, dealId, { stage: newStage, probability: deal.probability, updated_at: deal.updated_at });
+                lsSave(LS_KEYS.crm_deals, _crmDeals);
+                renderCRMDealPipeline();
+                updateCRMStats();
+                showToast(`Deal moved to ${newStage}`, 'success');
+            });
+        });
+    }
 
     // ═══ BUSINESS CONSULTING SUBSCRIPTION & BILLING GUARD ═══
     const WORKER_URL = window.SIMPATICO_CONFIG?.workerUrl || 'https://simpatico-hr-ats.simpaticohrconsultancy.workers.dev';
