@@ -152,6 +152,27 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); min-
 .audio-playback audio { width: 100%; margin-top: 0.75rem; border-radius: 8px; }
 .pronunciation-detail { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
 .pronunciation-detail .pron-count { font-size: 0.72rem; color: var(--text-muted); }
+/* Gamification */
+.xp-section { margin-top: 1.2rem; padding-top: 1rem; border-top: 1px solid var(--border); }
+.xp-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.level-badge { display: inline-flex; align-items: center; gap: 6px; background: linear-gradient(135deg, var(--accent), #8b5cf6); padding: 4px 14px; border-radius: 20px; font-size: 0.78rem; font-weight: 800; color: #fff; box-shadow: 0 2px 12px rgba(99,102,241,0.3); }
+.xp-text { font-size: 0.75rem; color: var(--text-muted); font-weight: 600; }
+.xp-bar { height: 8px; background: rgba(255,255,255,0.06); border-radius: 4px; overflow: hidden; }
+.xp-bar-fill { height: 100%; border-radius: 4px; background: linear-gradient(90deg, var(--accent), #8b5cf6, var(--pink)); transition: width 0.8s ease; }
+.badges-grid { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 0.75rem; }
+.badge-item { width: 44px; height: 44px; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 1.3rem; border: 1px solid var(--border); background: var(--bg-card); position: relative; transition: all 0.3s; }
+.badge-item.locked { opacity: 0.25; filter: grayscale(1); }
+.badge-item.unlocked { border-color: rgba(99,102,241,0.4); box-shadow: 0 2px 10px rgba(99,102,241,0.15); }
+.badge-item:hover::after { content: attr(data-name); position: absolute; bottom: -24px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.9); color: #fff; padding: 3px 8px; border-radius: 4px; font-size: 0.62rem; white-space: nowrap; z-index: 10; }
+.xp-earned { display: inline-flex; align-items: center; gap: 6px; background: linear-gradient(135deg, rgba(99,102,241,0.15), rgba(139,92,246,0.15)); border: 1px solid rgba(99,102,241,0.3); padding: 8px 20px; border-radius: 20px; font-size: 0.92rem; font-weight: 800; color: var(--accent-light); animation: xpPop 0.5s ease; }
+@keyframes xpPop { 0% { transform: scale(0.5); opacity: 0; } 60% { transform: scale(1.15); } 100% { transform: scale(1); opacity: 1; } }
+.levelup-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.8); backdrop-filter: blur(8px); z-index: 9999; display: flex; align-items: center; justify-content: center; animation: fadeIn 0.3s; }
+.levelup-card { background: linear-gradient(135deg, #1a1a2e, #16213e); border: 1px solid rgba(99,102,241,0.4); border-radius: 24px; padding: 3rem; text-align: center; max-width: 380px; animation: levelPop 0.6s ease; box-shadow: 0 20px 60px rgba(99,102,241,0.3); }
+.levelup-card .level-num { font-size: 4rem; font-weight: 900; background: linear-gradient(135deg, var(--accent-light), var(--pink)); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
+.levelup-card h2 { font-size: 1.5rem; font-weight: 800; color: #fff; margin: 0.5rem 0; }
+.levelup-card p { color: var(--text-sec); font-size: 0.88rem; margin-bottom: 1.5rem; }
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes levelPop { 0% { transform: scale(0.3) rotate(-10deg); opacity: 0; } 100% { transform: scale(1) rotate(0); opacity: 1; } }
 </style>
 </head>
 <body>
@@ -235,6 +256,15 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); min-
         <div><div class="metric-label">Avg Score</div><div id="stat-avg" class="metric-value" style="color:var(--green);">&#8212;</div></div>
         <div><div class="metric-label">CEFR Level</div><div id="stat-cefr" class="metric-value" style="color:var(--amber);">&#8212;</div></div>
       </div>
+      <!-- XP & Level -->
+      <div class="xp-section">
+        <div class="xp-header">
+          <span id="xp-level-badge" class="level-badge">&#11088; Level 1</span>
+          <span id="xp-text" class="xp-text">0 / 100 XP</span>
+        </div>
+        <div class="xp-bar"><div class="xp-bar-fill" id="xp-bar-fill" style="width:0%"></div></div>
+        <div class="badges-grid" id="badges-grid"></div>
+      </div>
     </div>
   </div>
 
@@ -296,9 +326,10 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); min-
 
   <!-- SCREEN 4: RESULTS -->
   <div id="screen-results" class="screen">
-    <div class="results-header"><h2>Session Complete &#127881;</h2><p style="color:var(--text-sec);margin-top:0.5rem;" id="results-summary-text">Here's your performance breakdown</p></div>
+    <div class="results-header"><h2>Session Complete &#127881;</h2><p style="color:var(--text-sec);margin-top:0.5rem;" id="results-summary-text">Here's your performance breakdown</p><div id="xp-earned-display" style="margin-top:1rem;"></div></div>
     <div class="results-grid" id="results-scores"></div>
     <div id="results-cefr" style="text-align:center;margin-bottom:2rem;"><div style="font-size:0.78rem;font-weight:700;color:var(--text-muted);text-transform:uppercase;margin-bottom:6px;">Estimated CEFR Level</div><span id="results-cefr-badge" class="cefr-badge cefr-b1">B1</span></div>
+    <div id="results-badges" class="feedback-section" style="display:none;"><h3>&#127942; Badges Earned</h3><div id="results-new-badges" class="badges-grid"></div></div>
     <div class="feedback-section"><h3>&#128170; Strengths</h3><ul class="feedback-list" id="strengths-list"></ul></div>
     <div class="feedback-section"><h3>&#127919; Areas to Improve</h3><ul class="feedback-list" id="improvements-list"></ul></div>
     <div class="feedback-section" id="results-corrections" style="display:none;"><h3>&#128221; Grammar Corrections</h3><div id="results-corrections-list"></div></div>
@@ -405,7 +436,7 @@ function endSession(){
   if(recognition){try{recognition.stop();}catch(e){}recognition=null;}
   stopMic();stopPlayback();stopRecording();
   if(session.userTextBuffer)session.fullTranscript.push({role:'user',text:session.userTextBuffer});
-  calcFinal();saveProgress();renderResults();showScreen('screen-results');}
+  calcFinal();saveProgress();renderResults();const h=JSON.parse(localStorage.getItem('ce_progress')||'[]');if(h.length)showXPEarned(h[h.length-1]);updateGamification();showScreen('screen-results');}
 
 function calcFinal(){const el=(Date.now()-session.startTime)/60000,wpm=el>0.1?Math.round(session.wordCount/el):0;let fl=50;if(wpm>=100&&wpm<=170)fl=75+Math.min(25,(wpm-100)*0.35);else if(wpm>170)fl=Math.max(40,100-(wpm-170)*0.5);else if(wpm>0)fl=Math.max(20,wpm*0.75);fl=Math.max(10,fl-Math.min(30,session.fillerCount*2.5));session.scores.fluency=Math.round(fl);session.scores.grammar=Math.max(15,90-session.corrections.length*6);const w=session.userTextBuffer.toLowerCase().split(/\s+/).filter(w=>w.length>3),uq=new Set(w).size;session.scores.vocabulary=Math.round(Math.min(100,(uq/Math.max(1,w.length))*100+uq*0.8));const pc=session.pronConfidences;if(pc.length>0){const avg=pc.reduce((a,b)=>a+b,0)/pc.length;session.scores.pronunciation=Math.round(avg*100);}else{session.scores.pronunciation=50;}const fr=session.wordCount>0?session.fillerCount/session.wordCount:0;session.scores.confidence=Math.round(Math.max(20,85-fr*200));}
 
@@ -426,6 +457,108 @@ function saveProgress(){const h=JSON.parse(localStorage.getItem('ce_progress')||
 function updProgress(){const h=JSON.parse(localStorage.getItem('ce_progress')||'[]');if(!h.length){document.getElementById('progress-summary').style.display='none';return;}document.getElementById('progress-summary').style.display='block';document.getElementById('stat-sessions').textContent=h.length;const tm=h.reduce((s,x)=>s+(x.duration||0),0);document.getElementById('stat-hours').textContent=(tm/60).toFixed(1);document.getElementById('stat-avg').textContent=Math.round(h.reduce((s,x)=>s+x.avg,0)/h.length);document.getElementById('stat-cefr').textContent=h[h.length-1].cefr||'\u2014';let streak=0;const dates=[...new Set(h.map(x=>new Date(x.date).toDateString()))].sort((a,b)=>new Date(b)-new Date(a));for(let i=0;i<dates.length;i++){const exp=new Date();exp.setDate(exp.getDate()-i);if(dates[i]===exp.toDateString())streak++;else break;}document.getElementById('streak-badge').textContent='\u{1F525} '+streak+' day streak';}
 
 updProgress();
+updateGamification();
+
+// === GAMIFICATION: XP, Levels, Badges ===
+const LEVELS=[0,100,250,450,700,1000,1400,1900,2500,3200,4000,5000,6200,7600,9200,11000,13000,15500,18500,22000];
+const LEVEL_TITLES=['Beginner','Starter','Learner','Speaker','Talker','Converser','Communicator','Presenter','Debater','Fluent Speaker','Confident Speaker','Grammar Guru','Vocabulary Master','Pronunciation Pro','IELTS Ready','Business English','Advanced Speaker','Near-Native','Expert','English Champion'];
+
+const BADGES=[
+  {id:'first_session',icon:'\u{1F31F}',name:'First Steps',desc:'Complete your first session',check:h=>h.length>=1},
+  {id:'five_sessions',icon:'\u{1F525}',name:'On Fire',desc:'Complete 5 sessions',check:h=>h.length>=5},
+  {id:'ten_sessions',icon:'\u{1F4AA}',name:'Dedicated',desc:'Complete 10 sessions',check:h=>h.length>=10},
+  {id:'streak_3',icon:'\u26A1',name:'3-Day Streak',desc:'Practice 3 days in a row',check:(h,s)=>s>=3},
+  {id:'streak_7',icon:'\u{1F451}',name:'Weekly Warrior',desc:'7-day practice streak',check:(h,s)=>s>=7},
+  {id:'score_80',icon:'\u{1F3AF}',name:'High Achiever',desc:'Score 80+ overall',check:h=>h.some(x=>x.avg>=80)},
+  {id:'score_90',icon:'\u{1F48E}',name:'Perfectionist',desc:'Score 90+ overall',check:h=>h.some(x=>x.avg>=90)},
+  {id:'all_modes',icon:'\u{1F308}',name:'Explorer',desc:'Try all 8 practice modes',check:h=>{const m=new Set(h.map(x=>x.mode));return m.size>=8;}},
+  {id:'hour_1',icon:'\u23F0',name:'Hour Power',desc:'Practice for 1 hour total',check:h=>h.reduce((s,x)=>s+(x.duration||0),0)>=60},
+  {id:'hour_5',icon:'\u{1F3C6}',name:'Marathon',desc:'5 hours total practice',check:h=>h.reduce((s,x)=>s+(x.duration||0),0)>=300},
+  {id:'no_fillers',icon:'\u2728',name:'Clean Speaker',desc:'Complete a session with 0 fillers',check:h=>h.some(x=>x.fillerCount===0&&x.wordCount>20)},
+  {id:'cefr_b2',icon:'\u{1F393}',name:'B2 Achieved',desc:'Reach CEFR B2 level',check:h=>h.some(x=>['B2','C1','C2'].includes(x.cefr))}
+];
+
+function calcXP(sessionData){const base=sessionData.duration*5;const scoreBonus=Math.round(sessionData.avg*0.5);const modeBonus=(['ielts','debate','presentation'].includes(sessionData.mode))?15:0;return base+scoreBonus+modeBonus;}
+
+function getTotalXP(){const h=JSON.parse(localStorage.getItem('ce_progress')||'[]');return h.reduce((sum,x)=>sum+calcXP(x),0);}
+
+function getLevelFromXP(xp){for(let i=LEVELS.length-1;i>=0;i--){if(xp>=LEVELS[i])return i+1;}return 1;}
+
+function getStreak(){const h=JSON.parse(localStorage.getItem('ce_progress')||'[]');const dates=[...new Set(h.map(x=>new Date(x.date).toDateString()))].sort((a,b)=>new Date(b)-new Date(a));let streak=0;for(let i=0;i<dates.length;i++){const exp=new Date();exp.setDate(exp.getDate()-i);if(dates[i]===exp.toDateString())streak++;else break;}return streak;}
+
+function getUnlockedBadges(){const h=JSON.parse(localStorage.getItem('ce_progress')||'[]');const streak=getStreak();return BADGES.filter(b=>b.check(h,streak)).map(b=>b.id);}
+
+function updateGamification(){
+  const h=JSON.parse(localStorage.getItem('ce_progress')||'[]');
+  if(!h.length)return;
+  const xp=getTotalXP();
+  const lvl=getLevelFromXP(xp);
+  const curThresh=LEVELS[lvl-1]||0;
+  const nextThresh=LEVELS[lvl]||LEVELS[LEVELS.length-1]+5000;
+  const pct=Math.min(100,((xp-curThresh)/(nextThresh-curThresh))*100);
+  
+  const badge=document.getElementById('xp-level-badge');
+  if(badge)badge.innerHTML='\u2B50 Level '+lvl+' \u2014 '+LEVEL_TITLES[lvl-1];
+  const txt=document.getElementById('xp-text');
+  if(txt)txt.textContent=xp+' / '+nextThresh+' XP';
+  const bar=document.getElementById('xp-bar-fill');
+  if(bar)bar.style.width=pct+'%';
+  
+  // Render badges
+  const grid=document.getElementById('badges-grid');
+  if(grid){
+    const unlocked=getUnlockedBadges();
+    grid.innerHTML=BADGES.map(b=>{
+      const u=unlocked.includes(b.id);
+      return '<div class="badge-item '+(u?'unlocked':'locked')+'" data-name="'+b.name+' \u2014 '+b.desc+'">'+b.icon+'</div>';
+    }).join('');
+  }
+}
+
+function showXPEarned(sessionData){
+  const xpEarned=calcXP(sessionData);
+  const el=document.getElementById('xp-earned-display');
+  if(el)el.innerHTML='<span class="xp-earned">+'+xpEarned+' XP earned!</span>';
+  
+  // Check for new badges
+  const prevBadges=JSON.parse(localStorage.getItem('ce_badges_prev')||'[]');
+  const newBadges=getUnlockedBadges();
+  const fresh=newBadges.filter(id=>!prevBadges.includes(id));
+  localStorage.setItem('ce_badges_prev',JSON.stringify(newBadges));
+  
+  if(fresh.length>0){
+    const grid=document.getElementById('results-new-badges');
+    const sec=document.getElementById('results-badges');
+    if(grid&&sec){
+      sec.style.display='block';
+      grid.innerHTML=fresh.map(id=>{
+        const b=BADGES.find(x=>x.id===id);
+        return '<div class="badge-item unlocked" data-name="'+b.name+'">'+b.icon+'</div>';
+      }).join('');
+    }
+  }
+  
+  // Check level-up
+  const totalBefore=getTotalXP()-xpEarned;
+  const totalAfter=getTotalXP();
+  const lvlBefore=getLevelFromXP(totalBefore);
+  const lvlAfter=getLevelFromXP(totalAfter);
+  if(lvlAfter>lvlBefore)showLevelUp(lvlAfter);
+}
+
+function showLevelUp(lvl){
+  const ov=document.createElement('div');
+  ov.className='levelup-overlay';
+  ov.onclick=()=>ov.remove();
+  ov.innerHTML='<div class="levelup-card" onclick="event.stopPropagation()"><div class="level-num">'+lvl+'</div><h2>Level Up!</h2><p>You reached <strong>'+LEVEL_TITLES[lvl-1]+'</strong></p><button class="btn btn-primary" onclick="this.closest(\'.levelup-overlay\').remove()">\u{1F389} Awesome!</button></div>';
+  document.body.appendChild(ov);
+  setTimeout(()=>{if(ov.parentNode)ov.remove();},8000);
+}
+
+// Save badge state on first load
+if(!localStorage.getItem('ce_badges_prev')){
+  localStorage.setItem('ce_badges_prev',JSON.stringify(getUnlockedBadges()));
+}
 
 // === AUDIO RECORDING (MediaRecorder) ===
 function startRecording(){try{if(!session.micStream)return;session.recordedChunks=[];const mr=new MediaRecorder(session.micStream,{mimeType:MediaRecorder.isTypeSupported('audio/webm;codecs=opus')?'audio/webm;codecs=opus':'audio/webm'});mr.ondataavailable=e=>{if(e.data.size>0)session.recordedChunks.push(e.data);};mr.start(1000);session.recorder=mr;}catch(e){console.warn('Recording not supported:',e);}}
