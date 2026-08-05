@@ -3224,19 +3224,24 @@ Guidelines:
                     
                     state.liveTranscript.push({ role: 'model', parts: [{ text: state.aiSpokenTextBuffer }] });
                     
-                    // Update progress dynamically based on model turns
-                    const modelTurns = state.liveTranscript.filter(t => t.role === 'model').length;
+                    // Update progress based on actual Q&A exchanges (not raw model turns)
+                    // The first model turn is the greeting + Q1, subsequent model turns after
+                    // a user turn are follow-up questions. We count completed user answers.
+                    const userTurnsCount = state.liveTranscript.filter(t => t.role === 'user').length;
                     const targetQuestions = state.questionsCount || 5;
-                    state.currentIndex = Math.min(targetQuestions - 1, Math.max(0, modelTurns - 1));
+                    // Progress = number of user responses completed (each one = 1 answered question)
+                    state.currentIndex = Math.min(targetQuestions - 1, Math.max(0, userTurnsCount));
                     updateProgress();
                     document.getElementById('q-number').textContent = `Q${state.currentIndex + 1}`;
 
                     state.aiSpokenTextBuffer = '';
                     state.aiSpeakingActive = false;
 
-                    // If we have completed the final turn, wait for audio queue to finish playing, then terminate!
-                    if (modelTurns >= targetQuestions) {
-                        console.log("Reached target question count. Stopping mic stream and waiting for final playback to finish...");
+                    // Only terminate once the candidate has answered ALL target questions.
+                    // This prevents the greeting or acknowledgement turns from consuming
+                    // question slots and cutting the interview short.
+                    if (userTurnsCount >= targetQuestions) {
+                        console.log(`Interview complete: ${userTurnsCount}/${targetQuestions} answers collected. Stopping mic and waiting for final audio playback...`);
                         stopMicStreaming();
                         
                         // Disable the end button to show it is finalizing
@@ -3295,8 +3300,20 @@ Guidelines:
             stopWaveform();
             stopSpeakingTimer();
             cleanupMicStream();
-            if (state.liveWs) {
+
+            // Guard: only auto-finish if we've collected enough user answers.
+            // Premature WS close (network drop, server timeout, etc.) should NOT
+            // immediately generate a fake report — give the user a chance to retry.
+            const closedUserTurns = (state.liveTranscript || []).filter(t => t.role === 'user').length;
+            const closedTargetQ = state.questionsCount || 5;
+
+            if (state.liveWs && closedUserTurns >= Math.max(1, closedTargetQ - 1)) {
+                // Interview is substantially complete — finalize the report
                 finishLiveVoiceInterview();
+            } else if (state.liveWs) {
+                // Premature close — show reconnect/retry option instead of fake report
+                state.liveWs = null;
+                showPrematureCloseWarning(closedUserTurns, closedTargetQ);
             }
         };
 
@@ -3359,36 +3376,173 @@ Guidelines:
             renderReport(report);
 
         } catch (err) {
-            console.error('Failed to generate report from live transcript:', err);
-            // Real-Time NLP Fallback Score Calculation based on Candidate's actual Transcript
-            const userTurns = (state.liveTranscript || []).filter(t => t.role === 'user');
-            let totalWords = 0;
-            userTurns.forEach(t => {
-                const text = t.parts?.map(p => p.text).join(' ') || '';
-                totalWords += text.split(/\s+/).filter(w => w.length > 0).length;
-            });
-            
-            let avgScore = 68;
-            if (userTurns.length > 0) {
-                const wordsPerTurn = totalWords / userTurns.length;
-                if (wordsPerTurn > 15) avgScore += 10;
-                if (wordsPerTurn > 35) avgScore += 8;
-                if (userTurns.length >= 3) avgScore += 6;
+            console.error('Report generation failed, attempting retries:', err);
+
+            // Retry the API call up to 2 times with exponential backoff
+            let retrySuccess = false;
+            const reportPayload = {
+                sessionId: state.sessionId || crypto.randomUUID(),
+                role: state.role,
+                level: state.level,
+                transcript: state.liveTranscript,
+                candidate_name: _b2bCandidateName || null,
+                candidate_email: _b2bCandidateEmail || null,
+                mode: 'voice',
+                proctoring_violations: (_enableProctoring || _enableWebcamProctoring) ? state.proctoringViolations : null,
+                resume_matching_report: _resumeAnalysis
+            };
+
+            for (let attempt = 1; attempt <= 2; attempt++) {
+                try {
+                    document.getElementById('report-loading').querySelector('.loading-text').textContent =
+                        `Retrying report generation (attempt ${attempt}/2)...`;
+                    await new Promise(r => setTimeout(r, attempt * 1500));
+                    const retryReport = await apiCall('/api/interview/report-from-transcript', reportPayload);
+                    state.answers = retryReport.answers || [];
+                    renderReport(retryReport);
+                    retrySuccess = true;
+                    break;
+                } catch (retryErr) {
+                    console.warn(`Retry ${attempt}/2 failed:`, retryErr.message);
+                }
             }
-            avgScore = Math.min(96, Math.max(52, avgScore));
-            
-            renderReport({
-                overallScore: avgScore,
-                recommendation: avgScore >= 82 ? 'strong-hire' : avgScore >= 70 ? 'hire' : 'lean-hire',
-                summary: `You completed the live voice assessment. Analyzed ${userTurns.length} spoken responses with total word volume of ${totalWords} words.`,
-                topStrengths: ['Completed live proctored voice assessment', 'Demonstrated fluid spoken communication'],
-                focusAreas: ['Elaborate with specific system scale numbers and latency benchmarks'],
-                nextSteps: ['View full transcript in Client Dashboard'],
-                answers: [],
-            });
+
+            if (!retrySuccess) {
+                // All retries exhausted — generate honest fallback from transcript
+                renderHonestFallbackReport(state.liveTranscript, state.role, state.level);
+            }
         } finally {
             document.getElementById('report-loading').classList.add('hidden');
+            const loadingText = document.getElementById('report-loading')?.querySelector('.loading-text');
+            if (loadingText) loadingText.textContent = 'Generating your hiring report...';
         }
+    }
+
+    /**
+     * Show a user-facing warning when the WebSocket closes prematurely,
+     * before enough Q&A exchanges have been recorded. Gives the user the
+     * option to submit partial results, retry, or restart.
+     */
+    function showPrematureCloseWarning(completedQuestions, targetQuestions) {
+        const answered = completedQuestions || 0;
+        const target = targetQuestions || 5;
+
+        // If at least half the questions were answered, offer partial submission
+        if (answered >= Math.ceil(target / 2)) {
+            const proceed = confirm(
+                `The AI connection was lost after ${answered} of ${target} questions were answered.\n\n` +
+                `Would you like to generate a partial report from the ${answered} answers collected?\n\n` +
+                `Click OK to generate a partial report, or Cancel to restart the interview.`
+            );
+            if (proceed) {
+                // Re-mark liveWs to allow finishLiveVoiceInterview to proceed
+                state.liveWs = { close() {} };
+                finishLiveVoiceInterview();
+            } else {
+                restartInterview();
+            }
+        } else {
+            // Too few answers — don't generate a meaningless report
+            showError('setup-error',
+                `Connection lost after only ${answered} of ${target} questions. ` +
+                `Please check your network and try again.`
+            );
+            showScreen('screen-setup');
+        }
+    }
+
+    /**
+     * Generate an honest fallback report when the API is unreachable.
+     * Unlike the old code that started from a hardcoded base of 68,
+     * this performs genuine analysis of the transcript content.
+     */
+    function renderHonestFallbackReport(transcript, role, level) {
+        const userTurns = (transcript || []).filter(t => t.role === 'user');
+        const modelTurns = (transcript || []).filter(t => t.role === 'model');
+
+        if (userTurns.length === 0) {
+            showError('setup-error', 'No answers were recorded. Unable to generate a report.');
+            showScreen('screen-setup');
+            return;
+        }
+
+        // Analyze each user response meaningfully
+        let totalWords = 0;
+        let totalSentences = 0;
+        let longResponseCount = 0;
+        const perAnswerScores = [];
+
+        userTurns.forEach(t => {
+            const text = t.parts?.map(p => p.text).join(' ') || '';
+            const words = text.split(/\s+/).filter(w => w.length > 0);
+            const sentences = text.split(/[.!?]+/).filter(s => s.trim().length > 0);
+            const wordCount = words.length;
+            totalWords += wordCount;
+            totalSentences += sentences.length;
+            if (wordCount > 30) longResponseCount++;
+
+            // Per-answer heuristic score based on response depth
+            let answerScore = 0;
+            if (wordCount >= 5) answerScore += 20;    // Attempted an answer
+            if (wordCount >= 15) answerScore += 15;   // Provided some detail
+            if (wordCount >= 30) answerScore += 15;   // Thorough response
+            if (wordCount >= 60) answerScore += 10;   // Very detailed
+            if (sentences.length >= 2) answerScore += 10;  // Multiple points made
+            if (sentences.length >= 4) answerScore += 10;  // Well-structured
+            // Cap at 80 — can't earn top marks without real AI evaluation
+            answerScore = Math.min(80, answerScore);
+            perAnswerScores.push(answerScore);
+        });
+
+        // Overall score = average of per-answer scores
+        const avgScore = Math.round(
+            perAnswerScores.reduce((sum, s) => sum + s, 0) / perAnswerScores.length
+        );
+        const avgWordsPerAnswer = Math.round(totalWords / userTurns.length);
+
+        const strengths = [];
+        const focusAreas = [];
+
+        if (userTurns.length >= 3) strengths.push(`Answered ${userTurns.length} questions in the live voice assessment`);
+        if (avgWordsPerAnswer >= 30) strengths.push('Provided detailed spoken responses');
+        if (longResponseCount >= 2) strengths.push('Gave thorough answers on multiple questions');
+        if (strengths.length === 0) strengths.push('Participated in the live voice interview');
+
+        if (avgWordsPerAnswer < 15) focusAreas.push('Provide more detailed answers — aim for at least 3-4 sentences per response');
+        if (userTurns.length < 3) focusAreas.push('More questions need to be answered for a complete evaluation');
+        focusAreas.push('Note: This is an estimated score — AI evaluation was temporarily unavailable');
+
+        // Build per-question timeline entries
+        const answers = userTurns.map((t, i) => {
+            const text = t.parts?.map(p => p.text).join(' ') || '';
+            const qTurn = modelTurns[i] || {};
+            const qText = qTurn.parts?.map(p => p.text).join(' ') || `Question ${i + 1}`;
+            return {
+                question: qText.substring(0, 200),
+                answer: text,
+                score: perAnswerScores[i] || 0,
+                verdict: perAnswerScores[i] >= 60 ? 'good' : perAnswerScores[i] >= 30 ? 'weak' : 'weak',
+                type: 'technical',
+                difficulty: 'medium',
+                strengths: [],
+                improvements: []
+            };
+        });
+        state.answers = answers;
+
+        renderReport({
+            overallScore: avgScore,
+            recommendation: avgScore >= 70 ? 'hire' : avgScore >= 45 ? 'lean-hire' : 'no-hire',
+            summary: `Completed ${userTurns.length} questions in live voice mode. Average response length: ${avgWordsPerAnswer} words. ` +
+                     `Note: AI scoring was temporarily unavailable — this is an estimated score based on response depth analysis.`,
+            topStrengths: strengths,
+            focusAreas: focusAreas,
+            nextSteps: [
+                'Retry the interview when the AI server is available for accurate scoring',
+                'Review your responses and practice areas flagged above'
+            ],
+            answers: answers
+        });
     }
 
     // ── Premium Voice Mode Helpers ──
