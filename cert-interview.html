@@ -1747,6 +1747,9 @@
                     <button class="btn btn-primary" onclick="downloadReport()">
                         📥 Download Report
                     </button>
+                    <button class="btn btn-primary" id="btn-view-cert" onclick="viewCertificate()" style="background:linear-gradient(135deg,#f59e0b,#d97706);display:none;">
+                        🏆 View Certificate
+                    </button>
                 </div>
             </div>
         </div>
@@ -1842,6 +1845,11 @@
             const providerSelect = document.getElementById('byok-provider');
             const keyInput = document.getElementById('byok-key');
             
+            const resumeContainer = document.getElementById('resume-upload-container');
+            if (resumeContainer) {
+                resumeContainer.style.display = (_requireResume || _showResumeUpload) ? 'block' : 'none';
+            }
+
             if (providerSelect) {
                 if (savedProvider) {
                     providerSelect.value = savedProvider;
@@ -1854,12 +1862,17 @@
                 keyInput.value = savedKey;
             }
 
-            // Expand BYOK panel by default if no saved key and not B2B
+            // BYOK panel: only auto-expand for voice users who need a key
+            // Text mode uses platform-side AI — no user key needed
             if (!_isB2B && !savedKey) {
-                const panel = document.getElementById('byok-panel');
-                const arrow = document.getElementById('byok-arrow');
-                if (panel) panel.style.display = 'block';
-                if (arrow) arrow.style.transform = 'rotate(180deg)';
+                const modeSelect = document.getElementById('mode-select');
+                const isVoiceMode = modeSelect && modeSelect.value === 'voice';
+                if (isVoiceMode) {
+                    const panel = document.getElementById('byok-panel');
+                    const arrow = document.getElementById('byok-arrow');
+                    if (panel) panel.style.display = 'block';
+                    if (arrow) arrow.style.transform = 'rotate(180deg)';
+                }
             }
             initOptionalFeatures();
         });
@@ -1877,7 +1890,7 @@
 
             const resumeContainer = document.getElementById('resume-upload-container');
             if (resumeContainer) {
-                resumeContainer.style.display = _requireResume ? 'block' : 'none';
+                resumeContainer.style.display = (_requireResume || _showResumeUpload) ? 'block' : 'none';
             }
         }
 
@@ -2452,7 +2465,8 @@
     // ── Proctoring & Resume Matching Configuration ──
     let _enableProctoring = _urlParams.get('proctoring') === '1';
     let _enableWebcamProctoring = _urlParams.get('webcam') === '1';
-    let _requireResume = _urlParams.get('resume') === '1';
+    let _requireResume = _urlParams.get('resume') === 'required';
+    let _showResumeUpload = _urlParams.get('resume') !== '0';
     let _resumeText = '';
     let _resumeAnalysis = null;
 
@@ -4314,8 +4328,9 @@ Guidelines:
 
         const provider = document.getElementById('byok-provider')?.value || '';
         const key = document.getElementById('byok-key')?.value?.trim() || '';
-        if (!_isB2B && (!provider || !key)) {
-            showError('setup-error', 'An AI Provider and API Key are required. Please expand "Bring Your Own Key" and configure.');
+        // BYOK key is only required for voice mode (needs Gemini API for speech)
+        if (!_isB2B && (mode === 'voice') && (!provider || !key)) {
+            showError('setup-error', 'Voice mode requires a Gemini API Key. Please expand "Bring Your Own Key" and configure, or switch to Text mode.');
             return;
         }
 
@@ -4401,6 +4416,7 @@ Guidelines:
                 count,
                 candidate_name: _b2bCandidateName || null,
                 candidate_email: _b2bCandidateEmail || null,
+                resume_text: _resumeText || '',
                 mode: 'text'
             });
 
@@ -4797,10 +4813,17 @@ Guidelines:
             improvementsList.appendChild(li);
         });
 
-        // Follow-up (Disabled)
+        // Follow-up question from AI evaluation
         const followUpBox = document.getElementById('fb-followup-box');
-        if (followUpBox) followUpBox.style.display = 'none';
-        _pendingFollowUp = '';
+        const followUpText = (evaluation.followUp || '').trim();
+        if (followUpBox && followUpText) {
+            followUpBox.style.display = 'block';
+            document.getElementById('fb-followup').textContent = followUpText;
+            _pendingFollowUp = followUpText;
+        } else if (followUpBox) {
+            followUpBox.style.display = 'none';
+            _pendingFollowUp = '';
+        }
 
         const isLast = state.currentIndex >= state.questions.length - 1;
         document.getElementById('btn-next-question').textContent = isLast ? 'View Report →' : 'Next Question →';
@@ -4990,6 +5013,44 @@ Guidelines:
             }).catch(e => console.warn('Cert sync bg note:', e));
         } catch(e) { console.warn('Cert sync note:', e); }
 
+        // Save certification to localStorage for certificate.html
+        // Derive sub-scores from actual answer data by question type
+        const typeScores = {};
+        state.answers.forEach(a => {
+            const t = (a.type || 'technical').toLowerCase();
+            if (!typeScores[t]) typeScores[t] = [];
+            typeScores[t].push(a.score || 0);
+        });
+        const avgType = (types) => {
+            const all = types.flatMap(t => typeScores[t] || []);
+            return all.length ? Math.round(all.reduce((s, v) => s + v, 0) / all.length) : score;
+        };
+        const userName = _b2bCandidateName || localStorage.getItem('cand_name') || 'Candidate';
+        const certIdVal = 'SIMP-' + Date.now().toString(36).toUpperCase().substring(0, 6);
+        const certData = {
+            certId: certIdVal,
+            name: userName,
+            role: state.role || 'Professional',
+            date: new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }),
+            overall: score,
+            cognitive: avgType(['cognitive', 'problem-solving', 'analytical']),
+            situational: avgType(['situational', 'scenario', 'case-study']),
+            attitude: avgType(['behavioral', 'attitude', 'culture-fit']),
+            jobScore: avgType(['technical', 'coding', 'domain']),
+            communication: avgType(['communication', 'presentation']),
+            integrity: trustScore || 100
+        };
+        try {
+            const certs = JSON.parse(localStorage.getItem('simpatico_certifications') || '[]');
+            certs.push(certData);
+            localStorage.setItem('simpatico_certifications', JSON.stringify(certs));
+            state._lastCertId = certIdVal;
+        } catch(e) { console.warn('Cert save note:', e); }
+
+        // Show certificate button if score is eligible (≥50)
+        const certBtn = document.getElementById('btn-view-cert');
+        if (certBtn && score >= 50) certBtn.style.display = 'inline-flex';
+
         // Timeline
         renderTimeline();
     }
@@ -5064,6 +5125,11 @@ Guidelines:
         a.download = `interview-report-${state.role.replace(/\s+/g, '-').toLowerCase()}-${Date.now()}.txt`;
         a.click();
         URL.revokeObjectURL(url);
+    }
+
+    function viewCertificate() {
+        const certId = state._lastCertId || '';
+        window.open('certificate.html?certId=' + encodeURIComponent(certId), '_blank');
     }
 
     // ══════════════════════════════════════════
