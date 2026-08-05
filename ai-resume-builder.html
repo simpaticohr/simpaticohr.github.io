@@ -1,0 +1,576 @@
+<!doctype html>
+<html lang="en">
+<head>
+<!-- 🔒 ACCESS GUARD — Requires Career Lab auth -->
+<script>
+(function(){
+  try {
+    var t = localStorage.getItem('simpatico_token');
+    var u = JSON.parse(localStorage.getItem('simpatico_user') || '{}');
+    if (!t || (!u.id && !u.email)) { window.location.replace('career-lab-gate.html'); return; }
+    if (u.expiresAt && Date.now() > u.expiresAt) {
+      localStorage.removeItem('simpatico_token');
+      localStorage.removeItem('simpatico_user');
+      window.location.replace('career-lab-gate.html');
+    }
+  } catch(e) { window.location.replace('career-lab-gate.html'); }
+})();
+</script>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI Resume Builder — ATS-Optimized Resumes | Simpatico HR Career Lab</title>
+<meta name="description" content="AI Resume Builder by Simpatico HR Career Lab — upload your resume or fill in your profile and get a complete, ATS-optimized, achievement-driven resume tailored to your target role. Copy, download as .txt or print / save as PDF.">
+<meta name="robots" content="index, follow">
+<link rel="canonical" href="https://simpaticohr.in/ai-resume-builder.html">
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script>if(window.pdfjsLib)pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';</script>
+
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
+<style>
+  :root {
+    --accent: #6366f1;
+    --accent-soft: rgba(99,102,241,.12);
+    --bg: #020617;
+    --card: rgba(15,23,42,.65);
+    --border: rgba(255,255,255,.08);
+    --text: #f8fafc;
+    --muted: #94a3b8;
+    --green: #10b981;
+    --red: #ef4444;
+    --yellow: #f59e0b;
+    --blue: #3b82f6;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
+    background:
+      radial-gradient(circle at 10% 20%, rgba(99,102,241,.15), transparent 40%),
+      radial-gradient(circle at 90% 80%, rgba(79,70,229,.1), transparent 40%),
+      var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+  }
+
+  .nav {
+    backdrop-filter: blur(16px);
+    background: rgba(2,6,23,.85);
+    padding: 1.2rem 6%;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid var(--border);
+    position: sticky;
+    top: 0;
+    z-index: 100;
+  }
+  .logo { font-weight: 800; font-size: 1.1rem; color: #fff; text-decoration: none; }
+  .logo span { color: var(--accent); }
+  .nav-links { display: flex; gap: 16px; }
+  .link { color: var(--muted); text-decoration: none; font-size: 13px; font-weight: 500; }
+  .link:hover { color: #fff; }
+
+  .container { max-width: 800px; margin: 0 auto; padding: 50px 20px; }
+
+  .header { text-align: center; margin-bottom: 40px; }
+  .header h1 {
+    font-size: clamp(2rem, 5vw, 3rem);
+    font-weight: 800;
+    background: linear-gradient(#fff, #94a3b8);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    margin-bottom: 12px;
+  }
+  .header p { color: var(--muted); font-size: 1rem; line-height: 1.6; }
+
+  .card {
+    background: var(--card);
+    backdrop-filter: blur(22px);
+    border: 1px solid var(--border);
+    border-radius: 24px;
+    padding: 32px;
+    margin-bottom: 20px;
+  }
+  .card h2 { font-size: 1.1rem; font-weight: 700; margin-bottom: 16px; display: flex; align-items: center; gap: 8px; }
+
+  label { display: block; font-size: 0.8rem; color: var(--muted); margin: 14px 0 6px; font-weight: 600; }
+  textarea, input[type="text"] {
+    width: 100%;
+    padding: 12px 14px;
+    background: rgba(255,255,255,0.04);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    color: var(--text);
+    font-size: 0.9rem;
+    font-family: inherit;
+    outline: none;
+    transition: border-color 0.2s;
+  }
+  textarea { min-height: 120px; resize: vertical; }
+  textarea:focus, input:focus { border-color: rgba(99,102,241,0.4); box-shadow: 0 0 0 3px rgba(99,102,241,0.1); }
+
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; }
+
+  .hint { font-size: 0.75rem; color: var(--muted); margin-top: 8px; line-height: 1.5; }
+
+  .upload-area {
+    border: 2px dashed var(--border);
+    border-radius: 16px;
+    padding: 30px;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.3s;
+    margin-top: 8px;
+  }
+  .upload-area:hover { border-color: rgba(99,102,241,0.4); background: rgba(99,102,241,0.03); }
+  .upload-area.ok { border-color: var(--green); background: rgba(16,185,129,0.05); }
+  .upload-area p { color: var(--muted); font-size: 0.85rem; }
+  .upload-area strong { color: var(--accent); }
+  .file-name { font-size: 0.78rem; color: var(--muted); margin-top: 6px; }
+
+  .btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    width: 100%;
+    padding: 16px;
+    border-radius: 16px;
+    font-weight: 700;
+    font-size: 0.95rem;
+    border: none;
+    cursor: pointer;
+    font-family: inherit;
+    transition: all 0.2s;
+    margin-top: 20px;
+  }
+  .btn-primary { background: var(--accent); color: #fff; }
+  .btn-primary:hover { transform: scale(1.02); box-shadow: 0 8px 30px rgba(99,102,241,0.3); }
+  .btn-primary:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+  .btn-secondary { background: transparent; border: 1px solid var(--border); color: #fff; margin-top: 10px; }
+  .btn-secondary:hover { border-color: rgba(99,102,241,0.4); }
+
+  /* Results */
+  .result-section { margin-bottom: 20px; }
+  .result-section h3 { font-size: 0.9rem; font-weight: 700; margin-bottom: 10px; display: flex; align-items: center; gap: 6px; }
+  .result-section:last-child { margin-bottom: 0; }
+
+  .summary-text {
+    font-size: 0.92rem;
+    line-height: 1.7;
+    color: #e2e8f0;
+    white-space: pre-wrap;
+  }
+
+  .resume-pre {
+    background: rgba(0,0,0,0.28);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 22px 24px;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
+    font-size: 0.85rem;
+    line-height: 1.65;
+    color: #e2e8f0;
+  }
+
+  .tag-list { display: flex; flex-wrap: wrap; gap: 6px; }
+  .tag-match { background: rgba(16,185,129,0.12); color: #34d399; padding: 4px 12px; border-radius: 8px; font-size: 0.78rem; font-weight: 600; }
+  .tag-tip { background: rgba(99,102,241,0.12); color: #a5b4fc; padding: 4px 12px; border-radius: 8px; font-size: 0.78rem; font-weight: 600; }
+
+  .tip-item {
+    background: rgba(255,255,255,0.03);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 12px 16px;
+    margin-bottom: 8px;
+    font-size: 0.85rem;
+    color: var(--muted);
+    line-height: 1.6;
+  }
+
+  .action-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 20px; }
+  .action-row .btn { margin-top: 0; padding: 14px 10px; font-size: 0.85rem; }
+
+  .hidden { display: none !important; }
+
+  .toast-box { position: fixed; top: 16px; right: 16px; z-index: 9999; display: flex; flex-direction: column; gap: 8px; }
+  .toast { background: var(--card); border: 1px solid var(--border); color: var(--text); padding: 10px 18px; border-radius: 10px; font-size: 0.85rem; box-shadow: 0 8px 24px rgba(0,0,0,0.4); animation: tIn 0.3s ease, tOut 0.3s ease 2.7s forwards; }
+  @keyframes tIn { from { transform: translateX(120%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+  @keyframes tOut { to { transform: translateX(120%); opacity: 0; } }
+
+  /* Print-only area: prints ONLY the resume text, black on white */
+  #printArea { display: none; }
+  @media print {
+    @page { margin: 2cm; }
+    body { background: #fff !important; }
+    body > *:not(#printArea) { display: none !important; }
+    #printArea {
+      display: block !important;
+      white-space: pre-wrap;
+      word-wrap: break-word;
+      color: #000;
+      background: #fff;
+      font-family: Georgia, 'Times New Roman', serif;
+      font-size: 11pt;
+      line-height: 1.55;
+    }
+  }
+
+  @media (max-width: 600px) {
+    .container { padding: 30px 14px; }
+    .card { padding: 24px 18px; border-radius: 18px; }
+    .nav { padding: 1rem 4%; }
+    .grid-2 { grid-template-columns: 1fr; }
+    .action-row { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+
+<body>
+
+<div class="toast-box" id="toasts"></div>
+
+<nav class="nav">
+  <a class="logo" href="index.html">SIMPATICO <span>HR</span></a>
+  <div class="nav-links">
+    <a class="link" href="career-lab.html">🧪 Career Lab</a>
+    <a class="link" href="index.html">Home</a>
+  </div>
+</nav>
+
+<div class="container">
+
+  <div class="header">
+    <h1>📝 AI Resume Builder</h1>
+    <p>Upload your current resume or fill in your profile — get a complete, ATS-optimized rewrite tailored to your target role, with achievement-driven bullets and recruiter keywords.</p>
+  </div>
+
+  <!-- INPUT -->
+  <div id="inputSection">
+    <div class="card">
+      <h2>📄 Upload Resume <span style="font-size:0.72rem;color:var(--muted);font-weight:600;">(optional)</span></h2>
+      <div class="upload-area" id="uploadArea" onclick="document.getElementById('fileInput').click()">
+        <p>📁 Click to upload <strong>PDF or TXT</strong></p>
+        <p class="file-name" id="fileName">No file selected</p>
+        <input type="file" id="fileInput" accept=".pdf,.txt" hidden>
+      </div>
+      <p class="hint">Upload your existing resume for the best rewrite — or skip this and fill in your profile manually below.</p>
+    </div>
+
+    <div class="card">
+      <h2>👤 Your Profile <span style="font-size:0.72rem;color:var(--muted);font-weight:600;">(required if no upload)</span></h2>
+      <div class="grid-2">
+        <div>
+          <label>Full Name</label>
+          <input type="text" id="nameInput" placeholder="e.g. Priya Sharma">
+        </div>
+        <div>
+          <label>Target Job Role *</label>
+          <input type="text" id="roleInput" placeholder="e.g. Senior Product Manager">
+        </div>
+      </div>
+      <div class="grid-2">
+        <div>
+          <label>Years of Experience</label>
+          <input type="text" id="expInput" placeholder="e.g. 5 (or Fresher)">
+        </div>
+        <div>
+          <label>Education</label>
+          <input type="text" id="eduInput" placeholder="e.g. B.Tech CSE, Delhi University, 2019">
+        </div>
+      </div>
+      <label>Key Skills (comma-separated)</label>
+      <input type="text" id="skillsInput" placeholder="e.g. React, Node.js, SQL, Stakeholder Management, Agile">
+      <label>Top Achievements</label>
+      <textarea id="achInput" placeholder="List your proudest work wins, one per line...&#10;&#10;Example:&#10;Led a 6-member team that cut report generation time by 40%&#10;Closed ₹1.2Cr in new business in FY25&#10;Launched onboarding flow used by 30,000+ users"></textarea>
+    </div>
+
+    <div class="card">
+      <h2>🎯 Target Job Description <span style="font-size:0.72rem;color:var(--muted);font-weight:600;">(optional)</span></h2>
+      <label>Paste a job description to tailor keywords against</label>
+      <textarea id="jdInput" placeholder="Paste the target job description here — the AI will mirror its keywords for ATS match..."></textarea>
+    </div>
+
+    <button class="btn btn-primary" id="generateBtn" onclick="generate()">✨ Build My Resume</button>
+    <button class="btn btn-secondary" onclick="window.location.href='career-lab.html'">← Back to Career Lab</button>
+  </div>
+
+  <!-- RESULTS -->
+  <div id="resultSection" class="hidden">
+    <div class="card">
+      <h2>💼 Professional Summary</h2>
+      <p class="summary-text" id="summaryText"></p>
+    </div>
+
+    <div class="card">
+      <h2>📄 Your New Resume</h2>
+      <pre class="resume-pre" id="resumeFull"></pre>
+    </div>
+
+    <div class="card">
+      <div class="result-section">
+        <h3>🏷️ ATS Keywords &amp; Skills</h3>
+        <div class="tag-list" id="skillsTags"></div>
+      </div>
+
+      <div class="result-section">
+        <h3>✨ What We Improved</h3>
+        <div id="notesList"></div>
+      </div>
+    </div>
+
+    <div class="action-row">
+      <button class="btn btn-secondary" onclick="copyResume()">📋 Copy Resume</button>
+      <button class="btn btn-secondary" onclick="downloadResume()">⬇️ Download .txt</button>
+      <button class="btn btn-secondary" onclick="printResume()">🖨️ Print / Save as PDF</button>
+    </div>
+
+    <button class="btn btn-primary" onclick="resetForm()">🔄 Start Over / New</button>
+    <button class="btn btn-secondary" onclick="window.location.href='career-lab.html'">← Back to Career Lab</button>
+  </div>
+
+</div>
+
+<!-- Print-only resume output (populated on generate) -->
+<div id="printArea"></div>
+
+<script src="js/career-lab-paywall.js"></script>
+<script>
+  const W = "https://evalis-ai.simpaticohrconsultancy.workers.dev";
+  const TOOL_KEY = 'resumeBuilder';
+  const BTN_LABEL = '✨ Build My Resume';
+  let resumeText = "";
+  let lastResume = "";
+  let lastName = "";
+
+  CareerLabPaywall.decorateButton(document.getElementById('generateBtn'), TOOL_KEY);
+
+  function toast(m) {
+    const c = document.getElementById("toasts");
+    const t = document.createElement("div");
+    t.className = "toast"; t.textContent = m;
+    c.appendChild(t);
+    setTimeout(() => t.remove(), 3200);
+  }
+
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  }
+
+  // File upload (PDF via pdf.js, TXT direct) — same pattern as ats-optimizer
+  document.getElementById('fileInput').addEventListener('change', async e => {
+    const file = e.target.files[0];
+    if (!file) return;
+    document.getElementById('fileName').textContent = '⏳ Processing...';
+    try {
+      const ext = file.name.split('.').pop().toLowerCase();
+      if (ext === 'txt') resumeText = await file.text();
+      else if (ext === 'pdf') resumeText = await extractPDF(file);
+      else resumeText = await file.text();
+      resumeText = resumeText.replace(/\s+/g, ' ').replace(/[^\x20-\x7E\n]/g, '').trim().substring(0, 5000);
+      if (resumeText.length < 30) {
+        document.getElementById('fileName').textContent = '⚠️ Could not read. Try TXT.';
+        resumeText = '';
+        return;
+      }
+      document.getElementById('fileName').textContent = '✅ ' + file.name + ' (' + resumeText.length + ' chars)';
+      document.getElementById('uploadArea').classList.add('ok');
+      toast('📄 Resume loaded!');
+    } catch (err) {
+      document.getElementById('fileName').textContent = '❌ Error';
+      resumeText = '';
+    }
+  });
+
+  async function extractPDF(f) {
+    if (!window.pdfjsLib) return await f.text();
+    try {
+      const b = await f.arrayBuffer();
+      const p = await pdfjsLib.getDocument({ data: b }).promise;
+      let t = '';
+      for (let i = 1; i <= p.numPages; i++) {
+        const pg = await p.getPage(i);
+        const c = await pg.getTextContent();
+        t += c.items.map(x => x.str).join(' ') + '\n';
+      }
+      return t;
+    } catch (e) {
+      return await f.text();
+    }
+  }
+
+  // Generate
+  async function generate() {
+    if (!CareerLabPaywall.require(TOOL_KEY)) return;
+
+    const name = document.getElementById('nameInput').value.trim();
+    const role = document.getElementById('roleInput').value.trim();
+    const exp = document.getElementById('expInput').value.trim();
+    const edu = document.getElementById('eduInput').value.trim();
+    const skills = document.getElementById('skillsInput').value.trim();
+    const ach = document.getElementById('achInput').value.trim();
+    const jd = document.getElementById('jdInput').value.trim();
+
+    if (!role) { toast('🎯 Enter your target job role'); return; }
+    if (!resumeText && (!name || !skills)) { toast('📄 Upload a resume OR fill in your name + key skills'); return; }
+
+    const btn = document.getElementById('generateBtn');
+    btn.disabled = true;
+    btn.textContent = '⏳ AI is working...';
+
+    try {
+      let details = 'CANDIDATE DETAILS:\n- Target job role: ' + role + '\n';
+      if (name) details += '- Full name: ' + name + '\n';
+      if (exp) details += '- Years of experience: ' + exp + '\n';
+      if (skills) details += '- Key skills: ' + skills + '\n';
+      if (edu) details += '- Education: ' + edu + '\n';
+      if (ach) details += '- Top achievements:\n' + ach.substring(0, 1500) + '\n';
+
+      let prompt = 'Write a complete, polished, ATS-optimized resume for this candidate, tailored to the target role' +
+        (jd ? ' and mirroring keywords from the target job description' : '') + '.\n\n' + details;
+
+      if (resumeText) prompt += '\nEXISTING RESUME TEXT (rewrite and upgrade this — do not copy weak phrasing):\n' + resumeText.substring(0, 5000) + '\n';
+      if (jd) prompt += '\nTARGET JOB DESCRIPTION:\n' + jd.substring(0, 3000) + '\n';
+
+      prompt += `
+RULES:
+- Use clear plain-text section headers in this order: PROFESSIONAL SUMMARY / CORE SKILLS / PROFESSIONAL EXPERIENCE / EDUCATION (add CERTIFICATIONS or PROJECTS only if the candidate's details justify them)
+- Every experience bullet starts with a strong action verb (Led, Built, Delivered, Reduced, Grew...) and includes quantified results (numbers, %, scale, ₹/$) — derive realistic metrics from the candidate's achievements where possible
+- Plain text only: no markdown, no asterisks, no tables; use "- " for bullets and blank lines between sections
+- Never invent employers, degrees or dates — only reframe and sharpen the information given
+
+Return ONLY this JSON (no markdown fences, no commentary):
+{
+  "fullResume": "the complete rewritten resume as plain text with the section headers PROFESSIONAL SUMMARY / CORE SKILLS / PROFESSIONAL EXPERIENCE / EDUCATION, achievement-driven bullets starting with action verbs and quantified results, \\n between lines",
+  "summary": "3-line professional summary",
+  "skills": ["10-14 ATS keywords"],
+  "improvementNotes": ["3-5 short notes on what was improved"]
+}
+
+Return ONLY JSON.`;
+
+      const res = await fetch(W, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          messages: [
+            {
+              role: "system",
+              content: "You are an expert professional resume writer and ATS (Applicant Tracking System) specialist. You write achievement-driven resumes with quantified results that pass ATS screening. Return ONLY valid JSON. No markdown, no code fences."
+            },
+            { role: "user", content: prompt }
+          ]
+        })
+      });
+
+      const data = await res.json();
+      if (!data.response) throw new Error("Empty response");
+
+      const result = parseJSON(data.response);
+      lastName = name;
+      showResults(result);
+      toast('✅ Resume built!');
+
+    } catch (err) {
+      console.error(err);
+      toast('❌ Error: ' + err.message);
+    }
+
+    btn.disabled = false;
+    btn.textContent = BTN_LABEL;
+  }
+
+  function parseJSON(raw) {
+    let c = raw.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
+    const m = c.match(/\{[\s\S]*\}/);
+    if (!m) throw new Error('No JSON');
+    c = m[0].replace(/,\s*([}\]])/g, '$1');
+    try { return JSON.parse(c); } catch (e) {
+      c = c.replace(/[\x00-\x1F\x7F]/g, ' ');
+      return JSON.parse(c);
+    }
+  }
+
+  function showResults(r) {
+    const full = String(r.fullResume || '').trim();
+    if (!full) throw new Error('AI returned an empty resume');
+    lastResume = full;
+
+    document.getElementById('inputSection').classList.add('hidden');
+    document.getElementById('resultSection').classList.remove('hidden');
+
+    document.getElementById('summaryText').textContent = r.summary || '';
+    document.getElementById('resumeFull').textContent = full;
+    document.getElementById('printArea').textContent = full;
+
+    const sk = document.getElementById('skillsTags');
+    const skills = Array.isArray(r.skills) ? r.skills : [];
+    sk.innerHTML = skills.length
+      ? skills.map(s => `<span class="tag-match">✅ ${esc(s)}</span>`).join('')
+      : '<span class="tag-tip">No keywords returned</span>';
+
+    const notes = Array.isArray(r.improvementNotes) ? r.improvementNotes : [];
+    document.getElementById('notesList').innerHTML = notes.length
+      ? notes.map(n => `<div class="tip-item">✨ ${esc(n)}</div>`).join('')
+      : '<div class="tip-item">Resume rewritten and ATS-optimized for your target role.</div>';
+
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  async function copyResume() {
+    if (!lastResume) { toast('⚠️ Nothing to copy yet'); return; }
+    try {
+      await navigator.clipboard.writeText(lastResume);
+      toast('📋 Resume copied to clipboard!');
+    } catch (e) {
+      toast('❌ Copy failed — select the resume text manually');
+    }
+  }
+
+  function downloadResume() {
+    if (!lastResume) { toast('⚠️ Nothing to download yet'); return; }
+    const blob = new Blob([lastResume], { type: 'text/plain;charset=utf-8' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = (lastName ? lastName.replace(/[^a-z0-9]+/gi, '-').replace(/^-+|-+$/g, '') : 'AI') + '-Resume.txt';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    toast('⬇️ Resume downloaded!');
+  }
+
+  function printResume() {
+    if (!lastResume) { toast('⚠️ Nothing to print yet'); return; }
+    document.getElementById('printArea').textContent = lastResume;
+    window.print();
+  }
+
+  function resetForm() {
+    document.getElementById('inputSection').classList.remove('hidden');
+    document.getElementById('resultSection').classList.add('hidden');
+    document.getElementById('nameInput').value = '';
+    document.getElementById('roleInput').value = '';
+    document.getElementById('expInput').value = '';
+    document.getElementById('eduInput').value = '';
+    document.getElementById('skillsInput').value = '';
+    document.getElementById('achInput').value = '';
+    document.getElementById('jdInput').value = '';
+    document.getElementById('fileName').textContent = 'No file selected';
+    document.getElementById('uploadArea').classList.remove('ok');
+    document.getElementById('fileInput').value = '';
+    document.getElementById('printArea').textContent = '';
+    resumeText = '';
+    lastResume = '';
+    lastName = '';
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+</script>
+
+</body>
+</html>

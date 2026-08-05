@@ -1,6 +1,23 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+    <!-- 🔒 ACCESS GUARD — Requires Career Lab auth (exempts B2B/token invites) -->
+    <script>
+    (function(){
+      try {
+        var p = new URLSearchParams(window.location.search);
+        if (p.get('b2b') === '1' || p.has('token') || p.has('api_key')) return;
+        var t = localStorage.getItem('simpatico_token');
+        var u = JSON.parse(localStorage.getItem('simpatico_user') || '{}');
+        if (!t || (!u.id && !u.email)) { window.location.replace('career-lab-gate.html'); return; }
+        if (u.expiresAt && Date.now() > u.expiresAt) {
+          localStorage.removeItem('simpatico_token');
+          localStorage.removeItem('simpatico_user');
+          window.location.replace('career-lab-gate.html');
+        }
+      } catch(e) { window.location.replace('career-lab-gate.html'); }
+    })();
+    </script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AI Interview Platform — Candidate Evaluation | Simpatico HR</title>
@@ -1409,6 +1426,31 @@
                             <option value="visible">Always Visible</option>
                         </select>
                     </div>
+                </div>
+
+                <div class="form-group" style="margin-top:0.25rem;">
+                    <label class="form-label" for="interview-lang-select">Interview Language (Speech Recognition)</label>
+                    <select id="interview-lang-select" class="form-select">
+                        <option value="en-US" selected>🇬🇧 English</option>
+                        <option value="hi-IN">🇮🇳 हिन्दी (Hindi)</option>
+                        <option value="ml-IN">🇮🇳 മലയാളം (Malayalam)</option>
+                        <option value="ta-IN">🇮🇳 தமிழ் (Tamil)</option>
+                        <option value="te-IN">🇮🇳 తెలుగు (Telugu)</option>
+                        <option value="kn-IN">🇮🇳 ಕನ್ನಡ (Kannada)</option>
+                        <option value="bn-IN">🇮🇳 বাংলা (Bengali)</option>
+                        <option value="ar-SA">🇸🇦 العربية (Arabic)</option>
+                        <option value="de-DE">🇩🇪 Deutsch (German)</option>
+                        <option value="fr-FR">🇫🇷 Français (French)</option>
+                        <option value="es-ES">🇪🇸 Español (Spanish)</option>
+                        <option value="pt-BR">🇧🇷 Português (Portuguese)</option>
+                        <option value="zh-CN">🇨🇳 中文 (Chinese)</option>
+                        <option value="ur-PK">🇵🇰 اردو (Urdu)</option>
+                    </select>
+                </div>
+
+                <div id="speech-compat-warning" class="error-banner" style="display:none;margin-top:0.75rem;">
+                    <span>⚠️</span>
+                    <span>Your browser does not support Speech Recognition. Voice mode will not work. Please use <strong>Google Chrome</strong> or <strong>Microsoft Edge</strong> for the best experience.</span>
                 </div>
 
                 <!-- BYOK & Avatar Service Key Section -->
@@ -3693,13 +3735,17 @@ Guidelines:
         const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
         if (!SpeechRecognition) {
             console.warn('Speech recognition not supported in this browser.');
+            const warn = document.getElementById('speech-compat-warning');
+            if (warn) warn.style.display = 'flex';
             return null;
         }
         
         const rec = new SpeechRecognition();
         rec.continuous = true;
         rec.interimResults = true;
-        rec.lang = 'en-US';
+        // Use the language selected by the user (defaults to en-US)
+        const langSelect = document.getElementById('interview-lang-select');
+        rec.lang = langSelect ? langSelect.value : 'en-US';
         
         rec.onstart = function() {
             state.recognitionActive = true;

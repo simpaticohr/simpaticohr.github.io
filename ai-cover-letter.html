@@ -1,0 +1,536 @@
+<!doctype html>
+<html lang="en">
+<head>
+<!-- 🔒 ACCESS GUARD — Requires Career Lab auth -->
+<script>
+(function(){
+  try {
+    var t = localStorage.getItem('simpatico_token');
+    var u = JSON.parse(localStorage.getItem('simpatico_user') || '{}');
+    if (!t || (!u.id && !u.email)) { window.location.replace('career-lab-gate.html'); return; }
+    if (u.expiresAt && Date.now() > u.expiresAt) {
+      localStorage.removeItem('simpatico_token');
+      localStorage.removeItem('simpatico_user');
+      window.location.replace('career-lab-gate.html');
+    }
+  } catch(e) { window.location.replace('career-lab-gate.html'); }
+})();
+</script>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI Cover Letter Generator | Simpatico HR</title>
+<meta name="description" content="Generate two tailored, tone-matched cover letter variants for any job description in seconds. AI aligns your letter with JD keywords — edit, copy and download.">
+<meta name="robots" content="index, follow">
+<link rel="canonical" href="https://simpaticohr.in/ai-cover-letter.html">
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script>if(window.pdfjsLib)pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';</script>
+
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
+<style>
+  :root {
+    --accent: #6366f1;
+    --accent-soft: rgba(99,102,241,.12);
+    --bg: #020617;
+    --card: rgba(15,23,42,.65);
+    --border: rgba(255,255,255,.08);
+    --text: #f8fafc;
+    --muted: #94a3b8;
+    --green: #10b981;
+    --red: #ef4444;
+    --yellow: #f59e0b;
+    --blue: #3b82f6;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
+    background:
+      radial-gradient(circle at 10% 20%, rgba(99,102,241,.15), transparent 40%),
+      radial-gradient(circle at 90% 80%, rgba(79,70,229,.1), transparent 40%),
+      var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+  }
+
+  .nav {
+    backdrop-filter: blur(16px);
+    background: rgba(2,6,23,.85);
+    padding: 1.2rem 6%;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid var(--border);
+    position: sticky;
+    top: 0;
+    z-index: 100;
+  }
+  .logo { font-weight: 800; font-size: 1.1rem; color: #fff; text-decoration: none; }
+  .logo span { color: var(--accent); }
+  .nav-links { display: flex; gap: 16px; }
+  .link { color: var(--muted); text-decoration: none; font-size: 13px; font-weight: 500; }
+  .link:hover { color: #fff; }
+
+  .container { max-width: 900px; margin: 0 auto; padding: 50px 20px; }
+
+  .header { text-align: center; margin-bottom: 40px; }
+  .header h1 {
+    font-size: clamp(2rem, 5vw, 3rem);
+    font-weight: 800;
+    background: linear-gradient(#fff, #94a3b8);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    margin-bottom: 12px;
+  }
+  .header p { color: var(--muted); font-size: 1rem; line-height: 1.6; }
+
+  .card {
+    background: var(--card);
+    backdrop-filter: blur(22px);
+    border: 1px solid var(--border);
+    border-radius: 24px;
+    padding: 32px;
+    margin-bottom: 20px;
+  }
+  .card h2 { font-size: 1.1rem; font-weight: 700; margin-bottom: 16px; display: flex; align-items: center; gap: 8px; }
+
+  label { display: block; font-size: 0.8rem; color: var(--muted); margin: 14px 0 6px; font-weight: 600; }
+  textarea, input[type="text"], select {
+    width: 100%;
+    padding: 12px 14px;
+    background: rgba(255,255,255,0.04);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    color: var(--text);
+    font-size: 0.9rem;
+    font-family: inherit;
+    outline: none;
+    transition: border-color 0.2s;
+  }
+  textarea { min-height: 140px; resize: vertical; }
+  select { appearance: none; cursor: pointer; }
+  select option { background: #0f172a; color: var(--text); }
+  textarea:focus, input:focus, select:focus { border-color: rgba(99,102,241,0.4); box-shadow: 0 0 0 3px rgba(99,102,241,0.1); }
+
+  .row-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; }
+
+  .upload-area {
+    border: 2px dashed var(--border);
+    border-radius: 16px;
+    padding: 24px;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.3s;
+    margin-top: 8px;
+  }
+  .upload-area:hover { border-color: rgba(99,102,241,0.4); background: rgba(99,102,241,0.03); }
+  .upload-area.ok { border-color: var(--green); background: rgba(16,185,129,0.05); }
+  .upload-area p { color: var(--muted); font-size: 0.85rem; }
+  .upload-area strong { color: var(--accent); }
+  .file-name { font-size: 0.78rem; color: var(--muted); margin-top: 6px; }
+  .or-divider { text-align: center; color: var(--muted); font-size: 0.78rem; margin: 14px 0 2px; font-weight: 600; }
+
+  .btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    width: 100%;
+    padding: 16px;
+    border-radius: 16px;
+    font-weight: 700;
+    font-size: 0.95rem;
+    border: none;
+    cursor: pointer;
+    font-family: inherit;
+    transition: all 0.2s;
+    margin-top: 20px;
+  }
+  .btn-primary { background: var(--accent); color: #fff; }
+  .btn-primary:hover { transform: scale(1.02); box-shadow: 0 8px 30px rgba(99,102,241,0.3); }
+  .btn-primary:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+  .btn-secondary { background: transparent; border: 1px solid var(--border); color: #fff; margin-top: 10px; }
+  .btn-secondary:hover { border-color: rgba(99,102,241,0.4); }
+
+  /* Results — variant cards */
+  .variants { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 4px; }
+  .variant-card {
+    background: var(--card);
+    backdrop-filter: blur(22px);
+    border: 1px solid var(--border);
+    border-radius: 24px;
+    padding: 26px;
+    display: flex;
+    flex-direction: column;
+  }
+  .variant-label {
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: #a5b4fc;
+    background: rgba(99,102,241,0.12);
+    display: inline-block;
+    align-self: flex-start;
+    padding: 5px 12px;
+    border-radius: 8px;
+    margin-bottom: 14px;
+  }
+  .variant-subject {
+    font-size: 0.92rem;
+    font-weight: 700;
+    line-height: 1.5;
+    margin-bottom: 14px;
+    padding-bottom: 14px;
+    border-bottom: 1px solid var(--border);
+  }
+  .variant-subject span { color: var(--muted); font-weight: 600; font-size: 0.78rem; display: block; margin-bottom: 4px; }
+  .variant-body {
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-size: 0.85rem;
+    color: #cbd5e1;
+    line-height: 1.7;
+    background: rgba(255,255,255,0.03);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px;
+    flex: 1;
+  }
+  .variant-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 16px; }
+  .btn-small {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 11px;
+    border-radius: 12px;
+    font-weight: 700;
+    font-size: 0.82rem;
+    border: 1px solid var(--border);
+    background: rgba(255,255,255,0.04);
+    color: var(--text);
+    cursor: pointer;
+    font-family: inherit;
+    transition: all 0.2s;
+  }
+  .btn-small:hover { border-color: rgba(99,102,241,0.4); background: rgba(99,102,241,0.08); }
+
+  .hidden { display: none !important; }
+
+  .toast-box { position: fixed; top: 16px; right: 16px; z-index: 9999; display: flex; flex-direction: column; gap: 8px; }
+  .toast { background: var(--card); border: 1px solid var(--border); color: var(--text); padding: 10px 18px; border-radius: 10px; font-size: 0.85rem; box-shadow: 0 8px 24px rgba(0,0,0,0.4); animation: tIn 0.3s ease, tOut 0.3s ease 2.7s forwards; }
+  @keyframes tIn { from { transform: translateX(120%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+  @keyframes tOut { to { transform: translateX(120%); opacity: 0; } }
+
+  @media (max-width: 700px) {
+    .variants { grid-template-columns: 1fr; }
+    .row-2 { grid-template-columns: 1fr; }
+  }
+  @media (max-width: 600px) {
+    .container { padding: 30px 14px; }
+    .card { padding: 24px 18px; border-radius: 18px; }
+    .variant-card { padding: 20px 16px; border-radius: 18px; }
+    .nav { padding: 1rem 4%; }
+  }
+</style>
+</head>
+
+<body>
+
+<div class="toast-box" id="toasts"></div>
+
+<nav class="nav">
+  <a class="logo" href="index.html">SIMPATICO <span>HR</span></a>
+  <div class="nav-links">
+    <a class="link" href="career-lab.html">🧪 Career Lab</a>
+    <a class="link" href="index.html">Home</a>
+  </div>
+</nav>
+
+<div class="container">
+
+  <div class="header">
+    <h1>✉️ AI Cover Letter Generator</h1>
+    <p>Paste the job description, pick a tone, and get two tailored cover letter variants aligned with the JD keywords — ready to copy or download.</p>
+  </div>
+
+  <!-- INPUT -->
+  <div id="inputSection">
+    <div class="card">
+      <h2>📄 Your Resume <span style="font-size:0.75rem;color:var(--muted);font-weight:600;">(optional — makes the letter personal)</span></h2>
+      <div class="upload-area" id="uploadArea" onclick="document.getElementById('fileInput').click()">
+        <p>📁 Click to upload <strong>PDF or TXT</strong></p>
+        <p class="file-name" id="fileName">No file selected</p>
+        <input type="file" id="fileInput" accept=".pdf,.txt" hidden>
+      </div>
+      <div class="or-divider">— OR —</div>
+      <label>Paste your resume text</label>
+      <textarea id="resumeInput" style="min-height:110px;" placeholder="Paste your resume / CV text here..."></textarea>
+    </div>
+
+    <div class="card">
+      <h2>📋 Job Details</h2>
+      <label>Job Description <span style="color:var(--red);">*</span></label>
+      <textarea id="jdInput" placeholder="Paste the full job description here...&#10;&#10;Example:&#10;We are looking for a Senior Frontend Developer with 5+ years experience in React, TypeScript, and Next.js..."></textarea>
+
+      <div class="row-2">
+        <div>
+          <label>Company Name (optional)</label>
+          <input type="text" id="companyInput" placeholder="e.g. Acme Corp">
+        </div>
+        <div>
+          <label>Hiring Manager Name (optional)</label>
+          <input type="text" id="managerInput" placeholder="e.g. Priya Sharma">
+        </div>
+      </div>
+
+      <label>Tone</label>
+      <select id="toneInput">
+        <option value="Professional" selected>Professional</option>
+        <option value="Friendly">Friendly</option>
+        <option value="Confident">Confident</option>
+        <option value="Formal">Formal</option>
+      </select>
+    </div>
+
+    <button class="btn btn-primary" id="generateBtn" onclick="generate()">✉️ Generate Cover Letters</button>
+    <button class="btn btn-secondary" onclick="window.location.href='career-lab.html'">← Back to Career Lab</button>
+  </div>
+
+  <!-- RESULTS -->
+  <div id="resultSection" class="hidden">
+    <div class="variants" id="variantsGrid"></div>
+
+    <button class="btn btn-primary" onclick="resetForm()">🔄 Start Over / New</button>
+    <button class="btn btn-secondary" onclick="window.location.href='career-lab.html'">← Back to Career Lab</button>
+  </div>
+
+</div>
+
+<script src="js/career-lab-paywall.js"></script>
+<script>
+  const W = "https://evalis-ai.simpaticohrconsultancy.workers.dev";
+  let resumeText = "";
+  let lastVariants = [];
+
+  const generateBtn = document.getElementById('generateBtn');
+  CareerLabPaywall.decorateButton(generateBtn, 'coverLetter');
+
+  function toast(m) {
+    const c = document.getElementById("toasts");
+    const t = document.createElement("div");
+    t.className = "toast"; t.textContent = m;
+    c.appendChild(t);
+    setTimeout(() => t.remove(), 3200);
+  }
+
+  // File upload
+  document.getElementById('fileInput').addEventListener('change', async e => {
+    const file = e.target.files[0];
+    if (!file) return;
+    document.getElementById('fileName').textContent = '⏳ Processing...';
+    try {
+      const ext = file.name.split('.').pop().toLowerCase();
+      if (ext === 'txt') resumeText = await file.text();
+      else if (ext === 'pdf') resumeText = await extractPDF(file);
+      else resumeText = await file.text();
+      resumeText = resumeText.replace(/\s+/g, ' ').replace(/[^\x20-\x7E\n]/g, '').trim().substring(0, 5000);
+      if (resumeText.length < 30) {
+        document.getElementById('fileName').textContent = '⚠️ Could not read. Try TXT or paste below.';
+        resumeText = '';
+        return;
+      }
+      document.getElementById('fileName').textContent = '✅ ' + file.name + ' (' + resumeText.length + ' chars)';
+      document.getElementById('uploadArea').classList.add('ok');
+      toast('📄 Resume loaded!');
+    } catch (err) {
+      document.getElementById('fileName').textContent = '❌ Error';
+      resumeText = '';
+    }
+  });
+
+  async function extractPDF(f) {
+    if (!window.pdfjsLib) return await f.text();
+    try {
+      const b = await f.arrayBuffer();
+      const p = await pdfjsLib.getDocument({ data: b }).promise;
+      let t = '';
+      for (let i = 1; i <= p.numPages; i++) {
+        const pg = await p.getPage(i);
+        const c = await pg.getTextContent();
+        t += c.items.map(x => x.str).join(' ') + '\n';
+      }
+      return t;
+    } catch (e) {
+      return await f.text();
+    }
+  }
+
+  // Generate
+  async function generate() {
+    if (!CareerLabPaywall.require('coverLetter')) return;
+
+    const jd = document.getElementById('jdInput').value.trim();
+    const company = document.getElementById('companyInput').value.trim();
+    const manager = document.getElementById('managerInput').value.trim();
+    const tone = document.getElementById('toneInput').value;
+    const pastedResume = document.getElementById('resumeInput').value.trim();
+    const resume = [pastedResume, resumeText].filter(Boolean).join('\n').substring(0, 4000);
+
+    if (!jd) { toast('📋 Paste the job description first'); return; }
+
+    generateBtn.disabled = true;
+    generateBtn.textContent = '⏳ AI is working...';
+
+    try {
+      const res = await fetch(W, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          messages: [
+            {
+              role: "system",
+              content: "You are an expert career coach who writes tailored cover letters. Each letter must mirror the exact keywords and priorities of the job description, avoid clichés and generic filler (no 'I am writing to express my interest', no 'team player', no 'fast learner'), and stay under 350 words. Adapt strictly to the requested tone. Return ONLY valid JSON. No markdown, no code fences, no commentary."
+            },
+            {
+              role: "user",
+              content: `Write two distinct cover letter variants for this application.
+
+Tone: ${tone}
+Company: ${company || 'Not specified'}
+Hiring Manager: ${manager || 'Not specified (use a generic greeting like "Dear Hiring Manager")'}
+
+Job Description:
+${jd.substring(0, 3000)}
+
+${resume ? 'Candidate Resume:\n' + resume : 'No resume provided — keep claims credible and skill-focused based on the JD.'}
+
+Requirements:
+- Each variant: greeting, 3-4 short paragraphs, sign-off.
+- Mirror the JD's actual keywords and priorities.
+- Different angle per variant (e.g. achievement-led vs story-led).
+- Under 350 words per letter.
+- Also write a short email subject line for each variant.
+- Label each variant "Variant 1 — <short style name>" / "Variant 2 — <short style name>".
+
+Return ONLY this JSON:
+{
+  "variants": [
+    { "label": "Variant 1 — <short style name>", "subject": "email subject line", "body": "full cover letter with greeting, 3-4 short paragraphs, sign-off" },
+    { "label": "Variant 2 — <short style name>", "subject": "email subject line", "body": "full cover letter with greeting, 3-4 short paragraphs, sign-off" }
+  }
+}
+
+Return ONLY JSON.`
+            }
+          ]
+        })
+      });
+
+      const data = await res.json();
+      if (!data.response) throw new Error("Empty response");
+
+      const result = parseJSON(data.response);
+      if (!result.variants || !result.variants.length) throw new Error("No variants returned");
+      showResults(result.variants.slice(0, 2));
+      toast('✅ Cover letters ready!');
+
+    } catch (err) {
+      console.error(err);
+      toast('❌ Error: ' + err.message);
+    }
+
+    generateBtn.disabled = false;
+    generateBtn.innerHTML = generateBtn.dataset.label || '✉️ Generate Cover Letters';
+    CareerLabPaywall.decorateButton(generateBtn, 'coverLetter');
+  }
+
+  function parseJSON(raw) {
+    let c = raw.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
+    const m = c.match(/\{[\s\S]*\}/);
+    if (!m) throw new Error('No JSON');
+    c = m[0].replace(/,\s*([}\]])/g, '$1');
+    try { return JSON.parse(c); } catch (e) {
+      c = c.replace(/[\x00-\x1F\x7F]/g, ' ');
+      return JSON.parse(c);
+    }
+  }
+
+  function esc(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+
+  function showResults(variants) {
+    document.getElementById('inputSection').classList.add('hidden');
+    document.getElementById('resultSection').classList.remove('hidden');
+    lastVariants = variants;
+
+    document.getElementById('variantsGrid').innerHTML = variants.map((v, i) => `
+      <div class="variant-card">
+        <div class="variant-label">${esc(v.label || ('Variant ' + (i + 1)))}</div>
+        <div class="variant-subject"><span>✉️ Subject</span>${esc(v.subject || '')}</div>
+        <div class="variant-body">${esc(v.body || '')}</div>
+        <div class="variant-actions">
+          <button class="btn-small" onclick="copyVariant(${i})">📋 Copy</button>
+          <button class="btn-small" onclick="downloadVariant(${i})">⬇️ Download .txt</button>
+        </div>
+      </div>`).join('');
+
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  function variantText(i) {
+    const v = lastVariants[i] || {};
+    return 'Subject: ' + (v.subject || '') + '\n\n' + (v.body || '');
+  }
+
+  async function copyVariant(i) {
+    const txt = variantText(i);
+    try {
+      await navigator.clipboard.writeText(txt);
+      toast('📋 Copied to clipboard!');
+    } catch (e) {
+      const ta = document.createElement('textarea');
+      ta.value = txt;
+      document.body.appendChild(ta);
+      ta.select();
+      try { document.execCommand('copy'); toast('📋 Copied to clipboard!'); }
+      catch (err) { toast('❌ Copy failed'); }
+      ta.remove();
+    }
+  }
+
+  function downloadVariant(i) {
+    const v = lastVariants[i] || {};
+    const blob = new Blob([variantText(i)], { type: 'text/plain;charset=utf-8' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'cover-letter-variant-' + (i + 1) + '.txt';
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 100);
+    toast('⬇️ Downloaded ' + (v.label ? '"' + v.label + '"' : 'cover letter') + '!');
+  }
+
+  function resetForm() {
+    document.getElementById('inputSection').classList.remove('hidden');
+    document.getElementById('resultSection').classList.add('hidden');
+    document.getElementById('jdInput').value = '';
+    document.getElementById('companyInput').value = '';
+    document.getElementById('managerInput').value = '';
+    document.getElementById('toneInput').value = 'Professional';
+    document.getElementById('resumeInput').value = '';
+    document.getElementById('fileName').textContent = 'No file selected';
+    document.getElementById('uploadArea').classList.remove('ok');
+    document.getElementById('fileInput').value = '';
+    resumeText = '';
+    lastVariants = [];
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+</script>
+
+</body>
+</html>

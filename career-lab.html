@@ -13,7 +13,7 @@
 <meta property="og:type" content="website">
 <title>Career Lab — AI Mock Interview Practice & Skill Development | Simpatico HR</title>
 
-<!-- 🔒 ACCESS GUARD — Requires Supabase Authentication -->
+<!-- 🔒 ACCESS GUARD — Requires Career Lab auth + token expiry check -->
 <script>
 (function () {
   try {
@@ -24,12 +24,21 @@
       window.location.replace("career-lab-gate.html");
       return;
     }
+    // Check token expiry (24h sessions)
+    if (user.expiresAt && Date.now() > user.expiresAt) {
+      localStorage.removeItem("simpatico_token");
+      localStorage.removeItem("simpatico_user");
+      window.location.replace("career-lab-gate.html");
+      return;
+    }
   } catch(e) {
     // localStorage blocked — redirect to gate
     window.location.replace("career-lab-gate.html");
   }
 })();
+</script>
 
+<script>
 // ═══════════════════════════════════════
 // 🔐 READ ADMIN CONFIG
 // ═══════════════════════════════════════
@@ -561,9 +570,10 @@ body {
 <nav class="nav">
   <a class="logo" href="index.html">SIMPATICO <span>HR</span></a>
   <div class="nav-links">
-    <a class="link" href="mock-admin.html" style="background:rgba(245,158,11,0.15);border:1px solid rgba(245,158,11,0.3);color:#fbbf24;padding:6px 14px;border-radius:10px;font-weight:700;">⚙️ Mock Admin</a>
+    <a class="link" id="mock-admin-link" href="mock-admin.html" style="background:rgba(245,158,11,0.15);border:1px solid rgba(245,158,11,0.3);color:#fbbf24;padding:6px 14px;border-radius:10px;font-weight:700;display:none;">⚙️ Mock Admin</a>
     <a class="link" href="evalis-platform.html">🏢 HR Portal</a>
     <a class="link" href="index.html">← Home</a>
+    <a class="link" href="#" onclick="logoutCareerLab();return false;" style="background:rgba(239,68,68,0.12);border:1px solid rgba(239,68,68,0.25);color:#f87171;padding:6px 14px;border-radius:10px;font-weight:700;">🚪 Logout</a>
   </div>
 </nav>
 
@@ -960,6 +970,24 @@ body {
 
 <script src="js/career-lab-paywall.js"></script>
 <script>
+// Show Mock Admin link only for admin users
+(function() {
+  try {
+    const cfg = JSON.parse(localStorage.getItem('adminConfig') || '{}');
+    if (cfg.careerLabPassword) {
+      const link = document.getElementById('mock-admin-link');
+      if (link) link.style.display = '';
+    }
+  } catch(e) {}
+})();
+
+// Logout — clear session and redirect to gate
+function logoutCareerLab() {
+  localStorage.removeItem('simpatico_token');
+  localStorage.removeItem('simpatico_user');
+  window.location.replace('career-lab-gate.html');
+}
+
 // Render admin-configured prices on premium cards
 document.querySelectorAll('[data-clp-price]').forEach(el => {
   el.textContent = CareerLabPaywall.priceLabel(el.getAttribute('data-clp-price'));
