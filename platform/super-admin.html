@@ -868,23 +868,46 @@ async function loadUsers() {
     try {
         const users = await adminFetch('/admin/users');
         if (Array.isArray(users) && users.length > 0) {
+            // Store users globally for filtering
+            window._allUsers = users;
+            const candidates = users.filter(u => u.role === 'candidate');
+            const companies = users.filter(u => u.role === 'client_admin' || u.role === 'employer');
+            const staff = users.filter(u => u.role === 'hr' || u.role === 'admin' || u.role === 'super_admin' || u.role === 'superadmin');
+
             document.getElementById('mainContent').innerHTML = `
-                <div class="panel">
-                    <div class="panel-header">
-                        <div class="panel-title"><i class="fas fa-users" style="color:#10B981;margin-right:8px"></i>Users (${users.length})</div>
-                        <span class="panel-badge">${users.length} total</span>
+                <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px;">
+                    <div class="stat-card" style="cursor:pointer" onclick="filterUsers('all')">
+                        <div class="stat-icon" style="background:rgba(99,102,241,.1);color:#6366F1"><i class="fas fa-users"></i></div>
+                        <div class="stat-value">${users.length}</div><div class="stat-label">Total Users</div>
                     </div>
-                    <div class="table-wrap"><table>
-                        <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Status</th><th>Joined</th></tr></thead>
-                        <tbody>${users.map(u => `<tr>
-                            <td><strong>${esc(u.full_name||'-')}</strong></td>
-                            <td style="font-size:13px">${esc(u.email)}</td>
-                            <td><span class="badge badge-${getRoleBadge(u.role)}">${esc(u.role)}</span></td>
-                            <td><span class="badge ${u.is_active!==false?'badge-active':'badge-inactive'}">${u.is_active!==false?'Active':'Inactive'}</span></td>
-                            <td style="font-size:13px;color:#6B7280">${formatDate(u.created_at)}</td>
-                        </tr>`).join('')}</tbody>
-                    </table></div>
+                    <div class="stat-card" style="cursor:pointer" onclick="filterUsers('candidate')">
+                        <div class="stat-icon" style="background:rgba(16,185,129,.1);color:#10B981"><i class="fas fa-user-graduate"></i></div>
+                        <div class="stat-value">${candidates.length}</div><div class="stat-label">Candidates</div>
+                    </div>
+                    <div class="stat-card" style="cursor:pointer" onclick="filterUsers('company')">
+                        <div class="stat-icon" style="background:rgba(59,130,246,.1);color:#3B82F6"><i class="fas fa-building"></i></div>
+                        <div class="stat-value">${companies.length}</div><div class="stat-label">Companies</div>
+                    </div>
+                    <div class="stat-card" style="cursor:pointer" onclick="filterUsers('staff')">
+                        <div class="stat-icon" style="background:rgba(139,92,246,.1);color:#8B5CF6"><i class="fas fa-user-shield"></i></div>
+                        <div class="stat-value">${staff.length}</div><div class="stat-label">Staff</div>
+                    </div>
+                </div>
+                <div class="panel">
+                    <div class="panel-header" style="flex-wrap:wrap;gap:10px;">
+                        <div class="panel-title"><i class="fas fa-users" style="color:#10B981;margin-right:8px"></i>Users <span id="usersCount">(${users.length})</span></div>
+                        <div style="display:flex;gap:8px;align-items:center;">
+                            <input type="text" id="userSearchInput" placeholder="Search by name, email, skills..." 
+                                   oninput="filterUsers(window._currentUserFilter||'all')"
+                                   style="padding:8px 14px;border:1px solid #E5E7EB;border-radius:8px;font-size:13px;width:280px;background:#F9FAFB;outline:none;">
+                            <button onclick="exportUsersCsv()" style="padding:8px 14px;background:#10B981;color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;">
+                                <i class="fas fa-download" style="margin-right:4px"></i>Export CSV
+                            </button>
+                        </div>
+                    </div>
+                    <div id="usersTableWrap"></div>
                 </div>`;
+            filterUsers('all');
         } else {
             document.getElementById('mainContent').innerHTML = `<div class="panel"><div class="panel-header"><div class="panel-title">All Users</div></div><p style="text-align:center;color:#9CA3AF;padding:40px">No users found</p></div>`;
         }
@@ -894,6 +917,131 @@ async function loadUsers() {
             <p style="text-align:center;color:#EF4444;padding:40px">${e.message}</p>
             <p style="text-align:center;color:#9CA3AF;padding-bottom:20px;font-size:13px">Add an RLS policy on the <code>users</code> table allowing <code>super_admin</code> to read all rows.</p></div>`;
     }
+}
+
+window._currentUserFilter = 'all';
+
+function filterUsers(role) {
+    window._currentUserFilter = role;
+    const search = (document.getElementById('userSearchInput')?.value || '').toLowerCase().trim();
+    let filtered = (window._allUsers || []);
+    if (role === 'candidate') filtered = filtered.filter(u => u.role === 'candidate');
+    else if (role === 'company') filtered = filtered.filter(u => u.role === 'client_admin' || u.role === 'employer');
+    else if (role === 'staff') filtered = filtered.filter(u => u.role === 'hr' || u.role === 'admin' || u.role === 'super_admin' || u.role === 'superadmin');
+    if (search) {
+        filtered = filtered.filter(u => 
+            (u.full_name||'').toLowerCase().includes(search) ||
+            (u.email||'').toLowerCase().includes(search) ||
+            (u.skills||'').toLowerCase().includes(search) ||
+            (u.sector||'').toLowerCase().includes(search) ||
+            (u.location||'').toLowerCase().includes(search)
+        );
+    }
+    document.getElementById('usersCount').textContent = `(${filtered.length})`;
+    const wrap = document.getElementById('usersTableWrap');
+    if (!filtered.length) {
+        wrap.innerHTML = '<p style="text-align:center;color:#9CA3AF;padding:40px">No users match this filter</p>';
+        return;
+    }
+    wrap.innerHTML = `<div class="table-wrap"><table>
+        <thead><tr><th>Name</th><th>Email</th><th>Phone</th><th>Role</th><th>Skills</th><th>Status</th><th>Joined</th><th>Profile</th></tr></thead>
+        <tbody>${filtered.map((u, i) => `<tr>
+            <td><strong>${esc(u.full_name||'-')}</strong></td>
+            <td style="font-size:13px">${esc(u.email||'')}</td>
+            <td style="font-size:13px">${esc(u.phone||'-')}</td>
+            <td><span class="badge badge-${getRoleBadge(u.role)}">${esc(u.role)}</span></td>
+            <td style="font-size:12px;max-width:200px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${esc(u.skills||'')}">${esc(u.skills||'-')}</td>
+            <td><span class="badge ${u.is_active!==false?'badge-active':'badge-inactive'}">${u.is_active!==false?'Active':'Inactive'}</span></td>
+            <td style="font-size:13px;color:#6B7280">${formatDate(u.created_at)}</td>
+            <td><button onclick="showUserProfile(${i})" style="padding:5px 12px;background:#6366F1;color:#fff;border:none;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;">View</button></td>
+        </tr>`).join('')}</tbody>
+    </table></div>`;
+    window._filteredUsers = filtered;
+}
+
+function showUserProfile(idx) {
+    const u = (window._filteredUsers || [])[idx];
+    if (!u) return;
+    const resumeHtml = u.resume_url ? 
+        `<a href="${esc(u.resume_url)}" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:6px;padding:10px 18px;background:linear-gradient(135deg,#6366F1,#8B5CF6);color:#fff;border-radius:10px;text-decoration:none;font-weight:700;font-size:13px;">
+            <i class="fas fa-file-pdf"></i> Download CV / Resume
+        </a>` : '<span style="color:#9CA3AF;font-size:13px;">No resume uploaded</span>';
+    
+    const modal = document.createElement('div');
+    modal.id = 'userProfileModal';
+    modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.6);backdrop-filter:blur(6px);z-index:10000;display:flex;align-items:center;justify-content:center;padding:20px;';
+    modal.innerHTML = `
+        <div style="background:#fff;border-radius:20px;max-width:600px;width:100%;max-height:90vh;overflow-y:auto;box-shadow:0 24px 80px rgba(0,0,0,.2);">
+            <div style="background:linear-gradient(135deg,#4F46E5,#7C3AED);padding:28px 24px;border-radius:20px 20px 0 0;position:relative;">
+                <button onclick="document.getElementById('userProfileModal').remove()" style="position:absolute;top:14px;right:16px;background:rgba(255,255,255,.2);border:none;color:#fff;width:32px;height:32px;border-radius:50%;cursor:pointer;font-size:16px;">✕</button>
+                <div style="display:flex;align-items:center;gap:16px;">
+                    <div style="width:64px;height:64px;border-radius:50%;background:rgba(255,255,255,.2);display:flex;align-items:center;justify-content:center;font-size:28px;font-weight:800;color:#fff;">
+                        ${(u.full_name||'?')[0].toUpperCase()}
+                    </div>
+                    <div>
+                        <div style="font-size:20px;font-weight:800;color:#fff;">${esc(u.full_name||'-')}</div>
+                        <div style="font-size:13px;color:rgba(255,255,255,.8);">${esc(u.email||'')}</div>
+                        <span style="display:inline-block;margin-top:6px;padding:3px 10px;background:rgba(255,255,255,.2);border-radius:20px;font-size:11px;font-weight:600;color:#fff;">${esc(u.role||'candidate')}</span>
+                    </div>
+                </div>
+            </div>
+            <div style="padding:24px;">
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px;">
+                    <div style="background:#F9FAFB;border-radius:12px;padding:14px;">
+                        <div style="font-size:11px;font-weight:600;color:#6B7280;text-transform:uppercase;margin-bottom:4px;">Phone</div>
+                        <div style="font-size:14px;font-weight:600;color:#1F2937;">${esc(u.phone||'Not provided')}</div>
+                    </div>
+                    <div style="background:#F9FAFB;border-radius:12px;padding:14px;">
+                        <div style="font-size:11px;font-weight:600;color:#6B7280;text-transform:uppercase;margin-bottom:4px;">Location</div>
+                        <div style="font-size:14px;font-weight:600;color:#1F2937;">${esc(u.location||'Not provided')}</div>
+                    </div>
+                    <div style="background:#F9FAFB;border-radius:12px;padding:14px;">
+                        <div style="font-size:11px;font-weight:600;color:#6B7280;text-transform:uppercase;margin-bottom:4px;">Experience</div>
+                        <div style="font-size:14px;font-weight:600;color:#1F2937;">${esc(u.experience||'Not provided')}</div>
+                    </div>
+                    <div style="background:#F9FAFB;border-radius:12px;padding:14px;">
+                        <div style="font-size:11px;font-weight:600;color:#6B7280;text-transform:uppercase;margin-bottom:4px;">Sector</div>
+                        <div style="font-size:14px;font-weight:600;color:#1F2937;">${esc(u.sector||'Not provided')}</div>
+                    </div>
+                </div>
+                <div style="background:#F9FAFB;border-radius:12px;padding:14px;margin-bottom:20px;">
+                    <div style="font-size:11px;font-weight:600;color:#6B7280;text-transform:uppercase;margin-bottom:6px;">Skills</div>
+                    <div style="display:flex;flex-wrap:wrap;gap:6px;">
+                        ${(u.skills||'').split(',').filter(s=>s.trim()).map(s => 
+                            `<span style="padding:4px 10px;background:#EEF2FF;color:#4F46E5;border-radius:20px;font-size:12px;font-weight:600;">${esc(s.trim())}</span>`
+                        ).join('') || '<span style="color:#9CA3AF;font-size:13px;">No skills listed</span>'}
+                    </div>
+                </div>
+                <div style="background:#F0FDF4;border:1px solid #BBF7D0;border-radius:12px;padding:16px;text-align:center;">
+                    <div style="font-size:11px;font-weight:600;color:#16A34A;text-transform:uppercase;margin-bottom:10px;">📄 Resume / CV</div>
+                    ${resumeHtml}
+                </div>
+                <div style="margin-top:16px;padding-top:16px;border-top:1px solid #E5E7EB;display:flex;justify-content:space-between;font-size:12px;color:#9CA3AF;">
+                    <span>Registered: ${formatDate(u.created_at)}</span>
+                    <span>ID: ${esc((u.id||u.auth_id||'-').toString().slice(0,8))}...</span>
+                </div>
+            </div>
+        </div>`;
+    modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
+    document.body.appendChild(modal);
+}
+
+function exportUsersCsv() {
+    const users = window._filteredUsers || window._allUsers || [];
+    if (!users.length) return;
+    const headers = ['Name','Email','Phone','Role','Skills','Experience','Sector','Location','Resume URL','Status','Joined'];
+    const rows = users.map(u => [
+        u.full_name||'', u.email||'', u.phone||'', u.role||'',
+        u.skills||'', u.experience||'', u.sector||'', u.location||'',
+        u.resume_url||'', u.is_active!==false?'Active':'Inactive',
+        u.created_at ? new Date(u.created_at).toLocaleDateString() : ''
+    ].map(v => '"' + String(v).replace(/"/g,'""') + '"'));
+    const csv = [headers.join(','), ...rows.map(r=>r.join(','))].join('\n');
+    const blob = new Blob([csv], {type:'text/csv'});
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `simpatico_users_${new Date().toISOString().slice(0,10)}.csv`;
+    a.click();
 }
 
 async function loadJobs() {
