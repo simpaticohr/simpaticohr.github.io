@@ -585,15 +585,20 @@ presentation:{icon:'\u{1F4CA}',title:'Presentation Practice',topics:['Elevator p
 function showScreen(id){document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));document.getElementById(id).classList.add('active');}
 function showError(id,msg){const el=document.getElementById(id);el.style.display='flex';el.querySelector('span:last-child').textContent=msg;}
 
+function getAdminGeminiKey(){try{return JSON.parse(localStorage.getItem('adminConfig')||'{}').geminiKey||'';}catch(e){return '';}}
+
 function selectMode(mode){
   session.mode=mode;const c=MODES[mode];
   document.getElementById('setup-mode-icon').textContent=c.icon;
   document.getElementById('setup-mode-title').textContent=c.title;
   const sel=document.getElementById('topic-select');sel.innerHTML='';
   c.topics.forEach((t,i)=>{const o=document.createElement('option');o.value=t;o.textContent=t;if(i===0)o.selected=true;sel.appendChild(o);});
-  const saved=localStorage.getItem('ce_gemini_key')||sessionStorage.getItem('byok_gemini_key')||'';
+  const saved=getAdminGeminiKey()||localStorage.getItem('ce_gemini_key')||sessionStorage.getItem('byok_gemini_key')||'';
   const ki=document.getElementById('gemini-key');if(ki&&saved)ki.value=saved;
-  if(!saved){document.getElementById('byok-panel').style.display='block';document.getElementById('byok-arrow').style.transform='rotate(180deg)';}
+  // Hide BYOK section from candidates when admin has configured the key
+  const byokSection=document.querySelector('.byok-section');
+  if(saved&&byokSection){byokSection.style.display='none';}
+  else if(!saved){document.getElementById('byok-panel').style.display='block';document.getElementById('byok-arrow').style.transform='rotate(180deg)';}
   document.getElementById('setup-error').style.display='none';
   showScreen('screen-setup');
 }
@@ -619,8 +624,9 @@ function startTimer(min){session.timeRemaining=min*60;updTimer();session.timerIn
 function updTimer(){const m=Math.floor(session.timeRemaining/60),s=session.timeRemaining%60;document.getElementById('session-timer').textContent=m+':'+String(s).padStart(2,'0');if(session.timeRemaining<=30)document.getElementById('session-timer').style.color='var(--red)';}
 
 async function startSession(){
-  const key=document.getElementById('gemini-key').value.trim();
-  if(!key){showError('setup-error','A Gemini API Key is required. Get one free at aistudio.google.com/apikey');return;}
+  // Priority: input field > admin config > localStorage
+  const key=document.getElementById('gemini-key').value.trim()||getAdminGeminiKey();
+  if(!key){showError('setup-error','Gemini API Key not configured. Please contact your Simpatico HR administrator.');return;}
   session.geminiKey=key;session.topic=document.getElementById('topic-select').value;session.duration=parseInt(document.getElementById('duration-select').value);session.difficulty=document.getElementById('difficulty-select').value;session.voice=document.getElementById('coach-voice-select').value;
   session.aiTextBuffer='';session.userTextBuffer='';session.fullTranscript=[];session.corrections=[];session.wordCount=0;session.fillerCount=0;session.pronConfidences=[];session.recordedChunks=[];session.recorder=null;session.scores={fluency:0,grammar:0,vocabulary:0,pronunciation:0,confidence:0};session.nextPlayTime=0;session.audioQueue=[];
   const btn=document.getElementById('btn-start');btn.disabled=true;btn.innerHTML='<div class="spinner"></div> Connecting...';
