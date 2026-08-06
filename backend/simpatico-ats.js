@@ -1374,6 +1374,7 @@ route("GET", "/recruitment/jobs", handleListJobs);
 route("PATCH", "/recruitment/jobs/:id", handleUpdateJob);
 route("DELETE", "/recruitment/jobs/:id", handleDeleteJob);
 route("GET", "/recruitment/public/jobs", handlePublicJobs);
+route("GET", "/recruitment/trial-usage", handleTrialUsage);
 route("POST", "/recruitment/applications", handleCreateApplication);
 route("POST", "/interviews/schedule", handleScheduleInterviewEmail);
 route("GET", "/recruitment/applications", handleListApplications);
@@ -4224,6 +4225,80 @@ async function handleSendAllPayslips(request, env, ctx) {
   });
 }
 
+// ── Trial Enforcement (server-side) ──────────────────────────────────────────
+// 2-day free trial limits: 1 job posting, 10 applications received, 1 interview.
+const TRIAL_LIMITS = { max_jobs: 1, max_applications: 10, max_interviews: 1 };
+const PAID_PLANS = ["starter", "professional", "enterprise", "pro", "business", "premium"];
+const PLATFORM_COMPANY_ID = "a0000000-0000-0000-0000-000000000001";
+// Candidate-facing message when a trial company can't accept (more) applications.
+// Deliberately neutral — trial mechanics are not exposed to applicants.
+const TRIAL_CLOSED_MSG = "This position is no longer accepting applications.";
+
+// Returns { plan, isPaid, isExpired } for a company, or null when unknown (fail-open).
+async function getCompanyTrialState(env, companyId) {
+  if (!companyId || companyId === PLATFORM_COMPANY_ID) return null;
+  try {
+    const res = await sbFetch(
+      env,
+      "GET",
+      `/rest/v1/companies?id=eq.${companyId}&select=subscription_plan,subscription_end,created_at`,
+      null,
+      false,
+      companyId,
+    );
+    if (!res.ok) return null;
+    const arr = await res.json();
+    const comp = arr && arr[0];
+    if (!comp) return null;
+    const plan = (comp.subscription_plan || "trial").toLowerCase();
+    const isPaid = PAID_PLANS.includes(plan);
+    let isExpired = plan === "expired_trial";
+    if (!isPaid && !isExpired) {
+      // 2-day clock: subscription_end wins, fall back to created_at + 2 days
+      let end = comp.subscription_end ? new Date(comp.subscription_end) : null;
+      if ((!end || isNaN(end.getTime())) && comp.created_at) {
+        end = new Date(new Date(comp.created_at).getTime() + 2 * 24 * 60 * 60 * 1000);
+      }
+      if (end && !isNaN(end.getTime()) && Date.now() > end.getTime()) isExpired = true;
+    }
+    return { plan, isPaid, isExpired };
+  } catch (e) {
+    console.warn("[trial] Company trial state lookup failed:", e.message);
+    return null;
+  }
+}
+
+// Count rows for a tenant-owned table, capped at `limit` for cheap threshold checks.
+async function countTenantRows(env, table, column, companyId, limit) {
+  try {
+    const res = await sbFetch(
+      env,
+      "GET",
+      `/rest/v1/${table}?${column}=eq.${companyId}&select=id&limit=${limit}`,
+      null,
+      false,
+      companyId,
+    );
+    if (!res.ok) return 0;
+    const rows = await res.json();
+    return Array.isArray(rows) ? rows.length : 0;
+  } catch (e) {
+    return 0;
+  }
+}
+
+// Lightweight usage counters for the trial banner (js/trial-guard.js).
+async function handleTrialUsage(request, env, ctx, _, url) {
+  const tenantId = url.searchParams.get("tenant_id") || ctx.tenantId;
+  if (!tenantId) throw new ValidationError("tenant_id is required");
+  const [jobs, interviews, applications] = await Promise.all([
+    countTenantRows(env, "jobs", "company_id", tenantId, 1000),
+    countTenantRows(env, "interviews", "company_id", tenantId, 1000),
+    countTenantRows(env, "job_applications", "tenant_id", tenantId, 1000),
+  ]);
+  return apiResponse({ jobs, interviews, applications, limits: TRIAL_LIMITS });
+}
+
 // ── Recruitment / ATS ─────────────────────────────────────────────────────────
 
 async function handleCreateJob(request, env, ctx) {
@@ -4242,21 +4317,15 @@ async function handleCreateJob(request, env, ctx) {
   }
 
   // ── SERVER-SIDE TRIAL GUARD ENFORCEMENT ──
-  if (targetCompanyId && targetCompanyId !== 'a0000000-0000-0000-0000-000000000001' && ctx.role !== 'superadmin' && ctx.role !== 'super_admin') {
-    const compRes = await sbFetch(env, "GET", `/rest/v1/companies?id=eq.${targetCompanyId}&select=subscription_plan,is_active`, null, false, targetCompanyId);
-    let plan = 'trial';
-    if (compRes.ok) {
-      const compArr = await compRes.json();
-      if (compArr && compArr[0]?.subscription_plan) plan = compArr[0].subscription_plan.toLowerCase();
-    }
-    const isPaid = ['starter', 'professional', 'enterprise', 'pro', 'business', 'premium'].includes(plan);
-    if (!isPaid) {
-      const countRes = await sbFetch(env, "GET", `/rest/v1/jobs?company_id=eq.${targetCompanyId}&select=id`, null, false, targetCompanyId);
-      if (countRes.ok) {
-        const existingJobs = await countRes.json();
-        if (Array.isArray(existingJobs) && existingJobs.length >= 1) {
-          throw new AppError("Trial limit reached. Your 2-day free trial allows 1 job posting. Please upgrade your subscription to post more jobs.", 403);
-        }
+  if (targetCompanyId && targetCompanyId !== PLATFORM_COMPANY_ID && ctx.role !== 'superadmin' && ctx.role !== 'super_admin') {
+    const trial = await getCompanyTrialState(env, targetCompanyId);
+    if (trial && !trial.isPaid) {
+      if (trial.isExpired) {
+        throw new AppError("Your 2-day free trial has expired. Please upgrade your subscription to post jobs.", 403);
+      }
+      const existingJobs = await countTenantRows(env, "jobs", "company_id", targetCompanyId, TRIAL_LIMITS.max_jobs);
+      if (existingJobs >= TRIAL_LIMITS.max_jobs) {
+        throw new AppError("Trial limit reached. Your 2-day free trial allows 1 job posting. Please upgrade your subscription to post more jobs.", 403);
       }
     }
   }
@@ -4494,6 +4563,12 @@ async function handlePublicJobs(request, env, ctx, _, url) {
     console.warn("[PublicJobs] Company block check failed:", e.message);
   }
 
+  // ── Expired trial — stop advertising jobs publicly ──
+  const publicTrial = await getCompanyTrialState(env, company_id);
+  if (publicTrial && !publicTrial.isPaid && publicTrial.isExpired) {
+    return apiResponse({ jobs: [], trial_expired: true });
+  }
+
   // Pass company_id as the tenant parameter to sbFetch to auto-filter and isolate tenant records securely
   const res = await sbFetch(
     env,
@@ -4622,6 +4697,24 @@ async function handleCreateApplication(request, env, ctx) {
   );
   const [job] = await jobRes.json();
 
+  // ── TRIAL APPLICATION CAP + EXPIRY (server-side) ──
+  // Trial companies receive at most TRIAL_LIMITS.max_applications in total;
+  // expired trials stop receiving applications entirely (candidate sees a polite closed message).
+  const trialCompanyId = _isUuid(ctx.tenantId) ? ctx.tenantId : (job && _isUuid(job.company_id) ? job.company_id : null);
+  let trialState = null;
+  if (trialCompanyId) {
+    trialState = await getCompanyTrialState(env, trialCompanyId);
+    if (trialState && !trialState.isPaid) {
+      if (trialState.isExpired) {
+        throw new AppError(TRIAL_CLOSED_MSG, 403);
+      }
+      const appCount = await countTenantRows(env, "job_applications", "tenant_id", trialCompanyId, TRIAL_LIMITS.max_applications);
+      if (appCount >= TRIAL_LIMITS.max_applications) {
+        throw new AppError(TRIAL_CLOSED_MSG, 403);
+      }
+    }
+  }
+
   let match_score = null;
   let status = "applied";
   let ai_summary = "";
@@ -4671,14 +4764,26 @@ Return ONLY valid JSON in format: {"match_score": 85, "reason": "Brief 1-sentenc
 
   if (autoEnabled && match_score !== null) {
     if (match_score >= shortlistThreshold) {
-      // HIGH SCORE &rarr; Auto-shortlist to interview stage
-      status = "interview";
-      autoInterview = true;
-      const chars =
-        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-      for (let i = 0; i < 32; i++) {
-        interviewToken += chars.charAt(Math.floor(Math.random() * chars.length));
+      // ── TRIAL INTERVIEW LIMIT (server-side): 1 interview on trial ──
+      let trialInterviewBlocked = false;
+      if (trialState && !trialState.isPaid && trialCompanyId) {
+        const interviewCount = await countTenantRows(env, "interviews", "company_id", trialCompanyId, TRIAL_LIMITS.max_interviews);
+        if (trialState.isExpired || interviewCount >= TRIAL_LIMITS.max_interviews) {
+          trialInterviewBlocked = true;
+          console.log(`[trial] Auto-interview skipped for ${trialCompanyId}: trial interview limit reached`);
+        }
       }
+      if (!trialInterviewBlocked) {
+        // HIGH SCORE &rarr; Auto-shortlist to interview stage
+        status = "interview";
+        autoInterview = true;
+        const chars =
+          "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+        for (let i = 0; i < 32; i++) {
+          interviewToken += chars.charAt(Math.floor(Math.random() * chars.length));
+        }
+      }
+      // Trial-limited high scorers stay as "applied" for manual review after upgrade
     }
     // MIDDLE SCORE (rejectThreshold..69) → stays as "applied" for manual review
   }

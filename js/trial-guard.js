@@ -16,6 +16,7 @@
   const TRIAL_LIMITS = {
     max_jobs: 1,
     max_interviews: 1,
+    max_applications: 10,
   };
 
   // ── Consulting pricing per currency (mirrors backend PLAN_PRICING.consulting_monthly) ──
@@ -114,19 +115,22 @@
 
   // ── Check usage counts for trial limits ──
   async function checkTrialUsage(companyId) {
-    if (!companyId) return { jobs: 0, interviews: 0 };
+    if (!companyId) return { jobs: 0, interviews: 0, applications: 0 };
     const client = sb();
     let jobsCount = 0;
     let interviewsCount = 0;
+    let applicationsCount = 0;
 
     try {
       if (client) {
-        const [jobsRes, intRes] = await Promise.all([
+        const [jobsRes, intRes, appRes] = await Promise.all([
           client.from('jobs').select('id', { count: 'exact', head: true }).eq('company_id', companyId),
           client.from('interviews').select('id', { count: 'exact', head: true }).eq('company_id', companyId),
+          client.from('job_applications').select('id', { count: 'exact', head: true }).eq('tenant_id', companyId),
         ]);
         jobsCount = jobsRes.count || 0;
         interviewsCount = intRes.count || 0;
+        applicationsCount = appRes.count || 0;
       }
 
       // Secondary check via Worker API
@@ -138,11 +142,12 @@
         const d = uData.data || uData;
         if (typeof d.jobs === 'number') jobsCount = Math.max(jobsCount, d.jobs);
         if (typeof d.interviews === 'number') interviewsCount = Math.max(interviewsCount, d.interviews);
+        if (typeof d.applications === 'number') applicationsCount = Math.max(applicationsCount, d.applications);
       }
     } catch(e) {
       console.warn('[trial-guard] Error checking usage:', e.message);
     }
-    return { jobs: jobsCount, interviews: interviewsCount };
+    return { jobs: jobsCount, interviews: interviewsCount, applications: applicationsCount };
   }
 
   // ── Calculate remaining time ──
@@ -193,6 +198,7 @@
       const isConsulting = window.location.pathname.includes('consulting');
       const jobsUsed = usage.jobs || 0;
       const intUsed = usage.interviews || 0;
+      const appsUsed = usage.applications || 0;
 
       const banner = document.createElement('div');
       banner.id = 'trial-banner';
@@ -208,7 +214,7 @@
       if (!isConsulting) {
         limitsSpan = `
           <span style="opacity:0.8;font-size:12px;">
-            📋 Jobs: ${jobsUsed}/${TRIAL_LIMITS.max_jobs} &nbsp;|&nbsp; 🎙️ Interviews: ${intUsed}/${TRIAL_LIMITS.max_interviews}
+            📋 Jobs: ${jobsUsed}/${TRIAL_LIMITS.max_jobs} &nbsp;|&nbsp; 📥 Apps: ${appsUsed}/${TRIAL_LIMITS.max_applications} &nbsp;|&nbsp; 🎙️ Interviews: ${intUsed}/${TRIAL_LIMITS.max_interviews}
           </span>
         `;
       }

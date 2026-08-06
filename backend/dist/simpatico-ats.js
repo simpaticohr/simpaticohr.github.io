@@ -1374,6 +1374,7 @@ route("GET", "/recruitment/jobs", handleListJobs);
 route("PATCH", "/recruitment/jobs/:id", handleUpdateJob);
 route("DELETE", "/recruitment/jobs/:id", handleDeleteJob);
 route("GET", "/recruitment/public/jobs", handlePublicJobs);
+route("GET", "/recruitment/trial-usage", handleTrialUsage);
 route("POST", "/recruitment/applications", handleCreateApplication);
 route("POST", "/interviews/schedule", handleScheduleInterviewEmail);
 route("GET", "/recruitment/applications", handleListApplications);
@@ -1765,6 +1766,26 @@ export default {
         return Response.json(results, { status: 200, headers: corsHdrs });
       } catch (err) {
         return Response.json({ success: false, error: err.message }, { status: 500, headers: corsHdrs });
+      }
+    }
+
+    // ── Career Lab B2C Payment Routes (bypass auth — public endpoints for job seekers) ──
+    if (path.startsWith("/careerlab/")) {
+      const corsHdrs = getCorsHeaders(request);
+      try {
+        if (method === "POST" && path === "/careerlab/create-order") {
+          return await handleCareerLabCreateOrder(request, env);
+        }
+        if (method === "GET" && path === "/careerlab/check-status") {
+          return await handleCareerLabCheckStatus(request, env);
+        }
+        if (method === "POST" && path === "/careerlab/submit-utr") {
+          return await handleCareerLabSubmitUtr(request, env);
+        }
+        return Response.json({ success: false, error: "Not found" }, { status: 404, headers: corsHdrs });
+      } catch (err) {
+        console.error("[CareerLab] Error:", err.stack || err.message);
+        return Response.json({ success: false, error: err.message || "Internal error" }, { status: err.status || 500, headers: corsHdrs });
       }
     }
 
@@ -4204,6 +4225,80 @@ async function handleSendAllPayslips(request, env, ctx) {
   });
 }
 
+// ── Trial Enforcement (server-side) ──────────────────────────────────────────
+// 2-day free trial limits: 1 job posting, 10 applications received, 1 interview.
+const TRIAL_LIMITS = { max_jobs: 1, max_applications: 10, max_interviews: 1 };
+const PAID_PLANS = ["starter", "professional", "enterprise", "pro", "business", "premium"];
+const PLATFORM_COMPANY_ID = "a0000000-0000-0000-0000-000000000001";
+// Candidate-facing message when a trial company can't accept (more) applications.
+// Deliberately neutral — trial mechanics are not exposed to applicants.
+const TRIAL_CLOSED_MSG = "This position is no longer accepting applications.";
+
+// Returns { plan, isPaid, isExpired } for a company, or null when unknown (fail-open).
+async function getCompanyTrialState(env, companyId) {
+  if (!companyId || companyId === PLATFORM_COMPANY_ID) return null;
+  try {
+    const res = await sbFetch(
+      env,
+      "GET",
+      `/rest/v1/companies?id=eq.${companyId}&select=subscription_plan,subscription_end,created_at`,
+      null,
+      false,
+      companyId,
+    );
+    if (!res.ok) return null;
+    const arr = await res.json();
+    const comp = arr && arr[0];
+    if (!comp) return null;
+    const plan = (comp.subscription_plan || "trial").toLowerCase();
+    const isPaid = PAID_PLANS.includes(plan);
+    let isExpired = plan === "expired_trial";
+    if (!isPaid && !isExpired) {
+      // 2-day clock: subscription_end wins, fall back to created_at + 2 days
+      let end = comp.subscription_end ? new Date(comp.subscription_end) : null;
+      if ((!end || isNaN(end.getTime())) && comp.created_at) {
+        end = new Date(new Date(comp.created_at).getTime() + 2 * 24 * 60 * 60 * 1000);
+      }
+      if (end && !isNaN(end.getTime()) && Date.now() > end.getTime()) isExpired = true;
+    }
+    return { plan, isPaid, isExpired };
+  } catch (e) {
+    console.warn("[trial] Company trial state lookup failed:", e.message);
+    return null;
+  }
+}
+
+// Count rows for a tenant-owned table, capped at `limit` for cheap threshold checks.
+async function countTenantRows(env, table, column, companyId, limit) {
+  try {
+    const res = await sbFetch(
+      env,
+      "GET",
+      `/rest/v1/${table}?${column}=eq.${companyId}&select=id&limit=${limit}`,
+      null,
+      false,
+      companyId,
+    );
+    if (!res.ok) return 0;
+    const rows = await res.json();
+    return Array.isArray(rows) ? rows.length : 0;
+  } catch (e) {
+    return 0;
+  }
+}
+
+// Lightweight usage counters for the trial banner (js/trial-guard.js).
+async function handleTrialUsage(request, env, ctx, _, url) {
+  const tenantId = url.searchParams.get("tenant_id") || ctx.tenantId;
+  if (!tenantId) throw new ValidationError("tenant_id is required");
+  const [jobs, interviews, applications] = await Promise.all([
+    countTenantRows(env, "jobs", "company_id", tenantId, 1000),
+    countTenantRows(env, "interviews", "company_id", tenantId, 1000),
+    countTenantRows(env, "job_applications", "tenant_id", tenantId, 1000),
+  ]);
+  return apiResponse({ jobs, interviews, applications, limits: TRIAL_LIMITS });
+}
+
 // ── Recruitment / ATS ─────────────────────────────────────────────────────────
 
 async function handleCreateJob(request, env, ctx) {
@@ -4222,21 +4317,15 @@ async function handleCreateJob(request, env, ctx) {
   }
 
   // ── SERVER-SIDE TRIAL GUARD ENFORCEMENT ──
-  if (targetCompanyId && targetCompanyId !== 'a0000000-0000-0000-0000-000000000001' && ctx.role !== 'superadmin' && ctx.role !== 'super_admin') {
-    const compRes = await sbFetch(env, "GET", `/rest/v1/companies?id=eq.${targetCompanyId}&select=subscription_plan,is_active`, null, false, targetCompanyId);
-    let plan = 'trial';
-    if (compRes.ok) {
-      const compArr = await compRes.json();
-      if (compArr && compArr[0]?.subscription_plan) plan = compArr[0].subscription_plan.toLowerCase();
-    }
-    const isPaid = ['starter', 'professional', 'enterprise', 'pro', 'business', 'premium'].includes(plan);
-    if (!isPaid) {
-      const countRes = await sbFetch(env, "GET", `/rest/v1/jobs?company_id=eq.${targetCompanyId}&select=id`, null, false, targetCompanyId);
-      if (countRes.ok) {
-        const existingJobs = await countRes.json();
-        if (Array.isArray(existingJobs) && existingJobs.length >= 1) {
-          throw new AppError("Trial limit reached. Your 2-day free trial allows 1 job posting. Please upgrade your subscription to post more jobs.", 403);
-        }
+  if (targetCompanyId && targetCompanyId !== PLATFORM_COMPANY_ID && ctx.role !== 'superadmin' && ctx.role !== 'super_admin') {
+    const trial = await getCompanyTrialState(env, targetCompanyId);
+    if (trial && !trial.isPaid) {
+      if (trial.isExpired) {
+        throw new AppError("Your 2-day free trial has expired. Please upgrade your subscription to post jobs.", 403);
+      }
+      const existingJobs = await countTenantRows(env, "jobs", "company_id", targetCompanyId, TRIAL_LIMITS.max_jobs);
+      if (existingJobs >= TRIAL_LIMITS.max_jobs) {
+        throw new AppError("Trial limit reached. Your 2-day free trial allows 1 job posting. Please upgrade your subscription to post more jobs.", 403);
       }
     }
   }
@@ -4474,6 +4563,12 @@ async function handlePublicJobs(request, env, ctx, _, url) {
     console.warn("[PublicJobs] Company block check failed:", e.message);
   }
 
+  // ── Expired trial — stop advertising jobs publicly ──
+  const publicTrial = await getCompanyTrialState(env, company_id);
+  if (publicTrial && !publicTrial.isPaid && publicTrial.isExpired) {
+    return apiResponse({ jobs: [], trial_expired: true });
+  }
+
   // Pass company_id as the tenant parameter to sbFetch to auto-filter and isolate tenant records securely
   const res = await sbFetch(
     env,
@@ -4602,6 +4697,24 @@ async function handleCreateApplication(request, env, ctx) {
   );
   const [job] = await jobRes.json();
 
+  // ── TRIAL APPLICATION CAP + EXPIRY (server-side) ──
+  // Trial companies receive at most TRIAL_LIMITS.max_applications in total;
+  // expired trials stop receiving applications entirely (candidate sees a polite closed message).
+  const trialCompanyId = _isUuid(ctx.tenantId) ? ctx.tenantId : (job && _isUuid(job.company_id) ? job.company_id : null);
+  let trialState = null;
+  if (trialCompanyId) {
+    trialState = await getCompanyTrialState(env, trialCompanyId);
+    if (trialState && !trialState.isPaid) {
+      if (trialState.isExpired) {
+        throw new AppError(TRIAL_CLOSED_MSG, 403);
+      }
+      const appCount = await countTenantRows(env, "job_applications", "tenant_id", trialCompanyId, TRIAL_LIMITS.max_applications);
+      if (appCount >= TRIAL_LIMITS.max_applications) {
+        throw new AppError(TRIAL_CLOSED_MSG, 403);
+      }
+    }
+  }
+
   let match_score = null;
   let status = "applied";
   let ai_summary = "";
@@ -4651,14 +4764,26 @@ Return ONLY valid JSON in format: {"match_score": 85, "reason": "Brief 1-sentenc
 
   if (autoEnabled && match_score !== null) {
     if (match_score >= shortlistThreshold) {
-      // HIGH SCORE &rarr; Auto-shortlist to interview stage
-      status = "interview";
-      autoInterview = true;
-      const chars =
-        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-      for (let i = 0; i < 32; i++) {
-        interviewToken += chars.charAt(Math.floor(Math.random() * chars.length));
+      // ── TRIAL INTERVIEW LIMIT (server-side): 1 interview on trial ──
+      let trialInterviewBlocked = false;
+      if (trialState && !trialState.isPaid && trialCompanyId) {
+        const interviewCount = await countTenantRows(env, "interviews", "company_id", trialCompanyId, TRIAL_LIMITS.max_interviews);
+        if (trialState.isExpired || interviewCount >= TRIAL_LIMITS.max_interviews) {
+          trialInterviewBlocked = true;
+          console.log(`[trial] Auto-interview skipped for ${trialCompanyId}: trial interview limit reached`);
+        }
       }
+      if (!trialInterviewBlocked) {
+        // HIGH SCORE &rarr; Auto-shortlist to interview stage
+        status = "interview";
+        autoInterview = true;
+        const chars =
+          "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+        for (let i = 0; i < 32; i++) {
+          interviewToken += chars.charAt(Math.floor(Math.random() * chars.length));
+        }
+      }
+      // Trial-limited high scorers stay as "applied" for manual review after upgrade
     }
     // MIDDLE SCORE (rejectThreshold..69) → stays as "applied" for manual review
   }
@@ -9871,6 +9996,253 @@ async function executeCompletePayment(env, tx, gatewayPaymentId, ctx) {
 }
 
 // ===============================================================
+// § CAREER LAB — B2C Premium Tool Payments
+// Domestic (India): UPI/Bank → admin email with 1-click approve
+// International: Wise bank transfer → auto-matched by Wise webhook
+// No auth required — these are public-facing B2C endpoints.
+// ===============================================================
+
+const CAREERLAB_TOOL_PRICING = {
+  resumeBuilder:     { name: "AI Resume Builder",       inr: 299, usd: 6,  gbp: 5,  eur: 6,  aud: 10, aed: 22, cad: 8 },
+  coverLetter:       { name: "AI Cover Letter",         inr: 99,  usd: 2,  gbp: 2,  eur: 2,  aud: 3,  aed: 7,  cad: 3 },
+  careerRoadmap:     { name: "AI Career Roadmap",       inr: 249, usd: 5,  gbp: 4,  eur: 5,  aud: 8,  aed: 18, cad: 7 },
+  linkedinOptimizer: { name: "AI LinkedIn Optimizer",   inr: 149, usd: 3,  gbp: 3,  eur: 3,  aud: 5,  aed: 11, cad: 4 },
+  livePractice:      { name: "AI Live Interview Practice", inr: 199, usd: 4, gbp: 3, eur: 4, aud: 6, aed: 15, cad: 5 },
+};
+
+/**
+ * POST /careerlab/create-order — Create a pending Career Lab tool payment order.
+ * B2C endpoint — no auth required. Detects domestic vs international by currency.
+ * Body: { tool_key, customer_name, customer_email, currency? }
+ */
+async function handleCareerLabCreateOrder(request, env) {
+  const body = JSON.parse(await request.text());
+  const { tool_key, customer_name, customer_email, currency = "inr" } = body;
+
+  if (!tool_key || !CAREERLAB_TOOL_PRICING[tool_key]) {
+    return Response.json({ success: false, error: "Invalid tool_key. Valid: " + Object.keys(CAREERLAB_TOOL_PRICING).join(", ") }, { status: 400, headers: CORS_HEADERS });
+  }
+  if (!customer_email || !customer_email.includes("@")) {
+    return Response.json({ success: false, error: "Valid customer_email required" }, { status: 400, headers: CORS_HEADERS });
+  }
+
+  const cur = currency.toLowerCase();
+  const tool = CAREERLAB_TOOL_PRICING[tool_key];
+  const amount = tool[cur];
+  if (!amount) {
+    return Response.json({ success: false, error: "Unsupported currency: " + currency }, { status: 400, headers: CORS_HEADERS });
+  }
+
+  const curUpper = cur.toUpperCase();
+  const symbol = CURRENCY_SYMBOLS[curUpper] || "$";
+  const isDomestic = cur === "inr";
+  const gateway = isDomestic ? "careerlab_manual" : "careerlab_wise";
+  const orderId = `CL_${tool_key.toUpperCase()}_${crypto.randomUUID().replace(/-/g, "").substring(0, 12)}`;
+  const nameVal = customer_name || customer_email.split("@")[0];
+
+  // Insert into payment_transactions (no company_id for B2C — uses null)
+  try {
+    await fetch(`${env.SUPABASE_URL}/rest/v1/payment_transactions`, {
+      method: "POST",
+      headers: {
+        apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
+        "Content-Type": "application/json", Prefer: "return=minimal",
+      },
+      body: JSON.stringify({
+        gateway, gateway_order_id: orderId,
+        amount, currency: curUpper, status: "awaiting_payment",
+        plan: `careerlab_${tool_key}`, billing_cycle: "one_time",
+        customer_email, customer_name: nameVal,
+        metadata: { tool_key, tool_name: tool.name, type: "careerlab_b2c" },
+      }),
+    });
+  } catch (err) {
+    // Retry without optional columns if table schema is older
+    await fetch(`${env.SUPABASE_URL}/rest/v1/payment_transactions`, {
+      method: "POST",
+      headers: {
+        apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
+        "Content-Type": "application/json", Prefer: "return=minimal",
+      },
+      body: JSON.stringify({
+        gateway, gateway_order_id: orderId,
+        amount, currency: curUpper, status: "awaiting_payment",
+        plan: `careerlab_${tool_key}`, billing_cycle: "one_time",
+        metadata: { tool_key, tool_name: tool.name, type: "careerlab_b2c", customer_email, customer_name: nameVal },
+      }),
+    });
+  }
+
+  // Build admin notification with 1-click approve
+  let quickApproveSectionHtml = "";
+  try {
+    const approveToken = await quickApproveToken(env, orderId);
+    quickApproveSectionHtml = `<div style="margin-top:12px;padding:12px;background:#F0FDF4;border-radius:8px;text-align:center">
+        <a href="https://simpatico-hr-ats.simpaticohrconsultancy.workers.dev/admin/billing/quick-approve?order_id=${orderId}&token=${approveToken}" style="display:inline-block;padding:10px 20px;background:#059669;color:#fff;border-radius:8px;text-decoration:none;font-weight:700;font-size:13px">⚡ 1-Click Approve & Unlock Tool</a>
+      </div>`;
+  } catch (e) {
+    console.warn("[CareerLab] Quick-approve link omitted:", e.message);
+  }
+
+  const adminEmail = env.ADMIN_NOTIFICATION_EMAIL || "info@simpaticohr.in";
+  sendEmail(env, {
+    to: adminEmail,
+    subject: `🧠 Career Lab Purchase: ${tool.name} — ${symbol}${amount} ${curUpper} (${isDomestic ? "Domestic" : "International"})`,
+    html: `<div style="font-family:sans-serif;max-width:600px;margin:auto;padding:24px">
+      <h2 style="color:#FF9800;margin-bottom:16px">🧠 Career Lab Tool Purchase</h2>
+      <table style="width:100%;border-collapse:collapse;font-size:14px">
+        <tr><td style="padding:8px 12px;font-weight:600;color:#374151;border-bottom:1px solid #E5E7EB">Order ID</td><td style="padding:8px 12px;border-bottom:1px solid #E5E7EB;font-family:monospace;color:#4F46E5">${orderId}</td></tr>
+        <tr><td style="padding:8px 12px;font-weight:600;color:#374151;border-bottom:1px solid #E5E7EB">Tool</td><td style="padding:8px 12px;border-bottom:1px solid #E5E7EB">${tool.name}</td></tr>
+        <tr><td style="padding:8px 12px;font-weight:600;color:#374151;border-bottom:1px solid #E5E7EB">Amount</td><td style="padding:8px 12px;border-bottom:1px solid #E5E7EB;font-weight:700;color:#059669">${symbol}${amount} ${curUpper}</td></tr>
+        <tr><td style="padding:8px 12px;font-weight:600;color:#374151;border-bottom:1px solid #E5E7EB">Gateway</td><td style="padding:8px 12px;border-bottom:1px solid #E5E7EB">${isDomestic ? "UPI / Bank Transfer" : "Wise International"}</td></tr>
+        <tr><td style="padding:8px 12px;font-weight:600;color:#374151;border-bottom:1px solid #E5E7EB">Customer</td><td style="padding:8px 12px;border-bottom:1px solid #E5E7EB">${nameVal}</td></tr>
+        <tr><td style="padding:8px 12px;font-weight:600;color:#374151">Email</td><td style="padding:8px 12px">${customer_email}</td></tr>
+      </table>
+      <p style="margin-top:16px;font-size:13px;color:#DC2626;font-weight:600">⏳ Awaiting payment — verify and approve when received:</p>
+      ${quickApproveSectionHtml}
+      <p style="margin-top:12px;font-size:12px"><a href="https://simpaticohrconsultancy.com/platform/super-admin.html">Or manage in Admin Panel →</a></p>
+    </div>`,
+  }).catch(e => console.warn("[CareerLab] Admin notification failed:", e.message));
+
+  // Build response based on domestic vs international
+  const response = {
+    order_id: orderId, gateway, tool_key, tool_name: tool.name,
+    amount, currency: curUpper, is_domestic: isDomestic,
+  };
+
+  if (isDomestic) {
+    response.payment_details = {
+      upi_id: env.UPI_ID || "faisalkkod@okhdfcbank",
+      account_name: env.DOMESTIC_ACCOUNT_NAME || "Faisal",
+      bank_name: env.DOMESTIC_BANK_NAME || "State Bank of India",
+      account_number: env.DOMESTIC_ACCOUNT_NUMBER || "67326003131",
+      ifsc_code: env.DOMESTIC_IFSC_CODE || "SBIN0070198",
+      branch: env.DOMESTIC_BRANCH || "Perinthalmanna",
+      reference: orderId,
+      note: `Include order reference "${orderId}" in your payment note.`,
+    };
+  } else {
+    const bankDetails = WISE_BANK_DETAILS[curUpper] || WISE_BANK_DETAILS.USD;
+    response.wise_details = {
+      ...bankDetails,
+      email: "simpaticohrconsultancy@gmail.com",
+      reference: orderId,
+      note: `Include order reference "${orderId}" in your transfer note.`,
+    };
+  }
+
+  return Response.json({ success: true, data: response }, { status: 200, headers: CORS_HEADERS });
+}
+
+/**
+ * GET /careerlab/check-status — Poll payment status (B2C, no auth).
+ * Query: ?order_id=X&email=Y
+ * Email must match to prevent unauthorized status checks.
+ */
+async function handleCareerLabCheckStatus(request, env) {
+  const url = new URL(request.url);
+  const order_id = url.searchParams.get("order_id");
+  const email = (url.searchParams.get("email") || "").toLowerCase().trim();
+
+  if (!order_id) return Response.json({ success: false, error: "order_id required" }, { status: 400, headers: CORS_HEADERS });
+  if (!email) return Response.json({ success: false, error: "email required" }, { status: 400, headers: CORS_HEADERS });
+
+  const txRes = await fetch(
+    `${env.SUPABASE_URL}/rest/v1/payment_transactions?gateway_order_id=eq.${order_id}&select=status,customer_email,updated_at,plan,metadata&limit=1`,
+    { headers: { apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}` } }
+  );
+  const txns = await txRes.json();
+  const tx = txns?.[0];
+  if (!tx) return Response.json({ success: false, error: "Order not found" }, { status: 404, headers: CORS_HEADERS });
+
+  // Verify email matches (lightweight B2C auth)
+  const storedEmail = (tx.customer_email || (tx.metadata && tx.metadata.customer_email) || "").toLowerCase().trim();
+  if (storedEmail && storedEmail !== email) {
+    return Response.json({ success: false, error: "Email mismatch" }, { status: 403, headers: CORS_HEADERS });
+  }
+
+  const tool_key = tx.metadata?.tool_key || tx.plan?.replace("careerlab_", "") || null;
+
+  return Response.json({
+    success: true,
+    data: { order_id, status: tx.status, tool_key, is_paid: tx.status === "paid" },
+  }, { status: 200, headers: CORS_HEADERS });
+}
+
+/**
+ * POST /careerlab/submit-utr — Customer submits UTR/transaction reference (B2C, no auth).
+ * Body: { order_id, utr, email }
+ * Sends admin email with 1-click approve link.
+ */
+async function handleCareerLabSubmitUtr(request, env) {
+  const body = JSON.parse(await request.text());
+  const { order_id, utr, email } = body;
+
+  if (!order_id || !utr) return Response.json({ success: false, error: "order_id and utr required" }, { status: 400, headers: CORS_HEADERS });
+  if (!email) return Response.json({ success: false, error: "email required" }, { status: 400, headers: CORS_HEADERS });
+
+  // Fetch order
+  const txRes = await fetch(
+    `${env.SUPABASE_URL}/rest/v1/payment_transactions?gateway_order_id=eq.${order_id}&select=*&limit=1`,
+    { headers: { apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}` } }
+  );
+  const txns = await txRes.json();
+  const tx = txns?.[0];
+  if (!tx) return Response.json({ success: false, error: "Order not found" }, { status: 404, headers: CORS_HEADERS });
+
+  // Verify email
+  const storedEmail = (tx.customer_email || (tx.metadata && tx.metadata.customer_email) || "").toLowerCase().trim();
+  if (storedEmail && storedEmail !== email.toLowerCase().trim()) {
+    return Response.json({ success: false, error: "Email mismatch" }, { status: 403, headers: CORS_HEADERS });
+  }
+
+  // Update metadata with UTR
+  const updatedMeta = { ...(tx.metadata || {}), utr_submitted: utr, utr_submitted_at: new Date().toISOString() };
+  await fetch(
+    `${env.SUPABASE_URL}/rest/v1/payment_transactions?gateway_order_id=eq.${order_id}`,
+    {
+      method: "PATCH",
+      headers: { apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ metadata: updatedMeta }),
+    }
+  );
+
+  // 1-click approve link
+  let quickApproveUrl = "";
+  try {
+    const approveToken = await quickApproveToken(env, order_id);
+    quickApproveUrl = `https://simpatico-hr-ats.simpaticohrconsultancy.workers.dev/admin/billing/quick-approve?order_id=${order_id}&token=${approveToken}`;
+  } catch (e) {
+    console.warn("[CareerLab] Quick-approve link omitted:", e.message);
+  }
+
+  const toolName = tx.metadata?.tool_name || "Career Lab Tool";
+  const symbol = CURRENCY_SYMBOLS[tx.currency] || "₹";
+  const adminEmail = env.ADMIN_NOTIFICATION_EMAIL || "info@simpaticohr.in";
+  sendEmail(env, {
+    to: adminEmail,
+    subject: `📩 Career Lab UTR: ${order_id} — ${toolName} (UTR: ${utr})`,
+    html: `<div style="font-family:sans-serif;padding:24px;max-width:600px;margin:auto;border:1px solid #E2E8F0;border-radius:12px">
+      <h3 style="color:#FF9800;margin-top:0">📩 Career Lab — Customer Submitted Payment Ref</h3>
+      <p><strong>Order:</strong> <code style="color:#4F46E5">${order_id}</code></p>
+      <p><strong>Tool:</strong> ${toolName}</p>
+      <p><strong>Amount:</strong> ${symbol}${tx.amount} ${tx.currency}</p>
+      <p><strong>UTR / Ref:</strong> <code style="font-size:16px;background:#FFF3E0;color:#E65100;padding:4px 8px;border-radius:4px;font-weight:700">${utr}</code></p>
+      <p><strong>Customer:</strong> ${tx.customer_name} (${tx.customer_email})</p>
+
+      ${quickApproveUrl ? `<div style="margin-top:20px;padding:16px;background:#F0FDF4;border-radius:8px;text-align:center">
+        <p style="margin:0 0 10px;font-size:13px;color:#166534;font-weight:600">Verified payment? Unlock tool immediately:</p>
+        <a href="${quickApproveUrl}" style="display:inline-block;padding:12px 24px;background:#059669;color:#fff;border-radius:8px;text-decoration:none;font-weight:700;font-size:14px">⚡ 1-Click Approve & Unlock</a>
+      </div>` : ""}
+
+      <p style="margin-top:16px;font-size:12px;color:#64748B">Or manage in <a href="https://simpaticohrconsultancy.com/platform/super-admin.html">Admin Panel</a>.</p>
+    </div>`,
+  }).catch(e => console.warn("[CareerLab] Admin UTR email failed:", e.message));
+
+  return Response.json({ success: true, data: { message: "UTR submitted. You will be notified once verified." } }, { status: 200, headers: CORS_HEADERS });
+}
+
+// ===============================================================
 // § WISE INBOUND DEPOSIT WEBHOOK
 // Receives "Account deposit events" from Wise when money arrives.
 // Matches deposit reference to pending payment_transactions order,
@@ -12127,90 +12499,105 @@ async function handleBYOKValidate(request, env, ctx) {
 
 async function handleInterviewStart(request, env, ctx) {
   const body = await safeJson(request) || {};
-  const { role = "Software Engineer", level = "mid", count = 5, interview_level = "" } = body;
+  const { role = "Software Engineer", level = "mid", count = 5, interview_level = "", resume_text = "" } = body;
 
-  // Determine if this is a non-technical interview based on interview_level
+  const sessionId = `sess-${crypto.randomUUID().replace(/-/g, "").substring(0, 12)}`;
+
+  // Determine if this is a non-technical interview
   const il = (interview_level || "").toLowerCase();
   const isNonTech = il.includes('hr') || il.includes('behavioral') || il.includes('culture') ||
     il.includes('competency') || il.includes('screening') || il.includes('communication') ||
     il.includes('role play') || il.includes('simulation') || il.includes('domain knowledge') ||
     il.includes('client interaction');
 
-  const technicalQuestions = [
-    {
-      id: "q1",
-      question: `Describe a complex system or project you built as a ${level} ${role}. What were the core architecture trade-offs and scalability challenges?`,
-      type: "technical",
-      difficulty: level === "senior" || level === "lead" ? "hard" : "medium"
-    },
-    {
-      id: "q2",
-      question: `How do you diagnose and resolve a severe memory leak or latency bottleneck under heavy traffic in production?`,
-      type: "problem-solving",
-      difficulty: "hard"
-    },
-    {
-      id: "q3",
-      question: `Explain how you handle conflicting technical priorities between product deadline pressure and architectural debt.`,
-      type: "situational",
-      difficulty: "medium"
-    },
-    {
-      id: "q4",
-      question: `Walk me through your approach to data modeling, API contract design, and maintaining backward compatibility during rapid deployments.`,
-      type: "technical",
-      difficulty: "medium"
-    },
-    {
-      id: "q5",
-      question: `Share an example of a project where a critical dependency or assumption failed late in development. How did you pivot?`,
-      type: "behavioral",
-      difficulty: "medium"
+  // ── Try LLM-generated questions ──
+  try {
+    const resumeSection = resume_text && resume_text.trim().length > 50
+      ? `\n\nCandidate Resume/CV (use this to personalize questions — reference their specific experience, projects, skills, and gaps):\n---\n${resume_text.substring(0, 3000)}\n---`
+      : "\n\nNo resume provided — generate general questions for the role.";
+
+    const typeInstruction = isNonTech
+      ? 'Mix question types: behavioral, situational, competency, communication, culture-fit, motivational. Focus on soft skills, teamwork, leadership, conflict resolution.'
+      : 'Mix question types: technical, problem-solving, system-design, situational, behavioral, domain. Include at least 1 coding/architecture question and 1 behavioral question.';
+
+    const prompt = `You are an expert interviewer conducting a ${level}-level interview for a "${role}" position.
+
+Generate exactly ${count} unique, intelligent interview questions. ${typeInstruction}
+
+Rules:
+- NEVER use generic questions like "tell me about yourself" or "what are your strengths"
+- Each question must be specific to the "${role}" role at ${level} level
+- Vary difficulty: include easy, medium, and hard questions
+- Questions should probe real depth — not surface knowledge
+- If resume is provided, reference specific skills, projects, or experience gaps from it
+- Each question must be different in topic and approach
+${resumeSection}
+
+Return ONLY a JSON array (no markdown, no explanation):
+[
+  { "id": "q1", "question": "...", "type": "technical|behavioral|situational|problem-solving|system-design|competency|domain", "difficulty": "easy|medium|hard" },
+  ...
+]`;
+
+    const tenantId = ctx?.tenantId || "default";
+    const llmResult = await runLLM(env, tenantId, [
+      { role: "system", content: "You are a precise JSON generator. Return only valid JSON arrays. No markdown fences, no explanation." },
+      { role: "user", content: prompt }
+    ], 2048);
+
+    const responseText = llmResult?.response || (typeof llmResult === "string" ? llmResult : "");
+    // Extract JSON from response (handle markdown fences or extra text)
+    const jsonMatch = responseText.match(/\[[\s\S]*\]/);
+    if (jsonMatch) {
+      const questions = JSON.parse(jsonMatch[0]);
+      if (Array.isArray(questions) && questions.length >= 1) {
+        // Validate and clean question format
+        const cleaned = questions.slice(0, count).map((q, i) => ({
+          id: q.id || `q${i + 1}`,
+          question: String(q.question || "").trim(),
+          type: q.type || "technical",
+          difficulty: q.difficulty || "medium",
+        })).filter(q => q.question.length > 10);
+
+        if (cleaned.length >= 1) {
+          console.log(`[Interview] LLM generated ${cleaned.length} questions for ${role}/${level}`);
+          return apiResponse({ success: true, sessionId, role, level, questions: cleaned });
+        }
+      }
     }
+    console.warn("[Interview] LLM response could not be parsed as questions, using fallback");
+  } catch (err) {
+    console.warn("[Interview] LLM question generation failed, using fallback:", err.message);
+  }
+
+  // ── Fallback: Static questions (diverse pool, randomly selected) ──
+  const technicalPool = [
+    { question: `Describe a complex system or project you built as a ${level} ${role}. What were the core architecture trade-offs and scalability challenges?`, type: "technical", difficulty: level === "senior" ? "hard" : "medium" },
+    { question: `How do you diagnose and resolve a severe memory leak or latency bottleneck under heavy traffic in production?`, type: "problem-solving", difficulty: "hard" },
+    { question: `Explain how you handle conflicting technical priorities between product deadline pressure and architectural debt.`, type: "situational", difficulty: "medium" },
+    { question: `Walk me through your approach to data modeling, API contract design, and maintaining backward compatibility during rapid deployments.`, type: "technical", difficulty: "medium" },
+    { question: `Share an example of a project where a critical dependency or assumption failed late in development. How did you pivot?`, type: "behavioral", difficulty: "medium" },
+    { question: `How would you design a system that needs to handle 10x its current traffic within 3 months? What would you prioritize?`, type: "system-design", difficulty: "hard" },
+    { question: `Describe your testing strategy for a mission-critical feature. How do you balance speed of delivery with confidence in correctness?`, type: "technical", difficulty: "medium" },
+    { question: `Tell me about a time you had to onboard onto an unfamiliar codebase quickly. What was your approach?`, type: "behavioral", difficulty: "easy" },
+  ];
+  const nonTechPool = [
+    { question: `Tell me about your experience in a ${role} role. What aspects of this type of work are you most passionate about?`, type: "behavioral", difficulty: "easy" },
+    { question: `Describe a time when you had to handle a difficult situation with a colleague, client, or stakeholder. How did you resolve it?`, type: "situational", difficulty: "medium" },
+    { question: `How do you prioritize your tasks when you have multiple deadlines and competing responsibilities?`, type: "competency", difficulty: "medium" },
+    { question: `Can you share an example where you went above and beyond your job responsibilities to help your team or organization succeed?`, type: "behavioral", difficulty: "medium" },
+    { question: `What motivates you in your career, and why are you interested in this particular role?`, type: "motivational", difficulty: "easy" },
+    { question: `Describe a situation where you received critical feedback. How did you respond and what did you change?`, type: "behavioral", difficulty: "medium" },
+    { question: `Tell me about a time you had to convince someone to change their mind. What approach did you take?`, type: "communication", difficulty: "medium" },
+    { question: `How do you handle working with team members who have very different working styles from yours?`, type: "culture-fit", difficulty: "easy" },
   ];
 
-  const nonTechnicalQuestions = [
-    {
-      id: "q1",
-      question: `Tell me about your experience in a ${role} role. What aspects of this type of work are you most passionate about?`,
-      type: "behavioral",
-      difficulty: "easy"
-    },
-    {
-      id: "q2",
-      question: `Describe a time when you had to handle a difficult situation with a colleague, client, or stakeholder. How did you resolve it?`,
-      type: "situational",
-      difficulty: "medium"
-    },
-    {
-      id: "q3",
-      question: `How do you prioritize your tasks when you have multiple deadlines and competing responsibilities?`,
-      type: "competency",
-      difficulty: "medium"
-    },
-    {
-      id: "q4",
-      question: `Can you share an example where you went above and beyond your job responsibilities to help your team or organization succeed?`,
-      type: "behavioral",
-      difficulty: "medium"
-    },
-    {
-      id: "q5",
-      question: `What motivates you in your career, and why are you interested in this particular role?`,
-      type: "motivational",
-      difficulty: "easy"
-    }
-  ];
+  const pool = isNonTech ? nonTechPool : technicalPool;
+  // Shuffle and pick
+  const shuffled = pool.sort(() => Math.random() - 0.5).slice(0, count);
+  const questions = shuffled.map((q, i) => ({ id: `q${i + 1}`, ...q }));
 
-  const defaultQuestions = isNonTech ? nonTechnicalQuestions : technicalQuestions;
-
-  return apiResponse({
-    success: true,
-    sessionId: `sess-${Math.random().toString(36).substring(2, 11)}`,
-    role,
-    level,
-    questions: defaultQuestions.slice(0, count)
-  });
+  return apiResponse({ success: true, sessionId, role, level, questions });
 }
 
 async function handleInterviewEvaluate(request, env, ctx) {
@@ -12219,85 +12606,113 @@ async function handleInterviewEvaluate(request, env, ctx) {
 
   if (!answer || answer.trim().length === 0) {
     return apiResponse({
-      score: 30,
-      verdict: "weak",
+      score: 30, verdict: "weak",
       strengths: ["Attempted response"],
       improvements: ["Provide a complete, structured answer with relevant details"],
       followUp: "Could you elaborate with a specific concrete example from your past experience?"
     });
   }
 
+  // ── Try LLM evaluation ──
+  try {
+    const prompt = `You are an expert interviewer evaluating a candidate for a ${level}-level "${role}" position.
+
+Question asked: "${question}"
+
+Candidate's answer:
+"${answer.trim().substring(0, 2000)}"
+
+Evaluate the answer thoroughly. Consider:
+- Depth and specificity of the response
+- Relevance to the question and role
+- Use of concrete examples, metrics, or evidence
+- Communication clarity and structure
+- Technical accuracy (if applicable)
+
+Then generate a probing follow-up question that:
+- Digs deeper into a specific claim or gap in their answer
+- Tests whether the candidate truly understands what they said
+- Is NOT generic — reference something specific from their answer
+
+Return ONLY valid JSON (no markdown, no explanation):
+{
+  "score": <0-100>,
+  "verdict": "strong|good|weak",
+  "strengths": ["strength1", "strength2"],
+  "improvements": ["improvement1", "improvement2"],
+  "followUp": "A specific follow-up question based on their answer..."
+}`;
+
+    const tenantId = ctx?.tenantId || "default";
+    const llmResult = await runLLM(env, tenantId, [
+      { role: "system", content: "You are a precise JSON generator. Return only valid JSON objects. No markdown fences." },
+      { role: "user", content: prompt }
+    ], 1024);
+
+    const responseText = llmResult?.response || (typeof llmResult === "string" ? llmResult : "");
+    const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      const evaluation = JSON.parse(jsonMatch[0]);
+      if (typeof evaluation.score === "number" && evaluation.score >= 0 && evaluation.score <= 100) {
+        console.log(`[Interview] LLM evaluated answer: score=${evaluation.score}, verdict=${evaluation.verdict}`);
+        return apiResponse({
+          score: evaluation.score,
+          verdict: evaluation.verdict || (evaluation.score >= 80 ? "strong" : evaluation.score >= 60 ? "good" : "weak"),
+          strengths: Array.isArray(evaluation.strengths) ? evaluation.strengths : ["Answer was provided"],
+          improvements: Array.isArray(evaluation.improvements) ? evaluation.improvements : [],
+          followUp: evaluation.followUp || "",
+        });
+      }
+    }
+    console.warn("[Interview] LLM evaluation response could not be parsed, using fallback");
+  } catch (err) {
+    console.warn("[Interview] LLM evaluation failed, using fallback:", err.message);
+  }
+
+  // ── Fallback: keyword-based scoring ──
   const text = answer.trim();
   const words = text.split(/\s+/).filter(w => w.length > 0);
   const wordCount = words.length;
 
-  // Determine if this is a non-technical interview
   const il = (interview_level || "").toLowerCase();
   const isNonTech = il.includes('hr') || il.includes('behavioral') || il.includes('culture') ||
-    il.includes('competency') || il.includes('screening') || il.includes('communication') ||
-    il.includes('role play') || il.includes('simulation') || il.includes('domain knowledge') ||
-    il.includes('client interaction');
+    il.includes('competency') || il.includes('screening') || il.includes('communication');
 
-  const techKeywords = [
-    "architecture", "scalability", "latency", "throughput", "database", "index",
-    "cache", "redis", "microservices", "async", "event", "pipeline", "docker",
-    "kubernetes", "aws", "security", "auth", "testing", "monitoring", "metrics",
-    "refactor", "optimization", "bottleneck", "concurrency", "queue", "schema"
-  ];
-
-  const behavioralKeywords = [
-    "team", "collaboration", "communication", "stakeholder", "deadline", "priority",
-    "conflict", "leadership", "initiative", "feedback", "mentor", "goal", "challenge",
-    "customer", "client", "process", "improvement", "outcome", "result", "impact",
-    "responsibility", "decision", "adapt", "learn", "growth", "manage"
-  ];
-
+  const techKeywords = ["architecture", "scalability", "latency", "database", "cache", "microservices", "async", "docker", "kubernetes", "aws", "security", "testing", "monitoring", "optimization", "concurrency"];
+  const behavioralKeywords = ["team", "collaboration", "communication", "stakeholder", "deadline", "leadership", "initiative", "feedback", "challenge", "customer", "process", "improvement", "outcome", "impact"];
   const relevantKeywords = isNonTech ? behavioralKeywords : techKeywords;
-  
+
   let keywordHits = 0;
   const lowerText = text.toLowerCase();
-  relevantKeywords.forEach(kw => {
-    if (lowerText.includes(kw)) keywordHits++;
-  });
+  relevantKeywords.forEach(kw => { if (lowerText.includes(kw)) keywordHits++; });
 
   let score = 55;
   if (wordCount > 15) score += 10;
   if (wordCount > 35) score += 10;
   if (wordCount > 60) score += 8;
   score += Math.min(15, keywordHits * 3);
-
   score = Math.min(98, Math.max(35, score));
-  let verdict = score >= 80 ? "strong" : score >= 65 ? "good" : "weak";
 
+  const verdict = score >= 80 ? "strong" : score >= 65 ? "good" : "weak";
   const strengths = [];
-  if (wordCount > 30) strengths.push(isNonTech ? "Articulated response with thoughtful explanation" : "Articulated response with thorough explanation");
-  if (keywordHits >= 2) strengths.push(isNonTech ? "Demonstrated strong situational awareness and role-relevant competencies" : "Utilized precise domain terminology and architectural concepts");
+  if (wordCount > 30) strengths.push(isNonTech ? "Articulated response with thoughtful explanation" : "Thorough technical explanation");
+  if (keywordHits >= 2) strengths.push(isNonTech ? "Demonstrated situational awareness" : "Utilized precise domain terminology");
   if (strengths.length === 0) strengths.push("Clear communication");
 
   const improvements = [];
-  if (wordCount < 25) improvements.push(isNonTech ? "Elaborate further with concrete examples, outcomes, and measurable impact" : "Elaborate further with concrete metrics, latency targets, or system scale numbers");
-  if (keywordHits < 2) improvements.push(isNonTech ? "Include specific examples of teamwork, problem-solving, and measurable outcomes" : "Incorporate specific technical tools, patterns, and trade-offs into your answer");
-  if (improvements.length === 0) improvements.push(isNonTech ? "Provide more detail on the specific actions you took and their outcomes" : "Highlight edge cases and error recovery mechanisms");
+  if (wordCount < 25) improvements.push("Elaborate further with concrete examples and measurable impact");
+  if (keywordHits < 2) improvements.push(isNonTech ? "Include specific examples with outcomes" : "Incorporate specific technical tools and trade-offs");
+  if (improvements.length === 0) improvements.push("Highlight edge cases and error recovery");
 
   return apiResponse({
-    score,
-    verdict,
-    strengths,
-    improvements,
-    followUp: ""
+    score, verdict, strengths, improvements,
+    followUp: score < 75 ? "Can you walk me through a specific real-world example that demonstrates this?" : "",
   });
 }
 
 async function handleInterviewReport(request, env, ctx) {
   const body = await safeJson(request) || {};
-  const { role = "Software Engineer", level = "mid", answers = [], interview_level = "" } = body;
-
-  // Determine if this is a non-technical interview
-  const il = (interview_level || "").toLowerCase();
-  const isNonTech = il.includes('hr') || il.includes('behavioral') || il.includes('culture') ||
-    il.includes('competency') || il.includes('screening') || il.includes('communication') ||
-    il.includes('role play') || il.includes('simulation') || il.includes('domain knowledge') ||
-    il.includes('client interaction');
+  const { role = "Software Engineer", level = "mid", answers = [], interview_level = "", resume_matching_report = null } = body;
 
   let overallScore = 75;
   if (Array.isArray(answers) && answers.length > 0) {
@@ -12307,45 +12722,86 @@ async function handleInterviewReport(request, env, ctx) {
 
   const recommendation = overallScore >= 82 ? "strong-hire" : overallScore >= 70 ? "hire" : overallScore >= 55 ? "lean-hire" : "no-hire";
 
-  if (isNonTech) {
-    return apiResponse({
-      overallScore,
-      recommendation,
-      summary: `Candidate demonstrated ${overallScore >= 80 ? "exceptional" : "solid"} understanding of ${role} competencies. Showed strong communication and situational awareness.`,
-      topStrengths: [
-        "Clear communication and professional articulation",
-        "Demonstrated practical problem-solving in real-world scenarios",
-        "Proctored environment verification completed"
-      ],
-      focusAreas: [
-        "Provide more specific examples with measurable outcomes",
-        "Deeper exploration of stakeholder management scenarios"
-      ],
-      nextSteps: [
-        "Proceed to next interview round",
-        "Verify references for recent relevant roles"
-      ],
-      answers
-    });
+  // ── Try LLM report generation ──
+  try {
+    const answersDigest = (answers || []).map((a, i) => (
+      `Q${i + 1} [${a.type || "general"}/${a.difficulty || "medium"}]: Score ${a.score || 0}/100 (${a.verdict || "n/a"})` +
+      (a.strengths?.length ? `\n  Strengths: ${a.strengths.join(", ")}` : "") +
+      (a.improvements?.length ? `\n  Improvements: ${a.improvements.join(", ")}` : "")
+    )).join("\n\n");
+
+    const resumeSection = resume_matching_report
+      ? `\n\nResume Analysis:\n${JSON.stringify(resume_matching_report).substring(0, 1000)}`
+      : "";
+
+    const prompt = `You are a senior hiring manager writing a detailed candidate evaluation report.
+
+Position: ${role} (${level} level)
+Overall Score: ${overallScore}/100
+Recommendation: ${recommendation}
+
+Question-by-Question Performance:
+${answersDigest}
+${resumeSection}
+
+Write a comprehensive hiring report. Be specific — reference actual performance patterns from the data above.
+
+Return ONLY valid JSON (no markdown):
+{
+  "overallScore": ${overallScore},
+  "recommendation": "${recommendation}",
+  "summary": "2-3 sentence executive summary of the candidate's performance...",
+  "topStrengths": ["specific strength 1", "specific strength 2", "specific strength 3"],
+  "focusAreas": ["specific area 1", "specific area 2"],
+  "nextSteps": ["recommended action 1", "recommended action 2"]
+}`;
+
+    const tenantId = ctx?.tenantId || "default";
+    const llmResult = await runLLM(env, tenantId, [
+      { role: "system", content: "You are a precise JSON generator. Return only valid JSON objects. No markdown fences." },
+      { role: "user", content: prompt }
+    ], 1024);
+
+    const responseText = llmResult?.response || (typeof llmResult === "string" ? llmResult : "");
+    const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      const report = JSON.parse(jsonMatch[0]);
+      if (report.summary && report.topStrengths) {
+        console.log(`[Interview] LLM generated report: score=${report.overallScore}`);
+        return apiResponse({
+          overallScore: report.overallScore || overallScore,
+          recommendation: report.recommendation || recommendation,
+          summary: report.summary,
+          topStrengths: report.topStrengths || [],
+          focusAreas: report.focusAreas || [],
+          nextSteps: report.nextSteps || [],
+          answers,
+        });
+      }
+    }
+    console.warn("[Interview] LLM report could not be parsed, using fallback");
+  } catch (err) {
+    console.warn("[Interview] LLM report generation failed, using fallback:", err.message);
   }
+
+  // ── Fallback: static report ──
+  const il = (interview_level || "").toLowerCase();
+  const isNonTech = il.includes('hr') || il.includes('behavioral') || il.includes('culture') ||
+    il.includes('competency') || il.includes('screening') || il.includes('communication');
 
   return apiResponse({
     overallScore,
     recommendation,
-    summary: `Candidate demonstrated ${overallScore >= 80 ? "exceptional" : "solid"} understanding of ${role} concepts. Showed strong structural reasoning and domain competency.`,
-    topStrengths: [
-      "High communication density and technical articulation",
-      "Demonstrated practical system problem solving",
-      "Proctored environment verification completed"
-    ],
-    focusAreas: [
-      "Elaborate further on high-scale data metrics",
-      "Deep-dive into failover strategy benchmarks"
-    ],
-    nextSteps: [
-      "Proceed to client technical deep-dive interview",
-      "Verify references for recent engineering roles"
-    ],
+    summary: `Candidate demonstrated ${overallScore >= 80 ? "exceptional" : "solid"} understanding of ${role} ${isNonTech ? "competencies" : "concepts"}. Showed ${isNonTech ? "strong communication and situational awareness" : "strong structural reasoning and domain competency"}.`,
+    topStrengths: isNonTech
+      ? ["Clear communication and professional articulation", "Demonstrated practical problem-solving", "Proctored environment verification completed"]
+      : ["High communication density and technical articulation", "Demonstrated practical system problem solving", "Proctored environment verification completed"],
+    focusAreas: isNonTech
+      ? ["Provide more specific examples with measurable outcomes", "Deeper exploration of stakeholder management"]
+      : ["Elaborate further on high-scale data metrics", "Deep-dive into failover strategy benchmarks"],
+    nextSteps: isNonTech
+      ? ["Proceed to next interview round", "Verify references for recent roles"]
+      : ["Proceed to client technical deep-dive interview", "Verify references for recent engineering roles"],
     answers
   });
 }
