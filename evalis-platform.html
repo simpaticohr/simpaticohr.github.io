@@ -1359,16 +1359,26 @@ const MAX_VIOLATIONS = 3;
 // ─────────────────────────────────────────────
 const SB_URL = window.SIMPATICO_CONFIG?.supabaseUrl;
 const SB_KEY = window.SIMPATICO_CONFIG?.supabaseAnonKey;
-const SB_HDR = {
-  'Content-Type':  'application/json',
-  'apikey':        SB_KEY,
-  'Authorization': 'Bearer ' + SB_KEY,
-  'Prefer':        'return=representation',
-  'X-Tenant-ID':   window.SIMPATICO_CONFIG?.tenantId || 'SIMP_PRO_MAIN'
-};
+
+// Build headers dynamically — use JWT (authenticated role) when available,
+// fall back to anon key. Migration 050 revoked INSERT/UPDATE/DELETE from
+// anon on interviews, so writes REQUIRE an authenticated session.
+function getSbHeaders() {
+  const token = (typeof getAuthToken === 'function' && getAuthToken()) || SB_KEY;
+  return {
+    'Content-Type':  'application/json',
+    'apikey':        SB_KEY,
+    'Authorization': 'Bearer ' + token,
+    'Prefer':        'return=representation',
+    'X-Tenant-ID':   window.SIMPATICO_CONFIG?.tenantId || 'SIMP_PRO_MAIN'
+  };
+}
+// Keep SB_HDR as a getter for backward compat with any code reading it
+const SB_HDR = new Proxy({}, { get(_, prop) { return getSbHeaders()[prop]; } });
 
 async function db(action, table, data = null, filters = null, select = '*', order = null) {
   const sel = select || '*';
+  const _hdr = getSbHeaders();
 
   function buildFilters(base, f) {
     if (!f) return base;
@@ -1389,7 +1399,7 @@ async function db(action, table, data = null, filters = null, select = '*', orde
       const [col, dir] = order.split('.');
       url += `&order=${col}.${dir || 'asc'}`;
     }
-    const r = await fetch(url, { headers: { ...SB_HDR, 'Prefer': 'return=representation' } });
+    const r = await fetch(url, { headers: { ..._hdr, 'Prefer': 'return=representation' } });
     if (!r.ok) {
       const err = await r.json().catch(() => ({}));
       throw new Error(err.message || `DB select failed (${r.status})`);
@@ -1400,7 +1410,7 @@ async function db(action, table, data = null, filters = null, select = '*', orde
 
   if (action === 'insert') {
     const r = await fetch(`${SB_URL}/rest/v1/${table}`, {
-      method: 'POST', headers: SB_HDR, body: JSON.stringify(data),
+      method: 'POST', headers: _hdr, body: JSON.stringify(data),
     });
     if (!r.ok) {
       const err = await r.json().catch(() => ({}));
@@ -1414,7 +1424,7 @@ async function db(action, table, data = null, filters = null, select = '*', orde
     let url = `${SB_URL}/rest/v1/${table}?select=${sel}`;
     url = buildFilters(url, filters);
     const r = await fetch(url, {
-      method: 'PATCH', headers: SB_HDR, body: JSON.stringify(data),
+      method: 'PATCH', headers: _hdr, body: JSON.stringify(data),
     });
     if (!r.ok) {
       const err = await r.json().catch(() => ({}));
@@ -1432,7 +1442,7 @@ async function db(action, table, data = null, filters = null, select = '*', orde
       );
       url += '?' + parts.join('&');
     }
-    const r = await fetch(url, { method: 'DELETE', headers: SB_HDR });
+    const r = await fetch(url, { method: 'DELETE', headers: _hdr });
     if (r.status === 204) return { ok: true };
     return await r.json().catch(() => ({ ok: true }));
   }

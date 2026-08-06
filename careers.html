@@ -641,6 +641,7 @@
                 const SB_KEY = window.SIMPATICO_CONFIG?.supabaseAnonKey;
                 
                 // Fetch company subscription status to check trial validity
+                const DEFAULT_TENANT = 'a0000000-0000-0000-0000-000000000001';
                 let companyPlan = 'trial';
                 const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(companyId);
                 const queryFilter = isUuid ? `id=eq.${companyId}` : `slug=eq.${encodeURIComponent(companyId)}`;
@@ -652,9 +653,18 @@
                     );
                     if (compRes.ok) {
                         const cArr = await compRes.json();
-                        if (cArr?.[0]?.subscription_plan) companyPlan = cArr[0].subscription_plan.toLowerCase();
+                        if (cArr?.[0]?.subscription_plan) {
+                            companyPlan = cArr[0].subscription_plan.toLowerCase();
+                        } else {
+                            // No company record found — default tenant is always enterprise
+                            console.warn(`[Careers] No company record found for ${companyId}. Check RLS policies or run migration 054.`);
+                            if (companyId === DEFAULT_TENANT) companyPlan = 'enterprise';
+                        }
                     }
-                } catch(e){}
+                } catch(e){
+                    console.warn('[Careers] Company lookup failed:', e);
+                    if (companyId === DEFAULT_TENANT) companyPlan = 'enterprise';
+                }
 
                 // Fetch jobs isolated strictly by tenant company_id
                 const jobsQuery = isUuid
@@ -665,16 +675,17 @@
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const fetchedJobs = await res.json();
 
-                // 2-Day Trial Guard Filter:
-                // Unsubscribed trial clients can only display jobs posted within the last 48 hours.
-                const isPaid = ['starter', 'professional', 'enterprise', 'pro', 'business', 'premium'].includes(companyPlan);
+                // Trial Guard Filter:
+                // Paid plans → show all jobs. Trial plans → show jobs from last 30 days.
+                const PAID_PLANS = ['starter', 'professional', 'enterprise', 'pro', 'business', 'premium'];
+                const isPaid = PAID_PLANS.includes(companyPlan);
                 const nowMs = Date.now();
-                const TWO_DAYS_MS = 2 * 24 * 60 * 60 * 1000;
+                const TRIAL_WINDOW_MS = 30 * 24 * 60 * 60 * 1000; // 30 days for trial
 
                 allJobs = fetchedJobs.filter(j => {
                     if (isPaid) return true;
                     const createdMs = j.created_at ? new Date(j.created_at).getTime() : nowMs;
-                    return (nowMs - createdMs) <= TWO_DAYS_MS;
+                    return (nowMs - createdMs) <= TRIAL_WINDOW_MS;
                 });
 
                 // Populate UI components
