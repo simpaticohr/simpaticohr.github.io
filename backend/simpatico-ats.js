@@ -8704,6 +8704,20 @@ async function handleCreateInterview(request, env, ctx) {
             throw new ForbiddenError("Interview access has been restricted for this company. Please contact the platform administrator.");
           }
 
+          // --- Trial interview limit: 1 interview during the 2-day free trial ---
+          if (ctx.role !== "superadmin" && ctx.role !== "super_admin") {
+            const trial = await getCompanyTrialState(env, companyId);
+            if (trial && !trial.isPaid) {
+              if (trial.isExpired) {
+                throw new ForbiddenError("Your 2-day free trial has expired. Please upgrade your plan to schedule interviews.");
+              }
+              const trialIntCount = await countTenantRows(env, "interviews", "company_id", companyId, TRIAL_LIMITS.max_interviews);
+              if (trialIntCount >= TRIAL_LIMITS.max_interviews) {
+                throw new ForbiddenError("Trial limit reached: your 2-day free trial includes 1 interview. Please upgrade to schedule unlimited interviews.");
+              }
+            }
+          }
+
           // --- AI Free Tier Limit Enforcement ---
           const iType = body.interview_type || "human_live";
           const isAiMode = iType.startsWith("ai_");
@@ -12258,7 +12272,7 @@ async function handleBYOKValidate(request, env, ctx) {
 
   const RECOMMENDED = {
     openai: ["gpt-4o", "gpt-4o-mini", "gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano", "o4-mini"],
-    gemini: ["gemini-3.5-flash", "gemini-3.5-pro", "gemini-3.1-flash", "gemini-3.1-pro", "gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.0-flash"],
+    gemini: ["gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-3.5-pro", "gemini-3.1-flash", "gemini-3.1-flash-lite", "gemini-3.1-pro", "gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.5-pro", "gemini-2.0-flash", "gemini-2.0-flash-lite"],
     anthropic: ["claude-sonnet-4-20250514", "claude-3-5-sonnet-20241022", "claude-3-haiku-20240307"],
     deepseek: ["deepseek-chat", "deepseek-reasoner"],
     kimi: ["kimi-k2-0520", "moonshot-v1-128k", "moonshot-v1-32k"],
@@ -12284,9 +12298,9 @@ async function handleBYOKValidate(request, env, ctx) {
       // Only include models that work with the OpenAI-compatible chat endpoint
       // Exclude: gemma (local models), embedding, AQA, imagen, preview/experimental builds
       const GEMINI_CHAT_VERIFIED = [
-        "gemini-3.5-flash", "gemini-3.5-pro",
-        "gemini-3.1-flash", "gemini-3.1-pro",
-        "gemini-2.5-flash", "gemini-2.5-pro",
+        "gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-3.5-pro",
+        "gemini-3.1-flash", "gemini-3.1-flash-lite", "gemini-3.1-pro",
+        "gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.5-pro",
         "gemini-2.0-flash", "gemini-2.0-flash-lite",
         "gemini-1.5-flash", "gemini-1.5-pro",
       ];
