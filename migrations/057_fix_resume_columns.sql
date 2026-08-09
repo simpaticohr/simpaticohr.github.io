@@ -28,26 +28,46 @@ CREATE POLICY "candidate_profiles_insert_own" ON public.candidate_profiles
   FOR INSERT TO authenticated
   WITH CHECK (user_id IN (SELECT id FROM public.users WHERE auth_id = auth.uid()));
 
--- ─── 4. Storage policies for documents bucket (resume uploads) ──────────────
--- Ensure the bucket exists (idempotent)
+-- ─── 4. Storage policies for BOTH buckets used by resume uploads ────────────
+-- The platform/register-candidate.html uses 'hr-documents' bucket
+-- The register-candidate.html (root) uses 'documents' bucket
+
+-- 4a. 'documents' bucket
 INSERT INTO storage.buckets (id, name, public)
 VALUES ('documents', 'documents', true)
 ON CONFLICT (id) DO NOTHING;
 
--- Allow authenticated users to upload files
 DROP POLICY IF EXISTS "auth_upload_documents" ON storage.objects;
 CREATE POLICY "auth_upload_documents" ON storage.objects
   FOR INSERT TO authenticated
   WITH CHECK (bucket_id = 'documents');
 
--- Allow public read access (resumes are stored with public URLs)
 DROP POLICY IF EXISTS "public_read_documents" ON storage.objects;
 CREATE POLICY "public_read_documents" ON storage.objects
   FOR SELECT TO public
   USING (bucket_id = 'documents');
 
--- Allow authenticated users to overwrite/update their own uploads
 DROP POLICY IF EXISTS "auth_update_documents" ON storage.objects;
 CREATE POLICY "auth_update_documents" ON storage.objects
   FOR UPDATE TO authenticated
   USING (bucket_id = 'documents');
+
+-- 4b. 'hr-documents' bucket (used by platform registration + backend worker)
+INSERT INTO storage.buckets (id, name, public)
+VALUES ('hr-documents', 'hr-documents', true)
+ON CONFLICT (id) DO NOTHING;
+
+DROP POLICY IF EXISTS "auth_upload_hr_documents" ON storage.objects;
+CREATE POLICY "auth_upload_hr_documents" ON storage.objects
+  FOR INSERT TO authenticated
+  WITH CHECK (bucket_id = 'hr-documents');
+
+DROP POLICY IF EXISTS "public_read_hr_documents" ON storage.objects;
+CREATE POLICY "public_read_hr_documents" ON storage.objects
+  FOR SELECT TO public
+  USING (bucket_id = 'hr-documents');
+
+DROP POLICY IF EXISTS "auth_update_hr_documents" ON storage.objects;
+CREATE POLICY "auth_update_hr_documents" ON storage.objects
+  FOR UPDATE TO authenticated
+  USING (bucket_id = 'hr-documents');
