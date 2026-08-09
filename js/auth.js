@@ -164,30 +164,52 @@ class AuthManager {
     const fileExt = file.name.split('.').pop().toLowerCase();
     const filePath = `resumes/${userId}/${Date.now()}.${fileExt}`;
     
-    const { error } = await this.db.storage.from('documents').upload(filePath, file);
-    if (error) throw error;
+    const { error } = await this.db.storage.from('documents').upload(filePath, file, {
+      cacheControl: '3600',
+      upsert: true
+    });
+    if (error) {
+      console.error('Resume storage upload failed:', error.message);
+      throw error;
+    }
 
     const { data: urlData } = this.db.storage.from('documents').getPublicUrl(filePath);
     const resumeUrl = urlData.publicUrl;
     
     // Update candidate_profiles table
-    await this.db.from('candidate_profiles').update({ resume_url: resumeUrl }).eq('user_id', userId);
+    const { error: cpErr } = await this.db.from('candidate_profiles')
+      .update({ resume_url: resumeUrl })
+      .eq('user_id', userId);
+    if (cpErr) console.warn('candidate_profiles resume_url update failed:', cpErr.message);
     
     // Also update users table directly for super-admin visibility
     try {
-      await this.db.from('users').update({ resume_url: resumeUrl }).eq('id', userId);
-      await this.db.from('users').update({ resume_url: resumeUrl }).eq('auth_id', userId);
-    } catch(e) {}
+      const { error: uErr } = await this.db.from('users')
+        .update({ resume_url: resumeUrl })
+        .eq('id', userId);
+      if (uErr) console.warn('users resume_url update failed:', uErr.message);
+    } catch(e) {
+      console.warn('users resume update exception:', e);
+    }
 
     // Extract text for .txt files
     if (fileExt === 'txt') {
       try {
         const text = await file.text();
         if (text && text.trim().length > 10) {
-          await this.db.from('candidate_profiles').update({ resume_text: text }).eq('user_id', userId);
-          await this.db.from('users').update({ resume_text: text }).eq('id', userId);
+          const { error: cpTextErr } = await this.db.from('candidate_profiles')
+            .update({ resume_text: text })
+            .eq('user_id', userId);
+          if (cpTextErr) console.warn('candidate_profiles resume_text update failed:', cpTextErr.message);
+          
+          const { error: uTextErr } = await this.db.from('users')
+            .update({ resume_text: text })
+            .eq('id', userId);
+          if (uTextErr) console.warn('users resume_text update failed:', uTextErr.message);
         }
-      } catch(e) {}
+      } catch(e) {
+        console.warn('Resume text extraction failed:', e);
+      }
     }
     
     // Trigger AI resume parsing
