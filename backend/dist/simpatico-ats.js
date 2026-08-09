@@ -8976,8 +8976,9 @@ async function handleAdminListCompanies(request, env, ctx) {
 async function handleAdminListUsers(request, env, ctx) {
   requireRole(ctx, "super_admin", "superadmin");
 
+  // Fetch users with candidate profile data (resume_url, skills, etc.)
   const res = await fetch(
-    `${env.SUPABASE_URL}/rest/v1/users?select=*&order=created_at.desc`,
+    `${env.SUPABASE_URL}/rest/v1/users?select=*,candidate_profiles(resume_url,skills,experience_years,location,sector)&order=created_at.desc`,
     {
       headers: {
         apikey: env.SUPABASE_SERVICE_KEY,
@@ -8987,7 +8988,24 @@ async function handleAdminListUsers(request, env, ctx) {
   );
   if (!res.ok) throw new AppError("Failed to fetch users", res.status);
   const data = await res.json();
-  return apiResponse(data);
+
+  // Flatten candidate_profiles into the user object for frontend compatibility
+  const enriched = data.map((u) => {
+    const cp = Array.isArray(u.candidate_profiles)
+      ? u.candidate_profiles[0]
+      : u.candidate_profiles;
+    if (cp) {
+      u.resume_url = u.resume_url || cp.resume_url || null;
+      u.skills = u.skills || (Array.isArray(cp.skills) ? cp.skills.join(", ") : cp.skills) || "";
+      u.experience = u.experience || cp.experience_years || "";
+      u.location = u.location || cp.location || "";
+      u.sector = u.sector || cp.sector || "";
+    }
+    delete u.candidate_profiles;
+    return u;
+  });
+
+  return apiResponse(enriched);
 }
 
 /**
