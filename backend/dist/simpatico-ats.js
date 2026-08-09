@@ -8990,7 +8990,7 @@ async function handleAdminListUsers(request, env, ctx) {
   const users = await res.json();
   if (!Array.isArray(users)) return apiResponse([]);
 
-  // 2. Fetch candidate_profiles (keyed by user_id string)
+  // 2. Fetch candidate_profiles (keyed by user_id AND email)
   let profileMap = {};
   try {
     const pRes = await fetch(
@@ -9007,6 +9007,7 @@ async function handleAdminListUsers(request, env, ctx) {
       if (Array.isArray(profiles)) {
         profiles.forEach((p) => {
           if (p.user_id) profileMap[String(p.user_id)] = p;
+          if (p.email) profileMap[String(p.email).toLowerCase()] = p;
         });
       }
     }
@@ -9020,11 +9021,11 @@ async function handleAdminListUsers(request, env, ctx) {
         if (item && item.email) {
           const em = String(item.email).toLowerCase();
           emailDataMap[em] = {
-            resume_url: item.resume_url || emailDataMap[em]?.resume_url || null,
+            resume_url: item.resume_url || item.resume_key || emailDataMap[em]?.resume_url || null,
             resume_text: item.resume_text || emailDataMap[em]?.resume_text || null,
             skills: item.skills || emailDataMap[em]?.skills || "",
-            experience: item.experience || emailDataMap[em]?.experience || "",
-            location: item.location || emailDataMap[em]?.location || "",
+            experience: item.experience || item.years_experience || emailDataMap[em]?.experience || "",
+            location: item.location || item.location_city || emailDataMap[em]?.location || "",
             sector: item.sector || emailDataMap[em]?.sector || "",
           };
         }
@@ -9038,19 +9039,26 @@ async function handleAdminListUsers(request, env, ctx) {
   };
 
   await Promise.allSettled([
-    fetch(`${env.SUPABASE_URL}/rest/v1/job_applications?select=email,resume_url,resume_text`, { headers })
+    fetch(`${env.SUPABASE_URL}/rest/v1/job_applications?select=*`, { headers })
       .then((r) => (r.ok ? r.json() : []))
       .then(addEmailData)
       .catch(() => {}),
-    fetch(`${env.SUPABASE_URL}/rest/v1/applications?select=email,resume_url,resume_text`, { headers })
+    fetch(`${env.SUPABASE_URL}/rest/v1/applications?select=*`, { headers })
       .then((r) => (r.ok ? r.json() : []))
       .then(addEmailData)
       .catch(() => {}),
-    fetch(`${env.SUPABASE_URL}/rest/v1/candidates?select=email,resume_url,resume_text`, { headers })
+    fetch(`${env.SUPABASE_URL}/rest/v1/candidates?select=*`, { headers })
       .then((r) => (r.ok ? r.json() : []))
       .then(addEmailData)
       .catch(() => {}),
   ]);
+
+  // Helper to format Supabase storage key into public URL if needed
+  const formatResumeUrl = (raw) => {
+    if (!raw) return null;
+    if (raw.startsWith("http://") || raw.startsWith("https://")) return raw;
+    return `${env.SUPABASE_URL}/storage/v1/object/public/documents/${raw.replace(/^\/+/, "")}`;
+  };
 
   // 4. Merge aggregated data into users
   const enriched = users.map((u) => {
@@ -9058,14 +9066,15 @@ async function handleAdminListUsers(request, env, ctx) {
     const authId = u.auth_id != null ? String(u.auth_id) : "";
     const em = (u.email || "").toLowerCase();
 
-    const cp = profileMap[uId] || profileMap[authId] || {};
+    const cp = profileMap[uId] || profileMap[authId] || profileMap[em] || {};
     const app = emailDataMap[em] || {};
 
-    const resume_url = u.resume_url || cp.resume_url || app.resume_url || null;
+    const rawUrl = u.resume_url || u.resume_key || cp.resume_url || cp.resume_key || app.resume_url || null;
+    const resume_url = formatResumeUrl(rawUrl);
     const resume_text = u.resume_text || cp.resume_text || app.resume_text || null;
     const skills = u.skills || (Array.isArray(cp.skills) ? cp.skills.join(", ") : cp.skills) || app.skills || "";
-    const experience = u.experience || cp.experience_years || app.experience || "";
-    const location = u.location || cp.location || app.location || "";
+    const experience = u.experience || cp.years_experience || cp.experience || app.experience || "";
+    const location = u.location || (cp.location_city ? `${cp.location_city}${cp.location_country ? ', ' + cp.location_country : ''}` : cp.location) || app.location || "";
     const sector = u.sector || cp.sector || app.sector || "";
 
     return {
