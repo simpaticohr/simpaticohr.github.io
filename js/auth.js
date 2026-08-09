@@ -161,15 +161,34 @@ class AuthManager {
 
   // Upload Resume
   async uploadResume(userId, file) {
-    const fileExt = file.name.split('.').pop();
+    const fileExt = file.name.split('.').pop().toLowerCase();
     const filePath = `resumes/${userId}/${Date.now()}.${fileExt}`;
     
     const { error } = await this.db.storage.from('documents').upload(filePath, file);
     if (error) throw error;
 
     const { data: urlData } = this.db.storage.from('documents').getPublicUrl(filePath);
+    const resumeUrl = urlData.publicUrl;
     
-    await this.db.from('candidate_profiles').update({ resume_url: urlData.publicUrl }).eq('user_id', userId);
+    // Update candidate_profiles table
+    await this.db.from('candidate_profiles').update({ resume_url: resumeUrl }).eq('user_id', userId);
+    
+    // Also update users table directly for super-admin visibility
+    try {
+      await this.db.from('users').update({ resume_url: resumeUrl }).eq('id', userId);
+      await this.db.from('users').update({ resume_url: resumeUrl }).eq('auth_id', userId);
+    } catch(e) {}
+
+    // Extract text for .txt files
+    if (fileExt === 'txt') {
+      try {
+        const text = await file.text();
+        if (text && text.trim().length > 10) {
+          await this.db.from('candidate_profiles').update({ resume_text: text }).eq('user_id', userId);
+          await this.db.from('users').update({ resume_text: text }).eq('id', userId);
+        }
+      } catch(e) {}
+    }
     
     // Trigger AI resume parsing
     try {

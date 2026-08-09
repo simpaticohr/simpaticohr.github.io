@@ -9004,7 +9004,7 @@ async function handleAdminListUsers(request, env, ctx) {
   const users = await res.json();
   if (!Array.isArray(users)) return apiResponse([]);
 
-  // 2. Secondary fetch for candidate_profiles (graceful fallback)
+  // 2. Fetch candidate_profiles (keyed by user_id string)
   let profileMap = {};
   try {
     const pRes = await fetch(
@@ -9020,51 +9020,76 @@ async function handleAdminListUsers(request, env, ctx) {
       const profiles = await pRes.json();
       if (Array.isArray(profiles)) {
         profiles.forEach((p) => {
-          if (p.user_id) profileMap[p.user_id] = p;
+          if (p.user_id) profileMap[String(p.user_id)] = p;
         });
       }
     }
-  } catch (e) {
-    console.warn("Could not fetch candidate_profiles:", e.message);
-  }
+  } catch (e) {}
 
-  // 3. Secondary fetch for job_applications by email (graceful fallback)
-  let appMap = {};
-  try {
-    const aRes = await fetch(
-      `${env.SUPABASE_URL}/rest/v1/job_applications?select=email,resume_url,resume_text`,
-      {
-        headers: {
-          apikey: env.SUPABASE_SERVICE_KEY,
-          Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
-        },
-      },
-    );
-    if (aRes.ok) {
-      const apps = await aRes.json();
-      if (Array.isArray(apps)) {
-        apps.forEach((a) => {
-          if (a.email) appMap[a.email.toLowerCase()] = a;
-        });
-      }
+  // 3. Aggregate application resume data from job_applications, applications, and candidates tables
+  let emailDataMap = {};
+  const addEmailData = (arr) => {
+    if (Array.isArray(arr)) {
+      arr.forEach((item) => {
+        if (item && item.email) {
+          const em = String(item.email).toLowerCase();
+          emailDataMap[em] = {
+            resume_url: item.resume_url || emailDataMap[em]?.resume_url || null,
+            resume_text: item.resume_text || emailDataMap[em]?.resume_text || null,
+            skills: item.skills || emailDataMap[em]?.skills || "",
+            experience: item.experience || emailDataMap[em]?.experience || "",
+            location: item.location || emailDataMap[em]?.location || "",
+            sector: item.sector || emailDataMap[em]?.sector || "",
+          };
+        }
+      });
     }
-  } catch (e) {
-    console.warn("Could not fetch job_applications:", e.message);
-  }
+  };
 
-  // 4. Merge profile & application data into users
+  const headers = {
+    apikey: env.SUPABASE_SERVICE_KEY,
+    Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
+  };
+
+  await Promise.allSettled([
+    fetch(`${env.SUPABASE_URL}/rest/v1/job_applications?select=email,resume_url,resume_text`, { headers })
+      .then((r) => (r.ok ? r.json() : []))
+      .then(addEmailData)
+      .catch(() => {}),
+    fetch(`${env.SUPABASE_URL}/rest/v1/applications?select=email,resume_url,resume_text`, { headers })
+      .then((r) => (r.ok ? r.json() : []))
+      .then(addEmailData)
+      .catch(() => {}),
+    fetch(`${env.SUPABASE_URL}/rest/v1/candidates?select=email,resume_url,resume_text`, { headers })
+      .then((r) => (r.ok ? r.json() : []))
+      .then(addEmailData)
+      .catch(() => {}),
+  ]);
+
+  // 4. Merge aggregated data into users
   const enriched = users.map((u) => {
-    const cp = profileMap[u.id] || profileMap[u.auth_id] || {};
-    const app = appMap[(u.email || "").toLowerCase()] || {};
+    const uId = u.id != null ? String(u.id) : "";
+    const authId = u.auth_id != null ? String(u.auth_id) : "";
+    const em = (u.email || "").toLowerCase();
+
+    const cp = profileMap[uId] || profileMap[authId] || {};
+    const app = emailDataMap[em] || {};
+
+    const resume_url = u.resume_url || cp.resume_url || app.resume_url || null;
+    const resume_text = u.resume_text || cp.resume_text || app.resume_text || null;
+    const skills = u.skills || (Array.isArray(cp.skills) ? cp.skills.join(", ") : cp.skills) || app.skills || "";
+    const experience = u.experience || cp.experience_years || app.experience || "";
+    const location = u.location || cp.location || app.location || "";
+    const sector = u.sector || cp.sector || app.sector || "";
 
     return {
       ...u,
-      resume_url: u.resume_url || cp.resume_url || app.resume_url || null,
-      resume_text: u.resume_text || cp.resume_text || app.resume_text || null,
-      skills: u.skills || (Array.isArray(cp.skills) ? cp.skills.join(", ") : cp.skills) || "",
-      experience: u.experience || cp.experience_years || "",
-      location: u.location || cp.location || "",
-      sector: u.sector || cp.sector || "",
+      resume_url,
+      resume_text,
+      skills,
+      experience,
+      location,
+      sector,
     };
   });
 
