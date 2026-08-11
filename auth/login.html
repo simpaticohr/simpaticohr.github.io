@@ -663,10 +663,38 @@
     }
   }
 
-  // ── SOCIAL LOGIN ─────────────────────────────────────────────────
+  // ── SOCIAL LOGIN (SSO via Supabase OAuth) ───────────────────────
   async function socialLogin(provider) {
-    // ⚠️ Replace with your Supabase OAuth redirect call when ready
-    showAlert("Social login coming soon.", "warning");
+    const role = selectedRole || 'hr';
+    // Persist target role so the callback keeps portal context
+    sessionStorage.setItem('simpatico_auth_role', role);
+    localStorage.setItem('simpatico_auth_role', role);
+
+    const callback = window.location.origin + '/platform/auth-callback.html?role=' + role;
+    const db = window.SimpaticoDB || window._supabaseClient ||
+      (typeof getSupabaseClient === 'function' ? getSupabaseClient() : null);
+
+    try {
+      if (db) {
+        // Sign out any previous session BEFORE starting a new OAuth flow
+        try { await db.auth.signOut(); } catch(e) {}
+        const { error } = await db.auth.signInWithOAuth({
+          provider: provider,
+          options: {
+            redirectTo: callback,
+            queryParams: provider === 'google' ? { prompt: 'select_account' } : undefined
+          }
+        });
+        if (error) showAlert('Social sign-in failed: ' + error.message, 'warning');
+      } else {
+        // SDK not ready — fall back to a direct authorize redirect
+        const base = SUPABASE_URL || 'https://cvkxtsvgnynxexmemfuy.supabase.co';
+        window.location.href = base + '/auth/v1/authorize?provider=' + provider + '&redirect_to=' + encodeURIComponent(callback);
+      }
+    } catch (e) {
+      console.error('[socialLogin]', e);
+      showAlert('Social sign-in failed. Please try again.', 'warning');
+    }
   }
 </script>
 </body>
