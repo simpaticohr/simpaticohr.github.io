@@ -12925,7 +12925,6 @@ async function handleInterviewReportFromTranscript(request, env, ctx) {
   const body = await safeJson(request) || {};
   const { role = "Software Engineer", level = "mid", transcript = [], interview_level = "" } = body;
 
-  // Determine if this is a non-technical interview
   const il = (interview_level || "").toLowerCase();
   const isNonTech = il.includes('hr') || il.includes('behavioral') || il.includes('culture') ||
     il.includes('competency') || il.includes('screening') || il.includes('communication') ||
@@ -12933,30 +12932,142 @@ async function handleInterviewReportFromTranscript(request, env, ctx) {
     il.includes('client interaction');
 
   const userTurns = transcript.filter(t => t.role === "user");
-  let totalWords = 0;
-  userTurns.forEach(t => {
+  const modelTurns = transcript.filter(t => t.role === "model");
+
+  if (userTurns.length === 0) {
+    return apiResponse({
+      overallScore: 0, recommendation: "no-hire",
+      summary: "No candidate responses were recorded in the transcript.",
+      topStrengths: [], focusAreas: ["No answers provided"], nextSteps: ["Retry the interview"],
+      answers: []
+    });
+  }
+
+  // ── Try LLM evaluation first ──
+  try {
+    const transcriptDigest = transcript.slice(-40).map(t => {
+      const role = t.role === "model" ? "INTERVIEWER" : "CANDIDATE";
+      const text = (t.parts?.map(p => p.text).join(" ") || "").substring(0, 800);
+      return `${role}: ${text}`;
+    }).join("\n");
+
+    const prompt = `You are a senior hiring panel scoring a live voice interview transcript.
+Position: ${role} (${level} level)
+
+TRANSCRIPT:
+${transcriptDigest}
+
+Score the candidate strictly from the transcript evidence. Consider depth, specificity, technical accuracy, communication quality, and use of concrete examples. Penalize vagueness and buzzword-only answers. Be calibrated — 50 is average, 80+ is exceptional.
+
+For each candidate response, assign an individual score.
+
+Return ONLY valid JSON (no markdown):
+{
+  "overallScore": <0-100>,
+  "recommendation": "strong-hire|hire|lean-hire|no-hire",
+  "summary": "2-3 sentence summary of performance...",
+  "topStrengths": ["strength1", "strength2", "strength3"],
+  "focusAreas": ["area1", "area2"],
+  "nextSteps": ["step1", "step2"],
+  "perAnswerScores": [<score1>, <score2>, ...]
+}`;
+
+    const tenantId = ctx?.tenantId || "default";
+    const llmResult = await runLLM(env, tenantId, [
+      { role: "system", content: "You are a precise JSON generator. Return only valid JSON objects. No markdown fences." },
+      { role: "user", content: prompt }
+    ], 1500);
+
+    const responseText = llmResult?.response || (typeof llmResult === "string" ? llmResult : "");
+    const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      const report = JSON.parse(jsonMatch[0]);
+      if (report.summary && typeof report.overallScore === "number") {
+        const perScores = Array.isArray(report.perAnswerScores) ? report.perAnswerScores : [];
+        console.log(`[Interview] LLM transcript report: score=${report.overallScore}`);
+        return apiResponse({
+          overallScore: report.overallScore,
+          recommendation: report.recommendation || (report.overallScore >= 82 ? "strong-hire" : report.overallScore >= 70 ? "hire" : report.overallScore >= 55 ? "lean-hire" : "no-hire"),
+          summary: report.summary,
+          topStrengths: report.topStrengths || [],
+          focusAreas: report.focusAreas || [],
+          nextSteps: report.nextSteps || [],
+          answers: userTurns.map((t, idx) => ({
+            questionId: `q${idx + 1}`,
+            question: (modelTurns[idx]?.parts?.map(p => p.text).join(" ") || `Question ${idx + 1}`).substring(0, 200),
+            answer: t.parts?.map(p => p.text).join(" ") || "",
+            score: perScores[idx] != null ? Math.min(100, Math.max(0, perScores[idx])) : report.overallScore,
+            verdict: (perScores[idx] || report.overallScore) >= 75 ? "good" : "weak",
+            strengths: ["Spoken response evaluated by AI"],
+            improvements: [],
+            scoringMethod: "llm"
+          }))
+        });
+      }
+    }
+    console.warn("[Interview] LLM transcript report could not be parsed, using heuristic fallback");
+  } catch (err) {
+    console.warn("[Interview] LLM transcript report failed, using heuristic fallback:", err.message);
+  }
+
+  // ── Fallback: per-answer heuristic scoring (differentiated) ──
+  const techKeywords = ["architecture", "scalability", "latency", "database", "cache", "microservices", "async", "docker", "kubernetes", "aws", "security", "testing", "monitoring", "optimization", "concurrency", "algorithm", "api", "deploy"];
+  const behavioralKeywords = ["team", "collaboration", "communication", "stakeholder", "deadline", "leadership", "initiative", "feedback", "challenge", "customer", "process", "improvement", "outcome", "impact", "strategy"];
+  const relevantKeywords = isNonTech ? behavioralKeywords : techKeywords;
+
+  const perAnswerResults = userTurns.map((t, idx) => {
     const text = t.parts?.map(p => p.text).join(" ") || "";
-    totalWords += text.split(/\s+/).length;
+    const words = text.split(/\s+/).filter(w => w.length > 0);
+    const sentences = text.split(/[.!?]+/).filter(s => s.trim().length > 0);
+    const wordCount = words.length;
+    const lowerText = text.toLowerCase();
+
+    let answerScore = 35;
+    if (wordCount >= 5)  answerScore += 8;
+    if (wordCount >= 15) answerScore += 10;
+    if (wordCount >= 30) answerScore += 10;
+    if (wordCount >= 60) answerScore += 8;
+    if (sentences.length >= 2) answerScore += 7;
+    if (sentences.length >= 4) answerScore += 5;
+
+    // Keyword relevance bonus
+    let kwHits = 0;
+    relevantKeywords.forEach(kw => { if (lowerText.includes(kw)) kwHits++; });
+    answerScore += Math.min(12, kwHits * 3);
+
+    // Specificity bonus: numbers, percentages, proper nouns suggest concrete examples
+    const specificityMarkers = text.match(/\d+%|\d+\s*(ms|seconds|users|requests|GB|MB|TB|million|thousand)/gi) || [];
+    answerScore += Math.min(5, specificityMarkers.length * 2);
+
+    answerScore = Math.min(80, Math.max(20, answerScore)); // Cap at 80 without real AI
+
+    const qTurn = modelTurns[idx] || {};
+    const qText = (qTurn.parts?.map(p => p.text).join(" ") || `Question ${idx + 1}`).substring(0, 200);
+
+    return {
+      questionId: `q${idx + 1}`,
+      question: qText,
+      answer: text,
+      score: answerScore,
+      verdict: answerScore >= 60 ? "good" : "weak",
+      strengths: wordCount >= 20 ? ["Spoken response with substantive detail"] : ["Spoken response recorded"],
+      improvements: [isNonTech ? "Provide concrete examples with outcomes" : "Detail system metrics and trade-offs"],
+      scoringMethod: "heuristic"
+    };
   });
 
-  let overallScore = 72;
-  if (userTurns.length > 0) {
-    const avgWordsPerTurn = totalWords / userTurns.length;
-    if (avgWordsPerTurn > 15) overallScore += 10;
-    if (avgWordsPerTurn > 35) overallScore += 8;
-    if (userTurns.length >= 3) overallScore += 5;
-  }
-  overallScore = Math.min(96, Math.max(50, overallScore));
-
+  const overallScore = Math.round(
+    perAnswerResults.reduce((sum, a) => sum + a.score, 0) / perAnswerResults.length
+  );
   const recommendation = overallScore >= 82 ? "strong-hire" : overallScore >= 70 ? "hire" : overallScore >= 55 ? "lean-hire" : "no-hire";
 
   return apiResponse({
     overallScore,
     recommendation,
-    summary: `Candidate completed a live audio interview for ${role} (${level}). Exhibited ${userTurns.length} spoken responses with total word volume of ${totalWords} words.`,
+    summary: `Candidate completed a live audio interview for ${role} (${level}). Exhibited ${userTurns.length} spoken responses. Note: AI scoring was temporarily unavailable — scores are heuristic estimates based on response depth and relevance analysis.`,
     topStrengths: [
       "Fluid voice communication and active listening",
-      isNonTech ? "Responsive engagement and situational awareness during live AI conversation" : "Responsive technical engagement during live AI conversation",
+      isNonTech ? "Responsive engagement during live AI conversation" : "Responsive technical engagement during live AI conversation",
       "Proctored audio integrity verified"
     ],
     focusAreas: [
@@ -12966,17 +13077,10 @@ async function handleInterviewReportFromTranscript(request, env, ctx) {
       "Review interview audio transcript in Client Portal",
       "Schedule final round hiring manager discussion"
     ],
-    answers: userTurns.map((t, idx) => ({
-      questionId: `q${idx + 1}`,
-      question: `Question ${idx + 1}`,
-      answer: t.parts?.map(p => p.text).join(" ") || "",
-      score: overallScore,
-      verdict: overallScore >= 75 ? "good" : "weak",
-      strengths: ["Spoken response recorded"],
-      improvements: [isNonTech ? "Provide concrete examples with outcomes" : "Detail system metrics"]
-    }))
+    answers: perAnswerResults
   });
 }
+
 
 async function handleInterviewMatchResume(request, env, ctx) {
   const body = await safeJson(request) || {};
