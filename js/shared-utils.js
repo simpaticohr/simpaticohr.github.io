@@ -25,28 +25,36 @@
    * Priority: live Supabase token → sh_token → simpatico_token → sb-*-auth-token (localStorage)
    */
   function getAuthToken() {
+    // Helper: a JWT always has exactly 3 dot-separated segments.
+    function _isJWT(s) { return typeof s === 'string' && s.split('.').length === 3; }
+
     // 1. Prefer the live token kept fresh by onAuthStateChange
-    if (window._simpatico_liveToken) return window._simpatico_liveToken;
+    if (_isJWT(window._simpatico_liveToken)) return window._simpatico_liveToken;
 
     // 2. Try to find the Supabase auto-generated key first (freshest from SDK)
-    let token = '';
-    for (let i = 0; i < localStorage.length; i++) {
-      const k = localStorage.key(i);
+    var token = '';
+    for (var i = 0; i < localStorage.length; i++) {
+      var k = localStorage.key(i);
       if (k && k.startsWith('sb-') && k.endsWith('-auth-token')) {
         try {
-          const parsed = JSON.parse(localStorage.getItem(k));
+          var parsed = JSON.parse(localStorage.getItem(k));
           token = parsed.access_token || '';
-          if (token) break;
+          if (_isJWT(token)) break;
+          token = ''; // not a valid JWT, keep searching
         } catch (e) { /* skip malformed */ }
       }
     }
 
-    // 3. Fallback: primary manual localStorage keys (might be stale)
+    // 3. Fallback: primary manual localStorage keys (only if they look like JWTs)
     if (!token) {
-      token = localStorage.getItem('sh_token')
-           || localStorage.getItem('simpatico_token')
-           || localStorage.getItem('sb-token')
-           || '';
+      var candidates = [
+        localStorage.getItem('sh_token'),
+        localStorage.getItem('simpatico_token'),
+        localStorage.getItem('sb-token')
+      ];
+      for (var j = 0; j < candidates.length; j++) {
+        if (_isJWT(candidates[j])) { token = candidates[j]; break; }
+      }
     }
     
     return token;

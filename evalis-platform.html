@@ -1363,8 +1363,14 @@ const SB_KEY = window.SIMPATICO_CONFIG?.supabaseAnonKey;
 // Build headers dynamically — use JWT (authenticated role) when available,
 // fall back to anon key. Migration 050 revoked INSERT/UPDATE/DELETE from
 // anon on interviews, so writes REQUIRE an authenticated session.
+function _isJWT(s) { return typeof s === 'string' && s.split('.').length === 3; }
+
 function getSbHeaders() {
-  const token = (typeof getAuthToken === 'function' && getAuthToken()) || SB_KEY;
+  let token = (typeof getAuthToken === 'function' && getAuthToken()) || '';
+  // Only use the token if it is a valid JWT (3 dot-separated parts).
+  // Non-JWT strings (e.g. career-lab passphrases) cause Supabase to reject
+  // with "Expected 3 parts in JWT; got 1".
+  if (!_isJWT(token)) token = SB_KEY;
   return {
     'Content-Type':  'application/json',
     'apikey':        SB_KEY,
