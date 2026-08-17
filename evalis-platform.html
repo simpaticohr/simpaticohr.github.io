@@ -2343,13 +2343,36 @@ async function validateToken(token) {
     throw new Error('Token is too short or empty.');
   }
   const cleaned = token.trim();
+
+  // Try Worker API first (service key, bypasses RLS)
+  try {
+    const wr = await fetch(W + '/interviews/validate', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'apikey': SB_KEY,
+        'Authorization': 'Bearer ' + SB_KEY,
+        'X-Tenant-ID': window.SIMPATICO_CONFIG?.tenantId || 'SIMP_PRO_MAIN'
+      },
+      body: JSON.stringify({ token: cleaned })
+    });
+    if (wr.ok) {
+      const wd = await wr.json();
+      // Worker returns { valid, interview, reason }
+      if (wd.valid === false) throw new Error(wd.reason || 'Invalid token');
+      if (wd.interview) return wd.interview;
+    }
+    // If Worker returns non-ok, fall through to direct query
+    console.warn('[validateToken] Worker returned', wr.status);
+  } catch (e) {
+    if (e.message && !e.message.includes('fetch')) throw e; // re-throw validation errors
+    console.warn('[validateToken] Worker unreachable, trying direct Supabase');
+  }
+
+  // Fallback: direct Supabase REST query
   const url = `${SB_URL}/rest/v1/interviews?token=eq.${encodeURIComponent(cleaned)}&select=*&limit=1`;
   const r   = await fetch(url, {
-    headers: {
-      'apikey':        SB_KEY,
-      'Authorization': 'Bearer ' + SB_KEY,
-      'Content-Type':  'application/json',
-    },
+    headers: getSbHeaders(),
   });
   if (!r.ok) {
     const err = await r.json().catch(() => ({}));
