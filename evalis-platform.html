@@ -1454,6 +1454,33 @@ async function db(action, table, data = null, filters = null, select = '*', orde
   }
 }
 
+// Helper: insert into 'interviews' via Worker API (service key, bypasses RLS)
+// Falls back to direct Supabase REST insert on Worker failure.
+async function dbInsertInterview(payload) {
+  // 1. Try Worker API first
+  try {
+    const res = await fetch(W + '/client/interviews/create', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'apikey': SB_KEY,
+        'Authorization': 'Bearer ' + SB_KEY,
+        'X-Tenant-ID': window.SIMPATICO_CONFIG?.tenantId || 'SIMP_PRO_MAIN'
+      },
+      body: JSON.stringify(payload)
+    });
+    if (res.ok) return await res.json().catch(() => ({ ok: true }));
+    const err = await res.json().catch(() => ({}));
+    if (res.status === 403) throw new Error(err.message || 'Forbidden');
+    console.warn('[dbInsertInterview] Worker failed:', err.message || res.status);
+  } catch (e) {
+    if (e.message?.includes('Forbidden')) throw e;
+    console.warn('[dbInsertInterview] Worker unreachable, trying direct insert');
+  }
+  // 2. Fallback: direct Supabase REST
+  return await db('insert', 'interviews', payload);
+}
+
 async function uploadFile(file, fn) {
   try {
     const fd = new FormData();
@@ -2814,7 +2841,7 @@ async function runATS(app) {
     }, { id: app.id });
     if (status === 'shortlisted') {
       const token = crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36);
-      await db('insert', 'interviews', {
+      await dbInsertInterview({
         application_id: app.id, job_id: app.job_id, token,
         interview_type: 'real', status: 'pending',
         interview_role: jr, interview_level: jl, question_count: 10, ai_difficulty: document.getElementById('diffSel')?.value || 'adaptive',
@@ -3411,7 +3438,7 @@ async function _saveResults(r) {
       await db('update', 'interviews', payload, { token: curToken });
     } else {
       const fb = crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36);
-      await db('insert', 'interviews', {
+      await dbInsertInterview({
         ...payload, application_id: curAppId, job_id: curJobId,
         token: fb, started_at: new Date(Date.now() - secs * 1000).toISOString(),
         created_at: new Date().toISOString(),
@@ -3804,7 +3831,7 @@ async function sendInvite(appId, email) {
     const r       = jobData?.title || 'Interview';
     const lv      = jobData?.level || 'Mid-Level';
 
-    await db('insert', 'interviews', {
+    await dbInsertInterview({
       application_id:    appId,
       job_id:            selHRJob || null,
       token,
@@ -3870,11 +3897,11 @@ async function generateDirectInvite() {
       expires_at: expires.toISOString(), created_at: new Date().toISOString(),
     };
     try {
-      await db('insert', 'interviews', { ..._basePayload, hide_question_text: _hideQ });
+      await dbInsertInterview({ ..._basePayload, hide_question_text: _hideQ });
     } catch (_dbErr) {
       if (_dbErr.message?.includes('hide_question_text') || _dbErr.message?.includes('schema cache')) {
         console.warn('[generateDirectInvite] hide_question_text column missing, inserting without it');
-        await db('insert', 'interviews', _basePayload);
+        await dbInsertInterview(_basePayload);
       } else { throw _dbErr; }
     }
 
@@ -4062,7 +4089,7 @@ async function bulkGenerateInvites() {
     try {
       const token   = crypto.randomUUID ? crypto.randomUUID() : (Date.now().toString(36) + Math.random().toString(36).substring(2, 10));
       const expires = new Date(Date.now() + 72 * 3600000);
-      await db('insert', 'interviews', {
+      await dbInsertInterview({
         token, candidate_email: email,
         interview_role: bulkRole, interview_level: bulkLevel,
         ai_difficulty: 'adaptive', question_count: 10, interview_language: 'en',
