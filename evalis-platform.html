@@ -351,6 +351,11 @@
       70%{transform:scale(1.15);box-shadow:0 0 0 12px rgba(99,102,241,0)}
       100%{transform:scale(.9);box-shadow:0 0 0 0 rgba(99,102,241,0)}
     }
+    @keyframes pulse-dot{
+      0%{transform:scale(.8);opacity:.6}
+      50%{transform:scale(1.2);opacity:1}
+      100%{transform:scale(.8);opacity:.6}
+    }
 
     /* Bargie word counter pill */
     .bargie-words{
@@ -917,115 +922,98 @@
       <button class="btn btn-go" style="width:auto;padding:14px 44px" onclick="requestScreenShare()">📺 Share Screen Now</button>
     </div>
 
-    <!-- ══ LIVE INTERVIEW ══ -->
+    <!-- ══ LIVE INTERVIEW — Full-Duplex Gemini Live ══ -->
     <div id="page-live" class="hidden">
-      <div class="card">
-        <!-- Proctor bar -->
-        <div class="proctor-bar" id="proctorBar" style="display:none">
-          <div style="display:flex;align-items:center;gap:6px;color:var(--green);font-size:.8rem">
-            <span class="live-dot"></span><strong>PROCTORED SESSION</strong>
+      <div class="card" style="padding:0;overflow:hidden;border:none;background:transparent">
+
+        <!-- ── Top Status Bar ── -->
+        <div id="proctorBar" style="display:none;padding:10px 20px;background:rgba(16,185,129,.06);border-bottom:1px solid rgba(16,185,129,.15);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+          <div style="display:flex;align-items:center;gap:6px;color:var(--green);font-size:.78rem">
+            <span class="live-dot"></span><strong>PROCTORED</strong>
           </div>
-          <div style="display:flex;align-items:center;gap:14px;font-size:.78rem">
+          <div style="display:flex;align-items:center;gap:12px;font-size:.75rem">
             <span style="color:var(--muted)">Screen: <span id="screenStatus" style="color:var(--green)">✓</span></span>
             <span style="color:var(--muted)">Cam: <span id="camStatus" style="color:var(--green)">✓</span></span>
-            <span>⚠️ Flags: <span id="violationCount" style="color:var(--red);font-weight:800">0</span>/3</span>
+            <span>⚠️ <span id="violationCount" style="color:var(--red);font-weight:800">0</span>/3</span>
           </div>
         </div>
 
-        <!-- Interview meta -->
-        <div class="interview-meta" id="interviewMeta" style="display:none">
-          <span>🎭 <strong id="metaRole">—</strong></span>
-          <span>📊 <strong id="metaLevel">—</strong></span>
-          <span>🌐 <strong id="metaLang">—</strong></span>
+        <!-- ── Interview Header ── -->
+        <div id="interviewMeta" style="display:none;padding:14px 20px 8px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:.78rem;color:var(--muted)">
+          <span>🎭 <strong id="metaRole" style="color:var(--text)">—</strong></span>
+          <span style="opacity:.3">│</span>
+          <span>📊 <strong id="metaLevel" style="color:var(--text)">—</strong></span>
+          <span style="opacity:.3">│</span>
+          <span>🌐 <strong id="metaLang" style="color:var(--text)">—</strong></span>
           <span id="metaModeTag"></span>
-          <div style="margin-left:auto; display:flex;align-items:center;gap:6px;background:rgba(255,255,255,0.05);padding:2px 8px;border-radius:20px;border:1px solid var(--border)">
-            <i class="fas fa-magic" style="color:var(--dim);font-size:10px"></i>
-            <select id="avatarStyleSelect" onchange="changeAvatarStyle(this.value)" style="background:none;border:none;color:var(--text);font-size:10px;font-weight:700;outline:none;cursor:pointer">
-              <option value="neural">Neural AI Orb</option>
-              <option value="orb">AI Visualizer Orb</option>
-              <option value="canvas">Canvas Recruiter (Lipsync)</option>
-              <option value="simli">Simli Premium (WebRTC)</option>
-            </select>
-            <button id="simliSettingsBtn" onclick="openSimliSettings()" style="background:none;border:none;color:var(--dim);cursor:pointer;font-size:10px;display:none;padding:0 4px"><i class="fas fa-cog"></i></button>
+          <span id="metaModelBadge" style="margin-left:auto;font-size:.68rem;background:linear-gradient(135deg,rgba(99,102,241,.12),rgba(168,85,247,.12));padding:3px 10px;border-radius:20px;color:#a5b4fc;border:1px solid rgba(99,102,241,.2)">🎙️ Full-Duplex Live</span>
+        </div>
+
+        <!-- ── Progress ── -->
+        <div style="padding:0 20px">
+          <div class="progress-wrap" style="margin:6px 0 4px"><div class="progress-fill" id="progBar"></div></div>
+          <div class="progress-info" style="margin-bottom:0">
+            <span id="progText" style="font-size:.72rem">Connecting…</span>
+            <span class="q-tag" id="qTag" style="font-size:.65rem">LIVE</span>
           </div>
-          <span id="metaModelBadge" style="margin-left:12px;font-size:.7rem;background:rgba(99,102,241,.1);padding:2px 8px;border-radius:8px;color:var(--accent2);display:inline-flex;align-items:center;gap:4px">✨ Gemini 3.7 Flash</span>
         </div>
 
-        <!-- Progress -->
-        <div class="progress-wrap"><div class="progress-fill" id="progBar"></div></div>
-        <div class="progress-info">
-          <span id="progText">Question 1 of 10</span>
-          <span class="q-tag" id="qTag">Q1</span>
-        </div>
+        <!-- ── Main Interview Area ── -->
+        <div style="display:flex;flex-direction:column;align-items:center;padding:24px 20px 16px;min-height:340px;position:relative">
 
-        <div class="status-bar"><div class="status-dot"></div><span>Interview Active</span></div>
+          <!-- Floating Status Pill -->
+          <div id="fdStatusPill" style="display:inline-flex;align-items:center;gap:8px;padding:6px 18px;border-radius:24px;font-size:.78rem;font-weight:600;background:rgba(99,102,241,.1);border:1px solid rgba(99,102,241,.2);color:#a5b4fc;margin-bottom:16px;transition:all .4s ease">
+            <span id="fdStatusDot" style="width:8px;height:8px;border-radius:50%;background:#6366f1;display:inline-block;animation:pulse-dot 1.5s infinite"></span>
+            <span id="fdStatusText">Connecting to AI…</span>
+          </div>
 
-        <!-- ORB -->
-        <div class="orb-container">
-          <div>
-            <div class="avatar-container" id="orb">
-              <canvas id="neuralOrbCanvas" width="260" height="260"></canvas>
-              <canvas id="avatarCanvas" class="avatar-video" width="240" height="240" style="display:none;z-index:4;width:110px;height:110px;background:#0a0a14;"></canvas>
-              <video id="simliVideo" class="avatar-video" autoplay playsinline style="display:none;object-fit:cover;z-index:5;"></video>
-              <audio id="simliAudio" autoplay style="display:none;"></audio>
-              <div class="avatar-ring"></div>
-              <div class="avatar-glow"></div>
-              <div class="avatar-pulse-ring"></div>
+          <!-- Neural Orb -->
+          <div class="orb-container" style="margin:0">
+            <div>
+              <div class="avatar-container" id="orb" style="width:180px;height:180px">
+                <canvas id="neuralOrbCanvas" width="260" height="260"></canvas>
+                <div class="avatar-ring"></div>
+                <div class="avatar-glow"></div>
+                <div class="avatar-pulse-ring"></div>
+              </div>
             </div>
-            <div class="orb-label" id="orbLabel">Preparing…</div>
           </div>
+
+          <!-- Live Subtitles -->
+          <div id="fdSubtitles" style="width:100%;max-width:560px;min-height:60px;max-height:120px;overflow-y:auto;text-align:center;margin-top:16px;padding:12px 16px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);border-radius:14px;font-size:.88rem;line-height:1.55;color:var(--text);transition:all .3s ease">
+            <span id="fdSubtitleText" style="opacity:.7">Waiting for connection…</span>
+          </div>
+
+          <!-- Session Timer -->
+          <div id="timer" style="margin-top:12px;font-size:.72rem;color:var(--muted);font-variant-numeric:tabular-nums;letter-spacing:.5px">00:00</div>
+
+          <!-- Error -->
+          <div class="error-box" id="errorBox" style="margin-top:8px"></div>
+
+          <!-- Hidden elements for backward compat -->
+          <div id="questionBox" style="display:none"></div>
+          <div id="thinkBox" class="hidden" style="display:none"></div>
+          <div id="hfInfo" style="display:none"></div>
+          <div id="waveWrap" style="display:none"></div>
+          <div id="silenceWrap" style="display:none"></div>
+          <div id="liveTranscriptPreview" style="display:none"><span id="liveTranscriptText"></span></div>
+          <div id="manualSubmitWrap" style="display:none"><button id="btnManualSubmit" style="display:none"></button></div>
+          <button id="skipBtn" style="display:none"></button>
+          <button id="toggleQText" style="display:none"></button>
+          <canvas id="avatarCanvas" width="1" height="1" style="display:none"></canvas>
+          <video id="simliVideo" style="display:none"></video>
+          <audio id="simliAudio" style="display:none"></audio>
+          <select id="avatarStyleSelect" style="display:none"><option value="neural">Neural</option></select>
+          <button id="simliSettingsBtn" style="display:none"></button>
         </div>
 
-        <!-- Error -->
-        <div class="error-box" id="errorBox"></div>
-
-        <!-- Question -->
-        <div style="position:relative">
-          <div class="question-box" id="questionBox">Preparing your first question…</div>
-          <button id="toggleQText" onclick="toggleQuestionText()" style="position:absolute;top:8px;right:8px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.1);color:var(--muted);font-size:11px;padding:4px 10px;border-radius:8px;cursor:pointer;font-weight:600;transition:all .2s;z-index:2" title="Hide/Show question text">👁 Hide Text</button>
-        </div>
-
-        <!-- Thinking indicator -->
-        <div class="thinking hidden" id="thinkBox">
-          <div class="thinking-dots"><span></span><span></span><span></span></div>
-          <span>Analyzing your response…</span>
-        </div>
-
-        <!-- HF info -->
-        <div class="hf-info" id="hfInfo">🎤 Speak naturally. Your response will auto-submit when you pause, or tap Done below.</div>
-
-        <!-- Live Speech Feedback / Mobile Transcript & Action -->
-        <div id="liveTranscriptPreview" style="display:none;width:100%;max-height:70px;overflow-y:auto;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);border-radius:10px;padding:8px 12px;font-size:.82rem;color:var(--text);line-height:1.4;text-align:left;margin-top:8px">
-          <span style="color:var(--muted);font-size:.7rem;display:block;margin-bottom:2px">Live Speech:</span>
-          <span id="liveTranscriptText" style="color:#a5b4fc"></span>
-        </div>
-
-        <!-- Wave -->
-        <div class="wave-wrap" id="waveWrap">
-          <div class="wave-bar"></div><div class="wave-bar"></div><div class="wave-bar"></div>
-          <div class="wave-bar"></div><div class="wave-bar"></div><div class="wave-bar"></div>
-          <div class="wave-bar"></div><div class="wave-bar"></div><div class="wave-bar"></div>
-        </div>
-
-        <!-- Silence progress bar -->
-        <div class="silence-bar-wrap" id="silenceWrap">
-          <div class="silence-text" id="silenceText">Auto-submitting…</div>
-          <div class="silence-bar"><div class="silence-fill" id="silenceFill"></div></div>
-        </div>
-
-        <div class="timer" id="timer">00:00</div>
-
-        <!-- Manual Submit for Mobile / Touch -->
-        <div id="manualSubmitWrap" style="text-align:center;margin:10px 0">
-          <button class="btn btn-go" id="btnManualSubmit" onclick="manualSubmitAnswer()" style="display:none;width:auto;min-width:220px;padding:11px 24px;border-radius:12px;font-size:.88rem;font-weight:700;margin:0 auto 10px;background:linear-gradient(135deg,#10b981,#059669);box-shadow:0 0 20px rgba(16,185,129,.25)">
-            <i class="fas fa-check-circle"></i> Done Speaking — Submit
+        <!-- ── Bottom Action Bar ── -->
+        <div style="padding:12px 20px 20px;display:flex;justify-content:center;gap:12px">
+          <button class="btn-end" id="fdEndBtn" onclick="endEarly()" style="background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.25);color:#f87171;padding:10px 28px;border-radius:12px;font-size:.82rem;font-weight:700;cursor:pointer;transition:all .2s;display:flex;align-items:center;gap:6px">
+            <i class="fas fa-stop-circle"></i> End Interview
           </button>
         </div>
 
-        <div style="text-align:center">
-          <button class="btn-skip" id="skipBtn" onclick="skipQuestion()">Skip Question →</button>
-        </div>
-        <button class="btn-end" onclick="endEarly()">⏹ End Interview Early</button>
       </div>
     </div>
 
@@ -2879,8 +2867,497 @@ async function callGeminiDirect(messages, apiKey, model = 'gemini-3.7-flash') {
   }
 }
 
-// ─────────────────────────────────────────────
-// DIRECT OPENAI CONNECTOR
+// ═════════════════════════════════════════════════════════════
+// FULL-DUPLEX GEMINI LIVE — WebSocket Audio Engine
+// Real-time bidirectional streaming with barge-in & natural voice
+// ═════════════════════════════════════════════════════════════
+let _fdWs = null;               // Full-duplex WebSocket
+let _fdMicStream = null;        // MediaStream from getUserMedia
+let _fdMicCtx = null;           // AudioContext for mic capture (16kHz)
+let _fdMicProcessor = null;     // ScriptProcessorNode
+let _fdPlayCtx = null;          // AudioContext for PCM playback (24kHz)
+let _fdNextPlayTime = 0;        // Scheduled playback time
+let _fdAudioQueue = [];         // Active AudioBufferSourceNodes
+let _fdAiSpeaking = false;      // Is AI currently outputting audio?
+let _fdAiTextBuffer = '';       // Accumulated AI text for current turn
+let _fdUserTextBuffer = '';     // Accumulated user speech transcript
+let _fdLiveTranscript = [];     // Full conversation [{role, parts}]
+let _fdSessionTimer = null;     // Session duration timer
+let _fdSessionSecs = 0;         // Total seconds elapsed
+
+function _fdGetPlayCtx() {
+  if (!_fdPlayCtx) {
+    _fdPlayCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 24000 });
+  }
+  if (_fdPlayCtx.state === 'suspended') _fdPlayCtx.resume();
+  return _fdPlayCtx;
+}
+
+function _fdBase64ToFloat32(base64) {
+  const bin = atob(base64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  const int16 = new Int16Array(bytes.buffer);
+  const f32 = new Float32Array(int16.length);
+  for (let i = 0; i < int16.length; i++) f32[i] = int16[i] / 32768;
+  return f32;
+}
+
+function _fdPlayPcmChunk(base64Pcm) {
+  const ctx = _fdGetPlayCtx();
+  const samples = _fdBase64ToFloat32(base64Pcm);
+  if (samples.length === 0) return;
+
+  const buf = ctx.createBuffer(1, samples.length, 24000);
+  buf.getChannelData(0).set(samples);
+
+  const src = ctx.createBufferSource();
+  src.buffer = buf;
+  src.connect(ctx.destination);
+
+  const now = ctx.currentTime;
+  if (_fdNextPlayTime < now) _fdNextPlayTime = now + 0.04;
+
+  src.start(_fdNextPlayTime);
+  _fdAudioQueue.push(src);
+  _fdNextPlayTime += buf.duration;
+
+  src.onended = () => {
+    const idx = _fdAudioQueue.indexOf(src);
+    if (idx > -1) _fdAudioQueue.splice(idx, 1);
+  };
+}
+
+function _fdStopPlayback() {
+  _fdAudioQueue.forEach(s => { try { s.stop(); } catch(e) {} });
+  _fdAudioQueue.length = 0;
+  _fdNextPlayTime = 0;
+}
+
+async function _fdStartMicStream(ws) {
+  try {
+    _fdMicCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+    const source = _fdMicCtx.createMediaStreamSource(_fdMicStream);
+    _fdMicProcessor = _fdMicCtx.createScriptProcessor(2048, 1, 1);
+    source.connect(_fdMicProcessor);
+    _fdMicProcessor.connect(_fdMicCtx.destination);
+
+    _fdMicProcessor.onaudioprocess = (e) => {
+      const input = e.inputBuffer.getChannelData(0);
+      const int16 = new Int16Array(input.length);
+      for (let i = 0; i < input.length; i++) {
+        const s = Math.max(-1, Math.min(1, input[i]));
+        int16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+      }
+      const uint8 = new Uint8Array(int16.buffer);
+      let binary = '';
+      for (let i = 0; i < uint8.length; i++) binary += String.fromCharCode(uint8[i]);
+      const b64 = btoa(binary);
+
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({
+          realtimeInput: {
+            audio: { mimeType: 'audio/pcm;rate=16000', data: b64 }
+          }
+        }));
+      }
+    };
+  } catch(e) {
+    console.error('[FD] Mic stream setup error:', e);
+  }
+}
+
+function _fdStopMicStream() {
+  if (_fdMicProcessor) { try { _fdMicProcessor.disconnect(); } catch(e) {} _fdMicProcessor = null; }
+  if (_fdMicCtx) { try { _fdMicCtx.close(); } catch(e) {} _fdMicCtx = null; }
+}
+
+function _fdCleanupMic() {
+  if (_fdMicStream) { _fdMicStream.getTracks().forEach(t => t.stop()); _fdMicStream = null; }
+}
+
+function _fdSetStatus(state, text) {
+  const pill = document.getElementById('fdStatusPill');
+  const dot  = document.getElementById('fdStatusDot');
+  const txt  = document.getElementById('fdStatusText');
+  const sub  = document.getElementById('fdSubtitles');
+  if (!pill) return;
+
+  const states = {
+    connecting: { bg: 'rgba(99,102,241,.1)', border: 'rgba(99,102,241,.2)', color: '#a5b4fc', dot: '#6366f1' },
+    speaking:   { bg: 'rgba(16,185,129,.1)',  border: 'rgba(16,185,129,.25)', color: '#34d399', dot: '#10b981' },
+    listening:  { bg: 'rgba(34,211,238,.1)',   border: 'rgba(34,211,238,.25)', color: '#67e8f9', dot: '#22d3ee' },
+    error:      { bg: 'rgba(239,68,68,.1)',    border: 'rgba(239,68,68,.25)',  color: '#f87171', dot: '#ef4444' },
+  };
+  const s = states[state] || states.connecting;
+  pill.style.background = s.bg;
+  pill.style.borderColor = s.border;
+  pill.style.color = s.color;
+  if (dot) dot.style.background = s.dot;
+  if (txt) txt.textContent = text || state;
+
+  // Update orb visual state
+  try { setOrb(state === 'speaking' ? 'speaking' : state === 'listening' ? 'listening' : 'thinking'); } catch(e) {}
+}
+
+function _fdUpdateSubtitles(text, speaker) {
+  const el = document.getElementById('fdSubtitleText');
+  if (!el) return;
+  if (speaker === 'ai') {
+    el.style.color = 'var(--text)';
+    el.style.opacity = '1';
+  } else {
+    el.style.color = '#67e8f9';
+    el.style.opacity = '.85';
+  }
+  el.textContent = text;
+  const container = document.getElementById('fdSubtitles');
+  if (container) container.scrollTop = container.scrollHeight;
+}
+
+function _fdStartSessionTimer() {
+  _fdSessionSecs = 0;
+  if (_fdSessionTimer) clearInterval(_fdSessionTimer);
+  _fdSessionTimer = setInterval(() => {
+    _fdSessionSecs++;
+    const el = document.getElementById('timer');
+    if (el) el.textContent = `${String(Math.floor(_fdSessionSecs / 60)).padStart(2, '0')}:${String(_fdSessionSecs % 60).padStart(2, '0')}`;
+  }, 1000);
+}
+
+function _fdStopSessionTimer() {
+  if (_fdSessionTimer) { clearInterval(_fdSessionTimer); _fdSessionTimer = null; }
+}
+
+// ── Launch Full-Duplex Gemini Live Session ──
+async function startFullDuplexSession() {
+  // Reset state
+  _fdLiveTranscript = [];
+  _fdAiTextBuffer = '';
+  _fdUserTextBuffer = '';
+  _fdAiSpeaking = false;
+  _fdNextPlayTime = 0;
+  _fdAudioQueue = [];
+
+  // Get mic
+  try {
+    if (!_fdMicStream) {
+      _fdMicStream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
+      });
+    }
+  } catch (err) {
+    showError('🎤 Microphone access required for voice interview: ' + err.message);
+    return false;
+  }
+
+  // Get API key
+  const byok = getActiveBYOKConfig();
+  const geminiKey = byok.key;
+  if (!geminiKey || !geminiKey.startsWith('AIza')) {
+    showError('🔑 Gemini API Key required. Go to HR Dashboard → BYOK Settings and save your Google API key.');
+    return false;
+  }
+
+  // Build system prompt
+  const antiRepeatBlock = pastQuestions.length > 0 ? `
+CRITICAL ANTI-REPEAT RULE:
+This candidate was interviewed before (${pastQuestions.length} past questions). You MUST NOT ask questions on these topics or close variations:
+${pastQuestions.slice(0, 30).map(q => '- [R' + q.round + '] ' + q.topic + ': "' + q.text.substring(0, 100) + '"').join('\n')}
+Ask about DIFFERENT aspects that have NOT been explored.
+` : '';
+
+  const systemPrompt = `You are Simpatico AI, a warm, professional, and highly skilled AI interviewer at a top-tier company.
+You are conducting a ${level}-level interview for the role: "${role}".
+Language: ${L[lang]?.n || 'English'} only. Be warm, conversational, and professional — like a real human interviewer.
+${cv ? '\nCandidate Resume:\n' + cv.substring(0, 3000) + '\n' : ''}
+${antiRepeatBlock}
+Interview Protocol:
+1. Start by greeting the candidate warmly, introducing yourself briefly, then immediately ask the first question.
+2. Ask exactly ${totalQ} technical questions one by one. Mix: 30% technical, 40% behavioral (STAR), 30% situational.
+3. Tailor question depth to ${level} level.
+4. After each candidate response, briefly acknowledge it (1-2 sentences), then transition to the next question.
+5. If a response is vague or incomplete, ask ONE follow-up probe before moving on.
+6. Keep your responses extremely concise and natural — this is a voice conversation, not a text chat.
+7. Do NOT use markdown, asterisks, bullet points, or JSON. Just clean conversational English suitable for speech.
+8. Once all ${totalQ} questions are answered, conclude by thanking the candidate, stating their assessment is being finalized, and say goodbye.`;
+
+  // Open WebSocket
+  const wsUrl = 'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent?key=' + encodeURIComponent(geminiKey);
+
+  try {
+    const ws = new WebSocket(wsUrl);
+    _fdWs = ws;
+
+    ws.onopen = () => {
+      console.log('[FD] WebSocket connected');
+      _fdSetStatus('connecting', 'Setting up AI interviewer…');
+
+      // Send setup message
+      ws.send(JSON.stringify({
+        setup: {
+          model: 'models/gemini-2.0-flash-live-001',
+          generationConfig: {
+            responseModalities: ['AUDIO'],
+            speechConfig: {
+              voiceConfig: {
+                prebuiltVoiceConfig: { voiceName: 'Aoede' }
+              }
+            }
+          },
+          systemInstruction: {
+            parts: [{ text: systemPrompt }]
+          }
+        }
+      }));
+
+      // Trigger first AI turn
+      ws.send(JSON.stringify({
+        clientContent: {
+          turns: [{ role: 'user', parts: [{ text: 'Hello! I am ready to start the interview.' }] }],
+          turnComplete: true
+        }
+      }));
+
+      _fdSetStatus('speaking', 'AI Interviewer is speaking…');
+      _fdStartSessionTimer();
+
+      // Start continuous mic streaming
+      _fdStartMicStream(ws);
+    };
+
+    ws.onmessage = async (event) => {
+      let rawData = event.data;
+      if (event.data instanceof Blob) rawData = await event.data.text();
+
+      let msg;
+      try { msg = JSON.parse(rawData); } catch(e) {
+        console.error('[FD] Parse error:', e);
+        return;
+      }
+
+      // Handle errors
+      if (msg.error) {
+        console.error('[FD] Server error:', msg.error);
+        _fdSetStatus('error', 'Connection error: ' + (msg.error.message || msg.error));
+        showError('❌ AI connection error: ' + (msg.error.message || JSON.stringify(msg.error)));
+        _fdCleanup();
+        return;
+      }
+
+      // Handle setup complete
+      if (msg.setupComplete) {
+        console.log('[FD] Setup complete');
+        return;
+      }
+
+      if (msg.serverContent) {
+        const sc = msg.serverContent;
+
+        // Barge-in — user started speaking while AI was talking
+        if (sc.interrupted) {
+          console.log('[FD] Barge-in! AI interrupted by user speech');
+          _fdStopPlayback();
+          _fdAiSpeaking = false;
+          _fdAiTextBuffer = '';
+          _fdSetStatus('listening', 'Listening to you…');
+          _fdUpdateSubtitles('Listening…', 'user');
+          return;
+        }
+
+        // Model turn audio/text
+        if (sc.modelTurn && sc.modelTurn.parts) {
+          sc.modelTurn.parts.forEach(part => {
+            if (part.text) {
+              _fdAiTextBuffer += part.text;
+              _fdUpdateSubtitles(_fdAiTextBuffer, 'ai');
+            }
+            if (part.inlineData && part.inlineData.data) {
+              _fdAiSpeaking = true;
+              _fdSetStatus('speaking', 'AI Interviewer is speaking…');
+              _fdPlayPcmChunk(part.inlineData.data);
+
+              // Feed amplitude to neural orb
+              try {
+                const samples = _fdBase64ToFloat32(part.inlineData.data);
+                let rms = 0;
+                for (let i = 0; i < samples.length; i++) rms += samples[i] * samples[i];
+                rms = Math.sqrt(rms / samples.length);
+                if (window._neuralOrb) window._neuralOrb.amplitude = Math.min(1, rms * 5);
+              } catch(e) {}
+            }
+          });
+        }
+
+        // Turn complete
+        if (sc.turnComplete) {
+          console.log('[FD] AI turn complete:', _fdAiTextBuffer.substring(0, 80));
+
+          // Save AI turn to transcript
+          if (_fdAiTextBuffer) {
+            // Flush user text first
+            if (_fdUserTextBuffer) {
+              _fdLiveTranscript.push({ role: 'user', parts: [{ text: _fdUserTextBuffer }] });
+              _fdUserTextBuffer = '';
+            }
+            _fdLiveTranscript.push({ role: 'model', parts: [{ text: _fdAiTextBuffer }] });
+          }
+
+          // Update progress
+          const modelTurns = _fdLiveTranscript.filter(t => t.role === 'model').length;
+          const pct = Math.min(100, Math.round((modelTurns / (totalQ + 1)) * 100));
+          const pb = document.getElementById('progBar');
+          const pt = document.getElementById('progText');
+          if (pb) pb.style.width = pct + '%';
+          if (pt) pt.textContent = `Question ${Math.min(modelTurns, totalQ)} of ${totalQ}`;
+          const qt = document.getElementById('qTag');
+          if (qt) qt.textContent = modelTurns <= totalQ ? `Q${modelTurns}` : 'DONE';
+
+          _fdAiTextBuffer = '';
+          _fdAiSpeaking = false;
+
+          // Check if interview is complete
+          if (modelTurns > totalQ) {
+            console.log('[FD] Interview complete — waiting for audio to finish');
+            _fdStopMicStream();
+            const endBtn = document.getElementById('fdEndBtn');
+            if (endBtn) { endBtn.disabled = true; endBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Finalizing…'; }
+
+            const checkDrain = setInterval(() => {
+              if (_fdAudioQueue.length === 0) {
+                clearInterval(checkDrain);
+                finishFullDuplexInterview();
+              }
+            }, 300);
+            return;
+          }
+
+          _fdSetStatus('listening', 'Listening to you…');
+          _fdUpdateSubtitles('Listening…', 'user');
+          try { if (window._neuralOrb) window._neuralOrb.amplitude = 0; } catch(e) {}
+        }
+      }
+
+      // User speech transcription
+      if (msg.inputTranscription && msg.inputTranscription.text) {
+        const text = msg.inputTranscription.text;
+        console.log('[FD] User said:', text);
+        _fdUserTextBuffer = text;
+        _fdUpdateSubtitles(text, 'user');
+        _fdSetStatus('listening', 'Listening to you…');
+      }
+    };
+
+    ws.onclose = (event) => {
+      console.log('[FD] WebSocket closed:', event.code, event.reason);
+      if (_fdWs) finishFullDuplexInterview();
+    };
+
+    ws.onerror = (err) => {
+      console.error('[FD] WebSocket error:', err);
+      _fdSetStatus('error', 'Connection lost');
+    };
+
+    return true;
+  } catch (err) {
+    console.error('[FD] Failed to open WebSocket:', err);
+    showError('❌ Failed to connect to AI: ' + err.message);
+    return false;
+  }
+}
+
+function _fdCleanup() {
+  _fdStopPlayback();
+  _fdStopMicStream();
+  _fdCleanupMic();
+  _fdStopSessionTimer();
+  if (_fdWs) { try { _fdWs.close(); } catch(e) {} _fdWs = null; }
+}
+
+async function finishFullDuplexInterview() {
+  if (!_fdWs && _fdLiveTranscript.length < 2) return;
+
+  // Flush remaining user text
+  if (_fdUserTextBuffer) {
+    _fdLiveTranscript.push({ role: 'user', parts: [{ text: _fdUserTextBuffer }] });
+    _fdUserTextBuffer = '';
+  }
+
+  _fdCleanup();
+
+  if (_fdLiveTranscript.length < 2) {
+    showError('❌ Interview ended too early. No conversation was recorded.');
+    _nav('setup');
+    return;
+  }
+
+  // Convert live transcript to answers format for showResults
+  const userTurns = _fdLiveTranscript.filter(t => t.role === 'user');
+  const modelTurns = _fdLiveTranscript.filter(t => t.role === 'model');
+  answers = [];
+  for (let i = 0; i < modelTurns.length && i < userTurns.length; i++) {
+    answers.push({
+      question: modelTurns[i].parts?.[0]?.text || `Question ${i + 1}`,
+      answer: userTurns[i].parts?.[0]?.text || '[No response captured]',
+      type: 'main',
+      mainQNum: i + 1,
+      duration: Math.round(_fdSessionSecs / Math.max(1, userTurns.length)),
+      skipped: false,
+    });
+  }
+  mainQ = totalQ;
+
+  // Try to generate AI report from transcript
+  toast('📊 Generating assessment report…');
+  try {
+    const byok = getActiveBYOKConfig();
+    const reportPrompt = `You are an expert interview evaluator. Analyze this voice interview transcript and generate a structured assessment.
+
+Role: ${role} | Level: ${level} | Questions: ${totalQ}
+
+TRANSCRIPT:
+${_fdLiveTranscript.map(t => `[${t.role === 'model' ? 'INTERVIEWER' : 'CANDIDATE'}]: ${t.parts?.[0]?.text || ''}`).join('\n\n')}
+
+OUTPUT FORMAT (JSON):
+{
+  "overallScore": <number 0-100>,
+  "recommendation": "<strong-hire|hire|lean-hire|no-hire>",
+  "summary": "<2-3 sentence summary>",
+  "scores": { "technical": <0-100>, "communication": <0-100>, "problemSolving": <0-100>, "cultural": <0-100> },
+  "topStrengths": ["<strength1>", "<strength2>", "<strength3>"],
+  "focusAreas": ["<area1>", "<area2>"],
+  "answers": [${answers.map((a, i) => `{"question": "${a.question.substring(0, 100).replace(/"/g, '\\"')}", "score": 0, "feedback": ""}`).join(',')}]
+}
+
+Return ONLY valid JSON.`;
+
+    const reportText = await callGeminiDirect(
+      [{ role: 'user', content: reportPrompt }],
+      byok.key,
+      byok.model || 'gemini-3.7-flash'
+    );
+
+    // Parse JSON from response
+    const jsonMatch = reportText.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      const report = JSON.parse(jsonMatch[0]);
+      // Merge scores into answers
+      if (report.answers && Array.isArray(report.answers)) {
+        for (let i = 0; i < Math.min(answers.length, report.answers.length); i++) {
+          answers[i].score = report.answers[i].score || 0;
+          answers[i].feedback = report.answers[i].feedback || '';
+        }
+      }
+      window._fdReport = report;
+    }
+  } catch (e) {
+    console.warn('[FD] Report generation failed (will use fallback scoring):', e.message);
+  }
+
+  showResults();
+}
+
+
 // ─────────────────────────────────────────────
 async function callOpenAIDirect(messages, apiKey, model = 'gpt-4o-mini') {
   const ctrl = new AbortController();
@@ -3828,14 +4305,7 @@ async function startInterview() {
 async function _actuallyStart() {
   unlockMobileAudio();
   initTalkingAvatar();
-  changeAvatarStyle(localStorage.getItem('selected_avatar_style') || 'neural');
-
-  const byok = getActiveBYOKConfig();
-  const cleanModelName = (byok.model || 'Gemini 3.7 Flash')
-    .replace('gemini-2.5-flash', 'Gemini 3.7 Flash')
-    .replace('gemini-2.0-flash', 'Gemini 2.0 Flash')
-    .replace('gemini-2.5-pro',   'Gemini 2.5 Pro')
-    .replace('gemini-1.5-flash', 'Gemini 1.5 Flash');
+  changeAvatarStyle('neural'); // Always use neural orb for full-duplex
 
   const im = document.getElementById('interviewMeta');
   if (im) {
@@ -3848,19 +4318,10 @@ async function _actuallyStart() {
       : '<span class="mode-badge" style="background:rgba(16,185,129,.12);color:var(--green)">🟢 MOCK</span>';
     
     const mb = document.getElementById('metaModelBadge');
-    if (mb) mb.textContent = `✨ ${cleanModelName}`;
+    if (mb) mb.innerHTML = '🎙️ Full-Duplex Live';
     im.style.display = 'flex';
   }
   document.getElementById('screenShareOverlay')?.classList.add('hidden');
-
-  // Apply hide question text setting
-  if (qTextHidden || document.getElementById('hideQText')?.checked) {
-    qTextHidden = true;
-    const box = document.getElementById('questionBox');
-    const btn = document.getElementById('toggleQText');
-    if (box) box.style.display = 'none';
-    if (btn) { btn.innerHTML = '👁 Show Text'; btn.style.background = 'rgba(99,102,241,.2)'; btn.style.color = '#a5b4fc'; }
-  }
 
   // Load question history for anti-repeat
   if (_candEmail) {
@@ -3875,57 +4336,18 @@ async function _actuallyStart() {
     } catch (e) { console.warn('[AntiRepeat]', e.message); }
   }
 
-  const antiRepeatBlock = pastQuestions.length > 0 ? `
-CRITICAL ANTI-REPEAT RULE:
-This candidate was interviewed before (${pastQuestions.length} past questions). You MUST NOT ask questions on these topics or close variations:
-${pastQuestions.slice(0, 30).map(q => '- [R' + q.round + '] ' + q.topic + ': "' + q.text.substring(0, 100) + '"').join('\n')}
-Ask about DIFFERENT aspects that have NOT been explored.
-` : '';
-
-  const sys = `You are Simpatico AI, an expert AI interviewer conducting a ${level}-level interview for the role: "${role}".
-Language: ${L[lang]?.n || 'English'} only. Be warm, professional, and conversational.
-${cv ? '\nCandidate Resume:\n' + cv.substring(0, 3000) + '\n' : ''}
-${antiRepeatBlock}
-Interview Protocol:
-1. Ask exactly ${totalQ} MAIN questions. Mix: 30% technical, 40% behavioral (STAR), 30% situational.
-2. Tailor question depth to ${level} level.
-3. If an answer is vague, shallow, or incomplete → output [FOLLOWUP] with a C.L.A.I.M. probe.
-4. [FOLLOWUP] questions do NOT count toward the ${totalQ} total.
-5. After all main questions → output [DONE] with a brief, warm closing message.
-6. After EACH question, add on a NEW LINE: TOPIC_FP: a_snake_case_label (e.g. react_hooks, leadership_conflict)
-
-STRICT OUTPUT FORMAT — always start with exactly one tag:
-[NEXT] <question text>\nTOPIC_FP: topic_label
-[FOLLOWUP] <probe text>\nTOPIC_FP: topic_label
-[DONE] <closing message>
-
-Start now with [NEXT] and your first question.`;
-
-  chat = [{ role: 'system', content: sys }];
   _nav('live');
   if (mode === 'real') startProctor();
 
-  setOrb('thinking'); showThink(true); setBargie('thinking');
+  setOrb('thinking');
 
-  try {
-    const fq    = await callAI(chat);
-    chat.push({ role: 'assistant', content: fq });
-    let clean = fq.replace(/\[(NEXT|FOLLOWUP|DONE)\]\s*/i, '').trim();
-    // Extract topic fingerprint
-    const fp1 = clean.match(/\nTOPIC_FP:\s*(.+)/i);
-    if (fp1) clean = clean.replace(/\nTOPIC_FP:.*/i, '').trim();
-    _saveQHistory(clean, 'main', fp1?.[1] || '');
-    mainQ = 1; isFollowUp = false;
-    showThink(false);
-    document.getElementById('questionBox').textContent = clean;
-    updateProg();
-    initSTT();
-    await speak(clean);
-    startListen();
-    toast('🎯 Interview started! Speak naturally.');
-  } catch (e) {
-    showError('❌ Failed to start: ' + e.message);
-    showThink(false); setOrb('idle');
+  // Launch full-duplex session
+  const started = await startFullDuplexSession();
+  if (!started) {
+    showError('❌ Failed to start full-duplex session. Check your API key and try again.');
+    setOrb('idle');
+  } else {
+    toast('🎙️ Full-duplex interview started! Speak naturally — completely hands-free.');
   }
 }
 
@@ -4050,6 +4472,14 @@ function skipQuestion() {
 }
 
 function endEarly() {
+  // Full-duplex mode
+  if (_fdWs) {
+    if (_fdLiveTranscript.length < 2) { toast('⚠️ Wait for at least one question before ending'); return; }
+    stopProctor();
+    finishFullDuplexInterview();
+    return;
+  }
+  // Legacy turn-based mode
   if (answers.length < 1) { toast('⚠️ Answer at least one question before ending'); return; }
   stopListen();
   if (window.speechSynthesis) speechSynthesis.cancel();
@@ -4177,10 +4607,13 @@ async function requestScreenShare() {
 // RESULTS & EVALUATION
 // ─────────────────────────────────────────────
 async function showResults() {
+  // Sync full-duplex session duration to legacy `secs` variable
+  if (_fdSessionSecs > 0) secs = _fdSessionSecs;
   stopListen();
   if (window.speechSynthesis) speechSynthesis.cancel();
   stopProctor();
   setBargie('idle');
+  _fdCleanup(); // Clean up any full-duplex resources
   _nav('results');
   toast('📊 Generating AI evaluation…');
   await _genEval();
