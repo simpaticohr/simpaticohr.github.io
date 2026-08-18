@@ -2549,20 +2549,8 @@
 
                 // Hook into navigation or run once
                 document.addEventListener('DOMContentLoaded', () => {
-                    initCareersSettings();
+                    if (typeof initCareersSettings === 'function') initCareersSettings();
                 });
-                
-                // Add hook to the global navigateTo if we want it updated exactly on tab switch
-                const originalNav = window.navigateTo;
-                if (typeof originalNav === 'function') {
-                    window.navigateTo = function(sectionId, navEl) {
-                        originalNav(sectionId, navEl);
-                        if (sectionId === 'settings') {
-                            initCareersSettings();
-                            loadSlackSettings();
-                        }
-                    };
-                }
             </script>
         </div>
 
@@ -3473,27 +3461,6 @@ async function initApp() {
     }
     window._lastLoadedStorageKey = currentStorageKey;
 
-    // Verify local DataStore matches current tenant_id; if mismatch, re-initialize
-    const currentStorageKey = DataStore._storageKey;
-    if (window._lastLoadedStorageKey && window._lastLoadedStorageKey !== currentStorageKey) {
-        console.log('[init] Tenant storage key changed — refreshing appData cache');
-    }
-    window._lastLoadedStorageKey = currentStorageKey;
-
-    // Verify local DataStore matches current tenant_id; if mismatch, re-initialize
-    const currentStorageKey = DataStore._storageKey;
-    if (window._lastLoadedStorageKey && window._lastLoadedStorageKey !== currentStorageKey) {
-        console.log('[init] Tenant storage key changed — refreshing appData cache');
-    }
-    window._lastLoadedStorageKey = currentStorageKey;
-
-    // Verify local DataStore matches current tenant_id; if mismatch, re-initialize
-    const currentStorageKey = DataStore._storageKey;
-    if (window._lastLoadedStorageKey && window._lastLoadedStorageKey !== currentStorageKey) {
-        console.log('[init] Tenant storage key changed — refreshing appData cache');
-    }
-    window._lastLoadedStorageKey = currentStorageKey;
-
     // Initialize local session data from the REAL logged-in user
     DataStore.update(data => { 
         data.user.isLoggedIn = true; 
@@ -3573,6 +3540,7 @@ async function initApp() {
     }
 
     loadInterviewerSuggestions();
+    resolveInitialSection();
 }
 
 async function syncWithSupabase() {
@@ -4063,14 +4031,7 @@ function updateUserDisplay() {
 
 // ===== NAVIGATION =====
 function navigateTo(sectionId, navEl) {
-    // ✅ Replace the stub with the real function so all future onclick calls work
     window.navigateTo = navigateTo;
-    // Replay any navigation that was queued before DOMContentLoaded
-    if (window._navigatePending) {
-        var _p = window._navigatePending;
-        window._navigatePending = null;
-        if (_p.sectionId !== sectionId) { navigateTo(_p.sectionId, _p.navEl); return; }
-    }
     console.log(`[Navigation] Moving to: ${sectionId}`);
     
     // Production-ready cleanup: remove active/animate classes from ALL sections
@@ -4120,11 +4081,115 @@ function navigateTo(sectionId, navEl) {
     if (sectionId === 'storage' && typeof loadCompanyStorage === 'function') {
         loadCompanyStorage();
     }
+    if (sectionId === 'settings') {
+        if (typeof initCareersSettings === 'function') initCareersSettings();
+        if (typeof loadSlackSettings === 'function') loadSlackSettings();
+    }
 
-    document.getElementById('sidebar').classList.remove('open');
+    const sidebarEl = document.getElementById('sidebar');
+    if (sidebarEl) sidebarEl.classList.remove('open');
     const dd = document.getElementById('userDropdown');
     if (dd) dd.classList.remove('open');
 }
+
+// Export navigateTo immediately to window so onclick attributes never fail
+window.navigateTo = navigateTo;
+
+function resolveInitialSection() {
+    const params = new URLSearchParams(window.location.search);
+    const hash = window.location.hash.replace(/^#/, '');
+    const requested = params.get('section') || params.get('tab') || hash;
+    const aliasMap = {
+        'jobs': 'jobPostings',
+        'job': 'jobPostings',
+        'jobpostings': 'jobPostings',
+        'candidates': 'candidates',
+        'candidate': 'candidates',
+        'pipeline': 'candidates',
+        'talent': 'talentIntel',
+        'talentintel': 'talentIntel',
+        'interviews': 'interviews',
+        'interview': 'interviews',
+        'employees': 'employees',
+        'employee': 'employees',
+        'onboarding': 'onboarding',
+        'attendance': 'attendance',
+        'leaves': 'leaves',
+        'payroll': 'payroll',
+        'reviews': 'performance',
+        'performance': 'performance',
+        'training': 'training',
+        'analytics': 'analytics',
+        'ai': 'aiAssistant',
+        'aiassistant': 'aiAssistant',
+        'assessments': 'assessments',
+        'cx': 'cxPersonalization',
+        'cxpersonalization': 'cxPersonalization',
+        'db': 'dbAnalytics',
+        'dbanalytics': 'dbAnalytics',
+        'ats': 'atsAutomation',
+        'atsautomation': 'atsAutomation',
+        'rules': 'hrAutomation',
+        'hrautomation': 'hrAutomation',
+        'settings': 'settings'
+    };
+    if (requested) {
+        const target = aliasMap[requested.toLowerCase()] || requested;
+        if (document.getElementById('section-' + target)) {
+            navigateTo(target);
+            return;
+        }
+    }
+    if (window._navigatePending) {
+        const p = window._navigatePending;
+        window._navigatePending = null;
+        navigateTo(p.sectionId, p.navEl);
+    } else {
+        navigateTo('dashboard');
+    }
+}
+
+window.addEventListener('hashchange', () => {
+    const hash = window.location.hash.replace(/^#/, '');
+    if (hash) {
+        const aliasMap = {
+            'jobs': 'jobPostings',
+            'job': 'jobPostings',
+            'jobpostings': 'jobPostings',
+            'candidates': 'candidates',
+            'pipeline': 'candidates',
+            'talent': 'talentIntel',
+            'talentintel': 'talentIntel',
+            'interviews': 'interviews',
+            'interview': 'interviews',
+            'employees': 'employees',
+            'onboarding': 'onboarding',
+            'attendance': 'attendance',
+            'leaves': 'leaves',
+            'payroll': 'payroll',
+            'reviews': 'performance',
+            'performance': 'performance',
+            'training': 'training',
+            'analytics': 'analytics',
+            'ai': 'aiAssistant',
+            'aiassistant': 'aiAssistant',
+            'assessments': 'assessments',
+            'cx': 'cxPersonalization',
+            'cxpersonalization': 'cxPersonalization',
+            'db': 'dbAnalytics',
+            'dbanalytics': 'dbAnalytics',
+            'ats': 'atsAutomation',
+            'atsautomation': 'atsAutomation',
+            'rules': 'hrAutomation',
+            'hrautomation': 'hrAutomation',
+            'settings': 'settings'
+        };
+        const target = aliasMap[hash.toLowerCase()] || hash;
+        if (document.getElementById('section-' + target)) {
+            navigateTo(target);
+        }
+    }
+});
 
 // ── CSS Scoper: prevents external module styles from leaking into the parent dashboard ──
 function scopeModuleCss(cssText, containerId) {
