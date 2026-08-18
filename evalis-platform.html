@@ -1163,8 +1163,9 @@
           <div>
             <label>AI Model *</label>
             <select id="byokModel">
-              <option value="gemini-2.5-flash" selected>✨ Gemini 3.7 Flash / 2.5 Flash (Ultra Fast &amp; Accurate)</option>
-              <option value="gemini-2.0-flash">⚡ Gemini 2.0 Flash</option>
+              <option value="gemini-3.7-flash" selected>🌟 Gemini 3.7 Flash (Latest Ultra-Fast &amp; High Precision)</option>
+              <option value="gemini-2.5-flash">⚡ Gemini 2.5 Flash</option>
+              <option value="gemini-2.0-flash">🎙️ Gemini 2.0 Flash (Full-Duplex Live Voice)</option>
               <option value="gemini-2.5-pro">🧠 Gemini 2.5 Pro (Deep Technical QA)</option>
               <option value="gemini-1.5-flash">🚀 Gemini 1.5 Flash</option>
             </select>
@@ -1414,14 +1415,14 @@ const CFG = (() => {
       workerUrl:  window.SIMPATICO_CONFIG?.workerUrl || 'https://simpatico-hr-ats.simpaticohrconsultancy.workers.dev',
       hrPassword: a.hrPassword || 'simpatico2025',
       aiProvider: a.aiProvider || localStorage.getItem('evalis_byok_provider') || 'google',
-      aiModel:    a.aiModel    || localStorage.getItem('evalis_byok_model')    || 'gemini-2.5-flash',
+      aiModel:    a.aiModel    || localStorage.getItem('evalis_byok_model')    || 'gemini-3.7-flash',
     };
   } catch {
     return {
       workerUrl:  window.SIMPATICO_CONFIG?.workerUrl || 'https://simpatico-hr-ats.simpaticohrconsultancy.workers.dev',
       hrPassword: 'simpatico2025',
       aiProvider: 'google',
-      aiModel:    'gemini-2.5-flash',
+      aiModel:    'gemini-3.7-flash',
     };
   }
 })();
@@ -2564,8 +2565,9 @@ function speak(text) {
 // ─────────────────────────────────────────────
 const BYOK_MODELS_BY_PROVIDER = {
   google: [
-    { id: 'gemini-2.5-flash', name: '✨ Gemini 3.7 Flash / 2.5 Flash (Ultra Fast & Recommended)' },
-    { id: 'gemini-2.0-flash', name: '⚡ Gemini 2.0 Flash' },
+    { id: 'gemini-3.7-flash', name: '🌟 Gemini 3.7 Flash (Latest Ultra-Fast & Reasoning)' },
+    { id: 'gemini-2.5-flash', name: '⚡ Gemini 2.5 Flash' },
+    { id: 'gemini-2.0-flash', name: '🎙️ Gemini 2.0 Flash (Full-Duplex Live Voice)' },
     { id: 'gemini-2.5-pro',   name: '🧠 Gemini 2.5 Pro (Deep Reasoning & Complex QA)' },
     { id: 'gemini-1.5-flash', name: '🚀 Gemini 1.5 Flash' },
   ],
@@ -2585,7 +2587,7 @@ const BYOK_MODELS_BY_PROVIDER = {
 
 function getActiveBYOKConfig() {
   const provider = localStorage.getItem('evalis_byok_provider') || 'google';
-  const model    = localStorage.getItem('evalis_byok_model')    || 'gemini-2.5-flash';
+  const model    = localStorage.getItem('evalis_byok_model')    || 'gemini-3.7-flash';
   const key      = localStorage.getItem('evalis_byok_key')
                 || localStorage.getItem('simpatico_gemini_key')
                 || sessionStorage.getItem('byok_gemini_key')
@@ -2656,8 +2658,9 @@ function updateBYOKBadge(isSaved, model) {
 async function testBYOKConnection(provider, model, key) {
   const start = Date.now();
   if (provider === 'google' || key.startsWith('AIzaSy') || key.startsWith('AIza')) {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(key)}`;
-    const r = await fetch(url, {
+    // Try selected model first (e.g. gemini-3.7-flash)
+    let activeModel = model;
+    let r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${activeModel}:generateContent?key=${encodeURIComponent(key)}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -2665,12 +2668,27 @@ async function testBYOKConnection(provider, model, key) {
         generationConfig: { maxOutputTokens: 10, temperature: 0.1 }
       })
     });
+    
+    // If endpoint returns 404 (model ID not published in this region yet), fallback to 2.5 or 2.0
+    if (!r.ok && (r.status === 404 || r.status === 400) && activeModel === 'gemini-3.7-flash') {
+      console.log('[BYOK test] gemini-3.7-flash endpoint returned ' + r.status + ', testing gemini-2.5-flash endpoint...');
+      activeModel = 'gemini-2.5-flash';
+      r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${activeModel}:generateContent?key=${encodeURIComponent(key)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ role: 'user', parts: [{ text: 'Ping test. Reply with OK.' }] }],
+          generationConfig: { maxOutputTokens: 10, temperature: 0.1 }
+        })
+      });
+    }
+
     if (!r.ok) {
       const err = await r.json().catch(() => ({}));
       throw new Error(err.error?.message || `Google API HTTP ${r.status}`);
     }
     const d = await r.json();
-    return { ok: true, latency: Date.now() - start, modelName: model };
+    return { ok: true, latency: Date.now() - start, modelName: model, resolvedEndpoint: activeModel };
   }
 
   // Fallback test via worker validation endpoint
@@ -2790,11 +2808,8 @@ function loadBYOKUI() {
 // DIRECT GEMINI 3.7 FLASH CONNECTOR
 // Direct browser-to-Google API (Zero Worker Queue)
 // ─────────────────────────────────────────────
-async function callGeminiDirect(messages, apiKey, model = 'gemini-2.5-flash') {
-  let mName = model;
-  if (mName === 'gemini-3.7-flash') mName = 'gemini-2.5-flash';
-
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${mName}:generateContent?key=${encodeURIComponent(apiKey)}`;
+async function callGeminiDirect(messages, apiKey, model = 'gemini-3.7-flash') {
+  let activeModel = model;
 
   let systemText = '';
   const contents = [];
@@ -2831,12 +2846,24 @@ async function callGeminiDirect(messages, apiKey, model = 'gemini-2.5-flash') {
   const tm = setTimeout(() => ctrl.abort(), 35000);
 
   try {
-    const res = await fetch(url, {
+    let res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${activeModel}:generateContent?key=${encodeURIComponent(apiKey)}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(reqBody),
       signal: ctrl.signal,
     });
+
+    // If gemini-3.7-flash returns 404 in this regional API endpoint, fall back to gemini-2.5-flash
+    if (!res.ok && (res.status === 404 || res.status === 400) && activeModel === 'gemini-3.7-flash') {
+      activeModel = 'gemini-2.5-flash';
+      res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${activeModel}:generateContent?key=${encodeURIComponent(apiKey)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(reqBody),
+        signal: ctrl.signal,
+      });
+    }
+
     clearTimeout(tm);
     if (!res.ok) {
       const errJson = await res.json().catch(() => ({}));
