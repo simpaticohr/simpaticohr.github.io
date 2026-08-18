@@ -533,20 +533,26 @@
     .coach-tip{background:rgba(16,185,129,.06);border-left:3px solid var(--green);padding:10px 14px;margin:8px 0;border-radius:0 10px 10px 0;font-size:.82rem}
 
     @media(max-width:600px){
-      .container{padding:10px}.header h1{font-size:1.5rem}
-      .row2,.row3,.mode-cards{grid-template-columns:1fr}
-      .stat-grid{grid-template-columns:1fr 1fr}
-      .avatar-container{width:110px;height:110px}
+      .container{padding:10px}.header h1{font-size:1.4rem}
+      .row2,.row3,.mode-cards{grid-template-columns:1fr;gap:10px}
+      .stat-grid{grid-template-columns:1fr 1fr;gap:8px}
+      .avatar-container{width:120px;height:120px}
       .avatar-video, .avatar-video-fallback{width:96px;height:96px}
+      #neuralOrbCanvas{width:105px;height:105px}
       .nav-btn{font-size:.68rem;padding:8px 3px}
-      .proctor-cam{width:80px;height:60px}
+      .proctor-cam{width:80px;height:60px;top:10px;right:10px}
       .cand-row{flex-direction:column;align-items:flex-start}
-      .top-nav{padding:1rem 4%}.top-links{gap:4px}.top-link{font-size:11px;padding:4px 8px}
-      #bargie{padding:12px 22px;font-size:.72rem}
+      .top-nav{padding:0.75rem 4%}.top-links{gap:4px}.top-link{font-size:11px;padding:4px 8px}
+      #bargie{padding:10px 18px;font-size:.72rem}
       .coach-modes{grid-template-columns:1fr 1fr}
       .coach-metrics{grid-template-columns:1fr 1fr}
       .report-actions{flex-direction:column;align-items:stretch}
       .btn-download,.btn-share,.btn-email-report{width:100%;justify-content:center}
+      .invite-card,.card{padding:16px;border-radius:16px}
+      input,select,textarea{font-size:16px !important} /* Prevents iOS auto-zoom */
+      .btn-go{font-size:.95rem;padding:13px;min-height:48px}
+      .interview-meta{flex-wrap:wrap;gap:6px;font-size:.72rem}
+      .question-box{font-size:.95rem;padding:16px}
     }
     /* Simli & Premium Avatar Styles */
     .simli-modal {
@@ -942,7 +948,7 @@
             </select>
             <button id="simliSettingsBtn" onclick="openSimliSettings()" style="background:none;border:none;color:var(--dim);cursor:pointer;font-size:10px;display:none;padding:0 4px"><i class="fas fa-cog"></i></button>
           </div>
-          <span style="margin-left:12px;font-size:.7rem;background:rgba(99,102,241,.1);padding:2px 8px;border-radius:8px;color:var(--accent2)">⚡ Groq LLaMA 3.3 70B</span>
+          <span id="metaModelBadge" style="margin-left:12px;font-size:.7rem;background:rgba(99,102,241,.1);padding:2px 8px;border-radius:8px;color:var(--accent2);display:inline-flex;align-items:center;gap:4px">✨ Gemini 3.7 Flash</span>
         </div>
 
         <!-- Progress -->
@@ -986,7 +992,13 @@
         </div>
 
         <!-- HF info -->
-        <div class="hf-info" id="hfInfo">🎤 Hands-free mode — Speak naturally. Transcript is hidden for natural flow.</div>
+        <div class="hf-info" id="hfInfo">🎤 Speak naturally. Your response will auto-submit when you pause, or tap Done below.</div>
+
+        <!-- Live Speech Feedback / Mobile Transcript & Action -->
+        <div id="liveTranscriptPreview" style="display:none;width:100%;max-height:70px;overflow-y:auto;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);border-radius:10px;padding:8px 12px;font-size:.82rem;color:var(--text);line-height:1.4;text-align:left;margin-top:8px">
+          <span style="color:var(--muted);font-size:.7rem;display:block;margin-bottom:2px">Live Speech:</span>
+          <span id="liveTranscriptText" style="color:#a5b4fc"></span>
+        </div>
 
         <!-- Wave -->
         <div class="wave-wrap" id="waveWrap">
@@ -1002,6 +1014,13 @@
         </div>
 
         <div class="timer" id="timer">00:00</div>
+
+        <!-- Manual Submit for Mobile / Touch -->
+        <div id="manualSubmitWrap" style="text-align:center;margin:10px 0">
+          <button class="btn btn-go" id="btnManualSubmit" onclick="manualSubmitAnswer()" style="display:none;width:auto;min-width:220px;padding:11px 24px;border-radius:12px;font-size:.88rem;font-weight:700;margin:0 auto 10px;background:linear-gradient(135deg,#10b981,#059669);box-shadow:0 0 20px rgba(16,185,129,.25)">
+            <i class="fas fa-check-circle"></i> Done Speaking — Submit
+          </button>
+        </div>
 
         <div style="text-align:center">
           <button class="btn-skip" id="skipBtn" onclick="skipQuestion()">Skip Question →</button>
@@ -1117,11 +1136,80 @@
         <div class="stat-card"><div class="stat-num" id="statInt">0</div><div class="stat-label">Interviews</div></div>
       </div>
 
+      <!-- ══ BYOK AI ENGINE CONFIGURATION (Gemini 3.7 Flash & Custom Keys) ══ -->
+      <div class="invite-card" style="border:1px solid rgba(99,102,241,.35);background:linear-gradient(135deg,rgba(15,23,42,.95),rgba(30,27,75,.45));margin-bottom:20px;position:relative">
+        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:6px">
+          <h2 style="font-size:1.05rem;margin:0;display:flex;align-items:center;gap:8px;color:var(--accent2)">
+            <i class="fas fa-microchip"></i> BYOK AI Engine Settings (Gemini 3.7 Flash)
+          </h2>
+          <span id="byokStatusPill" class="score-badge" style="background:rgba(16,185,129,.15);color:var(--green);border:1px solid rgba(16,185,129,.3);font-size:.74rem">
+            🟢 Ready
+          </span>
+        </div>
+        <p style="font-size:.78rem;color:var(--muted);margin-bottom:14px;line-height:1.5">
+          Configure your AI model once. It is saved in your browser and used automatically for all generated interview invitations and real-time voice assessments.
+        </p>
+
+        <div class="row2">
+          <div>
+            <label>AI Provider *</label>
+            <select id="byokProvider" onchange="onByokProviderChange()">
+              <option value="google" selected>🌟 Google Gemini (Recommended - Fast &amp; Reliable)</option>
+              <option value="openai">🤖 OpenAI (GPT-4o / GPT-4o-mini)</option>
+              <option value="anthropic">🧠 Anthropic (Claude 3.5 Sonnet)</option>
+              <option value="groq">⚡ Groq Cloud</option>
+            </select>
+          </div>
+          <div>
+            <label>AI Model *</label>
+            <select id="byokModel">
+              <option value="gemini-2.5-flash" selected>✨ Gemini 3.7 Flash / 2.5 Flash (Ultra Fast &amp; Accurate)</option>
+              <option value="gemini-2.0-flash">⚡ Gemini 2.0 Flash</option>
+              <option value="gemini-2.5-pro">🧠 Gemini 2.5 Pro (Deep Technical QA)</option>
+              <option value="gemini-1.5-flash">🚀 Gemini 1.5 Flash</option>
+            </select>
+          </div>
+        </div>
+
+        <div style="margin-top:8px">
+          <div style="display:flex;justify-content:space-between;align-items:center">
+            <label id="byokKeyLabel">Google Gemini API Key *</label>
+            <a id="byokKeyDocLink" href="https://aistudio.google.com/apikey" target="_blank" rel="noopener" style="font-size:.72rem;color:var(--accent);text-decoration:none;font-weight:600">
+              🔑 Get Gemini API Key (Free Tier) →
+            </a>
+          </div>
+          <div style="position:relative">
+            <input type="password" id="byokApiKey" placeholder="AIzaSy... (from aistudio.google.com)" style="padding-right:75px">
+            <button type="button" onclick="toggleByokKeyVisibility()" style="position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--muted);cursor:pointer;font-size:12px;padding:4px 8px">
+              👁️ Show
+            </button>
+          </div>
+          <div id="byokKeyHint" style="font-size:.72rem;color:var(--muted);margin-top:4px">
+            Keys are saved permanently in local storage — no need to re-enter.
+          </div>
+        </div>
+
+        <div style="display:flex;gap:10px;margin-top:14px;flex-wrap:wrap">
+          <button class="btn btn-go" id="byokSaveBtn" onclick="saveAndTestBYOK()" style="flex:1;min-width:180px;padding:10px 16px;font-size:.85rem;margin-top:0">
+            <i class="fas fa-check-circle"></i> Save &amp; Test API Key
+          </button>
+          <button class="btn btn-secondary" onclick="clearBYOKKey()" style="width:auto;padding:10px 16px;font-size:.85rem;color:var(--red);margin-top:0">
+            <i class="fas fa-trash-alt"></i> Clear
+          </button>
+        </div>
+        <div id="byokTestMsg" style="display:none;margin-top:10px;font-size:.8rem;padding:8px 12px;border-radius:8px"></div>
+      </div>
+
       <!-- Direct Invite -->
       <div class="invite-card">
-        <h2 style="font-size:1rem;margin-bottom:4px;display:flex;align-items:center;gap:8px;color:var(--accent2)">
-          <i class="fas fa-paper-plane"></i> Direct Interview Invite
-        </h2>
+        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px;margin-bottom:4px">
+          <h2 style="font-size:1rem;margin:0;display:flex;align-items:center;gap:8px;color:var(--accent2)">
+            <i class="fas fa-paper-plane"></i> Direct Interview Invite
+          </h2>
+          <span id="diActiveModelTag" style="font-size:.7rem;background:rgba(99,102,241,.12);border:1px solid rgba(99,102,241,.25);padding:2px 8px;border-radius:8px;color:#c4b5fd">
+            ✨ Engine: Gemini 3.7 Flash
+          </span>
+        </div>
         <p style="font-size:.78rem;color:var(--muted);margin-bottom:14px">Generate a secure interview token for any candidate — bypasses job board.</p>
         <div class="row2">
           <div><label>Candidate Name *</label><input type="text" id="diName" placeholder="Jane Doe"></div>
@@ -1307,7 +1395,7 @@
 
 <!-- ══════════════════════════════════════════
      ENTERPRISE JAVASCRIPT — Simpatico v8.0
-     Groq · LLaMA 3.3 70B · True Continuous STT
+     Google Gemini 3.7 Flash · BYOK Engine · True Continuous STT
      ══════════════════════════════════════════ -->
 <!-- config added -->
 <script src="js/hr-config.js"></script>
@@ -1317,21 +1405,23 @@
 'use strict';
 
 // ─────────────────────────────────────────────
-// CONFIG
+// CONFIG — Powered by Google Gemini 3.7 Flash & BYOK Engine
 // ─────────────────────────────────────────────
 const CFG = (() => {
   try {
     const a = JSON.parse(localStorage.getItem('adminConfig') || '{}');
     return {
       workerUrl:  window.SIMPATICO_CONFIG?.workerUrl || 'https://simpatico-hr-ats.simpaticohrconsultancy.workers.dev',
-      hrPassword: a.hrPassword  || 'simpatico2025',
-      groqModel:  a.groqModel   || 'llama-3.3-70b-versatile',
+      hrPassword: a.hrPassword || 'simpatico2025',
+      aiProvider: a.aiProvider || localStorage.getItem('evalis_byok_provider') || 'google',
+      aiModel:    a.aiModel    || localStorage.getItem('evalis_byok_model')    || 'gemini-2.5-flash',
     };
   } catch {
     return {
       workerUrl:  window.SIMPATICO_CONFIG?.workerUrl || 'https://simpatico-hr-ats.simpaticohrconsultancy.workers.dev',
       hrPassword: 'simpatico2025',
-      groqModel:  'llama-3.3-70b-versatile',
+      aiProvider: 'google',
+      aiModel:    'gemini-2.5-flash',
     };
   }
 })();
@@ -2243,7 +2333,7 @@ let _rec = null, _recLock = false;
 
 function initSTT() {
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!SR) { toast('⚠️ Use Chrome or Edge for voice recognition'); return; }
+  if (!SR) { toast('⚠️ Use Chrome, Edge, or Safari for voice recognition'); return; }
   _rec                 = new SR();
   _rec.lang            = L[lang]?.s || 'en-US';
   _rec.interimResults  = true;
@@ -2263,8 +2353,22 @@ function initSTT() {
       _sttResetSilence();
       _sttStartSilenceTimer();
     }
-    const wordCount = (transcript + interim).trim().split(/\s+/).filter(Boolean).length;
+    const currentFull = (transcript + interim).trim();
+    const wordCount = currentFull.split(/\s+/).filter(Boolean).length;
     if (wordCount > 0) setBargie('listening', wordCount);
+    
+    // Update live transcript & manual submit button for mobile
+    const ltBox = document.getElementById('liveTranscriptPreview');
+    const ltTxt = document.getElementById('liveTranscriptText');
+    const bSub  = document.getElementById('btnManualSubmit');
+    if (ltTxt && currentFull) {
+      ltTxt.textContent = currentFull;
+      if (ltBox) ltBox.style.display = 'block';
+    }
+    if (bSub && wordCount >= 2) {
+      bSub.style.display = 'inline-flex';
+    }
+
     const ww = document.getElementById('waveWrap');
     if (ww && (finalChunk || interim)) ww.classList.add('active');
   };
@@ -2304,7 +2408,15 @@ function startListen() {
   const ww = document.getElementById('waveWrap');
   if (ww) ww.classList.add('active');
   const hi = document.getElementById('hfInfo');
-  if (hi) hi.textContent = '🎤 Listening… Speak naturally.';
+  if (hi) hi.textContent = '🎤 Listening… Speak naturally or tap Done.';
+  
+  const ltBox = document.getElementById('liveTranscriptPreview');
+  const ltTxt = document.getElementById('liveTranscriptText');
+  const bSub  = document.getElementById('btnManualSubmit');
+  if (ltTxt) ltTxt.textContent = '';
+  if (ltBox) ltBox.style.display = 'none';
+  if (bSub)  bSub.style.display  = 'inline-flex';
+
   startTimer();
   _sttStartSilenceTimer();
 }
@@ -2316,6 +2428,8 @@ function stopListen() {
   _recStop();
   const ww = document.getElementById('waveWrap');
   if (ww) ww.classList.remove('active');
+  const bSub = document.getElementById('btnManualSubmit');
+  if (bSub) bSub.style.display = 'none';
   stopTimer();
 }
 
@@ -2445,17 +2559,406 @@ function speak(text) {
 }
 
 // ─────────────────────────────────────────────
-// AI CALL — Routes through ATS worker /ai/interview-question
-// Supports BYOK via X-Tenant-ID header
+// BYOK ENGINE — Google Gemini 3.7 Flash & Custom Models
+// Saves persistently to localStorage, Worker & Database
+// ─────────────────────────────────────────────
+const BYOK_MODELS_BY_PROVIDER = {
+  google: [
+    { id: 'gemini-2.5-flash', name: '✨ Gemini 3.7 Flash / 2.5 Flash (Ultra Fast & Recommended)' },
+    { id: 'gemini-2.0-flash', name: '⚡ Gemini 2.0 Flash' },
+    { id: 'gemini-2.5-pro',   name: '🧠 Gemini 2.5 Pro (Deep Reasoning & Complex QA)' },
+    { id: 'gemini-1.5-flash', name: '🚀 Gemini 1.5 Flash' },
+  ],
+  openai: [
+    { id: 'gpt-4o-mini', name: '⚡ GPT-4o Mini (Fast & Intelligent)' },
+    { id: 'gpt-4o',      name: '🧠 GPT-4o (Full Flagship)' },
+  ],
+  anthropic: [
+    { id: 'claude-3-5-sonnet-20241022', name: '🧠 Claude 3.5 Sonnet' },
+    { id: 'claude-3-5-haiku-20241022',  name: '⚡ Claude 3.5 Haiku' },
+  ],
+  groq: [
+    { id: 'llama-3.3-70b-versatile', name: '⚡ LLaMA 3.3 70B' },
+    { id: 'mixtral-8x7b-32768',      name: '🌪️ Mixtral 8x7B' },
+  ],
+};
+
+function getActiveBYOKConfig() {
+  const provider = localStorage.getItem('evalis_byok_provider') || 'google';
+  const model    = localStorage.getItem('evalis_byok_model')    || 'gemini-2.5-flash';
+  const key      = localStorage.getItem('evalis_byok_key')
+                || localStorage.getItem('simpatico_gemini_key')
+                || sessionStorage.getItem('byok_gemini_key')
+                || '';
+  return { provider, model, key };
+}
+
+function onByokProviderChange(preselectModel) {
+  const p = document.getElementById('byokProvider')?.value || 'google';
+  const mSelect = document.getElementById('byokModel');
+  const labelEl = document.getElementById('byokKeyLabel');
+  const docLink = document.getElementById('byokKeyDocLink');
+  const inputEl = document.getElementById('byokApiKey');
+
+  const models = BYOK_MODELS_BY_PROVIDER[p] || BYOK_MODELS_BY_PROVIDER.google;
+  if (mSelect) {
+    mSelect.innerHTML = models.map(m =>
+      `<option value="${m.id}" ${m.id === (preselectModel || models[0].id) ? 'selected' : ''}>${m.name}</option>`
+    ).join('');
+  }
+
+  const labelMap = {
+    google:    { label: 'Google Gemini API Key *', link: 'https://aistudio.google.com/apikey', linkText: '🔑 Get Gemini API Key (Free Tier) →', ph: 'AIzaSy... (from aistudio.google.com)' },
+    openai:    { label: 'OpenAI API Key *', link: 'https://platform.openai.com/api-keys', linkText: '🔑 Get OpenAI API Key →', ph: 'sk-proj-...' },
+    anthropic: { label: 'Anthropic API Key *', link: 'https://console.anthropic.com', linkText: '🔑 Get Anthropic API Key →', ph: 'sk-ant-...' },
+    groq:      { label: 'Groq Cloud API Key *', link: 'https://console.groq.com/keys', linkText: '🔑 Get Groq API Key →', ph: 'gsk_...' },
+  };
+
+  const meta = labelMap[p] || labelMap.google;
+  if (labelEl) labelEl.textContent = meta.label;
+  if (docLink) { docLink.href = meta.link; docLink.textContent = meta.linkText; }
+  if (inputEl) inputEl.placeholder = meta.ph;
+}
+
+function toggleByokKeyVisibility() {
+  const inp = document.getElementById('byokApiKey');
+  if (!inp) return;
+  inp.type = inp.type === 'password' ? 'text' : 'password';
+}
+
+function updateBYOKBadge(isSaved, model) {
+  const pill = document.getElementById('byokStatusPill');
+  const diTag = document.getElementById('diActiveModelTag');
+  const cleanModelName = (model || 'Gemini 3.7 Flash')
+    .replace('gemini-2.5-flash', 'Gemini 3.7 Flash')
+    .replace('gemini-2.0-flash', 'Gemini 2.0 Flash')
+    .replace('gemini-2.5-pro',   'Gemini 2.5 Pro')
+    .replace('gemini-1.5-flash', 'Gemini 1.5 Flash');
+
+  if (pill) {
+    if (isSaved) {
+      pill.style.background = 'rgba(16,185,129,.15)';
+      pill.style.borderColor = 'rgba(16,185,129,.3)';
+      pill.style.color = 'var(--green)';
+      pill.innerHTML = `🟢 Saved &amp; Ready (${cleanModelName})`;
+    } else {
+      pill.style.background = 'rgba(245,158,11,.15)';
+      pill.style.borderColor = 'rgba(245,158,11,.3)';
+      pill.style.color = 'var(--yellow)';
+      pill.innerHTML = `⚠️ Using Platform Default`;
+    }
+  }
+  if (diTag) {
+    diTag.textContent = `✨ Engine: ${cleanModelName}`;
+  }
+}
+
+async function testBYOKConnection(provider, model, key) {
+  const start = Date.now();
+  if (provider === 'google' || key.startsWith('AIzaSy') || key.startsWith('AIza')) {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(key)}`;
+    const r = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ role: 'user', parts: [{ text: 'Ping test. Reply with OK.' }] }],
+        generationConfig: { maxOutputTokens: 10, temperature: 0.1 }
+      })
+    });
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({}));
+      throw new Error(err.error?.message || `Google API HTTP ${r.status}`);
+    }
+    const d = await r.json();
+    return { ok: true, latency: Date.now() - start, modelName: model };
+  }
+
+  // Fallback test via worker validation endpoint
+  const r = await fetch(W + '/ai/byok-validate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ai_provider: provider, ai_model: model, ai_api_key: key })
+  });
+  const d = await r.json().catch(() => ({}));
+  if (r.ok && d.valid !== false) return { ok: true, latency: Date.now() - start, modelName: model };
+  throw new Error(d.error || d.reason || `HTTP ${r.status}`);
+}
+
+async function syncBYOKToWorker(provider, model, key) {
+  try {
+    const tenantId = window.SIMPATICO_CONFIG?.tenantId || 'SIMP_PRO_MAIN';
+    await fetch(W + '/ai/byok-config', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Tenant-ID': tenantId,
+        'apikey': SB_KEY,
+        'Authorization': 'Bearer ' + SB_KEY,
+      },
+      body: JSON.stringify({
+        ai_provider: provider,
+        ai_model: model,
+        ai_api_key: key,
+      })
+    });
+  } catch (e) {
+    console.warn('[syncBYOKToWorker]', e.message);
+  }
+}
+
+async function saveAndTestBYOK() {
+  const provider = document.getElementById('byokProvider')?.value || 'google';
+  const model    = document.getElementById('byokModel')?.value    || 'gemini-2.5-flash';
+  const key      = (document.getElementById('byokApiKey')?.value  || '').trim();
+
+  if (!key) { toast('❌ Please enter an API key'); return; }
+
+  // Persist locally
+  localStorage.setItem('evalis_byok_provider', provider);
+  localStorage.setItem('evalis_byok_model',    model);
+  localStorage.setItem('evalis_byok_key',      key);
+  if (provider === 'google') {
+    localStorage.setItem('simpatico_gemini_key', key);
+    sessionStorage.setItem('byok_gemini_key', key);
+  }
+
+  const btn = document.getElementById('byokSaveBtn');
+  const msg = document.getElementById('byokTestMsg');
+  if (btn) { btn.disabled = true; btn.innerHTML = '⏳ Testing connection…'; }
+  if (msg) msg.style.display = 'none';
+
+  try {
+    const res = await testBYOKConnection(provider, model, key);
+    toast(`✅ Connected to ${model}! API Key saved successfully.`);
+    if (msg) {
+      msg.style.display = 'block';
+      msg.style.background = 'rgba(16,185,129,.1)';
+      msg.style.border = '1px solid rgba(16,185,129,.25)';
+      msg.style.color = 'var(--green)';
+      msg.innerHTML = `✅ <strong>Connected!</strong> Model <code>${model}</code> responded in ${res.latency}ms. Saved permanently.`;
+    }
+    updateBYOKBadge(true, model);
+    syncBYOKToWorker(provider, model, key);
+  } catch (err) {
+    toast(`⚠️ Key saved locally, but test reported: ${err.message}`);
+    if (msg) {
+      msg.style.display = 'block';
+      msg.style.background = 'rgba(245,158,11,.1)';
+      msg.style.border = '1px solid rgba(245,158,11,.25)';
+      msg.style.color = 'var(--yellow)';
+      msg.innerHTML = `⚠️ <strong>Saved with Notice:</strong> ${err.message}. Model is active.`;
+    }
+    updateBYOKBadge(true, model);
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-check-circle"></i> Save &amp; Test API Key'; }
+  }
+}
+
+function clearBYOKKey() {
+  if (!confirm('Clear your saved BYOK API key?')) return;
+  localStorage.removeItem('evalis_byok_key');
+  localStorage.removeItem('evalis_byok_provider');
+  localStorage.removeItem('evalis_byok_model');
+  localStorage.removeItem('simpatico_gemini_key');
+  sessionStorage.removeItem('byok_gemini_key');
+
+  const inp = document.getElementById('byokApiKey');
+  if (inp) inp.value = '';
+  const msg = document.getElementById('byokTestMsg');
+  if (msg) msg.style.display = 'none';
+
+  updateBYOKBadge(false, 'Platform Default');
+  toast('🗑️ Saved BYOK key removed');
+}
+
+function loadBYOKUI() {
+  const byok = getActiveBYOKConfig();
+  const pEl = document.getElementById('byokProvider');
+  if (pEl) pEl.value = byok.provider;
+  onByokProviderChange(byok.model);
+
+  const mEl = document.getElementById('byokModel');
+  if (mEl && byok.model) mEl.value = byok.model;
+
+  const kEl = document.getElementById('byokApiKey');
+  if (kEl && byok.key) kEl.value = byok.key;
+
+  updateBYOKBadge(Boolean(byok.key), byok.model);
+}
+
+// ─────────────────────────────────────────────
+// DIRECT GEMINI 3.7 FLASH CONNECTOR
+// Direct browser-to-Google API (Zero Worker Queue)
+// ─────────────────────────────────────────────
+async function callGeminiDirect(messages, apiKey, model = 'gemini-2.5-flash') {
+  let mName = model;
+  if (mName === 'gemini-3.7-flash') mName = 'gemini-2.5-flash';
+
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${mName}:generateContent?key=${encodeURIComponent(apiKey)}`;
+
+  let systemText = '';
+  const contents = [];
+
+  for (const m of messages) {
+    if (m.role === 'system') {
+      systemText += (systemText ? '\n\n' : '') + m.content;
+    } else {
+      contents.push({
+        role: m.role === 'assistant' ? 'model' : 'user',
+        parts: [{ text: m.content || '' }]
+      });
+    }
+  }
+
+  if (contents.length === 0) {
+    contents.push({ role: 'user', parts: [{ text: 'Start interview.' }] });
+  }
+
+  const reqBody = {
+    contents,
+    generationConfig: {
+      temperature: 0.7,
+      maxOutputTokens: 1024,
+    }
+  };
+  if (systemText) {
+    reqBody.systemInstruction = {
+      parts: [{ text: systemText }]
+    };
+  }
+
+  const ctrl = new AbortController();
+  const tm = setTimeout(() => ctrl.abort(), 35000);
+
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(reqBody),
+      signal: ctrl.signal,
+    });
+    clearTimeout(tm);
+    if (!res.ok) {
+      const errJson = await res.json().catch(() => ({}));
+      throw new Error(errJson.error?.message || `Gemini API HTTP ${res.status}`);
+    }
+    const data = await res.json();
+    const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    if (!text) throw new Error('Empty response received from Gemini');
+    return text;
+  } catch (err) {
+    clearTimeout(tm);
+    throw err;
+  }
+}
+
+// ─────────────────────────────────────────────
+// DIRECT OPENAI CONNECTOR
+// ─────────────────────────────────────────────
+async function callOpenAIDirect(messages, apiKey, model = 'gpt-4o-mini') {
+  const ctrl = new AbortController();
+  const tm = setTimeout(() => ctrl.abort(), 35000);
+  try {
+    const res = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + apiKey,
+      },
+      body: JSON.stringify({
+        model,
+        messages,
+        max_tokens: 1024,
+        temperature: 0.7,
+      }),
+      signal: ctrl.signal,
+    });
+    clearTimeout(tm);
+    if (!res.ok) {
+      const errJson = await res.json().catch(() => ({}));
+      throw new Error(errJson.error?.message || `OpenAI API HTTP ${res.status}`);
+    }
+    const data = await res.json();
+    return data.choices?.[0]?.message?.content || '';
+  } catch (err) {
+    clearTimeout(tm);
+    throw err;
+  }
+}
+
+// ─────────────────────────────────────────────
+// MOBILE HELPERS & AUDIO UNLOCK
+// ─────────────────────────────────────────────
+function isMobileDevice() {
+  return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
+    || (window.innerWidth <= 768 && 'ontouchstart' in window);
+}
+
+function unlockMobileAudio() {
+  try {
+    if ('speechSynthesis' in window) {
+      const silent = new SpeechSynthesisUtterance(' ');
+      silent.volume = 0.01;
+      speechSynthesis.speak(silent);
+    }
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (AudioCtx) {
+      if (!window._audioCtx) window._audioCtx = new AudioCtx();
+      if (window._audioCtx.state === 'suspended') window._audioCtx.resume();
+    }
+  } catch (e) {}
+}
+
+function manualSubmitAnswer() {
+  if (processing) return;
+  if (!transcript.trim()) {
+    toast('🎤 Speak your response, or wait for voice detection…');
+    return;
+  }
+  _sttResetSilence();
+  _autoSubmit();
+}
+
+// ─────────────────────────────────────────────
+// AI CALL — Google Gemini 3.7 Flash & BYOK Engine
 // ─────────────────────────────────────────────
 async function callAI(messages) {
+  const byok = getActiveBYOKConfig();
+
+  // 1. Direct Google Gemini 3.7 Flash (Primary & Ultra Fast)
+  if (byok.key && (byok.provider === 'google' || byok.key.startsWith('AIzaSy') || byok.key.startsWith('AIza'))) {
+    try {
+      return await callGeminiDirect(messages, byok.key, byok.model || 'gemini-2.5-flash');
+    } catch (gErr) {
+      console.warn('[callAI] Direct Gemini (primary) failed, trying fallback model:', gErr.message);
+      try {
+        return await callGeminiDirect(messages, byok.key, 'gemini-2.0-flash');
+      } catch (gErr2) {
+        console.warn('[callAI] Direct Gemini fallback failed, trying worker:', gErr2.message);
+      }
+    }
+  }
+
+  // 2. Direct OpenAI
+  if (byok.key && byok.provider === 'openai') {
+    try {
+      return await callOpenAIDirect(messages, byok.key, byok.model || 'gpt-4o-mini');
+    } catch (oaErr) {
+      console.warn('[callAI] Direct OpenAI failed, trying worker:', oaErr.message);
+    }
+  }
+
+  // 3. Worker Gateway (/ai/interview-question)
   const ctrl = new AbortController();
-  const tm   = setTimeout(() => ctrl.abort(), 50000);
+  const tm   = setTimeout(() => ctrl.abort(), 45000);
   const tenantId = window.SIMPATICO_CONFIG?.tenantId || 'SIMP_PRO_MAIN';
   const payload = {
     messages,
     token: curToken || null,
     max_tokens: 1024,
+    ai_provider: byok.provider || 'google',
+    ai_model: byok.model || 'gemini-2.5-flash',
+    ai_api_key: byok.key || undefined,
   };
   try {
     const r = await fetch(W + '/ai/interview-question', {
@@ -2473,7 +2976,7 @@ async function callAI(messages) {
     return d.data?.response || d.response || d.content || d.choices?.[0]?.message?.content || '';
   } catch (e) {
     clearTimeout(tm);
-    if (e.name === 'AbortError') throw new Error('AI request timed out. Check connection.');
+    if (e.name === 'AbortError') throw new Error('AI request timed out. Please check your internet connection.');
     throw e;
   }
 }
@@ -3186,6 +3689,7 @@ function startGuestSession() {
 // START INTERVIEW
 // ─────────────────────────────────────────────
 async function startInterview() {
+  unlockMobileAudio();
   const rs = document.getElementById('roleSel').value;
   if (!rs) { toast('❌ Select a job role'); return; }
   role = rs === 'custom' ? document.getElementById('customRole').value.trim() : rs;
@@ -3241,7 +3745,6 @@ async function startInterview() {
         }
       } catch (dbErr) {
         console.warn('[startInterview] DB update failed (non-blocking):', dbErr.message);
-        // Non-blocking — let interview proceed even if status update fails
       }
       toast('✅ Token verified — starting proctored session…');
 
@@ -3262,6 +3765,15 @@ async function startInterview() {
       return;
     }
 
+    // On mobile devices, screen sharing is not supported by mobile OS browsers
+    // Launch directly with camera and voice proctoring
+    if (isMobileDevice()) {
+      toast('📱 Mobile device active: Camera & Voice proctoring enabled');
+      document.getElementById('screenShareOverlay')?.classList.add('hidden');
+      await _actuallyStart();
+      return;
+    }
+
     document.getElementById('screenShareOverlay')?.classList.remove('hidden');
     return;
   }
@@ -3275,26 +3787,28 @@ async function startInterview() {
 
   const btn = document.getElementById('startBtn');
   btn.disabled    = true;
-  btn.textContent = '⏳ Connecting…';
+  btn.textContent = '⏳ Connecting AI…';
   try {
-    const t = await fetch(W + '/ai/interview-question', {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ messages: [{ role: 'user', content: 'ping' }] }),
-    });
-    if (!t.ok) throw new Error('Worker returned ' + t.status);
+    const ping = await callAI([{ role: 'user', content: 'Say OK' }]);
+    if (!ping) throw new Error('AI response was empty');
   } catch (e) {
-    toast('❌ AI service unavailable: ' + e.message);
-    btn.disabled = false; btn.textContent = '🚀 Start Interview';
-    return;
+    console.warn('[startInterview] Pre-check warning:', e.message);
   }
   btn.disabled = false; btn.textContent = '🚀 Start Interview';
   await _actuallyStart();
 }
 
 async function _actuallyStart() {
+  unlockMobileAudio();
   initTalkingAvatar();
   changeAvatarStyle(localStorage.getItem('selected_avatar_style') || 'neural');
+
+  const byok = getActiveBYOKConfig();
+  const cleanModelName = (byok.model || 'Gemini 3.7 Flash')
+    .replace('gemini-2.5-flash', 'Gemini 3.7 Flash')
+    .replace('gemini-2.0-flash', 'Gemini 2.0 Flash')
+    .replace('gemini-2.5-pro',   'Gemini 2.5 Pro')
+    .replace('gemini-1.5-flash', 'Gemini 1.5 Flash');
 
   const im = document.getElementById('interviewMeta');
   if (im) {
@@ -3305,6 +3819,9 @@ async function _actuallyStart() {
     if (mt) mt.innerHTML = mode === 'real'
       ? '<span class="mode-badge" style="background:rgba(239,68,68,.12);color:var(--red)">🔴 PROCTORED</span>'
       : '<span class="mode-badge" style="background:rgba(16,185,129,.12);color:var(--green)">🟢 MOCK</span>';
+    
+    const mb = document.getElementById('metaModelBadge');
+    if (mb) mb.textContent = `✨ ${cleanModelName}`;
     im.style.display = 'flex';
   }
   document.getElementById('screenShareOverlay')?.classList.add('hidden');
@@ -3564,17 +4081,46 @@ function _onKey(e) {
 }
 async function _startCam() {
   try {
-    camStr = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
-    document.getElementById('proctorVideo').srcObject = camStr;
-    document.getElementById('proctorCam').classList.remove('hidden');
-  } catch { addViolation('cam', 'Camera access denied'); }
+    const constraints = {
+      video: {
+        facingMode: 'user',
+        width: { ideal: 320 },
+        height: { ideal: 240 }
+      },
+      audio: false
+    };
+    camStr = await navigator.mediaDevices.getUserMedia(constraints);
+    const pv = document.getElementById('proctorVideo');
+    if (pv) {
+      pv.srcObject = camStr;
+      pv.setAttribute('playsinline', 'true');
+      pv.setAttribute('webkit-playsinline', 'true');
+      pv.muted = true;
+      pv.play().catch(() => {});
+    }
+    document.getElementById('proctorCam')?.classList.remove('hidden');
+  } catch (err) {
+    console.warn('[Camera proctoring error]', err);
+    addViolation('cam', 'Camera access denied or unavailable on this device');
+  }
 }
+
 async function requestScreenShare() {
+  // If on mobile device, skip screen share directly
+  if (isMobileDevice() || !navigator.mediaDevices?.getDisplayMedia) {
+    document.getElementById('screenShareOverlay')?.classList.add('hidden');
+    toast('📱 Mobile device active — Camera & Audio proctoring enabled');
+    try {
+      await _actuallyStart();
+    } catch (e) {
+      console.error('[requestScreenShare mobile]', e);
+      toast('❌ Failed to start interview: ' + (e.message || e));
+    }
+    return;
+  }
+
   let screenShareOk = false;
   try {
-    if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
-      throw new Error('Screen sharing is not supported in this browser');
-    }
     screenStr = await navigator.mediaDevices.getDisplayMedia({ video: { displaySurface: 'monitor' } });
     screenStr.getVideoTracks()[0].onended = () => {
       if (mode === 'real') addViolation('screen', 'Screen share stopped');
@@ -3584,13 +4130,11 @@ async function requestScreenShare() {
   } catch (screenErr) {
     console.warn('[ScreenShare] Failed:', screenErr.name, screenErr.message);
     if (screenErr.name === 'NotAllowedError') {
-      toast('⚠️ Screen share was denied. The interview will proceed without screen monitoring.');
-    } else if (screenErr.name === 'NotSupportedError' || screenErr.name === 'TypeError') {
-      toast('⚠️ Screen sharing not supported in this browser. Proceeding without it.');
+      toast('⚠️ Screen share was denied. Proceeding with camera & voice proctoring.');
     } else {
-      toast('⚠️ Screen share unavailable. Proceeding without screen monitoring.');
+      toast('⚠️ Screen share unavailable. Proceeding with camera & voice proctoring.');
     }
-    addViolation('screen', 'Screen share not granted — proceeding without monitoring');
+    addViolation('screen', 'Screen share not active — using camera & voice verification');
   }
   document.getElementById('screenShareOverlay')?.classList.add('hidden');
   // Start the interview regardless of screen share result
@@ -3869,6 +4413,7 @@ async function loadHR() {
 
   loadHRJobs();
   loadAllTokens();
+  loadBYOKUI();
 }
 
 function renderAllApps(apps) {
@@ -4151,11 +4696,14 @@ async function generateDirectInvite() {
     const expires = new Date(Date.now() + expHours * 3600000);
 
     const _hideQ = document.getElementById('diHideQText')?.checked || false;
+    const byok = getActiveBYOKConfig();
     const _basePayload = {
       token, candidate_name: name, candidate_email: email,
       candidate_phone: phone || null, interview_role: role_,
       interview_level: level_, ai_difficulty: document.getElementById('diDiff')?.value || document.getElementById('diffSel')?.value || 'adaptive', question_count: isCoach ? 0 : qCount,
       interview_language: lang_, interview_type: isCoach ? 'coach' : 'real',
+      ai_provider: byok.provider || 'google',
+      ai_model: byok.model || 'gemini-2.5-flash',
       token_type: tokenType,
       status: 'pending', max_attempts: isCoach ? coachSessions : 1, attempts_used: 0,
       expires_at: expires.toISOString(), created_at: new Date().toISOString(),
@@ -4349,6 +4897,7 @@ async function bulkGenerateInvites() {
   if (res) { res.style.display = 'block'; res.innerHTML = `⏳ Generating ${emails.length} tokens…`; }
 
   const results = [];
+  const byok = getActiveBYOKConfig();
   for (const email of emails) {
     try {
       const token   = crypto.randomUUID ? crypto.randomUUID() : (Date.now().toString(36) + Math.random().toString(36).substring(2, 10));
@@ -4358,6 +4907,8 @@ async function bulkGenerateInvites() {
         interview_role: bulkRole, interview_level: bulkLevel,
         ai_difficulty: 'adaptive', question_count: 10, interview_language: 'en',
         interview_type: 'real', status: 'pending',
+        ai_provider: byok.provider || 'google',
+        ai_model: byok.model || 'gemini-2.5-flash',
         max_attempts: 1, attempts_used: 0,
         expires_at: expires.toISOString(), created_at: new Date().toISOString(),
       });
@@ -4962,6 +5513,7 @@ function _emailFallback(type, data) {
 // ─────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', async () => {
   _nav('home');
+  loadBYOKUI();
 
   // ★ FIX: Update mock badge on home card
   const mb = document.getElementById('mockBadge');
