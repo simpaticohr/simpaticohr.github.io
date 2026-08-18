@@ -969,9 +969,9 @@
         <div class="orb-container">
           <div>
             <div class="avatar-container" id="orb">
-              <img id="avatarFallbackImg" src="assets/ai-interviewer-avatar.png" alt="AI Interviewer" class="avatar-video-fallback" style="display:none;" />
-              <video id="avatarVideoIdle" class="avatar-video" src="assets/avatar-idle.mp4" loop muted playsinline autoplay onerror="this.style.display='none'; document.getElementById('avatarFallbackImg').style.display='block';"></video>
-              <video id="avatarVideoTalking" class="avatar-video" src="assets/avatar-talking.mp4" loop muted playsinline onerror="this.style.display='none';"></video>
+              <img id="avatarFallbackImg" src="assets/ai-interviewer-avatar.png" alt="AI Interviewer" class="avatar-video-fallback" style="display:block;" />
+              <video id="avatarVideoIdle" class="avatar-video" src="assets/avatar-idle.mp4" loop muted playsinline autoplay style="display:none;" onerror="this.style.display='none'; document.getElementById('avatarFallbackImg').style.display='block';"></video>
+              <video id="avatarVideoTalking" class="avatar-video" src="assets/avatar-talking.mp4" loop muted playsinline style="display:none;" onerror="this.style.display='none';"></video>
               <canvas id="avatarCanvas" class="avatar-video" width="240" height="240" style="display:none;z-index:4;width:110px;height:110px;background:#0a0a14;"></canvas>
               <video id="simliVideo" class="avatar-video" autoplay playsinline style="display:none;object-fit:cover;z-index:5;"></video>
               <audio id="simliAudio" autoplay style="display:none;"></audio>
@@ -3037,11 +3037,37 @@ async function startInterview() {
       curAppId  = interview.application_id || curAppId;
       curJobId  = interview.job_id         || curJobId;
       if (interview.hide_question_text || new URLSearchParams(location.search).get('hideq') === '1') qTextHidden = true;
-      await db('update', 'interviews', {
-        status:        'in_progress',
-        started_at:    new Date().toISOString(),
+
+      // Update interview status via Worker API (bypasses RLS)
+      const startPayload = {
+        token: token,
+        status: 'in_progress',
+        started_at: new Date().toISOString(),
         attempts_used: (interview.attempts_used || 0) + 1,
-      }, { token });
+      };
+      try {
+        const startRes = await fetch(W + '/api/interview/start', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'apikey': SB_KEY,
+            'Authorization': 'Bearer ' + SB_KEY,
+            'X-Tenant-ID': window.SIMPATICO_CONFIG?.tenantId || 'SIMP_PRO_MAIN'
+          },
+          body: JSON.stringify(startPayload)
+        });
+        if (!startRes.ok) {
+          console.warn('[startInterview] Worker /api/interview/start returned', startRes.status, '— falling back to direct DB');
+          await db('update', 'interviews', {
+            status: 'in_progress',
+            started_at: startPayload.started_at,
+            attempts_used: startPayload.attempts_used,
+          }, { token });
+        }
+      } catch (dbErr) {
+        console.warn('[startInterview] DB update failed (non-blocking):', dbErr.message);
+        // Non-blocking — let interview proceed even if status update fails
+      }
       toast('✅ Token verified — starting proctored session…');
 
       // Notify HR that candidate started
@@ -3369,15 +3395,30 @@ async function _startCam() {
   } catch { addViolation('cam', 'Camera access denied'); }
 }
 async function requestScreenShare() {
+  let screenShareOk = false;
   try {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
+      throw new Error('Screen sharing is not supported in this browser');
+    }
     screenStr = await navigator.mediaDevices.getDisplayMedia({ video: { displaySurface: 'monitor' } });
     screenStr.getVideoTracks()[0].onended = () => {
       if (mode === 'real') addViolation('screen', 'Screen share stopped');
     };
-    document.getElementById('screenShareOverlay')?.classList.add('hidden');
+    screenShareOk = true;
     toast('✅ Screen sharing active');
-  } catch { toast('❌ Screen share is required for proctored interviews'); return; }
-  // Start the interview — errors here are separate from screen sharing
+  } catch (screenErr) {
+    console.warn('[ScreenShare] Failed:', screenErr.name, screenErr.message);
+    if (screenErr.name === 'NotAllowedError') {
+      toast('⚠️ Screen share was denied. The interview will proceed without screen monitoring.');
+    } else if (screenErr.name === 'NotSupportedError' || screenErr.name === 'TypeError') {
+      toast('⚠️ Screen sharing not supported in this browser. Proceeding without it.');
+    } else {
+      toast('⚠️ Screen share unavailable. Proceeding without screen monitoring.');
+    }
+    addViolation('screen', 'Screen share not granted — proceeding without monitoring');
+  }
+  document.getElementById('screenShareOverlay')?.classList.add('hidden');
+  // Start the interview regardless of screen share result
   try {
     await _actuallyStart();
   } catch (e) {
@@ -3464,7 +3505,26 @@ async function _saveResults(r) {
       violation_count: violations.length,
     };
     if (curToken) {
-      await db('update', 'interviews', payload, { token: curToken });
+      // Try Worker API first (bypasses RLS), fallback to direct DB
+      try {
+        const submitRes = await fetch(W + '/interviews/submit', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'apikey': SB_KEY,
+            'Authorization': 'Bearer ' + SB_KEY,
+            'X-Tenant-ID': window.SIMPATICO_CONFIG?.tenantId || 'SIMP_PRO_MAIN'
+          },
+          body: JSON.stringify({ token: curToken, ...payload })
+        });
+        if (!submitRes.ok) {
+          console.warn('[_saveResults] Worker /interviews/submit returned', submitRes.status, '— falling back to direct DB');
+          await db('update', 'interviews', payload, { token: curToken });
+        }
+      } catch (workerErr) {
+        console.warn('[_saveResults] Worker unreachable, trying direct DB:', workerErr.message);
+        await db('update', 'interviews', payload, { token: curToken });
+      }
     } else {
       const fb = crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36);
       await dbInsertInterview({
