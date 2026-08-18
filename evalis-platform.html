@@ -2576,11 +2576,28 @@ const BYOK_MODELS_BY_PROVIDER = {
 function getActiveBYOKConfig() {
   const provider = localStorage.getItem('evalis_byok_provider') || 'google';
   const model    = localStorage.getItem('evalis_byok_model')    || 'gemini-3.7-flash';
-  const key      = localStorage.getItem('evalis_byok_key')
+  let key        = (localStorage.getItem('evalis_byok_key')
                 || localStorage.getItem('simpatico_gemini_key')
                 || sessionStorage.getItem('byok_gemini_key')
-                || '';
+                || localStorage.getItem('byok_key')
+                || localStorage.getItem('evalis_byok_gemini_key')
+                || '').trim();
+  if (!key) {
+    try {
+      const adm = JSON.parse(localStorage.getItem('adminConfig') || '{}');
+      key = (adm.geminiKey || adm.gemini_key || adm.apiKey || '').trim();
+    } catch(e) {}
+  }
   return { provider, model, key };
+}
+
+function showError(msg) {
+  toast(msg);
+  const eb = document.getElementById('errorBox');
+  if (eb) {
+    eb.textContent = msg;
+    eb.style.display = 'block';
+  }
 }
 
 function onByokProviderChange(preselectModel) {
@@ -3088,15 +3105,16 @@ Interview Protocol:
   try {
     const ws = new WebSocket(wsUrl);
     _fdWs = ws;
+    let setupDone = false;
 
     ws.onopen = () => {
-      console.log('[FD] WebSocket connected');
-      _fdSetStatus('connecting', 'Setting up AI interviewer…');
+      console.log('[FD] WebSocket connected to Gemini Live');
+      _fdSetStatus('connecting', 'Establishing AI connection…');
 
-      // Send setup message
+      // Send setup message using valid Gemini Live model identifier
       ws.send(JSON.stringify({
         setup: {
-          model: 'models/gemini-2.0-flash-live-001',
+          model: 'models/gemini-2.0-flash-exp',
           generationConfig: {
             responseModalities: ['AUDIO'],
             speechConfig: {
@@ -3111,18 +3129,21 @@ Interview Protocol:
         }
       }));
 
-      // Trigger first AI turn
-      ws.send(JSON.stringify({
-        clientContent: {
-          turns: [{ role: 'user', parts: [{ text: 'Hello! I am ready to start the interview.' }] }],
-          turnComplete: true
+      // Fallback timer: if setupComplete not received in 1.2s, trigger turn
+      setTimeout(() => {
+        if (!setupDone && ws.readyState === WebSocket.OPEN) {
+          setupDone = true;
+          ws.send(JSON.stringify({
+            clientContent: {
+              turns: [{ role: 'user', parts: [{ text: 'Hello! I am ready to start the interview.' }] }],
+              turnComplete: true
+            }
+          }));
+          _fdSetStatus('speaking', 'AI Interviewer is starting…');
         }
-      }));
+      }, 1200);
 
-      _fdSetStatus('speaking', 'AI Interviewer is speaking…');
       _fdStartSessionTimer();
-
-      // Start continuous mic streaming
       _fdStartMicStream(ws);
     };
 
@@ -3136,18 +3157,28 @@ Interview Protocol:
         return;
       }
 
+      // Handle setup complete confirmation from Gemini server
+      if (msg.setupComplete) {
+        console.log('[FD] Gemini Live setup confirmed');
+        if (!setupDone) {
+          setupDone = true;
+          ws.send(JSON.stringify({
+            clientContent: {
+              turns: [{ role: 'user', parts: [{ text: 'Hello! I am ready to start the interview.' }] }],
+              turnComplete: true
+            }
+          }));
+          _fdSetStatus('speaking', 'AI Interviewer is starting…');
+        }
+        return;
+      }
+
       // Handle errors
       if (msg.error) {
         console.error('[FD] Server error:', msg.error);
         _fdSetStatus('error', 'Connection error: ' + (msg.error.message || msg.error));
         showError('❌ AI connection error: ' + (msg.error.message || JSON.stringify(msg.error)));
         _fdCleanup();
-        return;
-      }
-
-      // Handle setup complete
-      if (msg.setupComplete) {
-        console.log('[FD] Setup complete');
         return;
       }
 
