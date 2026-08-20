@@ -2000,7 +2000,7 @@
                 <div class="question-meta">
                     <span class="question-number" id="q-number">Q1</span>
                     <span class="badge badge-type" id="q-type">TECHNICAL</span>
-                    <span class="badge badge-medium" id="q-difficulty">MEDIUM</span>
+                    <span class="badge badge-medium" id="q-difficulty" style="display:none;"></span>
                 </div>
 
                 <div class="question-text" id="q-text">
@@ -5817,7 +5817,27 @@ GUIDELINES:
             { q: `How do you communicate complex concepts or technical trade-offs in ${role} to diverse stakeholders to secure consensus?`, type: 'communication', diff: 'medium' }
         ];
 
-        const pool = [...techBank, ...behavioralBank, ...situationalBank, ...commBank];
+        let pool = [];
+        const diffMode = (difficulty || _b2bDifficulty || 'mixed').toLowerCase();
+        
+        if (diffMode === 'hard' || diffMode === 'expert') {
+            // Prioritize Hard/Expert questions first
+            const hardTech = techBank.filter(q => q.diff === 'hard');
+            const hardBeh = behavioralBank.filter(q => q.diff === 'hard');
+            const hardSit = situationalBank.filter(q => q.diff === 'hard');
+            const otherTech = techBank.filter(q => q.diff !== 'hard').map(item => ({
+                ...item,
+                q: `[Deep Technical Assessment] In ${role}, analyze a high-concurrency or mission-critical scenario involving: ${item.q} Detail your architectural decisions, trade-offs, and failure mitigations.`,
+                diff: 'hard'
+            }));
+            pool = [...hardTech, ...hardBeh, ...hardSit, ...otherTech, ...commBank];
+        } else if (diffMode === 'easy') {
+            const easyTech = techBank.filter(q => q.diff === 'easy' || q.diff === 'medium');
+            pool = [...easyTech, ...behavioralBank, ...situationalBank, ...commBank];
+        } else {
+            pool = [...techBank, ...behavioralBank, ...situationalBank, ...commBank];
+        }
+
         const numQ = Math.min(pool.length, Math.max(3, count || 5));
         const selected = pool.slice(0, numQ);
 
@@ -5829,7 +5849,7 @@ GUIDELINES:
                 id: `q_${idx + 1}`,
                 question: item.q,
                 type: item.type,
-                difficulty: item.diff
+                difficulty: item.diff || diffMode
             }))
         };
     }
@@ -6262,11 +6282,11 @@ GUIDELINES:
         const typeEl = document.getElementById('q-type');
         typeEl.textContent = (q.type || 'technical').toUpperCase().replace('-', ' ');
 
-        // Difficulty badge
+        // Difficulty badge - Kept hidden from candidate view to avoid distraction
         const diffEl = document.getElementById('q-difficulty');
-        const diff = (q.difficulty || 'medium').toLowerCase();
-        diffEl.textContent = diff.toUpperCase();
-        diffEl.className = `badge badge-${diff}`;
+        if (diffEl) {
+            diffEl.style.display = 'none';
+        }
 
         // Clear answer
         document.getElementById('answer-input').value = '';
