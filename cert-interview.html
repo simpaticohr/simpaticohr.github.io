@@ -2183,16 +2183,10 @@
     const _b2bExp           = parseInt(_urlParams.get('exp') || '0');        // Expiration timestamp in epoch ms
 
     // ── Role & Authentication Gate ──
+    const _isCandidateInvite = (_b2bToken.length > 0) && (_urlParams.get('admin') !== '1');
     function isUserAdmin() {
         if (_urlParams.get('admin') === '1' || _urlParams.get('admin') === 'true') return true;
-        try {
-            const user = JSON.parse(localStorage.getItem('simpatico_user') || '{}');
-            const role = (user.role || '').toLowerCase();
-            if (['admin', 'super_admin', 'superadmin', 'recruiter', 'hr_manager', 'consultant'].includes(role)) {
-                return true;
-            }
-        } catch(e) {}
-        return false;
+        return !_isCandidateInvite;
     }
     const _isAdmin = isUserAdmin();
 
@@ -2203,7 +2197,7 @@
     }
 
     function isTokenUsed(token) {
-        if (!token || _isAdmin) return false;
+        if (!token || !_isCandidateInvite) return false;
         try {
             const used = JSON.parse(localStorage.getItem('simpatico_used_tokens') || '[]');
             return used.includes(token);
@@ -2250,7 +2244,7 @@
     }
 
     // Validate token and expiry on page load — block candidate if expired or already used
-    if (_b2bToken && !_isAdmin) {
+    if (_isCandidateInvite) {
         if (isTokenExpired(_b2bExp)) {
             document.addEventListener('DOMContentLoaded', () => showTokenExpiredScreen('time_expired', _b2bExp));
         } else if (isTokenUsed(_b2bToken)) {
@@ -2262,20 +2256,21 @@
     window.addEventListener('DOMContentLoaded', () => {
         const switcherContainer = document.getElementById('mode-switcher-container');
         const adminPanel = document.getElementById('admin-link-generator');
-
-        // Security check: ONLY display recruiter/admin features to verified admins
         const byokSection = document.querySelector('.byok-section');
-        if (_isAdmin) {
-            if (switcherContainer) switcherContainer.style.display = 'flex';
-            if (byokSection) byokSection.style.display = 'block';
-            if (_urlParams.get('admin') === '1' || _urlParams.get('admin') === 'true') {
-                switchPortalTab('admin');
-            }
-        } else {
-            // Absolute lockout: candidates MUST NEVER see admin panel, switcher, or BYOK section
+
+        if (_isCandidateInvite) {
+            // Absolute lockout: invited candidates with token MUST NEVER see admin panel, switcher, or BYOK section
             if (switcherContainer) switcherContainer.style.display = 'none';
             if (adminPanel) adminPanel.style.display = 'none';
             if (byokSection) byokSection.style.display = 'none';
+        } else {
+            // Recruiter / Admin / Direct visitor: display mode switcher tabs
+            if (switcherContainer) switcherContainer.style.display = 'flex';
+            if (_urlParams.get('admin') === '1' || _urlParams.get('admin') === 'true') {
+                switchPortalTab('admin');
+            } else {
+                switchPortalTab('candidate');
+            }
         }
 
         if (_isB2B) {
@@ -3064,11 +3059,9 @@
         if (savedGeminiKey && document.getElementById('byok-key')) {
             document.getElementById('byok-key').value = savedGeminiKey;
         }
-        const byokSection = document.querySelector('.byok-section');
-        if (!_isAdmin) {
+        if (_isCandidateInvite) {
+            const byokSection = document.querySelector('.byok-section');
             if (byokSection) byokSection.style.display = 'none';
-        } else {
-            if (byokSection) byokSection.style.display = 'block';
         }
         
         // Load initial key based on selected provider
@@ -4883,13 +4876,14 @@ GUIDELINES:
     }
 
     function switchPortalTab(tab) {
-        if (tab === 'admin' && !_isAdmin) {
+        if (tab === 'admin' && _isCandidateInvite) {
             console.warn('Unauthorized access to recruiter/admin panel blocked.');
             return;
         }
         const candBtn = document.getElementById('btn-tab-candidate');
         const adminBtn = document.getElementById('btn-tab-admin');
         const adminPanel = document.getElementById('admin-link-generator');
+        const byokSection = document.querySelector('.byok-section');
         const candDetailsCard = document.getElementById('contact-details-card');
         const candStartBtn = document.getElementById('btn-start');
         const resumeContainer = document.getElementById('resume-upload-container');
@@ -4907,6 +4901,7 @@ GUIDELINES:
                 adminPanel.style.display = 'block';
                 adminPanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
             }
+            if (byokSection) byokSection.style.display = 'block';
             if (candDetailsCard) candDetailsCard.style.display = 'none';
             if (candStartBtn) candStartBtn.style.display = 'none';
         } else {
@@ -4921,6 +4916,7 @@ GUIDELINES:
             if (adminPanel) {
                 adminPanel.style.display = 'none';
             }
+            if (byokSection) byokSection.style.display = 'none';
             if (candDetailsCard) candDetailsCard.style.display = 'block';
             if (candStartBtn) candStartBtn.style.display = 'block';
             if (resumeContainer) resumeContainer.style.display = 'block';
