@@ -4549,6 +4549,7 @@ GUIDELINES:
                     if (userTurnsCount >= targetQuestions) {
                         console.log(`Interview complete: ${userTurnsCount}/${targetQuestions} answers collected. Stopping mic and waiting for final audio playback...`);
                         stopMicStreaming();
+                        cleanupMicStream();
                         
                         // Disable the end button to show it is finalizing
                         const finishBtn = document.getElementById('btn-voice-finish');
@@ -4557,14 +4558,16 @@ GUIDELINES:
                             finishBtn.textContent = '⌛ Finalizing Report...';
                         }
                         
-                        // Check periodically for audio queue to drain
+                        // Check for audio queue to drain with a 3-second hard safety timeout
+                        let waitedMs = 0;
                         const checkInterval = setInterval(() => {
-                            if (audioQueue.length === 0) {
+                            waitedMs += 200;
+                            if (audioQueue.length === 0 || waitedMs >= 3000) {
                                 clearInterval(checkInterval);
-                                console.log("Audio queue empty. Terminating voice session...");
+                                console.log("Audio queue empty or timeout reached. Terminating voice session...");
                                 finishLiveVoiceInterview();
                             }
-                        }, 250);
+                        }, 200);
                         return;
                     }
 
@@ -4630,17 +4633,18 @@ GUIDELINES:
     }
 
     async function finishLiveVoiceInterview() {
-        if (!state.liveWs) return;
+        if (state._isFinishingVoiceSession) return;
+        state._isFinishingVoiceSession = true;
 
         if (state.userSpeechTranscript) {
             state.liveTranscript.push({ role: 'user', parts: [{ text: state.userSpeechTranscript }] });
             state.userSpeechTranscript = '';
         }
 
-        try {
-            state.liveWs.close();
-        } catch(e) {}
-        state.liveWs = null;
+        if (state.liveWs) {
+            try { state.liveWs.close(); } catch(e) {}
+            state.liveWs = null;
+        }
 
         stopMicStreaming();
         cleanupMicStream();
@@ -4651,6 +4655,13 @@ GUIDELINES:
         resetVad();
         if (window.speechSynthesis) {
             window.speechSynthesis.cancel();
+        }
+        if (state.recognition) {
+            try { state.recognition.stop(); } catch(e) {}
+        }
+        if (window.aiAvatar) {
+            window.aiAvatar.setState('idle');
+            window.aiAvatar.setAmplitude(0);
         }
 
         if (state.liveTranscript.length < 2) {
