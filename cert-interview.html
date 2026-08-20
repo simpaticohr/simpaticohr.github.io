@@ -1951,7 +1951,7 @@
                         <span id="voice-status-text">AI INTERVIEWER ACTIVE</span>
                     </div>
 
-                    <div class="avatar-stage" id="avatar-stage" onclick="toggleSpeechRecordingManual()" ondblclick="revealHiddenSubtitles()">
+                    <div class="avatar-stage visualizer-container" id="avatar-stage" onclick="toggleSpeechRecordingManual()" ondblclick="revealHiddenSubtitles()">
                         <canvas id="ai-avatar-canvas"></canvas>
                         <div id="simli-avatar" style="display:none"><video id="simli-video" autoplay playsinline></video></div>
                         <!-- DuiX Video Avatar (hyper-realistic) -->
@@ -5198,7 +5198,7 @@ GUIDELINES:
         rec.onend = function() {
             state.recognitionActive = false;
             // Restart if we are still in listening state and user hasn't submitted yet
-            const visualizer = document.getElementById('visualizer-container');
+            const visualizer = document.getElementById('avatar-stage') || document.getElementById('visualizer-container');
             if (state.voiceMode && visualizer && visualizer.classList.contains('listening')) {
                 setTimeout(() => {
                     try {
@@ -5213,8 +5213,23 @@ GUIDELINES:
         return rec;
     }
 
+    function setVisualizerState(cls) {
+        const el = document.getElementById('avatar-stage') || document.getElementById('visualizer-container');
+        if (el) el.className = 'avatar-stage visualizer-container ' + (cls || '');
+        if (window.aiAvatar && typeof window.aiAvatar.setState === 'function') {
+            window.aiAvatar.setState(cls);
+        }
+    }
+
+    function setVoiceStatusDot(cls, text) {
+        const dot = document.getElementById('voice-status-dot');
+        if (dot) dot.className = 'status-dot ' + (cls || '');
+        const txt = document.getElementById('voice-status-text');
+        if (txt && text) txt.textContent = text;
+    }
+
     function pulseWaveBars() {
-        const container = document.getElementById('visualizer-container');
+        const container = document.getElementById('avatar-stage') || document.getElementById('visualizer-container');
         if (!container || !container.classList.contains('listening')) return;
         
         const bars = document.querySelectorAll('.wave-bars .bar');
@@ -5232,21 +5247,31 @@ GUIDELINES:
 
     function setupVoiceSubtitles() {
         const overlay = document.getElementById('subtitles-overlay');
-        overlay.className = 'subtitles-overlay';
+        if (overlay) overlay.className = 'subtitles-overlay';
         
         if (state.subtitlesMode === 'hidden') {
-            overlay.classList.add('hidden-subtitles');
-            document.getElementById('subtitles-header-label').textContent = '📝 PROCTOR SUBTITLES (DBL-CLICK MIC TO REVEAL)';
-            document.getElementById('subtitles-text').style.display = 'none';
+            if (overlay) overlay.classList.add('hidden-subtitles');
+            const hdr = document.getElementById('subtitles-header-label');
+            if (hdr) hdr.textContent = '📝 PROCTOR SUBTITLES (DBL-CLICK MIC TO REVEAL)';
+            const txt = document.getElementById('subtitles-text');
+            if (txt) txt.style.display = 'none';
         } else if (state.subtitlesMode === 'subtle') {
-            overlay.classList.add('subtle-subtitles');
-            document.getElementById('subtitles-header-label').textContent = '📝 LIVE SUBTITLES';
-            document.getElementById('subtitles-text').style.display = 'block';
-            document.getElementById('subtitles-text').style.opacity = '0.6';
+            if (overlay) overlay.classList.add('subtle-subtitles');
+            const hdr = document.getElementById('subtitles-header-label');
+            if (hdr) hdr.textContent = '📝 LIVE SUBTITLES';
+            const txt = document.getElementById('subtitles-text');
+            if (txt) {
+                txt.style.display = 'block';
+                txt.style.opacity = '0.6';
+            }
         } else {
-            document.getElementById('subtitles-header-label').textContent = '📝 LIVE SUBTITLES';
-            document.getElementById('subtitles-text').style.display = 'block';
-            document.getElementById('subtitles-text').style.opacity = '1';
+            const hdr = document.getElementById('subtitles-header-label');
+            if (hdr) hdr.textContent = '📝 LIVE SUBTITLES';
+            const txt = document.getElementById('subtitles-text');
+            if (txt) {
+                txt.style.display = 'block';
+                txt.style.opacity = '1';
+            }
         }
     }
 
@@ -5254,6 +5279,7 @@ GUIDELINES:
         if (e) e.stopPropagation();
         const overlay = document.getElementById('subtitles-overlay');
         const body = document.getElementById('subtitles-text');
+        if (!overlay || !body) return;
         if (state.subtitlesMode === 'hidden') {
             if (overlay.classList.contains('revealed')) {
                 overlay.classList.remove('revealed');
@@ -5272,9 +5298,9 @@ GUIDELINES:
     function revealHiddenSubtitles() {
         if (state.subtitlesMode === 'hidden') {
             const overlay = document.getElementById('subtitles-overlay');
-            overlay.classList.toggle('revealed');
+            if (overlay) overlay.classList.toggle('revealed');
             const body = document.getElementById('subtitles-text');
-            body.style.display = overlay.classList.contains('revealed') ? 'block' : 'none';
+            if (body && overlay) body.style.display = overlay.classList.contains('revealed') ? 'block' : 'none';
         }
     }
 
@@ -5282,11 +5308,11 @@ GUIDELINES:
         state.voiceMuted = !state.voiceMuted;
         const muteBtn = document.getElementById('btn-voice-mute');
         if (state.voiceMuted) {
-            muteBtn.textContent = '🔊 Unmute AI';
+            if (muteBtn) muteBtn.textContent = '🔊 Unmute AI';
             synth.cancel();
         } else {
-            muteBtn.textContent = '🔇 Mute AI';
-            const visualizer = document.getElementById('visualizer-container');
+            if (muteBtn) muteBtn.textContent = '🔇 Mute AI';
+            const visualizer = document.getElementById('avatar-stage') || document.getElementById('visualizer-container');
             if (visualizer && visualizer.classList.contains('speaking')) {
                 const q = state.questions[state.currentIndex];
                 if (q) speakText(q.question);
@@ -5295,7 +5321,7 @@ GUIDELINES:
     }
 
     function toggleSpeechRecordingManual() {
-        const visualizer = document.getElementById('visualizer-container');
+        const visualizer = document.getElementById('avatar-stage') || document.getElementById('visualizer-container');
         if (!visualizer || !visualizer.classList.contains('listening')) return;
         
         // Pulsing animation trigger on click
@@ -5945,27 +5971,32 @@ GUIDELINES:
             stopSpeakingTimer();
             
             state.userSpeechTranscript = '';
-            document.getElementById('subtitles-text').textContent = 'Waiting for AI to finish speaking...';
-            document.getElementById('btn-voice-finish').disabled = true;
+            const subText = document.getElementById('subtitles-text');
+            if (subText) subText.textContent = 'Waiting for AI to finish speaking...';
+            const finishBtn = document.getElementById('btn-voice-finish');
+            if (finishBtn) finishBtn.disabled = true;
             
             // Update visualizer to AI Speaking
-            const visualizer = document.getElementById('visualizer-container');
-            visualizer.className = 'visualizer-container speaking';
-            document.getElementById('visualizer-icon').textContent = '🤖';
-            document.getElementById('voice-status-dot').className = 'status-dot pulse-blue';
-            document.getElementById('voice-status-text').textContent = 'AI INTERVIEWER SPEAKING';
-            document.getElementById('voice-instruction').textContent = 'AI is reading the question. Listen carefully.';
+            setVisualizerState('speaking');
+            const vIcon = document.getElementById('visualizer-icon');
+            if (vIcon) vIcon.textContent = '🤖';
+            setVoiceStatusDot('pulse-blue', 'AI INTERVIEWER SPEAKING');
+            const vInstr = document.getElementById('voice-instruction');
+            if (vInstr) vInstr.textContent = 'AI is reading the question. Listen carefully.';
             
             // Speak the question text
             speakText(q.question, function() {
                 // AI finished speaking, start listening to user
-                visualizer.className = 'visualizer-container listening';
-                document.getElementById('visualizer-icon').textContent = '🎙️';
-                document.getElementById('voice-status-dot').className = 'status-dot pulse-green';
-                document.getElementById('voice-status-text').textContent = 'LISTENING TO YOU';
-                document.getElementById('voice-instruction').textContent = 'Speak your answer. Auto-submits when you stop.';
-                document.getElementById('subtitles-text').textContent = 'Listening...';
-                document.getElementById('btn-voice-finish').disabled = false;
+                setVisualizerState('listening');
+                const vIcon2 = document.getElementById('visualizer-icon');
+                if (vIcon2) vIcon2.textContent = '🎙️';
+                setVoiceStatusDot('pulse-green', 'LISTENING TO YOU');
+                const vInstr2 = document.getElementById('voice-instruction');
+                if (vInstr2) vInstr2.textContent = 'Speak your answer. Auto-submits when you stop.';
+                const subText2 = document.getElementById('subtitles-text');
+                if (subText2) subText2.textContent = 'Listening...';
+                const finishBtn2 = document.getElementById('btn-voice-finish');
+                if (finishBtn2) finishBtn2.disabled = false;
                 
                 // Start real-time waveform, chime, and elapsed timer
                 playChime('listening');
@@ -6086,22 +6117,24 @@ GUIDELINES:
         synth.cancel(); // Stop AI speaking just in case
         
         // Capture final transcription
-        const finalAnswer = document.getElementById('subtitles-text').textContent.trim();
+        const subEl = document.getElementById('subtitles-text');
+        const finalAnswer = subEl ? subEl.textContent.trim() : '';
         if (!finalAnswer || finalAnswer === 'Listening...' || finalAnswer === 'Waiting for AI to finish speaking...' || finalAnswer === 'Listening for speech...') {
             // User didn't say anything
-            document.getElementById('voice-instruction').textContent = '⚠️ No answer detected. Please try speaking again.';
+            const vInstr = document.getElementById('voice-instruction');
+            if (vInstr) vInstr.textContent = '⚠️ No answer detected. Please try speaking again.';
             
             // Pulse mic color briefly
-            const originalText = document.getElementById('voice-status-text').textContent;
-            document.getElementById('voice-status-text').textContent = 'NO AUDIO DETECTED';
-            document.getElementById('voice-status-dot').className = 'status-dot pulse-red';
+            const statusTxtEl = document.getElementById('voice-status-text');
+            const originalText = statusTxtEl ? statusTxtEl.textContent : 'LISTENING TO YOU';
+            setVoiceStatusDot('pulse-red', 'NO AUDIO DETECTED');
             
             setTimeout(() => {
-                const visualizer = document.getElementById('visualizer-container');
+                const visualizer = document.getElementById('avatar-stage') || document.getElementById('visualizer-container');
                 if (state.voiceMode && visualizer && visualizer.classList.contains('listening')) {
-                    document.getElementById('voice-status-text').textContent = originalText;
-                    document.getElementById('voice-status-dot').className = 'status-dot pulse-green';
-                    document.getElementById('voice-instruction').textContent = 'Speak your answer now. Click the ring when done.';
+                    setVoiceStatusDot('pulse-green', originalText);
+                    const vInstr2 = document.getElementById('voice-instruction');
+                    if (vInstr2) vInstr2.textContent = 'Speak your answer now. Click the ring when done.';
                     if (state.recognition && !state.recognitionActive) {
                         try { state.recognition.start(); } catch(e) {}
                     }
@@ -6111,15 +6144,14 @@ GUIDELINES:
         }
         
         // Disable buttons and show processing state
-        document.getElementById('btn-voice-finish').disabled = true;
-        const visualizer = document.getElementById('visualizer-container');
-        if (visualizer) {
-            visualizer.className = 'visualizer-container processing';
-            document.getElementById('visualizer-icon').textContent = '⚡';
-            document.getElementById('voice-status-dot').className = 'status-dot pulse-amber';
-            document.getElementById('voice-status-text').textContent = 'ANALYZING ANSWER';
-            document.getElementById('voice-instruction').textContent = 'AI is evaluating your response...';
-        }
+        const finishBtn = document.getElementById('btn-voice-finish');
+        if (finishBtn) finishBtn.disabled = true;
+        setVisualizerState('processing');
+        const vIcon = document.getElementById('visualizer-icon');
+        if (vIcon) vIcon.textContent = '⚡';
+        setVoiceStatusDot('pulse-amber', 'ANALYZING ANSWER');
+        const vInstr = document.getElementById('voice-instruction');
+        if (vInstr) vInstr.textContent = 'AI is evaluating your response...';
         
         stopTimer();
         const q = state.questions[state.currentIndex];
@@ -6379,18 +6411,19 @@ GUIDELINES:
 
             // In voice mode, speak the follow-up question
             if (state.voiceMode) {
-                document.getElementById('text-answer-container').style.display = 'none';
-                document.getElementById('voice-answer-container').style.display = 'block';
-                const visualizer = document.getElementById('visualizer-container');
-                if (visualizer) {
-                    visualizer.className = 'visualizer-container speaking';
-                    document.getElementById('voice-status-text').textContent = 'AI FOLLOW-UP QUESTION';
-                }
+                const txtAns = document.getElementById('text-answer-container');
+                if (txtAns) txtAns.style.display = 'none';
+                const vAns = document.getElementById('voice-answer-container');
+                if (vAns) vAns.style.display = 'block';
+                setVisualizerState('speaking');
+                setVoiceStatusDot('pulse-blue', 'AI FOLLOW-UP QUESTION');
                 speakText(state.currentFollowUpQuestion, function() {
-                    if (visualizer) visualizer.className = 'visualizer-container listening';
-                    document.getElementById('voice-status-text').textContent = 'LISTENING TO YOU';
-                    document.getElementById('voice-instruction').textContent = 'Speak your follow-up answer.';
-                    document.getElementById('btn-voice-finish').disabled = false;
+                    setVisualizerState('listening');
+                    setVoiceStatusDot('pulse-green', 'LISTENING TO YOU');
+                    const vInstr = document.getElementById('voice-instruction');
+                    if (vInstr) vInstr.textContent = 'Speak your follow-up answer.';
+                    const finishBtn = document.getElementById('btn-voice-finish');
+                    if (finishBtn) finishBtn.disabled = false;
                     playChime('listening');
                     startWaveform();
                     startSpeakingTimer();
