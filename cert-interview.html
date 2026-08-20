@@ -1505,6 +1505,7 @@
                             <span class="badge" style="background:rgba(255,255,255,0.08);border:1px solid var(--border);padding:4px 10px;border-radius:6px;font-size:0.78rem;color:#fff;">Role: <strong id="cand-badge-role-val" style="color:var(--accent-indigo-light);">Software Engineer</strong></span>
                             <span class="badge" style="background:rgba(255,255,255,0.08);border:1px solid var(--border);padding:4px 10px;border-radius:6px;font-size:0.78rem;color:#fff;">Level: <strong id="cand-badge-level-val" style="color:var(--accent-amber);">Mid-Level</strong></span>
                             <span class="badge" style="background:rgba(255,255,255,0.08);border:1px solid var(--border);padding:4px 10px;border-radius:6px;font-size:0.78rem;color:#fff;">Questions: <strong id="cand-badge-count-val">5 Questions</strong></span>
+                            <span class="badge" style="background:rgba(255,255,255,0.08);border:1px solid var(--border);padding:4px 10px;border-radius:6px;font-size:0.78rem;color:#fff;">Language: <strong id="cand-badge-lang-val" style="color:var(--accent-cyan-light);">🇮🇳 English (India)</strong></span>
                             <span class="badge" style="background:rgba(99,102,241,0.2);border:1px solid rgba(99,102,241,0.4);padding:4px 10px;border-radius:6px;font-size:0.78rem;color:var(--accent-indigo-light);display:inline-flex;align-items:center;gap:6px;">
                                 Format: <strong id="cand-badge-format-val">AI Voice Interview</strong>
                                 <button type="button" id="btn-cand-switch-mode" onclick="toggleCandidateInterviewMode()" style="background:rgba(255,255,255,0.12);border:1px solid rgba(255,255,255,0.2);color:#fff;font-size:0.72rem;padding:2px 8px;border-radius:4px;cursor:pointer;margin-left:4px;transition:background 0.2s ease;" title="Switch assessment format">🔄 Switch Mode</button>
@@ -1676,6 +1677,14 @@
                                     <option value="hidden" selected>Hidden Subtitles (Ultra Pro)</option>
                                     <option value="subtle">Subtle Overlay</option>
                                     <option value="visible">Always Visible</option>
+                                </select>
+                            </div>
+                            <div class="form-group" id="lang-select-container">
+                                <label class="form-label" for="lang-select">Assessment Language</label>
+                                <select id="lang-select" class="form-select" onchange="updateCandRoleDisplay()">
+                                    <option value="en-IN" selected>🇮🇳 English (India)</option>
+                                    <option value="en-US">🇺🇸 English (US / Global)</option>
+                                    <option value="ml-IN">🌴 Malayalam (മലയാളം)</option>
                                 </select>
                             </div>
                         </div>
@@ -2365,6 +2374,7 @@
 
     // ── Admin-Controlled Settings (set via URL params when generating invite link) ──
     const _b2bDifficulty    = _urlParams.get('difficulty') || 'mixed';       // easy|medium|hard|mixed
+    const _b2bLang          = _urlParams.get('lang') || 'en-IN';             // en-IN|en-US|ml-IN
     const _b2bShowReport    = parseInt(_urlParams.get('show_report') || '1'); // 0=hidden, 1=full, 2=summary
     const _b2bCertDownload  = _urlParams.get('cert_download') !== '0';       // default: enabled
     const _b2bCvRequired    = _urlParams.get('cv_required') === '1';
@@ -4358,6 +4368,13 @@
                 ? `DIFFICULTY SETTING: MEDIUM — Questions should be at a standard professional level. Mix of fundamental and intermediate challenges appropriate for the stated experience level.`
                 : `DIFFICULTY SETTING: MIXED/ADAPTIVE — Start with medium difficulty. Escalate to harder questions if the candidate answers well. Reduce difficulty slightly if they struggle. The last 2 questions should be the hardest.`;
 
+            const currentLang = state.lang || _b2bLang || document.getElementById('lang-select')?.value || 'en-IN';
+            const langBlock = currentLang === 'ml-IN'
+                ? `LANGUAGE PROTOCOL: MALAYALAM (മലയാളം) & TECHNICAL ENGLISH — You must conduct the assessment primarily in natural, polite Malayalam. Technical terms (e.g. databases, APIs, algorithms, frameworks) may be kept in English/Manglish. Converse fluently and ask questions clearly in Malayalam.`
+                : currentLang === 'en-IN'
+                ? `LANGUAGE PROTOCOL: INDIAN ENGLISH (en-IN) — Conduct the assessment in professional Indian English with clear enunciation and corporate standard phrasing.`
+                : `LANGUAGE PROTOCOL: GLOBAL ENGLISH (en-US).`;
+
             const cvPhaseBlock = _resumeText ? `
 INTERVIEW PHASES:
 Phase 1 (First ${cvPhaseCount} questions): CV/EXPERIENCE-BASED
@@ -4376,6 +4393,7 @@ ${_resumeText.substring(0, 3000)}
 This is a CERTIFICATION interview — results determine if the candidate receives a verified professional certificate.
 
 ${difficultyBlock}
+${langBlock}
 
 INTERVIEW STRUCTURE — Ask exactly ${targetQuestions} questions with this distribution:
 - 40% Technical or Domain-Specific questions (core competency)
@@ -4965,12 +4983,26 @@ GUIDELINES:
         
         const utterance = new SpeechSynthesisUtterance(text);
         
-        // Load best English voice
+        // Select matching voice based on chosen interview language
+        const currentLang = state.lang || _b2bLang || document.getElementById('lang-select')?.value || 'en-IN';
         const voices = synth.getVoices();
-        const englishVoice = voices.find(v => v.lang.startsWith('en') && v.name.includes('Google')) || 
-                             voices.find(v => v.lang.startsWith('en') && v.name.includes('Natural')) ||
-                             voices.find(v => v.lang.startsWith('en'));
-        if (englishVoice) utterance.voice = englishVoice;
+        
+        if (currentLang === 'ml-IN') {
+            const mlVoice = voices.find(v => v.lang.startsWith('ml') || v.name.toLowerCase().includes('malayalam'));
+            if (mlVoice) utterance.voice = mlVoice;
+            utterance.lang = 'ml-IN';
+        } else if (currentLang === 'en-IN') {
+            const inVoice = voices.find(v => v.lang === 'en-IN' || v.name.toLowerCase().includes('india')) ||
+                            voices.find(v => v.lang.startsWith('en'));
+            if (inVoice) utterance.voice = inVoice;
+            utterance.lang = 'en-IN';
+        } else {
+            const englishVoice = voices.find(v => v.lang.startsWith('en') && v.name.includes('Google')) || 
+                                 voices.find(v => v.lang.startsWith('en') && v.name.includes('Natural')) ||
+                                 voices.find(v => v.lang.startsWith('en'));
+            if (englishVoice) utterance.voice = englishVoice;
+            utterance.lang = 'en-US';
+        }
         
         utterance.rate = 1.05;
         utterance.pitch = 1.0;
@@ -5258,7 +5290,8 @@ GUIDELINES:
         const rec = new SpeechRecognition();
         rec.continuous = true;
         rec.interimResults = true;
-        rec.lang = 'en-US';
+        const currentLang = state.lang || _b2bLang || document.getElementById('lang-select')?.value || 'en-IN';
+        rec.lang = currentLang;
         
         rec.onstart = function() {
             state.recognitionActive = true;
@@ -5711,6 +5744,17 @@ GUIDELINES:
         if (candLevelBadge) candLevelBadge.textContent = level;
         const candCountBadge = document.getElementById('cand-badge-count-val');
         if (candCountBadge) candCountBadge.textContent = count;
+        
+        const langEl = document.getElementById('lang-select');
+        const lang = _urlParams.get('lang') || (langEl ? langEl.value : 'en-IN');
+        const langMap = {
+            'en-IN': '🇮🇳 English (India)',
+            'en-US': '🇺🇸 English (Global)',
+            'ml-IN': '🌴 Malayalam (മലയാളം)'
+        };
+        const candLangBadge = document.getElementById('cand-badge-lang-val');
+        if (candLangBadge) candLangBadge.textContent = langMap[lang] || lang;
+
         const candFormatBadge = document.getElementById('cand-badge-format-val');
         if (candFormatBadge) candFormatBadge.textContent = isVoice ? '🎙️ AI Voice Interview' : '📝 Text-based Assessment';
         const bannerTitle = document.getElementById('cand-banner-role-title');
@@ -6055,10 +6099,11 @@ GUIDELINES:
             return;
         }
 
-        // Store contact info in state for report
+        // Store contact info and language in state for report
         state.candidateName = candName;
         state.candidateEmail = candEmail;
         state.candidatePhone = candPhone;
+        state.lang = _urlParams.get('lang') || document.getElementById('lang-select')?.value || 'en-IN';
 
         // ── One-Time Token & Expiry Validation (Do not burn until completed) ──
         if (_b2bToken && !_isAdmin) {
@@ -7306,6 +7351,7 @@ GUIDELINES:
         }
 
         // Admin controls
+        params.set('lang', document.getElementById('lang-select')?.value || 'en-IN');
         params.set('difficulty', document.getElementById('difficulty-select')?.value || document.getElementById('admin-difficulty')?.value || 'mixed');
         params.set('proctoring', document.getElementById('admin-proctoring')?.value || '0');
         params.set('show_report', document.getElementById('admin-show-report')?.value || '0');
