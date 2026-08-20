@@ -1502,7 +1502,10 @@
                             <span class="badge" style="background:rgba(255,255,255,0.08);border:1px solid var(--border);padding:4px 10px;border-radius:6px;font-size:0.78rem;color:#fff;">Role: <strong id="cand-badge-role-val" style="color:var(--accent-indigo-light);">Software Engineer</strong></span>
                             <span class="badge" style="background:rgba(255,255,255,0.08);border:1px solid var(--border);padding:4px 10px;border-radius:6px;font-size:0.78rem;color:#fff;">Level: <strong id="cand-badge-level-val" style="color:var(--accent-amber);">Mid-Level</strong></span>
                             <span class="badge" style="background:rgba(255,255,255,0.08);border:1px solid var(--border);padding:4px 10px;border-radius:6px;font-size:0.78rem;color:#fff;">Questions: <strong id="cand-badge-count-val">5 Questions</strong></span>
-                            <span class="badge" style="background:rgba(99,102,241,0.2);border:1px solid rgba(99,102,241,0.4);padding:4px 10px;border-radius:6px;font-size:0.78rem;color:var(--accent-indigo-light);">Format: <strong id="cand-badge-format-val">Text-Based Assessment</strong></span>
+                            <span class="badge" style="background:rgba(99,102,241,0.2);border:1px solid rgba(99,102,241,0.4);padding:4px 10px;border-radius:6px;font-size:0.78rem;color:var(--accent-indigo-light);display:inline-flex;align-items:center;gap:6px;">
+                                Format: <strong id="cand-badge-format-val">AI Voice Interview</strong>
+                                <button type="button" id="btn-cand-switch-mode" onclick="toggleCandidateInterviewMode()" style="background:rgba(255,255,255,0.12);border:1px solid rgba(255,255,255,0.2);color:#fff;font-size:0.72rem;padding:2px 8px;border-radius:4px;cursor:pointer;margin-left:4px;transition:background 0.2s ease;" title="Switch assessment format">🔄 Switch Mode</button>
+                            </span>
                         </div>
                     </div>
 
@@ -4219,17 +4222,18 @@
         const byokH = getByokHeaders();
         const geminiKey = byokH['X-AI-Key'] || getAdminGeminiKey() || localStorage.getItem('byok_key') || localStorage.getItem('evalis_byok_gemini_key') || '';
         if (!geminiKey) {
-            const btn = document.getElementById('btn-start');
-            if (btn) {
-                btn.disabled = false;
-                btn.innerHTML = '<i class="fas fa-play"></i> Start Assessment';
+            console.log('[Voice] Direct Gemini WebSocket key not detected on client device — transitioning to Browser AI Voice Mode.');
+            if (!state.questions || state.questions.length === 0) {
+                const qCount = state.questionsCount || 5;
+                const fallbackData = generateFallbackQuestionSet(state.role, state.level, qCount, 'mixed', _resumeText);
+                state.questions = fallbackData.questions;
             }
-            if (_isAdmin) {
-                showError('setup-error', 'Voice mode requires a Gemini API key. Please configure the key in the Admin AI Voice settings.');
-            } else {
-                showError('setup-error', 'Voice interview service is currently unavailable. Please switch to Text-based Assessment to continue.');
-            }
-            showScreen('screen-setup');
+            state.voiceMode = true;
+            document.getElementById('text-answer-container').style.display = 'none';
+            document.getElementById('voice-answer-container').style.display = 'block';
+            setupVoiceSubtitles();
+            showScreen('screen-interview');
+            loadQuestion(0);
             return;
         }
 
@@ -5384,6 +5388,16 @@ GUIDELINES:
         if (bannerTitle) bannerTitle.textContent = `${role} Assessment`;
     }
 
+    function toggleCandidateInterviewMode() {
+        const modeSelect = document.getElementById('mode-select');
+        if (!modeSelect) return;
+        const currentMode = modeSelect.value;
+        const newMode = (currentMode === 'voice') ? 'text' : 'voice';
+        modeSelect.value = newMode;
+        if (typeof toggleModeDetails === 'function') toggleModeDetails();
+        updateCandRoleDisplay();
+    }
+
     function showError(containerId, message) {
         const banner = document.getElementById(containerId);
         const text = document.getElementById(containerId + '-text');
@@ -5774,32 +5788,6 @@ GUIDELINES:
 
         if (btn) btn.innerHTML = '<div class="spinner"></div> Generating Questions...';
 
-        if (mode === 'voice') {
-            state.sessionId = crypto.randomUUID();
-            state.role = role;
-            state.level = level;
-            state.questions = [];
-            state.questionsCount = count || 5;
-            state.currentIndex = 0;
-            state.answers = [];
-            state.voiceMode = true;
-            state.subtitlesMode = subtitles;
-            state.subtitlesRevealed = (subtitles === 'visible');
-
-            document.getElementById('text-answer-container').style.display = 'none';
-            document.getElementById('voice-answer-container').style.display = 'block';
-            setupVoiceSubtitles();
-
-            showScreen('screen-interview');
-            if (btn) {
-                btn.disabled = false;
-                btn.innerHTML = 'Start Assessment →';
-            }
-            
-            startLiveVoiceInterview();
-            return;
-        }
-
         try {
             const previousHashes = getUsedQuestionHashes(role);
             const questionCount = count || 5;
@@ -5814,7 +5802,7 @@ GUIDELINES:
                     candidate_email: candEmail || _b2bCandidateEmail || null,
                     candidate_phone: candPhone || _b2bPhone || null,
                     resume_text: _resumeText || '',
-                    mode: 'text',
+                    mode: mode,
                     previousQuestionHashes: previousHashes,
                     adaptiveDifficulty: selectedDifficulty,
                     requireFollowUps: true,
@@ -5859,6 +5847,9 @@ GUIDELINES:
                 document.getElementById('text-answer-container').style.display = 'none';
                 document.getElementById('voice-answer-container').style.display = 'block';
                 setupVoiceSubtitles();
+                if (typeof initSelectedAvatar === 'function') {
+                    initSelectedAvatar();
+                }
             } else {
                 document.getElementById('text-answer-container').style.display = 'block';
                 document.getElementById('voice-answer-container').style.display = 'none';
@@ -5876,6 +5867,7 @@ GUIDELINES:
             }
         }
     }
+
 
 
     // ══════════════════════════════════════════
