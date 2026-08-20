@@ -2386,22 +2386,43 @@
     }
 
     function isTokenUsed(token) {
-        if (!token || !_isCandidateInvite) return false;
+        if (!token) return false;
         try {
+            // Check dedicated token-specific flag
+            if (localStorage.getItem('simpatico_token_used_' + token)) return true;
+            if (sessionStorage.getItem('simpatico_token_consumed_' + token)) return true;
+            
+            // Check global used tokens registry
             const used = JSON.parse(localStorage.getItem('simpatico_used_tokens') || '[]');
-            return used.includes(token);
+            return Array.isArray(used) && used.includes(token);
         } catch(e) { return false; }
     }
 
     function markTokenAsUsed(token) {
         if (!token) return;
         try {
+            // 1. Set individual token lock
+            localStorage.setItem('simpatico_token_used_' + token, JSON.stringify({
+                token: token,
+                usedAt: Date.now(),
+                timestamp: new Date().toISOString()
+            }));
+            sessionStorage.setItem('simpatico_token_consumed_' + token, '1');
+
+            // 2. Add to global used tokens list
             const used = JSON.parse(localStorage.getItem('simpatico_used_tokens') || '[]');
             if (!used.includes(token)) {
                 used.push(token);
                 if (used.length > 500) used.splice(0, used.length - 500);
                 localStorage.setItem('simpatico_used_tokens', JSON.stringify(used));
             }
+
+            // 3. Asynchronously inform backend worker if available
+            fetch(`${API_BASE}/api/interview/token-consume`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ token: token, timestamp: Date.now() })
+            }).catch(() => {});
         } catch(e) {}
     }
 
@@ -4636,6 +4657,10 @@ GUIDELINES:
             showError('setup-error', 'Interview ended too early. No conversation transcript was recorded.');
             showScreen('screen-setup');
             return;
+        }
+
+        if (_b2bToken) {
+            markTokenAsUsed(_b2bToken);
         }
 
         showScreen('screen-report');
