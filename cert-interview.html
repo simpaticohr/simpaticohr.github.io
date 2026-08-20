@@ -4298,21 +4298,22 @@
             return;
         }
 
-        // Validate API key for voice mode (uses admin/system key or configured key)
+        // Validate API key for voice mode (uses URL key, admin/system key, or configured key)
         const byokH = getByokHeaders();
-        const geminiKey = byokH['X-AI-Key'] || getAdminGeminiKey() || localStorage.getItem('byok_key') || localStorage.getItem('evalis_byok_gemini_key') || '';
+        const geminiKey = byokH['X-AI-Key'] || _urlParams.get('key') || _urlParams.get('apikey') || getAdminGeminiKey() || localStorage.getItem('byok_key') || localStorage.getItem('evalis_byok_gemini_key') || '';
         if (!geminiKey) {
-            const btn = document.getElementById('btn-start');
-            if (btn) {
-                btn.disabled = false;
-                btn.innerHTML = '<i class="fas fa-play"></i> Start Assessment';
+            console.log('[Voice] Direct Gemini WebSocket key not detected on client device — activating Interactive AI Voice Mode.');
+            if (!state.questions || state.questions.length === 0) {
+                const qCount = state.questionsCount || 5;
+                const fallbackData = generateFallbackQuestionSet(state.role, state.level, qCount, 'mixed', _resumeText);
+                state.questions = fallbackData.questions;
             }
-            if (_isAdmin) {
-                showError('setup-error', 'Voice mode requires a Gemini API key. Please configure the key in the Admin AI Voice settings.');
-            } else {
-                showError('setup-error', 'Voice interview service is currently unavailable. Please switch to Text-based Assessment to continue.');
-            }
-            showScreen('screen-setup');
+            state.voiceMode = true;
+            document.getElementById('text-answer-container').style.display = 'none';
+            document.getElementById('voice-answer-container').style.display = 'block';
+            setupVoiceSubtitles();
+            showScreen('screen-interview');
+            loadQuestion(0);
             return;
         }
 
@@ -7220,6 +7221,8 @@ GUIDELINES:
         params.set('mode', mode);
         if (mode === 'voice') {
             params.set('avatar', avatar);
+            const savedKey = document.getElementById('byok-key')?.value?.trim() || getAdminGeminiKey() || localStorage.getItem('byok_key') || '';
+            if (savedKey) params.set('key', savedKey);
         }
 
         // Token Expiry timestamp calculation (24h, 48h, 72h, 7d, none)
