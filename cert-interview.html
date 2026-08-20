@@ -1432,8 +1432,8 @@
             </div>
 
             <div class="card">
-                <!-- ── Mode Switcher Tab Bar: Candidate vs Recruiter/Admin ── -->
-                <div style="display:flex;align-items:center;background:rgba(0,0,0,0.35);border:1px solid var(--border);border-radius:12px;padding:6px;margin-bottom:1.5rem;gap:8px;flex-wrap:wrap;">
+                <!-- ── Mode Switcher Tab Bar: Candidate vs Recruiter/Admin (Hidden by default; shown only to authenticated admin or ?admin=1) ── -->
+                <div id="mode-switcher-container" style="display:none;align-items:center;background:rgba(0,0,0,0.35);border:1px solid var(--border);border-radius:12px;padding:6px;margin-bottom:1.5rem;gap:8px;flex-wrap:wrap;">
                     <button id="btn-tab-candidate" onclick="switchPortalTab('candidate')" class="btn" style="flex:1;min-width:200px;background:var(--gradient-primary);color:#fff;font-weight:700;font-size:0.85rem;padding:10px 16px;border-radius:8px;border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;transition:all 0.2s ease;">
                         🎯 Candidate Mode (Take Interview)
                     </button>
@@ -1557,13 +1557,13 @@
                     </div>
                 </div>
 
-                <!-- BYOK & Avatar Service Key Section -->
-                <div class="byok-section" style="margin-top:1rem;padding:1.2rem;background:rgba(99,102,241,0.06);border:1px solid rgba(99,102,241,0.2);border-radius:var(--radius-md);">
+                <!-- ── BYOK & Avatar Service Key Section (Admin Only) ── -->
+                <div id="byok-section-container" class="byok-section" style="display:none;margin-top:1rem;padding:1.2rem;background:rgba(99,102,241,0.06);border:1px solid rgba(99,102,241,0.2);border-radius:var(--radius-md);">
                     <div style="display:flex;align-items:center;justify-content:space-between;cursor:pointer" onclick="toggleByokPanel()">
                         <div style="display:flex;align-items:center;gap:8px;">
                             <span style="font-size:1rem">🔑</span>
                             <div>
-                                <div style="font-size:0.88rem;font-weight:700;color:#fff">AI Voice & Streaming Avatar API Keys</div>
+                                <div style="font-size:0.88rem;font-weight:700;color:#fff">👑 Admin: AI Voice & Streaming Avatar API Keys</div>
                                 <div style="font-size:0.75rem;color:var(--text-muted)">Configure Google Gemini Voice & HeyGen / Tavus / D-ID / Simli Avatar Service Keys</div>
                             </div>
                         </div>
@@ -1763,6 +1763,12 @@
                                 </button>
                                 <button id="btn-copy-inv-text" onclick="copyInvitationText()" class="btn" style="background:rgba(255,255,255,0.06);border:1px solid var(--border);color:#fff;font-size:0.8rem;padding:9px 12px;border-radius:8px;display:flex;align-items:center;justify-content:center;gap:6px;cursor:pointer;">
                                     📄 Copy Full Invitation Text
+                                </button>
+                                <button onclick="openAdminLinkPreview()" class="btn" style="background:rgba(99,102,241,0.15);border:1px solid rgba(99,102,241,0.3);color:var(--accent-indigo-light);font-size:0.8rem;padding:9px 12px;border-radius:8px;display:flex;align-items:center;justify-content:center;gap:6px;cursor:pointer;">
+                                    👁️ Open Candidate Preview
+                                </button>
+                                <button onclick="clearUsedTokenCache()" class="btn" style="background:rgba(244,63,94,0.1);border:1px solid rgba(244,63,94,0.25);color:var(--accent-rose);font-size:0.8rem;padding:9px 12px;border-radius:8px;display:flex;align-items:center;justify-content:center;gap:6px;cursor:pointer;" title="Clear local testing cache so you can re-test links in this browser">
+                                    🔄 Reset Local Test Tokens
                                 </button>
                             </div>
                         </div>
@@ -2164,7 +2170,7 @@
     const _b2bCompanySlug = _urlParams.get('company') || '';
     const _b2bCandidateName = _urlParams.get('name') ? decodeURIComponent(_urlParams.get('name')) : '';
     const _b2bCandidateEmail = _urlParams.get('email') ? decodeURIComponent(_urlParams.get('email')) : '';
-    const _b2bToken = _urlParams.get('token') || '';
+    const _b2bToken = (_urlParams.get('token') || '').trim();
     let _b2bCompanyConfig = null;  // Fetched company config for branding + avatar mode
     let _simliAdapter = null;      // SimliAdapter instance (premium avatar)
 
@@ -2175,7 +2181,20 @@
     const _b2bCvRequired    = _urlParams.get('cv_required') === '1';
     const _b2bPhone         = _urlParams.get('phone') ? decodeURIComponent(_urlParams.get('phone')) : '';
     const _b2bExp           = parseInt(_urlParams.get('exp') || '0');        // Expiration timestamp in epoch ms
-    const _isAdmin          = _urlParams.get('admin') === '1';
+
+    // ── Role & Authentication Gate ──
+    function isUserAdmin() {
+        if (_urlParams.get('admin') === '1' || _urlParams.get('admin') === 'true') return true;
+        try {
+            const user = JSON.parse(localStorage.getItem('simpatico_user') || '{}');
+            const role = (user.role || '').toLowerCase();
+            if (['admin', 'super_admin', 'superadmin', 'recruiter', 'hr_manager', 'consultant'].includes(role)) {
+                return true;
+            }
+        } catch(e) {}
+        return false;
+    }
+    const _isAdmin = isUserAdmin();
 
     // ── Token Expiry & Non-Reusable Validation System ──
     function isTokenExpired(exp) {
@@ -2184,7 +2203,7 @@
     }
 
     function isTokenUsed(token) {
-        if (!token) return false;
+        if (!token || _isAdmin) return false;
         try {
             const used = JSON.parse(localStorage.getItem('simpatico_used_tokens') || '[]');
             return used.includes(token);
@@ -2230,8 +2249,8 @@
         }
     }
 
-    // Validate token and expiry on page load — block if expired or already used
-    if (_b2bToken) {
+    // Validate token and expiry on page load — block candidate if expired or already used
+    if (_b2bToken && !_isAdmin) {
         if (isTokenExpired(_b2bExp)) {
             document.addEventListener('DOMContentLoaded', () => showTokenExpiredScreen('time_expired', _b2bExp));
         } else if (isTokenUsed(_b2bToken)) {
@@ -2239,122 +2258,139 @@
         }
     }
 
-    if (_isB2B) {
-        // Hide navigation and footer for white-label B2B experience
-        const nav = document.querySelector('.nav');
-        const footer = document.querySelector('.page-footer');
-        if (nav) nav.style.display = 'none';
-        if (footer) footer.style.display = 'none';
-        document.querySelector('.main-content')?.style.setProperty('padding-top', '1rem');
-        // Auto-fill from URL params and localStorage when setup screen loads
-        window.addEventListener('DOMContentLoaded', () => {
-            const roleInput = document.getElementById('role-input');
-            const levelSelect = document.getElementById('level-select');
-            const modeSelect = document.getElementById('mode-select');
-            if (roleInput && _urlParams.get('role')) { roleInput.value = decodeURIComponent(_urlParams.get('role')); roleInput.disabled = true; roleInput.style.opacity = '0.7'; }
-            if (levelSelect && _urlParams.get('level')) { levelSelect.value = _urlParams.get('level'); levelSelect.disabled = true; levelSelect.style.opacity = '0.7'; }
-            if (modeSelect && _urlParams.get('mode')) {
-                modeSelect.value = _urlParams.get('mode');
-                modeSelect.disabled = true;
-                modeSelect.style.opacity = '0.7';
-                if (typeof toggleModeDetails === 'function') toggleModeDetails();
-            }
-            const countSelect = document.getElementById('count-select');
-            if (countSelect && _urlParams.get('count')) { countSelect.value = _urlParams.get('count'); countSelect.disabled = true; countSelect.style.opacity = '0.7'; }
-            const avatarSelect = document.getElementById('avatar-select');
-            if (avatarSelect && _urlParams.get('avatar')) {
-                avatarSelect.value = _urlParams.get('avatar');
-                avatarSelect.disabled = true;
-                avatarSelect.style.opacity = '0.7';
-                if (typeof onAvatarSelectChange === 'function') onAvatarSelectChange();
-            }
+    // ── Global Page Initialization ──
+    window.addEventListener('DOMContentLoaded', () => {
+        const switcherContainer = document.getElementById('mode-switcher-container');
+        const adminPanel = document.getElementById('admin-link-generator');
 
-            // ── Auto-fill candidate contact details from URL params ──
-            const candNameInput = document.getElementById('cand-name-input');
-            const candEmailInput = document.getElementById('cand-email-input');
-            const candPhoneInput = document.getElementById('cand-phone-input');
-            if (candNameInput && _b2bCandidateName) {
-                candNameInput.value = _b2bCandidateName;
-                candNameInput.readOnly = true;
-                candNameInput.style.opacity = '0.7';
-            }
-            if (candEmailInput && _b2bCandidateEmail) {
-                candEmailInput.value = _b2bCandidateEmail;
-                candEmailInput.readOnly = true;
-                candEmailInput.style.opacity = '0.7';
-            }
-            if (candPhoneInput && _b2bPhone) {
-                candPhoneInput.value = _b2bPhone;
-                candPhoneInput.readOnly = true;
-                candPhoneInput.style.opacity = '0.7';
-            }
-
-            // ── Lock difficulty if set by admin ──
-            const difficultySelect = document.getElementById('difficulty-select');
-            if (difficultySelect && _urlParams.has('difficulty')) {
-                difficultySelect.value = _b2bDifficulty;
-                difficultySelect.disabled = true;
-                difficultySelect.style.opacity = '0.7';
-            }
-
-            // ── Show admin link generator panel if admin mode ──
-            if (_isAdmin) {
+        // Security check: ONLY display recruiter/admin features to verified admins
+        const byokSection = document.querySelector('.byok-section');
+        if (_isAdmin) {
+            if (switcherContainer) switcherContainer.style.display = 'flex';
+            if (byokSection) byokSection.style.display = 'block';
+            if (_urlParams.get('admin') === '1' || _urlParams.get('admin') === 'true') {
                 switchPortalTab('admin');
             }
+        } else {
+            // Absolute lockout: candidates MUST NEVER see admin panel, switcher, or BYOK section
+            if (switcherContainer) switcherContainer.style.display = 'none';
+            if (adminPanel) adminPanel.style.display = 'none';
+            if (byokSection) byokSection.style.display = 'none';
+        }
 
-            // ── Update CV badge if required / pre-attached ──
-            if (_b2bToken) {
-                try {
-                    const preattached = localStorage.getItem('simpatico_resume_' + _b2bToken);
-                    if (preattached) {
-                        _resumeText = preattached;
-                        const rStatus = document.getElementById('resume-status');
-                        if (rStatus) {
-                            rStatus.innerHTML = '✅ CV pre-attached by recruiter (Ready for Assessment)';
-                            rStatus.style.color = 'var(--green)';
-                        }
+        if (_isB2B) {
+            // Hide navigation and footer for white-label B2B experience
+            const nav = document.querySelector('.nav');
+            const footer = document.querySelector('.page-footer');
+            if (nav) nav.style.display = 'none';
+            if (footer) footer.style.display = 'none';
+            document.querySelector('.main-content')?.style.setProperty('padding-top', '1rem');
+        }
+
+        // Auto-fill from URL params
+        const roleInput = document.getElementById('role-input');
+        const levelSelect = document.getElementById('level-select');
+        const modeSelect = document.getElementById('mode-select');
+        if (roleInput && _urlParams.get('role')) { roleInput.value = decodeURIComponent(_urlParams.get('role')); roleInput.disabled = true; roleInput.style.opacity = '0.7'; }
+        if (levelSelect && _urlParams.get('level')) { levelSelect.value = _urlParams.get('level'); levelSelect.disabled = true; levelSelect.style.opacity = '0.7'; }
+        if (modeSelect && _urlParams.get('mode')) {
+            modeSelect.value = _urlParams.get('mode');
+            modeSelect.disabled = true;
+            modeSelect.style.opacity = '0.7';
+            if (typeof toggleModeDetails === 'function') toggleModeDetails();
+        }
+        const countSelect = document.getElementById('count-select');
+        if (countSelect && _urlParams.get('count')) { countSelect.value = _urlParams.get('count'); countSelect.disabled = true; countSelect.style.opacity = '0.7'; }
+        const avatarSelect = document.getElementById('avatar-select');
+        if (avatarSelect && _urlParams.get('avatar')) {
+            avatarSelect.value = _urlParams.get('avatar');
+            avatarSelect.disabled = true;
+            avatarSelect.style.opacity = '0.7';
+            if (typeof onAvatarSelectChange === 'function') onAvatarSelectChange();
+        }
+
+        // ── Auto-fill candidate contact details from URL params ──
+        const candNameInput = document.getElementById('cand-name-input');
+        const candEmailInput = document.getElementById('cand-email-input');
+        const candPhoneInput = document.getElementById('cand-phone-input');
+        if (candNameInput && _b2bCandidateName) {
+            candNameInput.value = _b2bCandidateName;
+            candNameInput.readOnly = true;
+            candNameInput.style.opacity = '0.7';
+        }
+        if (candEmailInput && _b2bCandidateEmail) {
+            candEmailInput.value = _b2bCandidateEmail;
+            candEmailInput.readOnly = true;
+            candEmailInput.style.opacity = '0.7';
+        }
+        if (candPhoneInput && _b2bPhone) {
+            candPhoneInput.value = _b2bPhone;
+            candPhoneInput.readOnly = true;
+            candPhoneInput.style.opacity = '0.7';
+        }
+
+        // ── Lock difficulty if set by admin ──
+        const difficultySelect = document.getElementById('difficulty-select');
+        if (difficultySelect && _urlParams.has('difficulty')) {
+            difficultySelect.value = _b2bDifficulty;
+            difficultySelect.disabled = true;
+            difficultySelect.style.opacity = '0.7';
+        }
+
+        // ── Update CV badge if required / pre-attached ──
+        if (_b2bToken) {
+            try {
+                const preattached = localStorage.getItem('simpatico_resume_' + _b2bToken);
+                if (preattached) {
+                    _resumeText = preattached;
+                    const rStatus = document.getElementById('resume-status');
+                    if (rStatus) {
+                        rStatus.innerHTML = '✅ CV pre-attached by recruiter (Ready for Assessment)';
+                        rStatus.style.color = 'var(--green)';
                     }
-                } catch(e) {}
-            }
-            if (_b2bCvRequired || _requireResume) {
-                const reqBadge = document.getElementById('resume-required-badge');
-                if (reqBadge && !_resumeText) {
-                    reqBadge.textContent = '* Mandatory Before Starting';
-                    reqBadge.style.background = 'rgba(244,63,94,0.15)';
-                    reqBadge.style.color = '#f43f5e';
                 }
+            } catch(e) {}
+        }
+        if (_b2bCvRequired || _requireResume) {
+            const reqBadge = document.getElementById('resume-required-badge');
+            if (reqBadge && !_resumeText) {
+                reqBadge.textContent = '* Mandatory Before Starting';
+                reqBadge.style.background = 'rgba(244,63,94,0.15)';
+                reqBadge.style.color = '#f43f5e';
             }
+        }
 
-            // Load BYOK settings from localStorage
-            const savedProvider = localStorage.getItem('byok_provider');
-            const savedKey = getAdminGeminiKey() || localStorage.getItem('byok_key');
+        // Load BYOK settings from localStorage
+        const providerSelect = document.getElementById('byok-provider');
+        const keyInput = document.getElementById('byok-key');
+        const savedProvider = localStorage.getItem('byok_provider');
+        const savedKey = getAdminGeminiKey() || localStorage.getItem('byok_key');
 
-            if (providerSelect) {
-                if (savedProvider) {
-                    providerSelect.value = savedProvider;
-                } else {
-                    providerSelect.value = 'gemini'; // Default to gemini
-                }
-                onByokProviderChange();
+        if (providerSelect) {
+            if (savedProvider) {
+                providerSelect.value = savedProvider;
+            } else {
+                providerSelect.value = 'gemini'; // Default to gemini
             }
-            if (keyInput && savedKey) {
-                keyInput.value = savedKey;
-            }
+            if (typeof onByokProviderChange === 'function') onByokProviderChange();
+        }
+        if (keyInput && savedKey) {
+            keyInput.value = savedKey;
+        }
 
-            // BYOK panel: only auto-expand for voice users who need a key
-            // Text mode uses platform-side AI — no user key needed
-            if (!_isB2B && !savedKey) {
-                const modeSelect = document.getElementById('mode-select');
-                const isVoiceMode = modeSelect && modeSelect.value === 'voice';
-                if (isVoiceMode) {
-                    const panel = document.getElementById('byok-panel');
-                    const arrow = document.getElementById('byok-arrow');
-                    if (panel) panel.style.display = 'block';
-                    if (arrow) arrow.style.transform = 'rotate(180deg)';
-                }
+        // BYOK panel: only auto-expand for admin in voice mode if key is missing
+        if (_isAdmin && !savedKey) {
+            const modeSelect = document.getElementById('mode-select');
+            const isVoiceMode = modeSelect && modeSelect.value === 'voice';
+            if (isVoiceMode) {
+                const panel = document.getElementById('byok-panel');
+                const arrow = document.getElementById('byok-arrow');
+                if (panel) panel.style.display = 'block';
+                if (arrow) arrow.style.transform = 'rotate(180deg)';
             }
-            initOptionalFeatures();
-        });
+        }
+        initOptionalFeatures();
+    });
 
         // Initialize proctoring & resume matching checks
         function initOptionalFeatures() {
@@ -2390,7 +2426,6 @@
                 })
                 .catch(e => console.warn('[B2B] Config fetch failed:', e.message));
         }
-    }
 
     /**
      * Initialize Simli premium avatar if company config requires it.
@@ -2881,8 +2916,9 @@
         }, 3500);
     }
 
-    // ── BYOK (Bring Your Own Key) ──
+    // ── BYOK (Bring Your Own Key) - Admin Only ──
     function toggleByokPanel() {
+        if (!_isAdmin) return;
         const panel = document.getElementById('byok-panel');
         const arrow = document.getElementById('byok-arrow');
         const show = panel.style.display === 'none';
@@ -3028,13 +3064,15 @@
         if (savedGeminiKey && document.getElementById('byok-key')) {
             document.getElementById('byok-key').value = savedGeminiKey;
         }
-        if (savedGeminiKey) {
-            const byokSection = document.querySelector('.byok-section');
+        const byokSection = document.querySelector('.byok-section');
+        if (!_isAdmin) {
             if (byokSection) byokSection.style.display = 'none';
+        } else {
+            if (byokSection) byokSection.style.display = 'block';
         }
         
         // Load initial key based on selected provider
-        onAvatarProviderKeyChange();
+        if (typeof onAvatarProviderKeyChange === 'function') onAvatarProviderKeyChange();
     });
 
     function getByokHeaders() {
@@ -3744,21 +3782,25 @@
             return;
         }
 
-        // Validate BYOK for voice mode (requires Gemini key)
+        // Validate API key for voice mode (uses admin/system key or configured key)
         const byokH = getByokHeaders();
-        if (!byokH['X-AI-Provider'] || byokH['X-AI-Provider'] !== 'gemini') {
+        const geminiKey = byokH['X-AI-Key'] || getAdminGeminiKey() || localStorage.getItem('byok_key') || localStorage.getItem('evalis_byok_gemini_key') || '';
+        if (!geminiKey) {
             const btn = document.getElementById('btn-start');
             if (btn) {
                 btn.disabled = false;
                 btn.innerHTML = '<i class="fas fa-play"></i> Start Assessment';
             }
-            showError('setup-error', 'Voice mode requires a Gemini API key. Go to "Bring Your Own Key" and select Google Gemini, or switch to Text mode.');
+            if (_isAdmin) {
+                showError('setup-error', 'Voice mode requires a Gemini API key. Please configure the key in the Admin AI Voice settings.');
+            } else {
+                showError('setup-error', 'Voice interview service is currently unavailable. Please switch to Text-based Assessment to continue.');
+            }
             showScreen('screen-setup');
             return;
         }
 
-        // In BYOK mode, connect directly to Gemini Live API using the user's key
-        const geminiKey = byokH['X-AI-Key'];
+        // Connect directly to Gemini Live API
         const wsUrl = 'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent?key=' + encodeURIComponent(geminiKey);
         const ws = new WebSocket(wsUrl);
         state.liveWs = ws;
@@ -4841,6 +4883,10 @@ GUIDELINES:
     }
 
     function switchPortalTab(tab) {
+        if (tab === 'admin' && !_isAdmin) {
+            console.warn('Unauthorized access to recruiter/admin panel blocked.');
+            return;
+        }
         const candBtn = document.getElementById('btn-tab-candidate');
         const adminBtn = document.getElementById('btn-tab-admin');
         const adminPanel = document.getElementById('admin-link-generator');
@@ -5097,8 +5143,8 @@ GUIDELINES:
         state.candidateEmail = candEmail;
         state.candidatePhone = candPhone;
 
-        // ── One-Time Token & Expiry Validation & Consumption ──
-        if (_b2bToken) {
+        // ── One-Time Token & Expiry Validation (Do not burn until completed) ──
+        if (_b2bToken && !_isAdmin) {
             if (isTokenExpired(_b2bExp)) {
                 showTokenExpiredScreen('time_expired', _b2bExp);
                 return;
@@ -5107,16 +5153,15 @@ GUIDELINES:
                 showTokenExpiredScreen('already_used');
                 return;
             }
-            markTokenAsUsed(_b2bToken);
         }
 
         const selectedDifficulty = document.getElementById('difficulty-select')?.value || 'mixed';
 
-        const provider = document.getElementById('byok-provider')?.value || '';
-        const key = document.getElementById('byok-key')?.value?.trim() || '';
-        // BYOK key is only required for voice mode (needs Gemini API for speech)
-        if (!_isB2B && (mode === 'voice') && (!provider || !key)) {
-            showError('setup-error', 'Voice mode requires a Gemini API Key. Please expand "Bring Your Own Key" and configure, or switch to Text mode.');
+        const provider = document.getElementById('byok-provider')?.value || 'gemini';
+        const key = document.getElementById('byok-key')?.value?.trim() || getAdminGeminiKey() || localStorage.getItem('byok_key') || localStorage.getItem('evalis_byok_gemini_key') || '';
+        // BYOK key check only for admin testing voice mode
+        if (_isAdmin && (mode === 'voice') && (!provider || !key)) {
+            showError('setup-error', 'Voice mode requires a Gemini API Key. Please configure your key in the Admin AI Voice settings.');
             return;
         }
 
@@ -5913,6 +5958,11 @@ GUIDELINES:
     function renderReport(report) {
         const score = report.overallScore || 0;
 
+        // Mark single-use token as completed only now that the assessment is finished
+        if (_b2bToken) {
+            markTokenAsUsed(_b2bToken);
+        }
+
         // ── ADMIN REPORT VISIBILITY CONTROL ──
         // 0 = hidden (show thank-you), 1 = full report, 2 = summary only
         if (_b2bShowReport === 0) {
@@ -6268,12 +6318,20 @@ GUIDELINES:
 
     // ── Admin Link Generator & Multi-Channel Dispatch ──
     function generateAdminLink() {
-        const token = 'TKN-' + crypto.randomUUID().substring(0, 12).toUpperCase();
-        const baseUrl = window.location.origin + '/cert-interview.html';
+        const cleanId = (crypto.randomUUID ? crypto.randomUUID().replace(/-/g, '').substring(0, 10) : (Date.now().toString(36) + Math.random().toString(36).substring(2, 6))).toUpperCase();
+        const token = 'TKN-' + cleanId;
+        const baseUrl = window.location.origin + window.location.pathname;
         const params = new URLSearchParams();
 
         params.set('token', token);
         params.set('b2b', '1');
+
+        // Ensure newly generated token is clean and fresh in local storage
+        try {
+            const used = JSON.parse(localStorage.getItem('simpatico_used_tokens') || '[]');
+            const cleaned = used.filter(t => t !== token);
+            localStorage.setItem('simpatico_used_tokens', JSON.stringify(cleaned));
+        } catch(e) {}
 
         // Candidate details
         const aName = document.getElementById('admin-cand-name')?.value?.trim();
@@ -6323,6 +6381,20 @@ GUIDELINES:
         const badge = document.getElementById('admin-expiry-badge');
         if (badge) badge.textContent = expiryDisplay;
         document.getElementById('admin-generated-link').style.display = 'block';
+    }
+
+    function openAdminLinkPreview() {
+        const link = document.getElementById('admin-link-text')?.textContent || '';
+        if (link) {
+            window.open(link, '_blank');
+        }
+    }
+
+    function clearUsedTokenCache() {
+        try {
+            localStorage.removeItem('simpatico_used_tokens');
+            showProctorToast('✅ Used tokens cache cleared! All test links re-enabled.');
+        } catch(e) {}
     }
 
     function getFormattedInvitationMessage() {
@@ -6443,6 +6515,10 @@ GUIDELINES:
     //  FAILURE SCREEN & PRACTICE MODE
     // ══════════════════════════════════════════
     function showFailureScreen(score, report) {
+        // Mark single-use token as completed upon finishing assessment
+        if (_b2bToken) {
+            markTokenAsUsed(_b2bToken);
+        }
         showScreen('screen-failure');
         document.getElementById('failure-score').textContent = score;
 
