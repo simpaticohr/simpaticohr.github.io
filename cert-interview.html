@@ -5057,10 +5057,24 @@ GUIDELINES:
         }
         if (state.recognition) {
             try { state.recognition.stop(); } catch(e) {}
+            state.recognition = null;
+            state.recognitionActive = false;
         }
         if (window.aiAvatar) {
             window.aiAvatar.setState('idle');
             window.aiAvatar.setAmplitude(0);
+        }
+        // Tear down avatar renderers so video/audio streams are released
+        if (typeof HyperRealRenderer !== 'undefined') {
+            try { HyperRealRenderer.destroy(); } catch(e) {}
+        }
+        destroySimli();
+        destroyDuix();
+        _activeRenderer = null;
+        // Fully release mic hardware
+        if (micStream) {
+            micStream.getTracks().forEach(t => t.stop());
+            micStream = null;
         }
 
         if (state.liveTranscript.length < 2) {
@@ -7354,6 +7368,46 @@ GUIDELINES:
         // Compute voice speaking metrics before report
         computeSpeakingMetrics();
 
+        // ── Full voice/connection cleanup — ensure everything disconnects ──
+        // Close live WebSocket if still open
+        if (state.liveWs) {
+            try { state.liveWs.close(); } catch(e) {}
+            state.liveWs = null;
+        }
+        // Stop mic streaming & release mic hardware
+        stopMicStreaming();
+        cleanupMicStream();
+        if (micStream) {
+            micStream.getTracks().forEach(t => t.stop());
+            micStream = null;
+        }
+        // Stop speech recognition
+        if (state.recognition) {
+            try { state.recognition.stop(); } catch(e) {}
+            state.recognition = null;
+            state.recognitionActive = false;
+        }
+        // Cancel speech synthesis
+        if (window.speechSynthesis) {
+            window.speechSynthesis.cancel();
+        }
+        // Stop audio playback, waveform, timers, VAD
+        if (typeof stopPlayback === 'function') stopPlayback();
+        stopWaveform();
+        stopSpeakingTimer();
+        stopTimer();
+        resetVad();
+        // Tear down all avatar renderers
+        if (window.aiAvatar) {
+            window.aiAvatar.setState('idle');
+            window.aiAvatar.setAmplitude(0);
+        }
+        if (typeof HyperRealRenderer !== 'undefined') {
+            try { HyperRealRenderer.destroy(); } catch(e) {}
+        }
+        destroySimli();
+        destroyDuix();
+        _activeRenderer = null;
         // Release screen wake lock — interview is complete
         releaseWakeLock();
 
