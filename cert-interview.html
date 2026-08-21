@@ -473,6 +473,31 @@
             margin-left: auto;
         }
 
+        /* ── Wake Lock indicator ── */
+        .wake-lock-badge {
+            display: none;
+            align-items: center;
+            gap: 5px;
+            padding: 3px 10px;
+            border-radius: 100px;
+            font-size: 0.68rem;
+            font-weight: 600;
+            letter-spacing: 0.3px;
+            color: var(--accent-emerald);
+            background: rgba(16, 185, 129, 0.08);
+            border: 1px solid rgba(16, 185, 129, 0.2);
+            white-space: nowrap;
+        }
+        .wake-lock-badge.active {
+            display: inline-flex;
+        }
+        .wake-lock-badge .wl-dot {
+            width: 6px; height: 6px;
+            border-radius: 50%;
+            background: var(--accent-emerald);
+            animation: pulse 2s infinite;
+        }
+
         /* ── Question display ── */
         .question-meta {
             display: flex; align-items: center; gap: 10px;
@@ -1760,6 +1785,15 @@
                                 </select>
                             </div>
                             <div class="form-group">
+                                <label class="form-label">📷 Webcam AI Proctoring</label>
+                                <select id="admin-webcam" class="form-select">
+                                    <option value="0">Off — No Camera Required</option>
+                                    <option value="1">Basic — Face Presence Detection</option>
+                                    <option value="2" selected>Full — Eye Gaze + Head Pose + Face Detection</option>
+                                </select>
+                                <div style="font-size:0.72rem;color:var(--text-muted);margin-top:4px;">Works on smartphone & laptop. Full mode detects eyes looking away and head turning.</div>
+                            </div>
+                            <div class="form-group">
                                 <label class="form-label">Candidate Report Visibility</label>
                                 <select id="admin-show-report" class="form-select">
                                     <option value="0" selected>🔒 Hidden — Sent to Admin Only</option>
@@ -1997,6 +2031,7 @@
             <div class="timer-bar">
                 <span class="timer-icon">⏱️</span>
                 <span class="timer-value" id="timer-value">05:00</span>
+                <span id="wake-lock-badge" class="wake-lock-badge" title="Screen stays awake during interview"><span class="wl-dot"></span> Screen Awake</span>
                 <span class="timer-label">Time remaining</span>
             </div>
 
@@ -3053,8 +3088,54 @@
             avgWordsPerAnswer: 0
         },
         communicationScores: null,    // Multi-dimensional evaluation scores
-        proctoringViolations: { tabSwitches: 0, pasteAttempts: 0, faceNotDetected: 0, multipleFaces: 0, screenShareDisconnected: 0, totalViolations: 0 }
+        proctoringViolations: { tabSwitches: 0, pasteAttempts: 0, faceNotDetected: 0, multipleFaces: 0, screenShareDisconnected: 0, gazeAwayCount: 0, headTurnCount: 0, rapidKeyPattern: 0, windowResizeCount: 0, devToolsOpened: 0, totalViolations: 0 },
+        wakeLockSentinel: null  // Screen Wake Lock sentinel to prevent mobile screen lock
     };
+
+    // ══════════════════════════════════════════
+    //  SCREEN WAKE LOCK — Prevent screen from locking during interview
+    // ══════════════════════════════════════════
+    async function acquireWakeLock() {
+        if (state.wakeLockSentinel) return; // Already held
+        if (!('wakeLock' in navigator)) {
+            console.log('[WakeLock] Screen Wake Lock API not supported by this browser.');
+            return;
+        }
+        try {
+            state.wakeLockSentinel = await navigator.wakeLock.request('screen');
+            console.log('[WakeLock] Screen Wake Lock acquired — screen will stay on.');
+            state.wakeLockSentinel.addEventListener('release', () => {
+                console.log('[WakeLock] Screen Wake Lock was released.');
+                state.wakeLockSentinel = null;
+                const badge = document.getElementById('wake-lock-badge');
+                if (badge) badge.classList.remove('active');
+            });
+            const badge = document.getElementById('wake-lock-badge');
+            if (badge) badge.classList.add('active');
+        } catch (err) {
+            console.warn('[WakeLock] Failed to acquire Screen Wake Lock:', err.message);
+        }
+    }
+
+    function releaseWakeLock() {
+        if (state.wakeLockSentinel) {
+            state.wakeLockSentinel.release().catch(() => {});
+            state.wakeLockSentinel = null;
+            console.log('[WakeLock] Screen Wake Lock explicitly released.');
+        }
+        const badge = document.getElementById('wake-lock-badge');
+        if (badge) badge.classList.remove('active');
+    }
+
+    // Re-acquire wake lock when returning to the page (e.g. after tab switch)
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible' && !state.wakeLockSentinel) {
+            const interviewScreen = document.getElementById('screen-interview');
+            if (interviewScreen && interviewScreen.classList.contains('active')) {
+                acquireWakeLock();
+            }
+        }
+    });
 
     // ══════════════════════════════════════════
     //  ANTI-CHEAT & SCREEN SHARING PROCTORING MODULE
@@ -3110,7 +3191,12 @@
         }
     }
 
+    let _devToolsCheckInterval = null;
+    let _keystrokeTimes = [];
+    let _lastWindowSize = { w: window.innerWidth, h: window.innerHeight };
+
     function initAntiCheatProctoring() {
+        // ── 1. Tab Switch / Visibility Detection ──
         document.addEventListener('visibilitychange', () => {
             if (document.hidden && state.sessionId) {
                 state.proctoringViolations.tabSwitches++;
@@ -3126,6 +3212,7 @@
             }
         });
 
+        // ── 2. Copy / Paste Blocking ──
         document.addEventListener('copy', (e) => {
             if (state.sessionId) {
                 e.preventDefault();
@@ -3144,12 +3231,135 @@
             }
         });
 
+        // ── 3. Context Menu Block ──
         document.addEventListener('contextmenu', (e) => {
             if (state.sessionId) {
                 e.preventDefault();
                 showProctorToast('⚠️ Right-click context menu disabled during evaluation.');
             }
         });
+
+        // ── 4. DevTools Detection (Desktop) ──
+        _devToolsCheckInterval = setInterval(() => {
+            if (!state.sessionId) return;
+            // Method A: Window size differential (devtools docked to side/bottom)
+            const widthThreshold = window.outerWidth - window.innerWidth > 160;
+            const heightThreshold = window.outerHeight - window.innerHeight > 200;
+            if (widthThreshold || heightThreshold) {
+                state.proctoringViolations.devToolsOpened++;
+                state.proctoringViolations.totalViolations++;
+                showProctorToast(`🔧 Developer Tools detected! This is a proctored assessment. (${state.proctoringViolations.devToolsOpened})`);
+            }
+        }, 3000);
+
+        // Method B: Console timing detection (devtools console intercepts output)
+        const devToolsConsoleCheck = /./;
+        devToolsConsoleCheck.toString = function() {
+            if (state.sessionId) {
+                state.proctoringViolations.devToolsOpened++;
+                state.proctoringViolations.totalViolations++;
+            }
+            return '';
+        };
+        // Trigger only once to detect open console
+        try { console.log('%c', devToolsConsoleCheck); } catch(e) {}
+
+        // ── 5. Window Resize / PiP Detection ──
+        window.addEventListener('resize', () => {
+            if (!state.sessionId) return;
+            const screenW = window.screen.availWidth || window.screen.width;
+            const screenH = window.screen.availHeight || window.screen.height;
+            const winW = window.innerWidth;
+            const winH = window.innerHeight;
+
+            // Flag if window is made very small (< 60% of screen = likely hiding behind another window)
+            if (winW < screenW * 0.6 && winH < screenH * 0.6) {
+                state.proctoringViolations.windowResizeCount++;
+                state.proctoringViolations.totalViolations++;
+                showProctorToast(`📐 Window shrunk below 60% of screen! Keep browser maximized. (${state.proctoringViolations.windowResizeCount})`);
+            }
+        });
+
+        // ── 6. Rapid Typing Pattern Detection ──
+        const answerInput = document.getElementById('answer-input');
+        if (answerInput) {
+            answerInput.addEventListener('keydown', (e) => {
+                if (!state.sessionId) return;
+                const now = performance.now();
+                _keystrokeTimes.push(now);
+
+                // Keep only last 20 keystrokes for analysis
+                if (_keystrokeTimes.length > 20) _keystrokeTimes.shift();
+
+                // Need at least 10 keystrokes to analyze pattern
+                if (_keystrokeTimes.length >= 10) {
+                    const intervals = [];
+                    for (let i = 1; i < _keystrokeTimes.length; i++) {
+                        intervals.push(_keystrokeTimes[i] - _keystrokeTimes[i - 1]);
+                    }
+                    const avgInterval = intervals.reduce((a, b) => a + b, 0) / intervals.length;
+
+                    // Avg < 30ms between keystrokes is impossible for human typing
+                    // Typical fast human typing is ~60-80ms between keys
+                    if (avgInterval < 30) {
+                        state.proctoringViolations.rapidKeyPattern++;
+                        state.proctoringViolations.totalViolations++;
+                        _keystrokeTimes = []; // Reset
+                        showProctorToast(`⌨️ Suspicious typing speed detected! Automated input flagged. (${state.proctoringViolations.rapidKeyPattern})`);
+                    }
+                }
+            });
+        }
+
+        // ── 7. Screenshot / Print Screen Blocking ──
+        document.addEventListener('keydown', (e) => {
+            if (!state.sessionId) return;
+            // Block PrintScreen, Ctrl+Shift+S (save), Cmd+Shift+3/4/5 (Mac screenshots)
+            if (e.key === 'PrintScreen' ||
+                (e.ctrlKey && e.shiftKey && (e.key === 'S' || e.key === 's')) ||
+                (e.metaKey && e.shiftKey && ['3', '4', '5'].includes(e.key))) {
+                e.preventDefault();
+                state.proctoringViolations.totalViolations++;
+                showProctorToast('📸 Screenshot attempt blocked during proctored assessment.');
+            }
+            // Block Ctrl+U (View Source), Ctrl+Shift+I (DevTools), F12
+            if ((e.ctrlKey && (e.key === 'u' || e.key === 'U')) ||
+                (e.ctrlKey && e.shiftKey && (e.key === 'I' || e.key === 'i' || e.key === 'J' || e.key === 'j')) ||
+                e.key === 'F12') {
+                e.preventDefault();
+                state.proctoringViolations.devToolsOpened++;
+                state.proctoringViolations.totalViolations++;
+                showProctorToast(`🔧 Developer Tools shortcut blocked! (${state.proctoringViolations.devToolsOpened})`);
+            }
+        });
+
+        // ── 8. Fullscreen Exit Detection ──
+        document.addEventListener('fullscreenchange', () => {
+            if (!state.sessionId) return;
+            if (!document.fullscreenElement) {
+                state.proctoringViolations.totalViolations++;
+                showProctorToast('⚠️ Fullscreen mode exited. Stay in fullscreen for best results.');
+            }
+        });
+
+        // ── 9. Text Selection Prevention (blocks screenshot of selected text) ──
+        document.addEventListener('selectstart', (e) => {
+            if (state.sessionId) {
+                const tag = (e.target.tagName || '').toLowerCase();
+                // Allow selection in answer textarea/input, block everywhere else
+                if (tag !== 'textarea' && tag !== 'input') {
+                    e.preventDefault();
+                }
+            }
+        });
+    }
+
+    function cleanupAntiCheatExtras() {
+        if (_devToolsCheckInterval) {
+            clearInterval(_devToolsCheckInterval);
+            _devToolsCheckInterval = null;
+        }
+        _keystrokeTimes = [];
     }
 
     function showProctorToast(message) {
@@ -3334,7 +3544,7 @@
 
     // ── Proctoring & Resume Matching Configuration ──
     let _enableProctoring = _urlParams.get('proctoring') === '1';
-    let _enableWebcamProctoring = _urlParams.get('webcam') === '1';
+    let _enableWebcamProctoring = _urlParams.get('webcam') === '1' || _urlParams.get('webcam') === '2';
     let _requireResume = _urlParams.get('resume') === 'required';
     let _showResumeUpload = _urlParams.get('resume') !== '0';
     let _resumeText = '';
@@ -3825,8 +4035,15 @@
 
     let faceDetectionInterval = null;
     let proctorStream = null;
+    let _gazeAwayStartTime = 0;       // Timestamp when gaze first went off-screen
+    let _headTurnStartTime = 0;       // Timestamp when head first turned away
+    const GAZE_AWAY_THRESHOLD_MS = 3000;  // 3s sustained gaze-away = violation
+    const HEAD_TURN_THRESHOLD_MS = 3000;  // 3s sustained head-turn = violation
+    const WEBCAM_LEVEL = parseInt(_urlParams.get('webcam') || '1'); // 0=off, 1=basic, 2=full
 
     async function initWebcamFaceTracking() {
+        if (WEBCAM_LEVEL === 0) return; // Admin disabled webcam proctoring
+
         let video = document.getElementById('proctor-webcam');
         if (!video) {
             video = document.createElement('video');
@@ -3834,17 +4051,7 @@
             video.autoplay = true;
             video.playsinline = true;
             video.muted = true;
-            video.style.position = 'fixed';
-            video.style.bottom = '20px';
-            video.style.right = '20px';
-            video.style.width = '140px';
-            video.style.height = '105px';
-            video.style.objectFit = 'cover';
-            video.style.borderRadius = '10px';
-            video.style.border = '2px solid rgba(239, 68, 68, 0.4)';
-            video.style.zIndex = '99998';
-            video.style.boxShadow = '0 8px 24px rgba(0,0,0,0.6)';
-            video.style.transform = 'scaleX(-1)';
+            video.style.cssText = 'position:fixed;bottom:20px;right:20px;width:140px;height:105px;object-fit:cover;border-radius:10px;border:2px solid rgba(16,185,129,0.5);z-index:99998;box-shadow:0 8px 24px rgba(0,0,0,0.6);transform:scaleX(-1);transition:border-color 0.3s ease;';
             document.body.appendChild(video);
         }
 
@@ -3852,41 +4059,38 @@
         if (!badge) {
             badge = document.createElement('div');
             badge.id = 'proctor-badge';
-            badge.style.position = 'fixed';
-            badge.style.bottom = '130px';
-            badge.style.right = '20px';
-            badge.style.padding = '4px 8px';
-            badge.style.background = 'rgba(239, 68, 68, 0.85)';
-            badge.style.color = '#fff';
-            badge.style.fontSize = '0.62rem';
-            badge.style.fontWeight = 'bold';
-            badge.style.borderRadius = '4px';
-            badge.style.zIndex = '99999';
-            badge.style.display = 'flex';
-            badge.style.alignItems = 'center';
-            badge.style.gap = '4px';
-            badge.style.boxShadow = '0 2px 8px rgba(0,0,0,0.3)';
-            badge.innerHTML = '<span style="width:6px;height:6px;background:#fff;border-radius:50%;display:inline-block;animation:pulse-red 1s infinite;"></span> AI CAM MONITOR';
+            badge.style.cssText = 'position:fixed;bottom:130px;right:20px;padding:4px 10px;background:rgba(16,185,129,0.9);color:#fff;font-size:0.62rem;font-weight:bold;border-radius:6px;z-index:99999;display:flex;align-items:center;gap:5px;box-shadow:0 2px 12px rgba(0,0,0,0.4);transition:background 0.3s ease;';
+            badge.innerHTML = '<span id="proctor-status-dot" style="width:6px;height:6px;background:#fff;border-radius:50%;display:inline-block;animation:pulse-red 1s infinite;"></span> <span id="proctor-status-text">AI EYE MONITOR</span>';
             document.body.appendChild(badge);
+
+            // Gaze status indicator below webcam
+            const gazeLabel = document.createElement('div');
+            gazeLabel.id = 'proctor-gaze-label';
+            gazeLabel.style.cssText = 'position:fixed;bottom:8px;right:20px;width:140px;text-align:center;font-size:0.6rem;font-weight:700;color:#34d399;z-index:99999;letter-spacing:0.5px;transition:color 0.3s ease;';
+            gazeLabel.textContent = '👁️ GAZE: ON SCREEN';
+            document.body.appendChild(gazeLabel);
 
             if (!document.getElementById('proctor-animations')) {
                 const style = document.createElement('style');
                 style.id = 'proctor-animations';
                 style.innerHTML = `
-                    @keyframes pulse-red {
-                        0% { opacity: 0.3; }
-                        50% { opacity: 1; }
-                        100% { opacity: 0.3; }
-                    }
+                    @keyframes pulse-red { 0%{opacity:0.3} 50%{opacity:1} 100%{opacity:0.3} }
+                    @keyframes proctor-flash { 0%,100%{border-color:rgba(244,63,94,0.8)} 50%{border-color:rgba(244,63,94,0.2)} }
+                    .proctor-cam-green { border-color: rgba(16,185,129,0.6) !important; }
+                    .proctor-cam-yellow { border-color: rgba(245,158,11,0.7) !important; }
+                    .proctor-cam-red { border-color: rgba(244,63,94,0.8) !important; animation: proctor-flash 1s infinite !important; }
                 `;
                 document.head.appendChild(style);
             }
         }
 
         try {
-            proctorStream = await navigator.mediaDevices.getUserMedia({ video: { width: 320, height: 240 } });
+            // Use front camera on mobile
+            proctorStream = await navigator.mediaDevices.getUserMedia({
+                video: { width: 320, height: 240, facingMode: 'user' }
+            });
             video.srcObject = proctorStream;
-            
+
             await loadFaceApi();
             startFaceDetectionLoop(video);
         } catch(e) {
@@ -3903,7 +4107,12 @@
             script.onload = async () => {
                 try {
                     const MODEL_URL = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model/';
-                    await faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL);
+                    await Promise.all([
+                        faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
+                        // Load landmarks model for eye gaze & head pose (Full mode)
+                        WEBCAM_LEVEL >= 2 ? faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL) : Promise.resolve()
+                    ]);
+                    console.log('[Proctor] face-api models loaded. Level:', WEBCAM_LEVEL >= 2 ? 'Full (landmarks)' : 'Basic (detection)');
                 } catch(e) {
                     console.error('Failed to load face-api model weights:', e);
                 }
@@ -3917,26 +4126,193 @@
         });
     }
 
+    // ── Eye Gaze & Head Pose computation from 68-point landmarks ──
+    function computeGazeAndPose(landmarks) {
+        const pts = landmarks.positions;
+        // Eye landmark indices (68-point model):
+        // Left eye:  36-41, Right eye: 42-47
+        // Nose tip: 30, Chin: 8, Left face: 0, Right face: 16
+
+        // --- Eye Gaze Ratio (EAR-style horizontal ratio) ---
+        // For each eye, compute how centered the iris/pupil area is
+        // by comparing midpoints of upper/lower lids to corners
+        const leftEye = pts.slice(36, 42);
+        const rightEye = pts.slice(42, 48);
+
+        function eyeHorizontalRatio(eyePts) {
+            // eyePts: [p0(outer), p1(top-outer), p2(top-inner), p3(inner), p4(bot-inner), p5(bot-outer)]
+            const eyeCenter = {
+                x: (eyePts[1].x + eyePts[2].x + eyePts[4].x + eyePts[5].x) / 4,
+                y: (eyePts[1].y + eyePts[2].y + eyePts[4].y + eyePts[5].y) / 4
+            };
+            const eyeWidth = Math.abs(eyePts[3].x - eyePts[0].x) || 1;
+            // Ratio: 0.0 = looking far left, 0.5 = center, 1.0 = looking far right
+            return (eyeCenter.x - eyePts[0].x) / eyeWidth;
+        }
+
+        const leftRatio = eyeHorizontalRatio(leftEye);
+        const rightRatio = eyeHorizontalRatio(rightEye);
+        const avgGazeRatio = (leftRatio + rightRatio) / 2;
+        // Deviation from center (0.5). Values > 0.18 suggest looking away
+        const gazeDeviation = Math.abs(avgGazeRatio - 0.5);
+
+        // --- Head Pose (Yaw & Pitch from landmark geometry) ---
+        // Yaw: asymmetry between nose-to-left-face vs nose-to-right-face distance
+        const noseTip = pts[30];
+        const leftFace = pts[0];
+        const rightFace = pts[16];
+        const chin = pts[8];
+        const forehead = { x: (pts[19].x + pts[24].x) / 2, y: (pts[19].y + pts[24].y) / 2 };
+
+        const noseToLeft = Math.sqrt((noseTip.x - leftFace.x) ** 2 + (noseTip.y - leftFace.y) ** 2);
+        const noseToRight = Math.sqrt((noseTip.x - rightFace.x) ** 2 + (noseTip.y - rightFace.y) ** 2);
+        const faceWidth = noseToLeft + noseToRight || 1;
+        // Yaw ratio: 0.5 = facing forward, <0.3 or >0.7 = turned significantly
+        const yawRatio = noseToLeft / faceWidth;
+        const yawDeg = Math.abs((yawRatio - 0.5) * 2) * 90; // Approximate degrees
+
+        // Pitch: vertical ratio of nose-to-forehead vs nose-to-chin
+        const noseToForehead = Math.sqrt((noseTip.x - forehead.x) ** 2 + (noseTip.y - forehead.y) ** 2);
+        const noseToChin = Math.sqrt((noseTip.x - chin.x) ** 2 + (noseTip.y - chin.y) ** 2);
+        const verticalTotal = noseToForehead + noseToChin || 1;
+        const pitchRatio = noseToForehead / verticalTotal;
+        const pitchDeg = Math.abs((pitchRatio - 0.4) * 2) * 90; // ~0.4 is neutral looking forward
+
+        return {
+            gazeDeviation,    // 0 = on screen, >0.18 = looking away
+            yawDeg,           // 0 = forward, >30 = turned significantly
+            pitchDeg,         // 0 = forward, >25 = looking up/down significantly
+            isGazeAway: gazeDeviation > 0.18,
+            isHeadTurned: yawDeg > 30 || pitchDeg > 25
+        };
+    }
+
+    function updateProctorVisuals(status) {
+        // status: 'ok' | 'warning' | 'violation'
+        const video = document.getElementById('proctor-webcam');
+        const badge = document.getElementById('proctor-badge');
+        const gazeLabel = document.getElementById('proctor-gaze-label');
+        const statusText = document.getElementById('proctor-status-text');
+
+        if (video) {
+            video.className = '';
+            video.classList.add(status === 'ok' ? 'proctor-cam-green' : status === 'warning' ? 'proctor-cam-yellow' : 'proctor-cam-red');
+        }
+        if (badge) {
+            badge.style.background = status === 'ok' ? 'rgba(16,185,129,0.9)' : status === 'warning' ? 'rgba(245,158,11,0.9)' : 'rgba(244,63,94,0.9)';
+        }
+        if (gazeLabel) {
+            gazeLabel.style.color = status === 'ok' ? '#34d399' : status === 'warning' ? '#fbbf24' : '#f87171';
+            gazeLabel.textContent = status === 'ok' ? '👁️ GAZE: ON SCREEN' : status === 'warning' ? '👁️ GAZE: DRIFTING...' : '🚨 GAZE: OFF SCREEN';
+        }
+        if (statusText) {
+            statusText.textContent = status === 'ok' ? 'AI EYE MONITOR' : status === 'warning' ? '⚠️ ATTENTION' : '🚨 VIOLATION';
+        }
+    }
+
     function startFaceDetectionLoop(video) {
         if (faceDetectionInterval) clearInterval(faceDetectionInterval);
-        
+        const isFullMode = WEBCAM_LEVEL >= 2 && window.faceapi && faceapi.nets.faceLandmark68Net.isLoaded;
+
         faceDetectionInterval = setInterval(async () => {
             if (!window.faceapi || !video || video.paused || video.ended) return;
             try {
-                const options = new faceapi.TinyFaceDetectorOptions({ inputSize: 128, scoreThreshold: 0.4 });
-                const detections = await faceapi.detectAllFaces(video, options);
-                
-                if (detections.length === 0) {
-                    state.proctoringViolations.faceNotDetected++;
-                    showProctorWarning(`⚠️ WARNING: No face detected! Please look directly at the camera. (${state.proctoringViolations.faceNotDetected} notices)`);
-                } else if (detections.length > 1) {
-                    state.proctoringViolations.multipleFaces++;
-                    showProctorWarning(`⚠️ WARNING: Multiple faces detected! Please ensure you are alone. (${state.proctoringViolations.multipleFaces} notices)`);
+                const options = new faceapi.TinyFaceDetectorOptions({ inputSize: 160, scoreThreshold: 0.4 });
+
+                if (isFullMode) {
+                    // Full mode: detect face + 68-point landmarks for gaze & head pose
+                    const result = await faceapi.detectSingleFace(video, options).withFaceLandmarks();
+
+                    if (!result) {
+                        // No face detected
+                        state.proctoringViolations.faceNotDetected++;
+                        state.proctoringViolations.totalViolations++;
+                        updateProctorVisuals('violation');
+                        if (state.proctoringViolations.faceNotDetected % 3 === 1) {
+                            showProctorWarning(`⚠️ No face detected! Look at the camera. (${state.proctoringViolations.faceNotDetected} notices)`);
+                        }
+                        _gazeAwayStartTime = 0;
+                        _headTurnStartTime = 0;
+                        return;
+                    }
+
+                    // Check for multiple faces
+                    const allFaces = await faceapi.detectAllFaces(video, options);
+                    if (allFaces.length > 1) {
+                        state.proctoringViolations.multipleFaces++;
+                        state.proctoringViolations.totalViolations++;
+                        updateProctorVisuals('violation');
+                        showProctorWarning(`⚠️ Multiple faces detected! Ensure you are alone. (${state.proctoringViolations.multipleFaces})`);
+                        return;
+                    }
+
+                    // Compute gaze and head pose
+                    const analysis = computeGazeAndPose(result.landmarks);
+                    const now = Date.now();
+
+                    // Eye gaze tracking
+                    if (analysis.isGazeAway) {
+                        if (_gazeAwayStartTime === 0) _gazeAwayStartTime = now;
+                        if (now - _gazeAwayStartTime >= GAZE_AWAY_THRESHOLD_MS) {
+                            state.proctoringViolations.gazeAwayCount++;
+                            state.proctoringViolations.totalViolations++;
+                            _gazeAwayStartTime = now; // Reset for next violation window
+                            updateProctorVisuals('violation');
+                            showProctorWarning(`👁️ Eyes looking away from screen! Gaze violations: ${state.proctoringViolations.gazeAwayCount}`);
+                            return;
+                        } else {
+                            updateProctorVisuals('warning');
+                        }
+                    } else {
+                        _gazeAwayStartTime = 0;
+                    }
+
+                    // Head pose tracking
+                    if (analysis.isHeadTurned) {
+                        if (_headTurnStartTime === 0) _headTurnStartTime = now;
+                        if (now - _headTurnStartTime >= HEAD_TURN_THRESHOLD_MS) {
+                            state.proctoringViolations.headTurnCount++;
+                            state.proctoringViolations.totalViolations++;
+                            _headTurnStartTime = now;
+                            updateProctorVisuals('violation');
+                            showProctorWarning(`🔄 Head turned away significantly! Head turn violations: ${state.proctoringViolations.headTurnCount}`);
+                            return;
+                        } else if (!analysis.isGazeAway) {
+                            updateProctorVisuals('warning');
+                        }
+                    } else {
+                        _headTurnStartTime = 0;
+                    }
+
+                    // All clear
+                    if (!analysis.isGazeAway && !analysis.isHeadTurned) {
+                        updateProctorVisuals('ok');
+                    }
+
+                } else {
+                    // Basic mode: face presence detection only
+                    const detections = await faceapi.detectAllFaces(video, options);
+
+                    if (detections.length === 0) {
+                        state.proctoringViolations.faceNotDetected++;
+                        state.proctoringViolations.totalViolations++;
+                        updateProctorVisuals('violation');
+                        if (state.proctoringViolations.faceNotDetected % 3 === 1) {
+                            showProctorWarning(`⚠️ No face detected! Look at the camera. (${state.proctoringViolations.faceNotDetected} notices)`);
+                        }
+                    } else if (detections.length > 1) {
+                        state.proctoringViolations.multipleFaces++;
+                        state.proctoringViolations.totalViolations++;
+                        updateProctorVisuals('violation');
+                        showProctorWarning(`⚠️ Multiple faces detected! Ensure you are alone. (${state.proctoringViolations.multipleFaces})`);
+                    } else {
+                        updateProctorVisuals('ok');
+                    }
                 }
             } catch(e) {
                 console.error('Face detection loop error:', e);
             }
-        }, 3000);
+        }, 2000); // Check every 2s for more responsive gaze tracking
     }
 
     function cleanupWebcamFaceTracking() {
@@ -3950,10 +4326,14 @@
             } catch(e) {}
             proctorStream = null;
         }
+        _gazeAwayStartTime = 0;
+        _headTurnStartTime = 0;
         const video = document.getElementById('proctor-webcam');
         if (video) video.remove();
         const badge = document.getElementById('proctor-badge');
         if (badge) badge.remove();
+        const gazeLabel = document.getElementById('proctor-gaze-label');
+        if (gazeLabel) gazeLabel.remove();
     }
 
     function handleProctorBlur() {
@@ -4670,6 +5050,7 @@ GUIDELINES:
         stopWaveform();
         stopSpeakingTimer();
         stopTimer();
+        releaseWakeLock();
         resetVad();
         if (window.speechSynthesis) {
             window.speechSynthesis.cancel();
@@ -4700,6 +5081,7 @@ GUIDELINES:
         try {
             if (_enableProctoring) {
                 cleanupProctoring();
+                cleanupAntiCheatExtras();
             }
             if (_enableWebcamProctoring) {
                 cleanupWebcamFaceTracking();
@@ -5498,6 +5880,13 @@ GUIDELINES:
             screen.classList.add('active');
             window.scrollTo({ top: 0, behavior: 'smooth' });
         }
+
+        // Wake Lock: acquire when entering interview, release when leaving
+        if (id === 'screen-interview') {
+            acquireWakeLock();
+        } else {
+            releaseWakeLock();
+        }
     }
 
     function switchPortalTab(tab) {
@@ -5657,9 +6046,11 @@ GUIDELINES:
                     </td>
                     <td style="padding:12px;font-size:0.78rem;color:var(--text-muted);">${escapeHtml(r.date || 'Recent')}</td>
                     <td style="padding:12px;text-align:right;">
-                        <div style="display:inline-flex;gap:6px;">
+                        <div style="display:inline-flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;">
                             ${isPass ? `<button onclick="viewCandidateCert('${r.certId}')" class="btn btn-ghost" style="padding:4px 8px;font-size:0.75rem;border:1px solid rgba(16,185,129,0.3);color:#34d399;border-radius:6px;cursor:pointer;">🎓 Cert</button>` : ''}
                             <button onclick="viewCandidateReportDetails('${r.certId}')" class="btn btn-primary" style="padding:4px 10px;font-size:0.75rem;border-radius:6px;cursor:pointer;">👁️ Report</button>
+                            <button onclick="downloadAdminReport('${r.certId}')" class="btn btn-ghost" style="padding:4px 8px;font-size:0.75rem;border:1px solid rgba(99,102,241,0.3);color:var(--accent-indigo-light);border-radius:6px;cursor:pointer;" title="Download Report as TXT">📄 Download</button>
+                            ${isPass ? `<button onclick="downloadAdminCert('${r.certId}')" class="btn btn-ghost" style="padding:4px 8px;font-size:0.75rem;border:1px solid rgba(245,158,11,0.3);color:var(--accent-amber);border-radius:6px;cursor:pointer;" title="Download Certificate PDF">🏆 Cert PDF</button>` : ''}
                             <button onclick="deleteCandidateReport('${r.certId}')" class="btn btn-ghost" style="padding:4px 6px;font-size:0.75rem;color:var(--accent-rose);border-radius:6px;cursor:pointer;" title="Delete Record">🗑️</button>
                         </div>
                     </td>
@@ -5722,6 +6113,108 @@ GUIDELINES:
         document.body.appendChild(dlAnchor);
         dlAnchor.click();
         dlAnchor.remove();
+    }
+
+    // ── Download individual candidate report as formatted TXT ──
+    function downloadAdminReport(certId) {
+        const reports = getStoredCandidateReports();
+        const r = reports.find(rep => rep.certId === certId);
+        if (!r) { alert('Report not found.'); return; }
+
+        const lines = [];
+        lines.push('═══════════════════════════════════════════════════');
+        lines.push('  SIMPATICO HR — Candidate Assessment Report');
+        lines.push('═══════════════════════════════════════════════════');
+        lines.push('');
+        lines.push(`Certificate ID : ${r.certId}`);
+        lines.push(`Candidate      : ${r.name || 'N/A'}`);
+        lines.push(`Email          : ${r.email || 'N/A'}`);
+        lines.push(`Role           : ${r.role || 'N/A'}`);
+        lines.push(`Level          : ${r.level || 'N/A'}`);
+        lines.push(`Date           : ${r.date || 'N/A'}`);
+        lines.push('');
+        lines.push('───── Competency Scores ─────');
+        lines.push(`Overall Score     : ${r.overall || 0}/100  ${(r.overall || 0) >= CERT_PASS_THRESHOLD ? '🏆 PASS' : '⚠️ FAIL'}`);
+        if (r.jobScore != null)      lines.push(`Technical/Domain  : ${r.jobScore}/100`);
+        if (r.cognitive != null)     lines.push(`Cognitive         : ${r.cognitive}/100`);
+        if (r.situational != null)   lines.push(`Situational       : ${r.situational}/100`);
+        if (r.attitude != null)      lines.push(`Behavioral        : ${r.attitude}/100`);
+        if (r.communication != null) lines.push(`Communication     : ${r.communication}/100`);
+        if (r.integrity != null)     lines.push(`Integrity Trust   : ${r.integrity}%`);
+        lines.push('');
+
+        if (r.summary) {
+            lines.push('───── Summary ─────');
+            lines.push(r.summary);
+            lines.push('');
+        }
+
+        if (r.topStrengths && r.topStrengths.length) {
+            lines.push('───── Top Strengths ─────');
+            r.topStrengths.forEach((s, i) => lines.push(`  ${i + 1}. ${s}`));
+            lines.push('');
+        }
+
+        if (r.focusAreas && r.focusAreas.length) {
+            lines.push('───── Focus Areas / Improvements ─────');
+            r.focusAreas.forEach((s, i) => lines.push(`  ${i + 1}. ${s}`));
+            lines.push('');
+        }
+
+        if (r.answers && r.answers.length) {
+            lines.push('═══════════════════════════════════════════════════');
+            lines.push('  QUESTION-BY-QUESTION BREAKDOWN');
+            lines.push('═══════════════════════════════════════════════════');
+            r.answers.forEach((a, i) => {
+                lines.push('');
+                lines.push(`Q${i + 1}: ${a.question || 'Question ' + (i + 1)}`);
+                lines.push(`   Score   : ${a.score || 0}/100 (${(a.verdict || 'N/A').toUpperCase()})`);
+                lines.push(`   Type    : ${(a.type || 'mixed').replace('-', ' ')} | Difficulty: ${(a.difficulty || 'medium').toUpperCase()}`);
+                if (a.answer) lines.push(`   Answer  : ${a.answer}`);
+                if (a.strengths && a.strengths.length) lines.push(`   ✓ Strengths   : ${a.strengths.join('; ')}`);
+                if (a.improvements && a.improvements.length) lines.push(`   ✗ Improvements: ${a.improvements.join('; ')}`);
+            });
+            lines.push('');
+        }
+
+        // Anti-Cheat Proctoring Summary
+        if (r.proctoringViolations || r.integrity != null) {
+            lines.push('═══════════════════════════════════════════════════');
+            lines.push('  ANTI-CHEAT PROCTORING AUDIT');
+            lines.push('═══════════════════════════════════════════════════');
+            if (r.integrity != null) lines.push(`Integrity Trust Score : ${r.integrity}%`);
+            const pv = r.proctoringViolations || {};
+            lines.push(`Tab Switch Violations : ${pv.tabSwitches || 0}`);
+            lines.push(`Copy/Paste Attempts   : ${pv.pasteAttempts || 0}`);
+            lines.push(`Face Not Detected     : ${pv.faceNotDetected || 0}`);
+            lines.push(`Multiple Faces        : ${pv.multipleFaces || 0}`);
+            lines.push(`Eye Gaze Away         : ${pv.gazeAwayCount || 0}`);
+            lines.push(`Head Turned Away      : ${pv.headTurnCount || 0}`);
+            lines.push(`Rapid Typing Flags    : ${pv.rapidKeyPattern || 0}`);
+            lines.push(`Window Resize Flags   : ${pv.windowResizeCount || 0}`);
+            lines.push(`DevTools Detection    : ${pv.devToolsOpened || 0}`);
+            lines.push(`Screen Share Issues   : ${pv.screenShareDisconnected || 0}`);
+            lines.push(`Total Violations      : ${pv.totalViolations || 0}`);
+            lines.push('');
+        }
+
+        lines.push('═══════════════════════════════════════════════════');
+        lines.push('  Generated by Simpatico HR AI Assessment Platform');
+        lines.push('  https://simpaticohr.in');
+        lines.push('═══════════════════════════════════════════════════');
+
+        const blob = new Blob([lines.join('\n')], { type: 'text/plain' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `assessment-report-${(r.name || 'candidate').replace(/\s+/g, '-').toLowerCase()}-${r.certId}.txt`;
+        a.click();
+        URL.revokeObjectURL(url);
+    }
+
+    // ── Open certificate page for admin download (PDF/PNG/Print) ──
+    function downloadAdminCert(certId) {
+        window.open('certificate.html?certId=' + encodeURIComponent(certId), '_blank');
     }
 
     function updateCandRoleDisplay() {
@@ -6861,6 +7354,9 @@ GUIDELINES:
         // Compute voice speaking metrics before report
         computeSpeakingMetrics();
 
+        // Release screen wake lock — interview is complete
+        releaseWakeLock();
+
         showScreen('screen-report');
         document.getElementById('report-loading').classList.remove('hidden');
 
@@ -6870,6 +7366,7 @@ GUIDELINES:
         try {
             if (_enableProctoring) {
                 cleanupProctoring();
+                cleanupAntiCheatExtras();
             }
             if (_enableWebcamProctoring) {
                 cleanupWebcamFaceTracking();
@@ -6984,17 +7481,32 @@ GUIDELINES:
             if (reportContainer) reportContainer.appendChild(antiCheatCard);
         }
         const v = state.proctoringViolations;
-        const trustScore = Math.max(60, 100 - (v.totalViolations || 0) * 10);
+        const trustScore = Math.max(60, 100 - (v.totalViolations || 0) * 5);
+        const trustColor = trustScore >= 90 ? '#34d399' : trustScore >= 70 ? '#fbbf24' : '#f43f5e';
+        const trustLabel = trustScore >= 90 ? '✅ Clean' : trustScore >= 70 ? '⚠️ Moderate Risk' : '🚨 High Risk';
         antiCheatCard.innerHTML = `
             <div style="background:rgba(16,185,129,0.08); border:1px solid rgba(16,185,129,0.25); border-radius:16px; padding:1.25rem; margin-top:1.5rem;">
-                <div style="font-weight:700; color:#34d399; font-size:0.9rem; margin-bottom:8px; display:flex; align-items:center; gap:8px;">
-                    🛡️ PROCTORED ANTI-CHEAT INTEGRITY REPORT
+                <div style="font-weight:700; color:#34d399; font-size:0.9rem; margin-bottom:12px; display:flex; align-items:center; gap:8px;">
+                    🛡️ AI-PROCTORED ANTI-CHEAT INTEGRITY REPORT
                 </div>
-                <div style="font-size:0.82rem; color:var(--text-secondary); display:grid; grid-template-columns:1fr 1fr; gap:8px;">
-                    <div>Screen Share Monitor: <strong style="color:${v.screenShareDisconnected > 0 ? '#f43f5e' : '#34d399'};">${v.screenShareDisconnected > 0 ? 'Warnings Logged' : 'Verified Active'}</strong></div>
-                    <div>Tab Switch Violations: <strong style="color:${v.tabSwitches > 0 ? '#f43f5e' : '#34d399'};">${v.tabSwitches}</strong></div>
-                    <div>Copy/Paste Violations: <strong style="color:${v.pasteAttempts > 0 ? '#f43f5e' : '#34d399'};">${v.pasteAttempts}</strong></div>
-                    <div>Anti-Cheat Trust Score: <strong style="color:#34d399;">${trustScore}% (${trustScore >= 90 ? 'Clean' : 'Flagged'})</strong></div>
+                <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;padding:10px 14px;background:rgba(0,0,0,0.2);border-radius:10px;">
+                    <div style="font-size:1.8rem;font-weight:900;color:${trustColor};">${trustScore}%</div>
+                    <div>
+                        <div style="font-weight:700;color:${trustColor};font-size:0.85rem;">${trustLabel}</div>
+                        <div style="font-size:0.72rem;color:var(--text-muted);">Anti-Cheat Trust Score · ${v.totalViolations || 0} total violations detected</div>
+                    </div>
+                </div>
+                <div style="font-size:0.78rem; color:var(--text-secondary); display:grid; grid-template-columns:1fr 1fr; gap:6px 16px;">
+                    <div>📺 Screen Share: <strong style="color:${v.screenShareDisconnected > 0 ? '#f43f5e' : '#34d399'};">${v.screenShareDisconnected > 0 ? 'Disconnected (' + v.screenShareDisconnected + ')' : 'Active'}</strong></div>
+                    <div>🔄 Tab Switches: <strong style="color:${v.tabSwitches > 0 ? '#f43f5e' : '#34d399'};">${v.tabSwitches}</strong></div>
+                    <div>📋 Copy/Paste: <strong style="color:${v.pasteAttempts > 0 ? '#f43f5e' : '#34d399'};">${v.pasteAttempts}</strong></div>
+                    <div>👤 Face Missing: <strong style="color:${v.faceNotDetected > 2 ? '#f43f5e' : '#34d399'};">${v.faceNotDetected}</strong></div>
+                    <div>👥 Multiple Faces: <strong style="color:${v.multipleFaces > 0 ? '#f43f5e' : '#34d399'};">${v.multipleFaces}</strong></div>
+                    <div>👁️ Eye Gaze Away: <strong style="color:${v.gazeAwayCount > 0 ? '#f43f5e' : '#34d399'};">${v.gazeAwayCount}</strong></div>
+                    <div>🔄 Head Turned: <strong style="color:${v.headTurnCount > 0 ? '#f43f5e' : '#34d399'};">${v.headTurnCount}</strong></div>
+                    <div>⌨️ Rapid Typing: <strong style="color:${v.rapidKeyPattern > 0 ? '#f43f5e' : '#34d399'};">${v.rapidKeyPattern}</strong></div>
+                    <div>📐 Window Resize: <strong style="color:${v.windowResizeCount > 0 ? '#fbbf24' : '#34d399'};">${v.windowResizeCount}</strong></div>
+                    <div>🔧 DevTools: <strong style="color:${v.devToolsOpened > 0 ? '#f43f5e' : '#34d399'};">${v.devToolsOpened}</strong></div>
                 </div>
             </div>`;
 
@@ -7065,7 +7577,8 @@ GUIDELINES:
             summary: report.summary || '',
             topStrengths: report.topStrengths || [],
             focusAreas: report.focusAreas || [],
-            answers: state.answers || []
+            answers: state.answers || [],
+            proctoringViolations: { ...state.proctoringViolations }
         };
 
         if (!state.isPracticeMode) {
@@ -7204,7 +7717,8 @@ GUIDELINES:
                 behavioral: avgType(['behavioral', 'attitude', 'culture-fit']),
                 situational: avgType(['situational', 'scenario', 'case-study']),
                 reportHidden: true,
-                answers: state.answers
+                answers: state.answers,
+                proctoringViolations: { ...state.proctoringViolations }
             };
             // Save locally for admin reports dashboard
             const certs = JSON.parse(localStorage.getItem('simpatico_certifications') || '[]');
@@ -7354,6 +7868,7 @@ GUIDELINES:
         params.set('lang', document.getElementById('lang-select')?.value || 'en-IN');
         params.set('difficulty', document.getElementById('difficulty-select')?.value || document.getElementById('admin-difficulty')?.value || 'mixed');
         params.set('proctoring', document.getElementById('admin-proctoring')?.value || '0');
+        params.set('webcam', document.getElementById('admin-webcam')?.value || '0');
         params.set('show_report', document.getElementById('admin-show-report')?.value || '0');
         params.set('cert_download', document.getElementById('admin-cert-download')?.value || '0');
         params.set('cv_required', document.getElementById('admin-cv-required')?.value || '0');
