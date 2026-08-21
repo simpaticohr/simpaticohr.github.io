@@ -6088,19 +6088,24 @@ GUIDELINES:
         state.role = record.role;
         state.level = record.level || 'mid-level';
         state._lastCertId = record.certId;
-        
+        state.answers = record.answers || [];
+        state.proctoringViolations = record.proctoringViolations || state.proctoringViolations;
+        state.communicationScores = record.communicationScores || null;
+        // Flag to prevent renderReport from re-saving a duplicate entry
+        state._viewingStoredReport = true;
+
+        const recScore = record.overall || 0;
         showScreen('screen-report');
         renderReport({
-            overall: record.overall || 0,
-            cognitive: record.cognitive || 0,
-            situational: record.situational || 0,
-            attitude: record.attitude || 0,
-            jobScore: record.jobScore || 0,
-            communication: record.communication || 0,
+            overallScore: recScore,
+            recommendation: recScore >= 85 ? 'strong-hire' : recScore >= CERT_PASS_THRESHOLD ? 'hire' : recScore >= 50 ? 'lean-hire' : 'no-hire',
             summary: record.summary || 'Candidate completed professional certification assessment.',
             topStrengths: record.topStrengths || ['Demonstrated relevant domain problem solving.'],
-            focusAreas: record.focusAreas || ['Continue strengthening practical architecture trade-offs.']
+            focusAreas: record.focusAreas || ['Continue strengthening practical architecture trade-offs.'],
+            communicationScores: record.communicationScores || null
         });
+        // Reset the flag after rendering
+        state._viewingStoredReport = false;
     }
 
     function deleteCandidateReport(certId) {
@@ -7494,6 +7499,37 @@ GUIDELINES:
 
         // ── CERTIFICATION GATE: Route failures to failure screen ──
         if (!state.isPracticeMode && score < CERT_PASS_THRESHOLD) {
+            // Save failed assessment cert data to localStorage BEFORE returning,
+            // so it appears in the Reports & Analytics tab
+            if (!state._viewingStoredReport) {
+                try {
+                    const v = state.proctoringViolations || {};
+                    const failTrustScore = Math.max(60, 100 - (v.totalViolations || 0) * 5);
+                    const failCertId = 'SIMP-' + Date.now().toString(36).toUpperCase().substring(0, 6);
+                    const failCertData = {
+                        certId: failCertId,
+                        name: state.candidateName || _b2bCandidateName || localStorage.getItem('cand_name') || 'Candidate',
+                        email: state.candidateEmail || _b2bCandidateEmail || '',
+                        role: state.role || 'Professional',
+                        level: state.level || 'Mid-Level',
+                        date: new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }),
+                        overall: score,
+                        integrity: failTrustScore,
+                        summary: report.summary || '',
+                        topStrengths: report.topStrengths || [],
+                        focusAreas: report.focusAreas || [],
+                        answers: state.answers || [],
+                        communicationScores: report.communicationScores || state.communicationScores || null,
+                        proctoringViolations: { ...v },
+                        passed: false
+                    };
+                    const certs = JSON.parse(localStorage.getItem('simpatico_certifications') || '[]');
+                    certs.push(failCertData);
+                    localStorage.setItem('simpatico_certifications', JSON.stringify(certs));
+                    state._lastCertId = failCertId;
+                } catch(e) { console.warn('Failed cert save note:', e); }
+            }
+
             if (_b2bShowReport === 0) {
                 showScreen('screen-thank-you');
                 document.getElementById('thankyou-session-id').textContent = state.sessionId || 'N/A';
@@ -7635,7 +7671,7 @@ GUIDELINES:
             proctoringViolations: { ...state.proctoringViolations }
         };
 
-        if (!state.isPracticeMode) {
+        if (!state.isPracticeMode && !state._viewingStoredReport) {
             try {
                 const certs = JSON.parse(localStorage.getItem('simpatico_certifications') || '[]');
                 certs.push(certData);
