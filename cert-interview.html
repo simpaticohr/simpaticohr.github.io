@@ -7819,11 +7819,16 @@ GUIDELINES:
         params.set('token', token);
         params.set('b2b', '1');
 
-        // Ensure newly generated token is clean and fresh in local storage
+        // Ensure newly generated token is clean and fresh in ALL storage locations
         try {
+            // 1. Remove from global used tokens list
             const used = JSON.parse(localStorage.getItem('simpatico_used_tokens') || '[]');
             const cleaned = used.filter(t => t !== token);
             localStorage.setItem('simpatico_used_tokens', JSON.stringify(cleaned));
+            // 2. Remove individual token-specific lock
+            localStorage.removeItem('simpatico_token_used_' + token);
+            // 3. Remove session-level consumed flag
+            sessionStorage.removeItem('simpatico_token_consumed_' + token);
         } catch(e) {}
 
         // Candidate details
@@ -7917,7 +7922,26 @@ GUIDELINES:
 
     function clearUsedTokenCache() {
         try {
+            // Clear global used tokens list
             localStorage.removeItem('simpatico_used_tokens');
+            // Clear all individual token-specific keys
+            const keysToRemove = [];
+            for (let i = 0; i < localStorage.length; i++) {
+                const key = localStorage.key(i);
+                if (key && key.startsWith('simpatico_token_used_')) {
+                    keysToRemove.push(key);
+                }
+            }
+            keysToRemove.forEach(k => localStorage.removeItem(k));
+            // Clear session-level consumed flags
+            const sessionKeysToRemove = [];
+            for (let i = 0; i < sessionStorage.length; i++) {
+                const key = sessionStorage.key(i);
+                if (key && key.startsWith('simpatico_token_consumed_')) {
+                    sessionKeysToRemove.push(key);
+                }
+            }
+            sessionKeysToRemove.forEach(k => sessionStorage.removeItem(k));
             showProctorToast('✅ Used tokens cache cleared! All test links re-enabled.');
         } catch(e) {}
     }
