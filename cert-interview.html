@@ -2258,6 +2258,9 @@
                     <button class="btn btn-primary" id="btn-view-cert" onclick="viewCertificate()" style="background:linear-gradient(135deg,#f59e0b,#d97706);display:none;">
                         🏆 View Certificate
                     </button>
+                    <button class="btn btn-primary" id="btn-download-cert-pdf" onclick="downloadCertificatePDF()" style="background:linear-gradient(135deg,#10b981,#059669);display:none;">
+                        📄 Download Certificate PDF
+                    </button>
                 </div>
             </div>
         </div>
@@ -7798,8 +7801,12 @@ GUIDELINES:
         const certBtn = document.getElementById('btn-view-cert');
         if (certBtn && !state.isPracticeMode && score >= CERT_PASS_THRESHOLD && _b2bCertDownload) {
             certBtn.style.display = 'inline-flex';
+            const certPdfBtn = document.getElementById('btn-download-cert-pdf');
+            if (certPdfBtn) certPdfBtn.style.display = 'inline-flex';
         } else if (certBtn) {
             certBtn.style.display = 'none';
+            const certPdfBtn = document.getElementById('btn-download-cert-pdf');
+            if (certPdfBtn) certPdfBtn.style.display = 'none';
         }
 
         // Summary-only mode: hide detailed sections
@@ -7940,6 +7947,127 @@ GUIDELINES:
     function viewCertificate() {
         const certId = state._lastCertId || '';
         window.open('certificate.html?certId=' + encodeURIComponent(certId), '_blank');
+    }
+
+    // ══════════════════════════════════════════
+    //  DOWNLOAD CERTIFICATE PDF (inline render)
+    // ══════════════════════════════════════════
+    function downloadCertificatePDF() {
+        const btn = document.getElementById('btn-download-cert-pdf');
+        if (btn) btn.innerHTML = '⌛ Generating Certificate...';
+
+        // Gather cert data
+        const certId = state._lastCertId || 'SIMP-' + Date.now().toString(36).toUpperCase().substring(0, 6);
+        const name = state.candidateName || _b2bCandidateName || localStorage.getItem('cand_name') || 'Candidate';
+        const role = state.role || 'Professional';
+        const issueDate = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+        const expiryDate = (() => { const d = new Date(); d.setFullYear(d.getFullYear() + 1); return d.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }); })();
+
+        // Get scores from localStorage cert data
+        const stored = JSON.parse(localStorage.getItem('simpatico_certifications') || '[]');
+        const cert = stored.find(c => c.certId === certId) || stored[stored.length - 1] || {};
+        const overall = cert.overall || Math.round((state.answers || []).reduce((s, a) => s + (a.score || 0), 0) / Math.max(1, (state.answers || []).length));
+        const cognitive = cert.cognitive || overall;
+        const situational = cert.situational || Math.min(100, overall + 3);
+        const attitude = cert.attitude || Math.min(100, overall + 5);
+        const jobScore = cert.jobScore || overall;
+        const communication = cert.communication || Math.max(60, overall - 5);
+        const integrity = cert.integrity || 100;
+        const grade = overall >= 90 ? 'EXCELLENT' : overall >= 80 ? 'VERY GOOD' : overall >= 70 ? 'GOOD' : 'SATISFACTORY';
+
+        const adminCfg = JSON.parse(localStorage.getItem('adminConfig') || '{}');
+        const sigName = adminCfg.signatoryName || 'Authorized Signatory — Simpatico HR';
+        const certTitle = adminCfg.certTitle || 'Certificate of Assessment & Verification';
+
+        // Build certificate HTML
+        const certHTML = `
+        <div id="cert-pdf-render" style="width:960px;font-family:'Plus Jakarta Sans',sans-serif;background:linear-gradient(145deg,rgba(11,19,41,0.95),rgba(2,6,23,0.98));border:2px solid rgba(245,158,11,0.3);border-radius:24px;padding:50px 55px;position:relative;color:#f8fafc;overflow:hidden;">
+            <div style="position:absolute;top:0;left:0;right:0;height:4px;background:linear-gradient(90deg,#6366f1,#f59e0b,#8b5cf6,#f59e0b,#6366f1);border-radius:24px 24px 0 0;"></div>
+            <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%) rotate(-35deg);font-size:6rem;font-weight:900;letter-spacing:12px;text-transform:uppercase;color:rgba(99,102,241,0.03);pointer-events:none;white-space:nowrap;">SIMPATICO HR</div>
+
+            <div style="text-align:center;margin-bottom:20px;position:relative;z-index:1;">
+                <img src="favicon-96x96.png" style="width:72px;height:72px;border-radius:16px;margin:0 auto 10px;display:block;border:2px solid rgba(245,158,11,0.3);" />
+                <div style="font-size:1.6rem;font-weight:800;letter-spacing:3px;">SIMPATICO <span style="color:#f59e0b;">HR</span></div>
+                <div style="font-size:0.78rem;letter-spacing:5px;text-transform:uppercase;color:#94a3b8;margin-top:6px;">Official AI Pre-Assessment Certificate</div>
+                <div style="font-size:0.78rem;color:#94a3b8;margin-top:8px;">
+                    <span style="color:#f59e0b;font-weight:600;">🌐 simpaticohr.in</span>
+                    <span style="margin:0 8px;color:rgba(245,158,11,0.5);">·</span>
+                    <span style="color:#f59e0b;font-weight:600;">✉ info@simpaticohr.in</span>
+                </div>
+                <div style="font-size:0.72rem;color:#64748b;margin-top:4px;letter-spacing:1px;">Perinthalmanna, Kerala, India</div>
+            </div>
+
+            <div style="font-family:'Playfair Display',serif;font-size:2.2rem;font-weight:700;text-align:center;margin:18px 0 8px;color:#f59e0b;">${escapeHtml(certTitle)}</div>
+            <div style="text-align:center;font-size:0.92rem;color:#94a3b8;">This pre-assessment credential is proudly presented to</div>
+            <div style="font-family:'Playfair Display',serif;font-size:2.6rem;font-weight:700;text-align:center;color:#f59e0b;margin:14px 0;font-style:italic;">${escapeHtml(name)}</div>
+            <div style="text-align:center;font-size:0.88rem;color:#6366f1;font-weight:700;margin-bottom:6px;">${escapeHtml(role)}</div>
+            <div style="text-align:center;font-size:0.85rem;color:#94a3b8;max-width:700px;margin:0 auto 10px;line-height:1.5;">
+                for successfully completing the <strong>AI Proctored Multi-Pillar Assessment</strong> across Cognitive Aptitude, Situational Judgment, Attitude & Ethics, Technical Voice Interview, Communication Skills, and AI Integrity Monitoring.
+            </div>
+
+            <div style="display:flex;align-items:center;gap:8px;background:rgba(16,185,129,0.12);border:1px solid rgba(16,185,129,0.3);border-radius:100px;padding:8px 20px;font-size:0.9rem;font-weight:800;color:#10b981;margin:10px auto;width:fit-content;">
+                <i class="fas fa-award"></i> Overall Score: ${overall}% — ${grade}
+            </div>
+
+            <div style="text-align:center;margin:14px 0;">
+                <div style="display:inline-flex;align-items:center;gap:8px;background:rgba(99,102,241,0.08);border:1px solid rgba(99,102,241,0.2);border-radius:100px;padding:6px 18px;font-size:0.78rem;font-weight:600;color:#818cf8;">
+                    Issued: <strong>${issueDate}</strong> <span style="color:#475569;">·</span> Valid Until: <strong>${expiryDate}</strong>
+                </div>
+            </div>
+
+            <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:10px;margin:25px 0;text-align:center;">
+                <div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);padding:14px 6px;border-radius:14px;"><div style="font-size:1.3rem;font-weight:800;color:#10b981;">${cognitive}%</div><div style="font-size:0.65rem;color:#94a3b8;margin-top:4px;font-weight:700;text-transform:uppercase;">Cognitive</div></div>
+                <div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);padding:14px 6px;border-radius:14px;"><div style="font-size:1.3rem;font-weight:800;color:#10b981;">${situational}%</div><div style="font-size:0.65rem;color:#94a3b8;margin-top:4px;font-weight:700;text-transform:uppercase;">Situational</div></div>
+                <div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);padding:14px 6px;border-radius:14px;"><div style="font-size:1.3rem;font-weight:800;color:#10b981;">${attitude}%</div><div style="font-size:0.65rem;color:#94a3b8;margin-top:4px;font-weight:700;text-transform:uppercase;">Attitude</div></div>
+                <div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);padding:14px 6px;border-radius:14px;"><div style="font-size:1.3rem;font-weight:800;color:#10b981;">${jobScore}%</div><div style="font-size:0.65rem;color:#94a3b8;margin-top:4px;font-weight:700;text-transform:uppercase;">Job Skills</div></div>
+                <div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);padding:14px 6px;border-radius:14px;"><div style="font-size:1.3rem;font-weight:800;color:#f59e0b;">${communication}%</div><div style="font-size:0.65rem;color:#94a3b8;margin-top:4px;font-weight:700;text-transform:uppercase;">Communication</div></div>
+                <div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);padding:14px 6px;border-radius:14px;"><div style="font-size:1.3rem;font-weight:800;color:#3b82f6;">${integrity}%</div><div style="font-size:0.65rem;color:#94a3b8;margin-top:4px;font-weight:700;text-transform:uppercase;">Integrity</div></div>
+            </div>
+
+            <div style="display:flex;justify-content:space-between;align-items:flex-end;margin-top:28px;border-top:1px solid rgba(255,255,255,0.08);padding-top:20px;">
+                <div>
+                    <div style="display:inline-flex;align-items:center;gap:8px;background:rgba(245,158,11,0.08);border:1px solid rgba(245,158,11,0.2);border-radius:10px;padding:8px 14px;">
+                        <div><div style="font-size:0.65rem;color:#64748b;text-transform:uppercase;letter-spacing:1px;font-weight:700;">Certificate ID</div><div style="font-size:0.85rem;color:#f59e0b;font-weight:800;letter-spacing:1.5px;">${escapeHtml(certId)}</div></div>
+                    </div>
+                    <div style="font-size:0.72rem;color:#64748b;line-height:1.6;margin-top:8px;">Verify: <strong>https://simpaticohr.in/verify</strong></div>
+                </div>
+                <div style="text-align:center;">
+                    <svg viewBox="0 0 220 65" width="150" height="50">
+                        <path d="M 12 42 C 18 18, 28 14, 35 28 C 42 42, 48 46, 55 32 C 62 18, 68 22, 75 36" stroke="#f59e0b" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+                        <path d="M 72 30 C 82 20, 92 18, 100 28 C 108 38, 115 36, 125 24 C 135 12, 142 16, 148 30" stroke="#f59e0b" stroke-width="2" fill="none" stroke-linecap="round"/>
+                        <path d="M 145 26 C 155 38, 162 40, 172 30 C 178 24, 184 22, 195 28" stroke="#f59e0b" stroke-width="1.8" fill="none" stroke-linecap="round"/>
+                        <path d="M 20 52 Q 80 48, 140 52 T 200 48" stroke="rgba(245,158,11,0.3)" stroke-width="1" fill="none" stroke-linecap="round"/>
+                    </svg>
+                    <div style="font-size:0.75rem;color:#94a3b8;font-weight:600;border-top:1px dashed rgba(255,255,255,0.2);padding-top:4px;">${escapeHtml(sigName)}</div>
+                </div>
+            </div>
+        </div>`;
+
+        // Inject hidden certificate into DOM
+        const wrapper = document.createElement('div');
+        wrapper.style.cssText = 'position:fixed;top:-9999px;left:-9999px;z-index:-1;';
+        wrapper.innerHTML = certHTML;
+        document.body.appendChild(wrapper);
+        const certEl = wrapper.querySelector('#cert-pdf-render');
+
+        const opt = {
+            margin:       [10, 10, 10, 10],
+            filename:     `Simpatico_HR_Certificate_${name.replace(/\s+/g, '_')}.pdf`,
+            image:        { type: 'jpeg', quality: 0.98 },
+            html2canvas:  { scale: 2, useCORS: true, backgroundColor: '#020617' },
+            jsPDF:        { unit: 'mm', format: 'a4', orientation: 'landscape' }
+        };
+
+        html2pdf().set(opt).from(certEl).save().then(() => {
+            document.body.removeChild(wrapper);
+            if (btn) btn.innerHTML = '📄 Download Certificate PDF';
+        }).catch(err => {
+            console.error('Certificate PDF failed:', err);
+            document.body.removeChild(wrapper);
+            if (btn) btn.innerHTML = '📄 Download Certificate PDF';
+            // Fallback: open certificate.html
+            viewCertificate();
+        });
     }
 
     // ── Save cert data silently (when report is hidden from candidate) ──
