@@ -3089,7 +3089,8 @@
         },
         communicationScores: null,    // Multi-dimensional evaluation scores
         proctoringViolations: { tabSwitches: 0, pasteAttempts: 0, faceNotDetected: 0, multipleFaces: 0, screenShareDisconnected: 0, gazeAwayCount: 0, headTurnCount: 0, rapidKeyPattern: 0, windowResizeCount: 0, devToolsOpened: 0, totalViolations: 0 },
-        wakeLockSentinel: null  // Screen Wake Lock sentinel to prevent mobile screen lock
+        wakeLockSentinel: null,  // Screen Wake Lock sentinel to prevent mobile screen lock
+        _isFinishingVoiceSession: false  // Guard flag for finishLiveVoiceInterview
     };
 
     // ══════════════════════════════════════════
@@ -4672,7 +4673,7 @@
         // Connect UI state
         document.getElementById('q-number').textContent = 'LIVE';
         document.getElementById('q-text').textContent = 'Connecting to AI Interviewer...';
-        document.getElementById('btn-voice-finish').disabled = true;
+        document.getElementById('btn-voice-finish').disabled = false;
         document.getElementById('btn-voice-finish').textContent = '⏹ End Interview';
         
         const avatarStage = document.getElementById('avatar-stage');
@@ -4913,6 +4914,9 @@ GUIDELINES:
                             document.getElementById('voice-status-dot').className = 'status-dot pulse-blue';
                             document.getElementById('voice-status-text').textContent = 'AI INTERVIEWER SPEAKING';
                             document.getElementById('voice-instruction').textContent = 'AI is speaking. Listen carefully.';
+                            // Keep End Interview button always enabled in live WS mode
+                            const wsFinishBtn = document.getElementById('btn-voice-finish');
+                            if (wsFinishBtn) wsFinishBtn.disabled = false;
                             
                             playPcmChunk(part.inlineData.data);
                             // Route audio to Simli for lip-sync (if active)
@@ -6443,8 +6447,8 @@ GUIDELINES:
 
     // ── Progress ──
     function updateProgress() {
-        const total = state.questions.length;
-        const current = state.currentIndex + 1;
+        const total = state.questions.length || state.questionsCount || 5;
+        const current = Math.min(state.currentIndex + 1, total);
         document.getElementById('progress-count').textContent = `${current} / ${total}`;
         document.getElementById('progress-fill').style.width = `${(current / total) * 100}%`;
         document.getElementById('progress-role').textContent =
@@ -7007,6 +7011,7 @@ GUIDELINES:
 
     async function finishVoiceSpeaking() {
         if (state.liveWs) {
+            state._isFinishingVoiceSession = false; // Reset guard to allow re-entry
             await finishLiveVoiceInterview();
             return;
         }
@@ -7026,7 +7031,18 @@ GUIDELINES:
         const subEl = document.getElementById('subtitles-text');
         const finalAnswer = subEl ? subEl.textContent.trim() : '';
         if (!finalAnswer || finalAnswer === 'Listening...' || finalAnswer === 'Waiting for AI to finish speaking...' || finalAnswer === 'Listening for speech...') {
-            // User didn't say anything
+            // Check if user explicitly wants to end the interview (End Interview button)
+            const endBtn = document.getElementById('btn-voice-finish');
+            const isEndRequest = endBtn && endBtn.textContent.includes('End Interview');
+            
+            if (isEndRequest && state.answers.length > 0) {
+                // User pressed End Interview with no current answer — skip this question and generate report
+                stopTimer();
+                generateReport();
+                return;
+            }
+            
+            // User didn't say anything — prompt to try again
             const vInstr = document.getElementById('voice-instruction');
             if (vInstr) vInstr.textContent = '⚠️ No answer detected. Please try speaking again.';
             
@@ -7263,22 +7279,31 @@ GUIDELINES:
 
         if (state.voiceMode) {
             let feedbackVoiceText = `Answer evaluated. You scored ${score} out of 100. `;
+            let _fbCallbackFired = false;
+            const safeCallback = (action) => {
+                if (_fbCallbackFired) return;
+                _fbCallbackFired = true;
+                action();
+            };
             if (hasFollowUp) {
                 feedbackVoiceText += `I have a follow-up question for you.`;
                 speakText(feedbackVoiceText, function() {
-                    // Automatically enter follow-up mode in voice
-                    handleNextClick();
+                    safeCallback(() => handleNextClick());
                 });
+                // Safety timeout: if TTS callback never fires, auto-proceed
+                setTimeout(() => safeCallback(() => handleNextClick()), 15000);
             } else if (isLast) {
                 feedbackVoiceText += `The interview is now complete. Generating your certification report.`;
                 speakText(feedbackVoiceText, function() {
-                    nextQuestion();
+                    safeCallback(() => nextQuestion());
                 });
+                setTimeout(() => safeCallback(() => nextQuestion()), 15000);
             } else {
                 feedbackVoiceText += `Moving to the next question.`;
                 speakText(feedbackVoiceText, function() {
-                    nextQuestion();
+                    safeCallback(() => nextQuestion());
                 });
+                setTimeout(() => safeCallback(() => nextQuestion()), 15000);
             }
         }
     }
@@ -7884,7 +7909,8 @@ GUIDELINES:
             communicationScores: null,
             liveWs: null,
             liveTranscript: [],
-            proctoringViolations: { tabSwitches: 0, pasteAttempts: 0, faceNotDetected: 0, multipleFaces: 0, screenShareDisconnected: 0, totalViolations: 0 }
+            proctoringViolations: { tabSwitches: 0, pasteAttempts: 0, faceNotDetected: 0, multipleFaces: 0, screenShareDisconnected: 0, totalViolations: 0 },
+            _isFinishingVoiceSession: false
         };
         const muteBtn = document.getElementById('btn-voice-mute');
         if (muteBtn) muteBtn.textContent = '🔇 Mute AI';
