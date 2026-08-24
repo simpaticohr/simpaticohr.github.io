@@ -1460,6 +1460,7 @@
     <script src="js/duix-renderer.js"></script>
     <script src="js/hyperreal-renderer.js"></script>
     <script src="js/interview-pipeline-engine.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
 
     <!-- NAVIGATION -->
     <nav class="nav">
@@ -7851,19 +7852,66 @@ GUIDELINES:
     //  DOWNLOAD REPORT
     // ══════════════════════════════════════════
     function downloadReport() {
+        const reportCard = document.querySelector('#screen-report .card');
+        if (!reportCard) {
+            // Fallback: generate text report if report card DOM not found
+            downloadReportText();
+            return;
+        }
+
+        // Show loading state on button
+        const btn = event && event.target ? event.target : document.querySelector('#screen-report .btn-primary');
+        const origText = btn ? btn.innerHTML : '';
+        if (btn) btn.innerHTML = '⌛ Generating PDF...';
+
+        // Temporarily hide buttons for PDF capture
+        const btnGroup = reportCard.querySelector('.btn-group');
+        if (btnGroup) btnGroup.style.display = 'none';
+        const loadingOverlay = document.getElementById('report-loading');
+        if (loadingOverlay) loadingOverlay.style.display = 'none';
+
+        const candidateName = state.candidateName || _b2bCandidateName || localStorage.getItem('cand_name') || 'Candidate';
+        const filename = `Simpatico_HR_Report_${candidateName.replace(/\s+/g, '_')}_${state.role.replace(/\s+/g, '_')}_${new Date().toISOString().slice(0,10)}.pdf`;
+
+        const opt = {
+            margin:       [10, 10, 10, 10],
+            filename:     filename,
+            image:        { type: 'jpeg', quality: 0.98 },
+            html2canvas:  { scale: 2, useCORS: true, backgroundColor: '#0a0e1a', scrollY: 0 },
+            jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' },
+            pagebreak:    { mode: ['avoid-all', 'css', 'legacy'] }
+        };
+
+        html2pdf().set(opt).from(reportCard).save().then(() => {
+            // Restore buttons
+            if (btnGroup) btnGroup.style.display = '';
+            if (btn) btn.innerHTML = origText;
+        }).catch(err => {
+            console.error('PDF generation failed:', err);
+            if (btnGroup) btnGroup.style.display = '';
+            if (btn) btn.innerHTML = origText;
+            // Fallback to text download
+            downloadReportText();
+        });
+    }
+
+    // Text fallback if PDF library fails to load
+    function downloadReportText() {
         const lines = [];
         lines.push('═══════════════════════════════════════');
         lines.push('  Simpatico HR - Candidate Evaluation Report');
         lines.push('═══════════════════════════════════════');
         lines.push('');
+        lines.push(`Candidate: ${state.candidateName || _b2bCandidateName || 'N/A'}`);
         lines.push(`Role: ${state.role}`);
         lines.push(`Level: ${state.level}`);
         lines.push(`Date: ${new Date().toLocaleDateString()}`);
-        lines.push(`Questions: ${state.questions.length}`);
+        lines.push(`Questions: ${state.answers.length}`);
         lines.push('');
 
-        const avgScore = Math.round(state.answers.reduce((s, a) => s + a.score, 0) / state.answers.length);
+        const avgScore = state.answers.length > 0 ? Math.round(state.answers.reduce((s, a) => s + (a.score || 0), 0) / state.answers.length) : 0;
         lines.push(`Overall Score: ${avgScore}/100`);
+        lines.push(`Result: ${avgScore >= CERT_PASS_THRESHOLD ? 'PASS ✅' : 'BELOW THRESHOLD ❌'}`);
         lines.push('');
 
         lines.push('───── Question Breakdown ─────');
@@ -7872,8 +7920,8 @@ GUIDELINES:
             lines.push(`Q${i+1}: ${a.question}`);
             lines.push(`   Score: ${a.score}/100 (${a.verdict})`);
             lines.push(`   Answer: ${a.answer}`);
-            if (a.strengths.length) lines.push(`   Strengths: ${a.strengths.join(', ')}`);
-            if (a.improvements.length) lines.push(`   Improve: ${a.improvements.join(', ')}`);
+            if (a.strengths && a.strengths.length) lines.push(`   Strengths: ${a.strengths.join(', ')}`);
+            if (a.improvements && a.improvements.length) lines.push(`   Improve: ${a.improvements.join(', ')}`);
         });
 
         lines.push('');
