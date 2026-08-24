@@ -4845,6 +4845,19 @@ GUIDELINES:
             document.getElementById('subtitles-text').textContent = 'Connected. Starting interview...';
 
             startStreamingMicToWs(ws);
+
+            // ── HARD INTERVIEW TIME LIMIT ──
+            // Absolute safety net: force-end the interview after max duration.
+            // Cannot be reset by any activity. Ensures interview ALWAYS ends.
+            const maxMinutes = (targetQuestions * 3) + 5; // 3 min per Q + 5 min buffer
+            state._hardInterviewTimeout = setTimeout(() => {
+                console.log(`[HARD TIMEOUT] Interview exceeded ${maxMinutes} minute limit. Force-ending.`);
+                if (state.liveWs) {
+                    state._isFinishingVoiceSession = false; // Reset guard
+                    finishLiveVoiceInterview();
+                }
+            }, maxMinutes * 60 * 1000);
+            console.log(`[Interview] Hard timeout set: ${maxMinutes} minutes`);
         };
 
         ws.onmessage = async (event) => {
@@ -4967,10 +4980,13 @@ GUIDELINES:
 
                     // Auto-end conditions:
                     // 1. User answered enough questions (turn count >= target)
-                    // 2. AI concluded with at least some answers
-                    // 3. User answered at least half the questions and timer-based or inactivity
+                    // 2. AI concluded with text keywords
+                    // 3. Model has spoken enough turns (targetQ + 2 for greeting/concluding)
+                    // 4. User answered 60%+ and timer expired
+                    const modelTurnsCount = state.liveTranscript.filter(t => t.role === 'model').length;
                     const shouldAutoEnd = userTurnsCount >= targetQuestions || 
                                           (isAIConcluding && userTurnsCount >= 2) ||
+                                          modelTurnsCount >= (targetQuestions + 2) ||
                                           (userTurnsCount >= Math.ceil(targetQuestions * 0.6) && state.timerSeconds <= 0);
 
                     if (shouldAutoEnd) {
@@ -4997,14 +5013,15 @@ GUIDELINES:
                         return;
                     }
 
-                    // Set inactivity timeout: if no new AI turn within 45 seconds, auto-end
+                    // Set inactivity timeout: if no new AI turn within 20 seconds, auto-end
                     if (userTurnsCount >= 2) {
                         state._liveInactivityTimer = setTimeout(() => {
                             console.log(`Inactivity timeout after ${userTurnsCount} user turns. Auto-ending interview...`);
                             if (state.liveWs) {
+                                state._isFinishingVoiceSession = false;
                                 finishLiveVoiceInterview();
                             }
-                        }, 45000);
+                        }, 20000);
                     }
 
                     avatarStage.className = 'avatar-stage listening';
@@ -5095,6 +5112,16 @@ GUIDELINES:
         stopTimer();
         releaseWakeLock();
         resetVad();
+        // Clear hard interview timeout
+        if (state._hardInterviewTimeout) {
+            clearTimeout(state._hardInterviewTimeout);
+            state._hardInterviewTimeout = null;
+        }
+        // Clear inactivity timer
+        if (state._liveInactivityTimer) {
+            clearTimeout(state._liveInactivityTimer);
+            state._liveInactivityTimer = null;
+        }
         if (window.speechSynthesis) {
             window.speechSynthesis.cancel();
         }
