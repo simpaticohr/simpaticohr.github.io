@@ -4930,37 +4930,58 @@ GUIDELINES:
                 if (serverContent.turnComplete) {
                     console.log("AI completed turn: " + state.aiSpokenTextBuffer);
                     
+                    // Flush any pending user speech transcript BEFORE counting user turns
+                    if (state.userSpeechTranscript) {
+                        state.liveTranscript.push({ role: 'user', parts: [{ text: state.userSpeechTranscript }] });
+                        state.userSpeechTranscript = '';
+                    }
+                    
                     state.liveTranscript.push({ role: 'model', parts: [{ text: state.aiSpokenTextBuffer }] });
                     
-                    // Update progress based on actual Q&A exchanges (not raw model turns)
-                    // The first model turn is the greeting + Q1, subsequent model turns after
-                    // a user turn are follow-up questions. We count completed user answers.
+                    // Count user turns for progress
                     const userTurnsCount = state.liveTranscript.filter(t => t.role === 'user').length;
                     const targetQuestions = state.questionsCount || 5;
-                    // Progress = number of user responses completed (each one = 1 answered question)
                     state.currentIndex = Math.min(targetQuestions - 1, Math.max(0, userTurnsCount));
                     updateProgress();
                     document.getElementById('q-number').textContent = `Q${state.currentIndex + 1}`;
 
+                    // Detect if AI is concluding the interview via keywords
+                    const aiText = (state.aiSpokenTextBuffer || '').toLowerCase();
+                    const concludingPhrases = [
+                        'assessment is complete', 'interview is complete', 'interview is now complete',
+                        'assessment is now complete', 'that concludes', 'concludes our interview',
+                        'concludes the interview', 'concludes this assessment', 'thank you for your time',
+                        'best of luck', 'all the best', 'good luck with', 'certification assessment is being finalized',
+                        'completed all the questions', 'that was the last question', 'end of the interview',
+                        'end of this assessment', 'wish you all the best', 'thank you for participating'
+                    ];
+                    const isAIConcluding = concludingPhrases.some(phrase => aiText.includes(phrase));
+
                     state.aiSpokenTextBuffer = '';
                     state.aiSpeakingActive = false;
 
-                    // Only terminate once the candidate has answered ALL target questions.
-                    // This prevents the greeting or acknowledgement turns from consuming
-                    // question slots and cutting the interview short.
-                    if (userTurnsCount >= targetQuestions) {
-                        console.log(`Interview complete: ${userTurnsCount}/${targetQuestions} answers collected. Stopping mic and waiting for final audio playback...`);
+                    // Clear any previous inactivity timeout
+                    if (state._liveInactivityTimer) {
+                        clearTimeout(state._liveInactivityTimer);
+                        state._liveInactivityTimer = null;
+                    }
+
+                    // Auto-end: user answered enough questions OR AI is concluding with at least some answers
+                    const shouldAutoEnd = userTurnsCount >= targetQuestions || 
+                                          (isAIConcluding && userTurnsCount >= 2);
+
+                    if (shouldAutoEnd) {
+                        console.log(`Interview complete: ${userTurnsCount}/${targetQuestions} answers, AI concluding: ${isAIConcluding}. Stopping mic and waiting for final audio playback...`);
                         stopMicStreaming();
                         cleanupMicStream();
                         
-                        // Disable the end button to show it is finalizing
                         const finishBtn = document.getElementById('btn-voice-finish');
                         if (finishBtn) {
                             finishBtn.disabled = true;
                             finishBtn.textContent = '⌛ Finalizing Report...';
                         }
                         
-                        // Check for audio queue to drain with a 3-second hard safety timeout
+                        // Wait for audio queue to drain (3s hard timeout)
                         let waitedMs = 0;
                         const checkInterval = setInterval(() => {
                             waitedMs += 200;
@@ -4973,15 +4994,23 @@ GUIDELINES:
                         return;
                     }
 
+                    // Set inactivity timeout: if no new AI turn within 45 seconds, auto-end
+                    if (userTurnsCount >= 2) {
+                        state._liveInactivityTimer = setTimeout(() => {
+                            console.log(`Inactivity timeout after ${userTurnsCount} user turns. Auto-ending interview...`);
+                            if (state.liveWs) {
+                                finishLiveVoiceInterview();
+                            }
+                        }, 45000);
+                    }
+
                     avatarStage.className = 'avatar-stage listening';
                     if (window.aiAvatar) {
                         window.aiAvatar.setState('listening');
                         window.aiAvatar.setAmplitude(0);
                     }
-                    // Update DuiX overlay state to listening
                     if (_duixActive && typeof DuixRenderer !== 'undefined') {
                         DuixRenderer.onState('listening');
-                        // Kick off speculative pre-rendering while candidate speaks
                         duixPreRenderLikelyLines();
                     }
                     document.getElementById('voice-status-dot').className = 'status-dot pulse-green';
@@ -4992,7 +5021,7 @@ GUIDELINES:
 
                     playChime('listening');
                     startSpeakingTimer();
-                    startTimer(); // Start/Reset 5-minute countdown for user to speak their answer
+                    startTimer();
                     startWaveform();
                 }
             }
@@ -5011,18 +5040,25 @@ GUIDELINES:
             stopWaveform();
             stopSpeakingTimer();
             cleanupMicStream();
+            // Clear inactivity timer
+            if (state._liveInactivityTimer) {
+                clearTimeout(state._liveInactivityTimer);
+                state._liveInactivityTimer = null;
+            }
 
-            // Guard: only auto-finish if we've collected enough user answers.
-            // Premature WS close (network drop, server timeout, etc.) should NOT
-            // immediately generate a fake report — give the user a chance to retry.
+            // Flush any pending user transcript before counting
+            if (state.userSpeechTranscript) {
+                state.liveTranscript.push({ role: 'user', parts: [{ text: state.userSpeechTranscript }] });
+                state.userSpeechTranscript = '';
+            }
+
             const closedUserTurns = (state.liveTranscript || []).filter(t => t.role === 'user').length;
             const closedTargetQ = state.questionsCount || 5;
 
-            if (state.liveWs && closedUserTurns >= Math.max(1, closedTargetQ - 1)) {
-                // Interview is substantially complete — finalize the report
+            // Auto-finish if at least 2 user answers collected (interview was substantive)
+            if (state.liveWs && closedUserTurns >= Math.max(2, Math.ceil(closedTargetQ / 2))) {
                 finishLiveVoiceInterview();
             } else if (state.liveWs) {
-                // Premature close — show reconnect/retry option instead of fake report
                 state.liveWs = null;
                 showPrematureCloseWarning(closedUserTurns, closedTargetQ);
             }
@@ -6710,6 +6746,11 @@ GUIDELINES:
             state.subtitlesMode = subtitles;
             state.subtitlesRevealed = (subtitles === 'visible');
 
+            // Mark token as used immediately when interview starts (prevents reuse)
+            if (_b2bToken && !_isAdmin) {
+                markTokenAsUsed(_b2bToken);
+            }
+
             document.getElementById('text-answer-container').style.display = 'none';
             document.getElementById('voice-answer-container').style.display = 'block';
             setupVoiceSubtitles();
@@ -6728,6 +6769,11 @@ GUIDELINES:
             const previousHashes = getUsedQuestionHashes(role);
             const questionCount = count || 5;
             let data = null;
+
+            // Mark token as used immediately for text mode too
+            if (_b2bToken && !_isAdmin) {
+                markTokenAsUsed(_b2bToken);
+            }
 
             try {
                 data = await apiCall('/api/interview/start', {
@@ -7031,12 +7077,12 @@ GUIDELINES:
         const subEl = document.getElementById('subtitles-text');
         const finalAnswer = subEl ? subEl.textContent.trim() : '';
         if (!finalAnswer || finalAnswer === 'Listening...' || finalAnswer === 'Waiting for AI to finish speaking...' || finalAnswer === 'Listening for speech...') {
-            // Check if user explicitly wants to end the interview (End Interview button)
+            // Check if user explicitly wants to end the interview
             const endBtn = document.getElementById('btn-voice-finish');
-            const isEndRequest = endBtn && endBtn.textContent.includes('End Interview');
+            const isEndRequest = endBtn && (endBtn.textContent.includes('End Interview') || endBtn.textContent.includes('Finish'));
             
             if (isEndRequest && state.answers.length > 0) {
-                // User pressed End Interview with no current answer — skip this question and generate report
+                // User pressed End/Finish with no current answer — skip this question and generate report
                 stopTimer();
                 generateReport();
                 return;
