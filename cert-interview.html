@@ -4930,8 +4930,9 @@ GUIDELINES:
                 if (serverContent.turnComplete) {
                     console.log("AI completed turn: " + state.aiSpokenTextBuffer);
                     
-                    // Flush any pending user speech transcript BEFORE counting user turns
-                    if (state.userSpeechTranscript) {
+                    // Note: user transcript is already flushed in modelTurn handler (line 4890)
+                    // Only flush here if there's unflushed text (e.g. no modelTurn preceded this turnComplete)
+                    if (state.userSpeechTranscript && !state.liveTranscript.some(t => t.role === 'user' && t.parts[0]?.text === state.userSpeechTranscript)) {
                         state.liveTranscript.push({ role: 'user', parts: [{ text: state.userSpeechTranscript }] });
                         state.userSpeechTranscript = '';
                     }
@@ -4945,17 +4946,15 @@ GUIDELINES:
                     updateProgress();
                     document.getElementById('q-number').textContent = `Q${state.currentIndex + 1}`;
 
-                    // Detect if AI is concluding the interview via keywords
+                    // Detect if AI is concluding (check text buffer + inputTranscription context)
                     const aiText = (state.aiSpokenTextBuffer || '').toLowerCase();
-                    const concludingPhrases = [
+                    const isAIConcluding = aiText.length > 0 && [
                         'assessment is complete', 'interview is complete', 'interview is now complete',
                         'assessment is now complete', 'that concludes', 'concludes our interview',
-                        'concludes the interview', 'concludes this assessment', 'thank you for your time',
-                        'best of luck', 'all the best', 'good luck with', 'certification assessment is being finalized',
-                        'completed all the questions', 'that was the last question', 'end of the interview',
-                        'end of this assessment', 'wish you all the best', 'thank you for participating'
-                    ];
-                    const isAIConcluding = concludingPhrases.some(phrase => aiText.includes(phrase));
+                        'thank you for your time', 'best of luck', 'all the best',
+                        'completed all the questions', 'that was the last question',
+                        'thank you for participating'
+                    ].some(phrase => aiText.includes(phrase));
 
                     state.aiSpokenTextBuffer = '';
                     state.aiSpeakingActive = false;
@@ -4966,9 +4965,13 @@ GUIDELINES:
                         state._liveInactivityTimer = null;
                     }
 
-                    // Auto-end: user answered enough questions OR AI is concluding with at least some answers
+                    // Auto-end conditions:
+                    // 1. User answered enough questions (turn count >= target)
+                    // 2. AI concluded with at least some answers
+                    // 3. User answered at least half the questions and timer-based or inactivity
                     const shouldAutoEnd = userTurnsCount >= targetQuestions || 
-                                          (isAIConcluding && userTurnsCount >= 2);
+                                          (isAIConcluding && userTurnsCount >= 2) ||
+                                          (userTurnsCount >= Math.ceil(targetQuestions * 0.6) && state.timerSeconds <= 0);
 
                     if (shouldAutoEnd) {
                         console.log(`Interview complete: ${userTurnsCount}/${targetQuestions} answers, AI concluding: ${isAIConcluding}. Stopping mic and waiting for final audio playback...`);
@@ -6460,6 +6463,18 @@ GUIDELINES:
             updateTimerDisplay();
             if (state.timerSeconds <= 0) {
                 stopTimer();
+                // Auto-submit/auto-end when timer expires
+                console.log('[Timer] Time expired. Auto-ending current turn...');
+                if (state.liveWs) {
+                    // WebSocket live mode: end the entire interview
+                    finishLiveVoiceInterview();
+                } else if (state.voiceMode) {
+                    // Non-WS voice mode: submit current answer
+                    finishVoiceSpeaking();
+                } else {
+                    // Text mode: auto-submit current answer
+                    submitAnswer();
+                }
             }
         }, 1000);
     }
