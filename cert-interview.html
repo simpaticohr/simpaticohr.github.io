@@ -4631,8 +4631,8 @@
                 }
                 const base64Audio = btoa(binary);
 
-                // Send to Gemini Multimodal Live WebSocket (only after setupComplete)
-                if (ws && ws.readyState === WebSocket.OPEN && state._wsSetupComplete) {
+                // Send to Gemini Multimodal Live WebSocket
+                if (ws && ws.readyState === WebSocket.OPEN) {
                     ws.send(JSON.stringify({
                         realtimeInput: {
                             mediaChunks: [{
@@ -4723,36 +4723,15 @@
             return;
         }
 
-        // Validate API key for voice mode (uses URL key, admin/system key, or configured key)
-        let geminiKey = getActiveGeminiKey();
-        if (!geminiKey && !_b2bToken) {
-            const entered = prompt('🔑 Please enter your Google Gemini API Key to connect to Gemini Live Full-Duplex AI:\n(Get one free at https://aistudio.google.com/apikey)');
-            if (entered && entered.trim()) {
-                geminiKey = entered.trim();
-                try {
-                    localStorage.setItem('evalis_byok_gemini_key', geminiKey);
-                    localStorage.setItem('byok_key', geminiKey);
-                    localStorage.setItem('ce_gemini_key', geminiKey);
-                } catch(e) {}
-            }
-        }
-
-        if (!geminiKey && !_b2bToken) {
-            const btn = document.getElementById('btn-start');
-            if (btn) {
-                btn.disabled = false;
-                btn.innerHTML = '<i class="fas fa-play"></i> Start Assessment';
-            }
-            showError('setup-error', 'Google Gemini API key is required to connect to Gemini Live Full-Duplex AI. Please enter your API key to proceed.');
-            showScreen('screen-setup');
-            return;
-        }
-
+        // Connect via Admin/System Gemini Key or Server Proxy WebSocket
+        const geminiKey = getActiveGeminiKey();
         let wsUrl = '';
         if (geminiKey) {
             wsUrl = 'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent?key=' + encodeURIComponent(geminiKey);
         } else if (_b2bToken) {
             wsUrl = `${API_BASE.replace(/^http/, 'ws')}/api/interview/live?token=${encodeURIComponent(_b2bToken)}`;
+        } else {
+            wsUrl = `${API_BASE.replace(/^http/, 'ws')}/api/interview/live?role=${encodeURIComponent(state.role || 'Software Engineer')}`;
         }
 
         // Connect to Gemini Live API (Direct or Server Proxy)
@@ -4856,6 +4835,25 @@ GUIDELINES:
                 }
             };
             ws.send(JSON.stringify(setupMsg));
+
+            // Trigger the initial turn
+            const startTurn = {
+                clientContent: {
+                    turns: [{
+                        role: "user",
+                        parts: [{ text: "Hello! I am ready to start the interview." }]
+                    }],
+                    turnComplete: true
+                }
+            };
+            ws.send(JSON.stringify(startTurn));
+
+            avatarStage.className = 'avatar-stage speaking';
+            if (window.aiAvatar) window.aiAvatar.setState('speaking');
+            document.getElementById('voice-status-dot').className = 'status-dot pulse-blue';
+            document.getElementById('voice-status-text').textContent = 'GEMINI LIVE ACTIVE';
+            document.getElementById('voice-instruction').textContent = 'Gemini Live AI is speaking. Listen carefully.';
+            document.getElementById('subtitles-text').textContent = 'Connected. Starting Gemini Live interview...';
 
             // Set up mic streaming listener
             startStreamingMicToWs(ws);
