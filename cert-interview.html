@@ -4676,7 +4676,7 @@
 
         // Connect UI state
         document.getElementById('q-number').textContent = 'LIVE';
-        document.getElementById('q-text').textContent = 'Connecting to AI Interviewer...';
+        document.getElementById('q-text').textContent = 'Connecting to Gemini Live AI Interviewer...';
         document.getElementById('btn-voice-finish').disabled = false;
         document.getElementById('btn-voice-finish').textContent = '⏹ End Interview';
         
@@ -4695,8 +4695,8 @@
         });
         document.getElementById('voice-status-dot').className = 'status-dot pulse-blue';
         document.getElementById('voice-status-text').textContent = 'CONNECTING';
-        document.getElementById('voice-instruction').textContent = 'Establishing secure low-latency full-duplex session...';
-        document.getElementById('subtitles-text').textContent = 'Connecting...';
+        document.getElementById('voice-instruction').textContent = 'Establishing secure low-latency full-duplex session with Gemini Live...';
+        document.getElementById('subtitles-text').textContent = 'Connecting to Gemini Live...';
 
         // Secure mic access
         try {
@@ -4809,15 +4809,22 @@ GUIDELINES:
 3. Do NOT use markdown, asterisks, bullet points, or JSON formatting. Use clean conversational English suitable for speech synthesis.
 4. Once all ${targetQuestions} main questions (with follow-ups) are complete, conclude by thanking the candidate and stating their certification assessment is being finalized.`;
 
+            // Official Google Gemini Multimodal Live WebSocket realtime model
+            const adminCfg = JSON.parse(localStorage.getItem('adminConfig') || '{}');
+            let wsModel = 'models/gemini-2.0-flash-exp';
+            if (adminCfg.geminiModel === 'gemini-2.0-flash' || adminCfg.geminiModel === 'gemini-2.0-flash-exp') {
+                wsModel = 'models/' + adminCfg.geminiModel;
+            }
+
             const setupMsg = {
                 setup: {
-                    model: "models/gemini-3.1-flash-live-preview",
+                    model: wsModel,
                     generationConfig: {
                         responseModalities: ["AUDIO"],
                         speechConfig: {
                             voiceConfig: {
                                 prebuiltVoiceConfig: {
-                                    voiceName: "Aoede" // beautiful female voice config
+                                    voiceName: "Aoede" // authentic Google neural voice
                                 }
                             }
                         }
@@ -4844,9 +4851,9 @@ GUIDELINES:
             avatarStage.className = 'avatar-stage speaking';
             if (window.aiAvatar) window.aiAvatar.setState('speaking');
             document.getElementById('voice-status-dot').className = 'status-dot pulse-blue';
-            document.getElementById('voice-status-text').textContent = 'AI INTERVIEWER ACTIVE';
-            document.getElementById('voice-instruction').textContent = 'AI is speaking. Listen carefully.';
-            document.getElementById('subtitles-text').textContent = 'Connected. Starting interview...';
+            document.getElementById('voice-status-text').textContent = 'GEMINI LIVE ACTIVE';
+            document.getElementById('voice-instruction').textContent = 'Gemini Live AI is speaking. Listen carefully.';
+            document.getElementById('subtitles-text').textContent = 'Connected. Starting Gemini Live interview...';
 
             startStreamingMicToWs(ws);
 
@@ -4929,8 +4936,8 @@ GUIDELINES:
                                 window.aiAvatar.setAmplitude(Math.min(1, rms * 4));
                             }
                             document.getElementById('voice-status-dot').className = 'status-dot pulse-blue';
-                            document.getElementById('voice-status-text').textContent = 'AI INTERVIEWER SPEAKING';
-                            document.getElementById('voice-instruction').textContent = 'AI is speaking. Listen carefully.';
+                            document.getElementById('voice-status-text').textContent = 'GEMINI LIVE SPEAKING';
+                            document.getElementById('voice-instruction').textContent = 'Gemini Live AI is speaking. Listen carefully.';
                             // Keep End Interview button always enabled in live WS mode
                             const wsFinishBtn = document.getElementById('btn-voice-finish');
                             if (wsFinishBtn) wsFinishBtn.disabled = false;
@@ -5191,7 +5198,18 @@ GUIDELINES:
             renderReport(report);
 
         } catch (err) {
-            console.error('Report generation failed, attempting retries:', err);
+            console.error('Report generation via proxy failed, attempting Gemini direct evaluation:', err);
+
+            try {
+                const directReport = await generateDirectGeminiReport(state.liveTranscript, state.role, state.level, state.candidateName || _b2bCandidateName);
+                if (directReport) {
+                    state.answers = directReport.answers || [];
+                    renderReport(directReport);
+                    return;
+                }
+            } catch (dErr) {
+                console.warn('Direct Gemini report generation note:', dErr.message);
+            }
 
             // Retry the API call up to 2 times with exponential backoff
             let retrySuccess = false;
@@ -6660,6 +6678,152 @@ GUIDELINES:
         return await response.json();
     }
 
+    // ── Direct Google Gemini REST API Engine (BYOK & Super Admin Key) ──
+    function getActiveGeminiKey() {
+        const byokH = getByokHeaders();
+        return byokH['X-AI-Key'] || _urlParams.get('key') || _urlParams.get('apikey') || getAdminGeminiKey() || localStorage.getItem('byok_key') || localStorage.getItem('evalis_byok_gemini_key') || localStorage.getItem('gemini_api_key') || '';
+    }
+
+    async function callGeminiDirectApi(prompt, systemInstruction = '', jsonMode = false) {
+        const geminiKey = getActiveGeminiKey();
+        if (!geminiKey) return null;
+
+        const cfg = JSON.parse(localStorage.getItem('adminConfig') || '{}');
+        let model = cfg.geminiModel || 'gemini-2.5-flash';
+        if (model === 'gemini-3.7-flash' || model === 'gemini-3.6-flash') {
+            model = 'gemini-2.5-flash';
+        }
+
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(geminiKey)}`;
+
+        const reqBody = {
+            contents: [{ role: 'user', parts: [{ text: prompt }] }],
+            generationConfig: {
+                temperature: 0.3
+            }
+        };
+        if (systemInstruction) {
+            reqBody.systemInstruction = { parts: [{ text: systemInstruction }] };
+        }
+        if (jsonMode) {
+            reqBody.generationConfig.responseMimeType = "application/json";
+        }
+
+        const res = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(reqBody)
+        });
+
+        if (!res.ok) {
+            const errText = await res.text();
+            throw new Error(`Gemini API returned ${res.status}: ${errText}`);
+        }
+        const data = await res.json();
+        const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+        return text;
+    }
+
+    async function generateDirectGeminiQuestions(role, level, count, difficulty, resumeText, lang) {
+        try {
+            const prompt = `Generate exactly ${count} professional interview certification questions for the role of ${role} at ${level} level.
+Difficulty Setting: ${difficulty}.
+Language: ${lang || 'en-IN'}.
+${resumeText ? `Candidate Resume:\n${resumeText.substring(0, 2500)}\n(Allocate 40% of questions specifically probing their resume claims and 60% for domain competency)` : ''}
+
+Respond STRICTLY with valid JSON in this exact structure:
+{
+  "questions": [
+    {
+      "id": "q1",
+      "type": "technical",
+      "difficulty": "hard",
+      "question": "Question text here..."
+    }
+  ]
+}`;
+            const sys = "You are an elite technical assessor designing rigorous professional certification examinations. Output pure JSON.";
+            const rawJson = await callGeminiDirectApi(prompt, sys, true);
+            if (!rawJson) return null;
+            const parsed = JSON.parse(rawJson.replace(/```json|```/g, '').trim());
+            return parsed.questions || null;
+        } catch(e) {
+            console.warn('[Gemini Direct] Question generation error:', e);
+            return null;
+        }
+    }
+
+    async function evaluateDirectGeminiAnswer(question, answer, role, level) {
+        try {
+            const prompt = `Role: ${role} (${level})
+Question: ${question}
+Candidate's Answer: ${answer}
+
+Evaluate the candidate's answer thoroughly and provide objective scoring.
+Output STRICTLY valid JSON with this format:
+{
+  "score": 82,
+  "verdict": "good",
+  "strengths": ["Clear technical explanation of...", "Demonstrated good domain knowledge"],
+  "improvements": ["Could mention specific trade-offs regarding..."],
+  "followUp": "Adaptive probing follow-up question here..."
+}`;
+            const sys = "You are an expert technical interviewer evaluating certification answers. Be honest, rigorous, and constructive.";
+            const rawJson = await callGeminiDirectApi(prompt, sys, true);
+            if (!rawJson) return null;
+            return JSON.parse(rawJson.replace(/```json|```/g, '').trim());
+        } catch(e) {
+            console.warn('[Gemini Direct] Answer evaluation error:', e);
+            return null;
+        }
+    }
+
+    async function generateDirectGeminiReport(transcript, role, level, candidateName) {
+        try {
+            const conversationText = Array.isArray(transcript) ? transcript.map(t => {
+                const text = t.parts?.map(p => p.text).filter(Boolean).join(' ') || '';
+                return `${t.role === 'user' ? 'Candidate' : 'Interviewer'}: ${text}`;
+            }).join('\n\n') : JSON.stringify(transcript);
+
+            const prompt = `Role: ${role} (${level})
+Candidate Name: ${candidateName || 'Candidate'}
+Assessment Transcript:
+${conversationText.substring(0, 10000)}
+
+Evaluate this full assessment and output a comprehensive certification report in STRICT JSON:
+{
+  "overallScore": 85,
+  "recommendation": "hire",
+  "summary": "Detailed executive summary of candidate performance...",
+  "topStrengths": ["Strength 1", "Strength 2", "Strength 3"],
+  "focusAreas": ["Growth area 1", "Growth area 2"],
+  "communicationScores": {
+    "fluency": 85,
+    "clarity": 88,
+    "professionalism": 90,
+    "confidence": 84
+  },
+  "answers": [
+    {
+      "question": "Question text...",
+      "answer": "Answer summary...",
+      "score": 85,
+      "verdict": "good",
+      "strengths": ["..."],
+      "improvements": ["..."]
+    }
+  ]
+}`;
+            const sys = "You are the Simpatico HR Chief Assessment Evaluator finalizing an official certification report. Output pure JSON.";
+            const rawJson = await callGeminiDirectApi(prompt, sys, true);
+            if (!rawJson) return null;
+            return JSON.parse(rawJson.replace(/```json|```/g, '').trim());
+        } catch(e) {
+            console.warn('[Gemini Direct] Report generation error:', e);
+            return null;
+        }
+    }
+
     // ══════════════════════════════════════════
     //  START INTERVIEW
     // ══════════════════════════════════════════
@@ -6846,8 +7010,16 @@ GUIDELINES:
                     }
                 });
             } catch (networkErr) {
-                console.warn('Worker endpoint offline/failed, activating built-in assessment engine:', networkErr.message);
-                data = generateFallbackQuestionSet(role, level, questionCount, selectedDifficulty, _resumeText);
+                console.warn('Backend endpoint offline/failed, invoking direct Google Gemini AI question generator:', networkErr.message);
+                const directQuestions = await generateDirectGeminiQuestions(role, level, questionCount, selectedDifficulty, _resumeText, state.lang);
+                if (directQuestions && Array.isArray(directQuestions) && directQuestions.length > 0) {
+                    data = {
+                        sessionId: 'gemini-' + Date.now(),
+                        questions: directQuestions
+                    };
+                } else {
+                    data = generateFallbackQuestionSet(role, level, questionCount, selectedDifficulty, _resumeText);
+                }
             }
 
             if (!data || !data.questions || !Array.isArray(data.questions) || data.questions.length === 0) {
@@ -7061,6 +7233,25 @@ GUIDELINES:
             showFeedback(evaluation);
 
         } catch (err) {
+            console.warn('Backend evaluate offline, trying direct Google Gemini AI evaluation:', err.message);
+            const directEval = await evaluateDirectGeminiAnswer(q.question, answer, state.role, state.level);
+            if (directEval) {
+                state.answers.push({
+                    questionId: q.id,
+                    question: q.question,
+                    type: q.type,
+                    difficulty: q.difficulty,
+                    answer,
+                    score: directEval.score || 75,
+                    verdict: directEval.verdict || 'good',
+                    strengths: directEval.strengths || ['Good response'],
+                    improvements: directEval.improvements || [],
+                    followUp: directEval.followUp || '',
+                });
+                showFeedback(directEval);
+                return;
+            }
+
             // Fallback: heuristic scoring from answer text when API is unreachable
             const fbWords = answer.split(/\s+/).filter(w => w.length > 0);
             const fbSentences = answer.split(/[.!?]+/).filter(s => s.trim().length > 0);
@@ -7218,7 +7409,36 @@ GUIDELINES:
             showFeedback(evaluation);
             
         } catch (err) {
-            console.error('Failed to evaluate answer:', err);
+            console.warn('Backend evaluate offline, trying direct Google Gemini AI evaluation for spoken answer:', err.message);
+            const directEval = await evaluateDirectGeminiAnswer(state.inFollowUp ? state.currentFollowUpQuestion : q.question, finalAnswer, state.role, state.level);
+            if (directEval) {
+                if (state.inFollowUp) {
+                    const lastIndex = state.answers.length - 1;
+                    if (lastIndex >= 0) {
+                        state.answers[lastIndex].answer = combinedAnswer;
+                        state.answers[lastIndex].score = directEval.score || 75;
+                        state.answers[lastIndex].verdict = directEval.verdict || 'good';
+                        state.answers[lastIndex].strengths = directEval.strengths || ['Good response'];
+                        state.answers[lastIndex].improvements = directEval.improvements || [];
+                    }
+                } else {
+                    state.answers.push({
+                        questionId: q.id,
+                        question: q.question,
+                        type: q.type,
+                        difficulty: q.difficulty,
+                        answer: finalAnswer,
+                        score: directEval.score || 75,
+                        verdict: directEval.verdict || 'good',
+                        strengths: directEval.strengths || ['Good response'],
+                        improvements: directEval.improvements || [],
+                        followUp: directEval.followUp || '',
+                    });
+                }
+                showFeedback(directEval);
+                return;
+            }
+
             // Heuristic scoring from spoken answer text when API is unreachable
             const vfbText = finalAnswer || '';
             const vfbWords = vfbText.split(/\s+/).filter(w => w.length > 0);
@@ -7579,15 +7799,31 @@ GUIDELINES:
             renderReport(report);
 
         } catch (err) {
+            console.warn('Backend report API offline, attempting direct Google Gemini report generation:', err.message);
+            try {
+                const directTranscript = (state.answers || []).flatMap(a => [
+                    { role: 'assistant', parts: [{ text: a.question || '' }] },
+                    { role: 'user', parts: [{ text: a.answer || '' }] }
+                ]);
+                const directReport = await generateDirectGeminiReport(directTranscript, state.role, state.level, state.candidateName || _b2bCandidateName);
+                if (directReport) {
+                    if (directReport.communicationScores) state.communicationScores = directReport.communicationScores;
+                    renderReport(directReport);
+                    return;
+                }
+            } catch (dErr) {
+                console.warn('Direct Gemini report error:', dErr.message);
+            }
+
             // Fallback: generate client-side basic report
             const avgScore = Math.round(
-                state.answers.reduce((s, a) => s + a.score, 0) / state.answers.length
+                state.answers.reduce((s, a) => s + (a.score || 0), 0) / Math.max(1, state.answers.length)
             );
             renderReport({
                 overallScore: avgScore,
                 recommendation: avgScore >= 75 ? 'hire' : avgScore >= 50 ? 'lean-hire' : 'no-hire',
                 summary: `You completed ${state.answers.length} questions with an average score of ${avgScore}/100.`,
-                topStrengths: ['Completed the interview'],
+                topStrengths: ['Completed the assessment'],
                 focusAreas: ['Review AI feedback for each question'],
                 nextSteps: ['Practice more questions', 'Review weak areas'],
             });
