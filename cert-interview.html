@@ -4623,14 +4623,14 @@
                 }
                 const base64Audio = btoa(binary);
 
-                // Send to Gemini
-                if (ws && ws.readyState === WebSocket.OPEN) {
+                // Send to Gemini Multimodal Live WebSocket (only after setupComplete)
+                if (ws && ws.readyState === WebSocket.OPEN && state._wsSetupComplete) {
                     ws.send(JSON.stringify({
                         realtimeInput: {
-                            audio: {
+                            mediaChunks: [{
                                 mimeType: 'audio/pcm;rate=16000',
                                 data: base64Audio
-                            }
+                            }]
                         }
                     }));
                 }
@@ -4671,6 +4671,7 @@
         state.aiSpeakingActive = false;
         state.aiSpokenTextBuffer = '';
         state.userSpeechTranscript = '';
+        state._wsSetupComplete = false;
         nextPlayTime = 0;
         audioQueue = [];
 
@@ -4836,25 +4837,7 @@ GUIDELINES:
             };
             ws.send(JSON.stringify(setupMsg));
 
-            // Automatically trigger the first model turn so AI starts speaking first
-            const startTurn = {
-                clientContent: {
-                    turns: [{
-                        role: "user",
-                        parts: [{ text: "Hello! I am ready to start the interview." }]
-                    }],
-                    turnComplete: true
-                }
-            };
-            ws.send(JSON.stringify(startTurn));
-
-            avatarStage.className = 'avatar-stage speaking';
-            if (window.aiAvatar) window.aiAvatar.setState('speaking');
-            document.getElementById('voice-status-dot').className = 'status-dot pulse-blue';
-            document.getElementById('voice-status-text').textContent = 'GEMINI LIVE ACTIVE';
-            document.getElementById('voice-instruction').textContent = 'Gemini Live AI is speaking. Listen carefully.';
-            document.getElementById('subtitles-text').textContent = 'Connected. Starting Gemini Live interview...';
-
+            // Set up mic streaming listener
             startStreamingMicToWs(ws);
 
             // ── HARD INTERVIEW TIME LIMIT ──
@@ -4881,6 +4864,31 @@ GUIDELINES:
                 msg = JSON.parse(rawData);
             } catch(e) {
                 console.error("Failed to parse WebSocket message:", e, rawData);
+                return;
+            }
+
+            // Handle Gemini Live setupComplete handshake
+            if (msg.setupComplete) {
+                console.log('[Gemini Live] Handshake complete! setupComplete received.');
+                state._wsSetupComplete = true;
+                avatarStage.className = 'avatar-stage speaking';
+                if (window.aiAvatar) window.aiAvatar.setState('speaking');
+                document.getElementById('voice-status-dot').className = 'status-dot pulse-blue';
+                document.getElementById('voice-status-text').textContent = 'GEMINI LIVE ACTIVE';
+                document.getElementById('voice-instruction').textContent = 'Gemini Live AI is speaking. Listen carefully.';
+                document.getElementById('subtitles-text').textContent = 'Connected. Starting Gemini Live interview...';
+
+                // Automatically trigger the first model turn so AI starts speaking first
+                const startTurn = {
+                    clientContent: {
+                        turns: [{
+                            role: "user",
+                            parts: [{ text: "Hello! I am ready to start the interview." }]
+                        }],
+                        turnComplete: true
+                    }
+                };
+                ws.send(JSON.stringify(startTurn));
                 return;
             }
 
@@ -5089,6 +5097,25 @@ GUIDELINES:
             // Auto-finish if at least 2 user answers collected (interview was substantive)
             if (state.liveWs && closedUserTurns >= Math.max(2, Math.ceil(closedTargetQ / 2))) {
                 finishLiveVoiceInterview();
+            } else if (state.liveWs && closedUserTurns === 0 && !state._isFinishingVoiceSession) {
+                console.warn('[Gemini Live] WebSocket disconnected before session start — transitioning to Interactive AI Voice Mode.');
+                state.liveWs = null;
+                stopMicStreaming();
+                stopPlayback();
+                cleanupMicStream();
+                if (!state.questions || state.questions.length === 0) {
+                    const qCount = state.questionsCount || 5;
+                    const diff = document.getElementById('difficulty-select')?.value || 'mixed';
+                    const fallbackData = generateFallbackQuestionSet(state.role, state.level, qCount, diff, _resumeText);
+                    state.questions = fallbackData.questions;
+                }
+                state.voiceMode = true;
+                document.getElementById('text-answer-container').style.display = 'none';
+                document.getElementById('voice-answer-container').style.display = 'block';
+                setupVoiceSubtitles();
+                showScreen('screen-interview');
+                loadQuestion(0);
+                return;
             } else if (state.liveWs) {
                 state.liveWs = null;
                 showPrematureCloseWarning(closedUserTurns, closedTargetQ);
