@@ -4820,14 +4820,16 @@ GUIDELINES:
                         speechConfig: {
                             voiceConfig: {
                                 prebuiltVoiceConfig: {
-                                    voiceName: "Aoede" // authentic Google neural voice
+                                    voiceName: "Aoede"
                                 }
                             }
                         }
                     },
                     systemInstruction: {
                         parts: [{ text: systemPrompt }]
-                    }
+                    },
+                    inputAudioTranscription: {},
+                    outputAudioTranscription: {}
                 }
             };
             ws.send(JSON.stringify(setupMsg));
@@ -4976,8 +4978,12 @@ GUIDELINES:
                     
                     // Count REAL user turns (only entries with actual speech content > 5 chars)
                     const userTurnsCount = state.liveTranscript.filter(t => t.role === 'user' && t.parts[0]?.text?.trim().length > 5).length;
+                    const modelTurnsCount = state.liveTranscript.filter(t => t.role === 'model').length;
                     const targetQuestions = state.questionsCount || 5;
-                    state.currentIndex = Math.min(targetQuestions - 1, Math.max(0, userTurnsCount));
+                    // Use the higher of user turns or (model turns - 1) as progress indicator
+                    // since in audio-only mode, user turns may not be transcribed
+                    const effectiveTurns = Math.max(userTurnsCount, Math.max(0, modelTurnsCount - 1));
+                    state.currentIndex = Math.min(targetQuestions - 1, Math.max(0, effectiveTurns));
                     updateProgress();
                     document.getElementById('q-number').textContent = `Q${state.currentIndex + 1}`;
 
@@ -5007,15 +5013,16 @@ GUIDELINES:
                         state._liveInactivityTimer = null;
                     }
 
-                    // Auto-end conditions (all require substantial user participation):
-                    // 1. User answered ALL target questions
-                    // 2. AI used concluding language AND user answered at least 70% of questions
-                    // 3. Model has spoken a very high number of turns (targetQ * 3 — accounts for follow-ups)
-                    const modelTurnsCount = state.liveTranscript.filter(t => t.role === 'model').length;
+                    // Auto-end conditions (all require substantial participation):
+                    // 1. User answered ALL target questions (via transcription)
+                    // 2. AI used concluding language AND enough progress made
+                    // 3. Model has spoken enough turns (targetQ * 3 — accounts for follow-ups)
+                    // 4. Enough progress made and timer expired
                     const shouldAutoEnd = (userTurnsCount >= targetQuestions) || 
-                                          (isAIConcluding && userTurnsCount >= Math.ceil(targetQuestions * 0.7)) ||
+                                          (effectiveTurns >= targetQuestions) ||
+                                          (isAIConcluding && effectiveTurns >= Math.ceil(targetQuestions * 0.7)) ||
                                           (modelTurnsCount >= (targetQuestions * 3)) ||
-                                          (userTurnsCount >= Math.ceil(targetQuestions * 0.8) && state.timerSeconds <= 0);
+                                          (effectiveTurns >= Math.ceil(targetQuestions * 0.8) && state.timerSeconds <= 0);
 
                     if (shouldAutoEnd) {
                         console.log(`Interview auto-end: ${userTurnsCount}/${targetQuestions} user answers, ${modelTurnsCount} model turns, AI concluding: ${isAIConcluding}.`);
@@ -5075,11 +5082,25 @@ GUIDELINES:
                 }
             }
 
+            // Handle user's speech transcription from Gemini Live
             if (msg.inputTranscription && msg.inputTranscription.text) {
                 const text = msg.inputTranscription.text;
                 console.log("User transcript:", text);
                 document.getElementById('subtitles-text').textContent = text;
+                // Accumulate user speech (each inputTranscription is a complete utterance)
                 state.userSpeechTranscript = text;
+                // Barge-in: if AI is speaking and user starts talking, stop playback
+                if (state.aiSpeakingActive) {
+                    stopPlayback();
+                    state.aiSpeakingActive = false;
+                }
+            }
+
+            // Handle AI's speech transcription for subtitles
+            if (msg.outputTranscription && msg.outputTranscription.text) {
+                state.aiSpokenTextBuffer += msg.outputTranscription.text;
+                document.getElementById('subtitles-text').textContent = state.aiSpokenTextBuffer;
+                document.getElementById('q-text').textContent = state.aiSpokenTextBuffer;
             }
         };
 
@@ -6849,7 +6870,9 @@ Evaluate this full assessment and output a comprehensive certification report in
   "communicationScores": {
     "fluency": 85,
     "clarity": 88,
+    "vocabulary": 82,
     "professionalism": 90,
+    "structure": 80,
     "confidence": 84
   },
   "answers": [
@@ -8046,9 +8069,11 @@ Evaluate this full assessment and output a comprehensive certification report in
 
         // Derive communication score from multi-dimensional evaluation if available
         const commScores = report.communicationScores || state.communicationScores;
-        const commAvg = commScores ? Math.round(
-            (commScores.clarity + commScores.fluency + commScores.vocabulary + commScores.professionalism + commScores.structure) / 5
-        ) : avgType(['communication', 'presentation']);
+        let commAvg = avgType(['communication', 'presentation']);
+        if (commScores) {
+            const commVals = [commScores.clarity, commScores.fluency, commScores.vocabulary, commScores.professionalism, commScores.structure, commScores.confidence].filter(v => typeof v === 'number');
+            commAvg = commVals.length > 0 ? Math.round(commVals.reduce((s, v) => s + v, 0) / commVals.length) : commAvg;
+        }
 
         const userName = state.candidateName || _b2bCandidateName || localStorage.getItem('cand_name') || 'Candidate';
         const certIdVal = 'SIMP-' + Date.now().toString(36).toUpperCase().substring(0, 6);
@@ -8082,9 +8107,12 @@ Evaluate this full assessment and output a comprehensive certification report in
             } catch(e) { console.warn('Cert save note:', e); }
         }
 
-        // Show certificate button only if admin allows AND score meets threshold
+        // Show certificate button if score meets threshold
+        // For non-B2B (direct/candidate mode), always show if passed
+        // For B2B, respect admin's cert_download setting
         const certBtn = document.getElementById('btn-view-cert');
-        if (certBtn && !state.isPracticeMode && score >= CERT_PASS_THRESHOLD && _b2bCertDownload) {
+        const showCert = !state.isPracticeMode && score >= CERT_PASS_THRESHOLD && (_b2bCertDownload || !_b2bToken);
+        if (certBtn && showCert) {
             certBtn.style.display = 'inline-flex';
             const certPdfBtn = document.getElementById('btn-download-cert-pdf');
             if (certPdfBtn) certPdfBtn.style.display = 'inline-flex';
