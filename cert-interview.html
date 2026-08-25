@@ -4958,31 +4958,45 @@ GUIDELINES:
                 if (serverContent.turnComplete) {
                     console.log("AI completed turn: " + state.aiSpokenTextBuffer);
                     
-                    // Note: user transcript is already flushed in modelTurn handler (line 4890)
-                    // Only flush here if there's unflushed text (e.g. no modelTurn preceded this turnComplete)
-                    if (state.userSpeechTranscript && !state.liveTranscript.some(t => t.role === 'user' && t.parts[0]?.text === state.userSpeechTranscript)) {
-                        state.liveTranscript.push({ role: 'user', parts: [{ text: state.userSpeechTranscript }] });
+                    // Only flush user transcript if there's actual meaningful speech content
+                    const trimmedUserSpeech = (state.userSpeechTranscript || '').trim();
+                    if (trimmedUserSpeech.length > 5) {
+                        // Avoid duplicate entries
+                        const lastUserEntry = [...state.liveTranscript].reverse().find(t => t.role === 'user');
+                        if (!lastUserEntry || lastUserEntry.parts[0]?.text !== trimmedUserSpeech) {
+                            state.liveTranscript.push({ role: 'user', parts: [{ text: trimmedUserSpeech }] });
+                        }
                         state.userSpeechTranscript = '';
                     }
                     
-                    state.liveTranscript.push({ role: 'model', parts: [{ text: state.aiSpokenTextBuffer }] });
+                    // Only push model turn if AI actually said something
+                    if ((state.aiSpokenTextBuffer || '').trim().length > 0) {
+                        state.liveTranscript.push({ role: 'model', parts: [{ text: state.aiSpokenTextBuffer }] });
+                    }
                     
-                    // Count user turns for progress
-                    const userTurnsCount = state.liveTranscript.filter(t => t.role === 'user').length;
+                    // Count REAL user turns (only entries with actual speech content > 5 chars)
+                    const userTurnsCount = state.liveTranscript.filter(t => t.role === 'user' && t.parts[0]?.text?.trim().length > 5).length;
                     const targetQuestions = state.questionsCount || 5;
                     state.currentIndex = Math.min(targetQuestions - 1, Math.max(0, userTurnsCount));
                     updateProgress();
                     document.getElementById('q-number').textContent = `Q${state.currentIndex + 1}`;
 
-                    // Detect if AI is concluding (check text buffer + inputTranscription context)
+                    // Detect if AI is concluding — require STRONG signals (multiple concluding phrases or explicit completion keywords)
                     const aiText = (state.aiSpokenTextBuffer || '').toLowerCase();
-                    const isAIConcluding = aiText.length > 0 && [
+                    const strongConcludingPhrases = [
                         'assessment is complete', 'interview is complete', 'interview is now complete',
-                        'assessment is now complete', 'that concludes', 'concludes our interview',
-                        'thank you for your time', 'best of luck', 'all the best',
+                        'assessment is now complete', 'that concludes our', 'concludes our interview',
                         'completed all the questions', 'that was the last question',
-                        'thank you for participating'
-                    ].some(phrase => aiText.includes(phrase));
+                        'certification assessment is being finalized'
+                    ];
+                    const weakConcludingPhrases = [
+                        'thank you for your time', 'best of luck', 'all the best',
+                        'thank you for participating', 'good luck with'
+                    ];
+                    const hasStrongSignal = strongConcludingPhrases.some(phrase => aiText.includes(phrase));
+                    const hasWeakSignal = weakConcludingPhrases.some(phrase => aiText.includes(phrase));
+                    // Only consider AI concluding if: strong signal found, OR weak signal + already answered most questions
+                    const isAIConcluding = hasStrongSignal || (hasWeakSignal && userTurnsCount >= Math.ceil(targetQuestions * 0.7));
 
                     state.aiSpokenTextBuffer = '';
                     state.aiSpeakingActive = false;
@@ -4993,19 +5007,18 @@ GUIDELINES:
                         state._liveInactivityTimer = null;
                     }
 
-                    // Auto-end conditions:
-                    // 1. User answered enough questions (turn count >= target)
-                    // 2. AI concluded with text keywords
-                    // 3. Model has spoken enough turns (targetQ + 2 for greeting/concluding)
-                    // 4. User answered 60%+ and timer expired
+                    // Auto-end conditions (all require substantial user participation):
+                    // 1. User answered ALL target questions
+                    // 2. AI used concluding language AND user answered at least 70% of questions
+                    // 3. Model has spoken a very high number of turns (targetQ * 3 — accounts for follow-ups)
                     const modelTurnsCount = state.liveTranscript.filter(t => t.role === 'model').length;
-                    const shouldAutoEnd = userTurnsCount >= targetQuestions || 
-                                          (isAIConcluding && userTurnsCount >= 2) ||
-                                          modelTurnsCount >= (targetQuestions + 2) ||
-                                          (userTurnsCount >= Math.ceil(targetQuestions * 0.6) && state.timerSeconds <= 0);
+                    const shouldAutoEnd = (userTurnsCount >= targetQuestions) || 
+                                          (isAIConcluding && userTurnsCount >= Math.ceil(targetQuestions * 0.7)) ||
+                                          (modelTurnsCount >= (targetQuestions * 3)) ||
+                                          (userTurnsCount >= Math.ceil(targetQuestions * 0.8) && state.timerSeconds <= 0);
 
                     if (shouldAutoEnd) {
-                        console.log(`Interview complete: ${userTurnsCount}/${targetQuestions} answers, AI concluding: ${isAIConcluding}. Stopping mic and waiting for final audio playback...`);
+                        console.log(`Interview auto-end: ${userTurnsCount}/${targetQuestions} user answers, ${modelTurnsCount} model turns, AI concluding: ${isAIConcluding}.`);
                         stopMicStreaming();
                         cleanupMicStream();
                         
@@ -5015,11 +5028,11 @@ GUIDELINES:
                             finishBtn.textContent = '⌛ Finalizing Report...';
                         }
                         
-                        // Wait for audio queue to drain (3s hard timeout)
+                        // Wait for audio queue to drain (5s hard timeout)
                         let waitedMs = 0;
                         const checkInterval = setInterval(() => {
                             waitedMs += 200;
-                            if (audioQueue.length === 0 || waitedMs >= 3000) {
+                            if (audioQueue.length === 0 || waitedMs >= 5000) {
                                 clearInterval(checkInterval);
                                 console.log("Audio queue empty or timeout reached. Terminating voice session...");
                                 finishLiveVoiceInterview();
@@ -5028,15 +5041,16 @@ GUIDELINES:
                         return;
                     }
 
-                    // Set inactivity timeout: if no new AI turn within 20 seconds, auto-end
-                    if (userTurnsCount >= 2) {
+                    // Set inactivity timeout: if no new AI turn within 45 seconds, auto-end
+                    // Only activate after user has answered at least 3 questions
+                    if (userTurnsCount >= 3) {
                         state._liveInactivityTimer = setTimeout(() => {
                             console.log(`Inactivity timeout after ${userTurnsCount} user turns. Auto-ending interview...`);
                             if (state.liveWs) {
                                 state._isFinishingVoiceSession = false;
                                 finishLiveVoiceInterview();
                             }
-                        }, 20000);
+                        }, 45000);
                     }
 
                     avatarStage.className = 'avatar-stage listening';
