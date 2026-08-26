@@ -2252,7 +2252,7 @@
                     <button class="btn btn-ghost" onclick="restartInterview()">
                         ← New Interview
                     </button>
-                    <button class="btn btn-primary" onclick="downloadReport()">
+                    <button class="btn btn-primary" id="btn-download-report" onclick="downloadReport(event)">
                         📥 Download Report
                     </button>
                     <button class="btn btn-primary" id="btn-view-cert" onclick="viewCertificate()" style="background:linear-gradient(135deg,#f59e0b,#d97706);display:none;">
@@ -5276,14 +5276,14 @@ GUIDELINES:
         }
         state.aiSpokenTextBuffer = '';
 
-        // Remove placeholder-only entries from transcript so report generation gets clean data
-        state.liveTranscript = state.liveTranscript.filter(t => {
+        // Preserve model entries with fallback question text so report evaluation has complete turns
+        state.liveTranscript.forEach(t => {
             if (t.role === 'model' && t._textPending) {
-                // Entry never received transcription — remove placeholder
-                console.log(`[finishLive] Removing un-transcribed model entry: Turn ${t._turnIndex}`);
-                return false;
+                const turnNum = t._turnIndex || 1;
+                t.parts = [{ text: `Assessment Question ${turnNum} (${state.role || 'Professional'} Assessment)` }];
+                t._textPending = false;
+                console.log(`[finishLive] Preserved un-transcribed model entry as Turn ${turnNum}`);
             }
-            return true;
         });
         console.log(`[finishLive] Final transcript: ${state.liveTranscript.length} entries, _modelTurnCount: ${state._modelTurnCount}`);
 
@@ -5328,9 +5328,7 @@ GUIDELINES:
             window.aiAvatar.setAmplitude(0);
         }
         // Tear down avatar renderers so video/audio streams are released
-        if (typeof HyperRealRenderer !== 'undefined') {
-            try { HyperRealRenderer.destroy(); } catch(e) {}
-        }
+        try { if (typeof HyperRealRenderer !== 'undefined') HyperRealRenderer.destroy(); } catch(e) {}
         destroySimli();
         destroyDuix();
         _activeRenderer = null;
@@ -5404,7 +5402,7 @@ GUIDELINES:
                         mode: 'voice',
                         proctoring_violations: (_enableProctoring || _enableWebcamProctoring) ? state.proctoringViolations : null,
                         resume_matching_report: _resumeAnalysis
-                    }, 12000);
+                    }, 28000);
                     _dbg('Step 2 response: ' + JSON.stringify(report ? { score: report.overallScore, answers: (report.answers||[]).length } : null));
                     if (report && (report.overallScore != null || report.answers)) {
                         state.answers = report.answers || [];
@@ -5449,11 +5447,13 @@ GUIDELINES:
                 const summaryEl = document.getElementById('report-summary');
                 if (summaryEl) summaryEl.textContent = 'Completed ' + qCount + '-question live voice assessment for ' + (state.role || 'Professional') + '. Audio transcription was limited. This is an estimated completion score.';
                 const strengthsList = document.getElementById('report-strengths');
-                if (strengthsList) strengthsList.innerHTML = '<li>Completed live voice certification assessment</li><li>Demonstrated engagement through full-duplex conversation</li>';
-                const focusList = document.getElementById('report-focus-areas');
-                if (focusList) focusList.innerHTML = '<li>Retry with audio transcription for detailed AI-powered evaluation</li>';
-                const timeline = document.getElementById('report-answers-timeline');
+                if (strengthsList) strengthsList.innerHTML = '<li><span class="num">1</span>Completed live voice certification assessment</li><li><span class="num">2</span>Demonstrated engagement through full-duplex conversation</li>';
+                const focusList = document.getElementById('report-focus') || document.getElementById('report-focus-areas');
+                if (focusList) focusList.innerHTML = '<li><span class="num">1</span>Retry with audio transcription for detailed AI-powered evaluation</li>';
+                const timeline = document.getElementById('report-timeline') || document.getElementById('report-answers-timeline');
                 if (timeline) timeline.innerHTML = '<div style="padding:16px;color:#888;text-align:center;">Voice responses — detailed breakdown requires transcription-enabled mode.</div>';
+                const stepsList = document.getElementById('report-steps');
+                if (stepsList) stepsList.innerHTML = '<li><span class="num">1</span>Review role requirements</li><li><span class="num">2</span>Retake with dedicated microphone for deep scoring</li>';
                 // Save cert data
                 try { saveCertDataSilently({ overallScore: score, summary: 'Voice assessment completed.', topStrengths: ['Completed voice assessment'], focusAreas: ['Retry for detailed scoring'], answers: [] }, score); } catch(e){}
                 reportGenerated = true;
@@ -7133,7 +7133,10 @@ Evaluate this full assessment and output a comprehensive certification report in
             const sys = "You are the Simpatico HR Chief Assessment Evaluator finalizing an official certification report. Output pure JSON.";
             const rawJson = await callGeminiDirectApi(prompt, sys, true);
             if (!rawJson) return null;
-            return JSON.parse(rawJson.replace(/```json|```/g, '').trim());
+            const cleaned = rawJson.replace(/```json|```/g, '').trim();
+            const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+            if (jsonMatch) return JSON.parse(jsonMatch[0]);
+            return JSON.parse(cleaned);
         } catch(e) {
             console.warn('[Gemini Direct] Report generation error:', e);
             return null;
@@ -8060,9 +8063,7 @@ Evaluate this full assessment and output a comprehensive certification report in
             window.aiAvatar.setState('idle');
             window.aiAvatar.setAmplitude(0);
         }
-        if (typeof HyperRealRenderer !== 'undefined') {
-            try { HyperRealRenderer.destroy(); } catch(e) {}
-        }
+        try { if (typeof HyperRealRenderer !== 'undefined') HyperRealRenderer.destroy(); } catch(e) {}
         destroySimli();
         destroyDuix();
         _activeRenderer = null;
@@ -8094,10 +8095,14 @@ Evaluate this full assessment and output a comprehensive certification report in
                 difficulty: document.getElementById('difficulty-select')?.value || 'mixed',
                 mode: state.voiceMode ? 'voice' : 'text',
                 answers: state.answers.map(a => ({
+                    question: a.question || '',
+                    answer: a.answer || '',
                     score: a.score,
                     verdict: a.verdict,
-                    strengths: a.strengths,
-                    improvements: a.improvements,
+                    type: a.type || 'technical',
+                    difficulty: a.difficulty || 'medium',
+                    strengths: a.strengths || [],
+                    improvements: a.improvements || [],
                 })),
                 proctoring_violations: (_enableProctoring || _enableWebcamProctoring) ? state.proctoringViolations : null,
                 resume_matching_report: _resumeAnalysis,
@@ -8170,8 +8175,8 @@ Evaluate this full assessment and output a comprehensive certification report in
             return;
         }
 
-        // ── CERTIFICATION GATE: Route failures to failure screen ──
-        if (!state.isPracticeMode && score < CERT_PASS_THRESHOLD) {
+        // ── CERTIFICATION GATE: Route failures to failure screen (only during live assessment, not when viewing reports) ──
+        if (!state.isPracticeMode && !state._viewingStoredReport && score < CERT_PASS_THRESHOLD) {
             // Save failed assessment cert data to localStorage BEFORE returning,
             // so it appears in the Reports & Analytics tab
             if (!state._viewingStoredReport) {
@@ -8232,19 +8237,30 @@ Evaluate this full assessment and output a comprehensive certification report in
         // Lists
         renderReportList('report-strengths', report.topStrengths || []);
         renderReportList('report-focus', report.focusAreas || []);
+        if (document.getElementById('report-steps')) {
+            renderReportList('report-steps', report.nextSteps || ['Practice targeted interview questions', 'Review domain competencies with AI tutor']);
+        }
 
         // ── Communication Skills Radar ──
         renderCommunicationScores(report.communicationScores || state.communicationScores);
 
-        // Render Anti-Cheat Audit Summary Card
+        // Render Anti-Cheat Audit Summary Card inside .card so it is included in PDF export
         let antiCheatCard = document.getElementById('report-anti-cheat-card');
         if (!antiCheatCard) {
             antiCheatCard = document.createElement('div');
             antiCheatCard.id = 'report-anti-cheat-card';
-            const reportContainer = document.querySelector('#screen-report .glass-card') || document.getElementById('screen-report');
-            if (reportContainer) reportContainer.appendChild(antiCheatCard);
+            const reportCard = document.querySelector('#screen-report .card');
+            const btnGroup = reportCard ? reportCard.querySelector('.btn-group') : null;
+            if (reportCard && btnGroup) {
+                reportCard.insertBefore(antiCheatCard, btnGroup);
+            } else if (reportCard) {
+                reportCard.appendChild(antiCheatCard);
+            } else {
+                const reportContainer = document.getElementById('screen-report');
+                if (reportContainer) reportContainer.appendChild(antiCheatCard);
+            }
         }
-        const v = state.proctoringViolations;
+        const v = state.proctoringViolations || { tabSwitches: 0, pasteAttempts: 0, totalViolations: 0 };
         const trustScore = Math.max(60, 100 - (v.totalViolations || 0) * 5);
         const trustColor = trustScore >= 90 ? '#34d399' : trustScore >= 70 ? '#fbbf24' : '#f43f5e';
         const trustLabel = trustScore >= 90 ? '✅ Clean' : trustScore >= 70 ? '⚠️ Moderate Risk' : '🚨 High Risk';
@@ -8422,18 +8438,23 @@ Evaluate this full assessment and output a comprehensive certification report in
     // ══════════════════════════════════════════
     //  DOWNLOAD REPORT
     // ══════════════════════════════════════════
-    function downloadReport() {
+    function downloadReport(e) {
         const reportCard = document.querySelector('#screen-report .card');
         if (!reportCard) {
-            // Fallback: generate text report if report card DOM not found
             downloadReportText();
             return;
         }
 
-        // Show loading state on button
-        const btn = event && event.target ? event.target : document.querySelector('#screen-report .btn-primary');
+        const btn = (e && e.target) ? e.target : (document.getElementById('btn-download-report') || document.querySelector('#screen-report .btn-primary'));
         const origText = btn ? btn.innerHTML : '';
         if (btn) btn.innerHTML = '⌛ Generating PDF...';
+
+        if (typeof html2pdf === 'undefined') {
+            console.warn('html2pdf library not loaded, falling back to text report');
+            downloadReportText();
+            if (btn) btn.innerHTML = origText;
+            return;
+        }
 
         // Temporarily hide buttons for PDF capture
         const btnGroup = reportCard.querySelector('.btn-group');
@@ -8453,17 +8474,22 @@ Evaluate this full assessment and output a comprehensive certification report in
             pagebreak:    { mode: ['avoid-all', 'css', 'legacy'] }
         };
 
-        html2pdf().set(opt).from(reportCard).save().then(() => {
-            // Restore buttons
+        try {
+            html2pdf().set(opt).from(reportCard).save().then(() => {
+                if (btnGroup) btnGroup.style.display = '';
+                if (btn) btn.innerHTML = origText;
+            }).catch(err => {
+                console.error('PDF generation failed:', err);
+                if (btnGroup) btnGroup.style.display = '';
+                if (btn) btn.innerHTML = origText;
+                downloadReportText();
+            });
+        } catch (pdfErr) {
+            console.error('html2pdf synchronous error:', pdfErr);
             if (btnGroup) btnGroup.style.display = '';
             if (btn) btn.innerHTML = origText;
-        }).catch(err => {
-            console.error('PDF generation failed:', err);
-            if (btnGroup) btnGroup.style.display = '';
-            if (btn) btn.innerHTML = origText;
-            // Fallback to text download
             downloadReportText();
-        });
+        }
     }
 
     // Text fallback if PDF library fails to load

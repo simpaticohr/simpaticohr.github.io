@@ -733,7 +733,7 @@ const HyperRealRenderer = (function () {
     selfhost: SelfHostAdapter,
     liveportrait: LatentSyncAdapter,
     heygen: HeyGenAdapter,
-    did: DIDAdapter,
+    did: DIdAdapter,
     tavus: TavusAdapter,
     simli: LatentSyncAdapter
   };
