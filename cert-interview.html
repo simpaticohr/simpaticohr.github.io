@@ -4987,22 +4987,45 @@ GUIDELINES:
                     updateProgress();
                     document.getElementById('q-number').textContent = `Q${state.currentIndex + 1}`;
 
-                    // Detect if AI is concluding — require STRONG signals (multiple concluding phrases or explicit completion keywords)
+                    // Detect if AI is concluding — use EXPANDED phrase detection + fuzzy word-pair matching
                     const aiText = (state.aiSpokenTextBuffer || '').toLowerCase();
                     const strongConcludingPhrases = [
                         'assessment is complete', 'interview is complete', 'interview is now complete',
                         'assessment is now complete', 'that concludes our', 'concludes our interview',
                         'completed all the questions', 'that was the last question',
-                        'certification assessment is being finalized'
+                        'certification assessment is being finalized',
+                        'this concludes', 'that concludes', 'we have concluded',
+                        'concludes your assessment', 'concludes the interview',
+                        'concludes this interview', 'concludes today',
+                        'this brings us to the end', 'brings us to the end',
+                        'that wraps up', 'this wraps up', 'wraps up our',
+                        'we\'ve covered all', 'covered all the questions',
+                        'end of the assessment', 'end of the interview',
+                        'assessment has been completed', 'interview has been completed',
+                        'no more questions', 'that was our final', 'this was our final',
+                        'final question has been', 'last question of',
+                        'assessment is being finalized', 'being finalized',
+                        'evaluation is complete', 'evaluation is now complete',
+                        'we are done', 'we\'re done with', 'that\'s all the questions',
+                        'completed your certification', 'certification interview is over'
                     ];
                     const weakConcludingPhrases = [
                         'thank you for your time', 'best of luck', 'all the best',
-                        'thank you for participating', 'good luck with'
+                        'thank you for participating', 'good luck with',
+                        'thank you for taking', 'thanks for your time',
+                        'wish you all the best', 'wish you the best',
+                        'good luck in your', 'best wishes',
+                        'it was a pleasure', 'great talking to you',
+                        'thank you so much for', 'appreciate your time'
                     ];
                     const hasStrongSignal = strongConcludingPhrases.some(phrase => aiText.includes(phrase));
                     const hasWeakSignal = weakConcludingPhrases.some(phrase => aiText.includes(phrase));
-                    // Only consider AI concluding if: strong signal found, OR weak signal + already answered most questions
-                    const isAIConcluding = hasStrongSignal || (hasWeakSignal && userTurnsCount >= Math.ceil(targetQuestions * 0.7));
+                    // Fuzzy word-pair detection: if the AI text contains BOTH a conclude-word AND an interview-word, treat as strong
+                    const concludeWords = ['conclud', 'complet', 'finish', 'wrap', 'final', 'done', 'end'];
+                    const contextWords = ['interview', 'assessment', 'evaluation', 'session', 'question', 'certification'];
+                    const hasFuzzyStrong = concludeWords.some(cw => aiText.includes(cw)) && contextWords.some(iw => aiText.includes(iw));
+                    // Consider AI concluding if: strong signal, fuzzy strong, OR weak signal + answered most questions
+                    const isAIConcluding = hasStrongSignal || hasFuzzyStrong || (hasWeakSignal && effectiveTurns >= Math.ceil(targetQuestions * 0.6));
 
                     state.aiSpokenTextBuffer = '';
                     state.aiSpeakingActive = false;
@@ -5016,16 +5039,17 @@ GUIDELINES:
                     // Auto-end conditions (all require substantial participation):
                     // 1. User answered ALL target questions (via transcription)
                     // 2. AI used concluding language AND enough progress made
-                    // 3. Model has spoken enough turns (targetQ * 3 — accounts for follow-ups)
+                    // 3. Model has spoken enough turns (targetQ * 2 — accounts for follow-ups)
                     // 4. Enough progress made and timer expired
+                    // 5. AI is concluding with even minimal progress (50%+)
                     const shouldAutoEnd = (userTurnsCount >= targetQuestions) || 
                                           (effectiveTurns >= targetQuestions) ||
-                                          (isAIConcluding && effectiveTurns >= Math.ceil(targetQuestions * 0.7)) ||
-                                          (modelTurnsCount >= (targetQuestions * 3)) ||
+                                          (isAIConcluding && effectiveTurns >= Math.ceil(targetQuestions * 0.5)) ||
+                                          (modelTurnsCount >= (targetQuestions * 2)) ||
                                           (effectiveTurns >= Math.ceil(targetQuestions * 0.8) && state.timerSeconds <= 0);
 
                     if (shouldAutoEnd) {
-                        console.log(`Interview auto-end: ${userTurnsCount}/${targetQuestions} user answers, ${modelTurnsCount} model turns, AI concluding: ${isAIConcluding}.`);
+                        console.log(`Interview auto-end: ${userTurnsCount}/${targetQuestions} user answers, ${modelTurnsCount} model turns, effectiveTurns: ${effectiveTurns}, AI concluding: ${isAIConcluding}, fuzzyStrong: ${hasFuzzyStrong}.`);
                         stopMicStreaming();
                         cleanupMicStream();
                         
@@ -5035,11 +5059,11 @@ GUIDELINES:
                             finishBtn.textContent = '⌛ Finalizing Report...';
                         }
                         
-                        // Wait for audio queue to drain (5s hard timeout)
+                        // Wait for audio queue to drain (8s to let farewell audio play, hard cap 10s)
                         let waitedMs = 0;
                         const checkInterval = setInterval(() => {
                             waitedMs += 200;
-                            if (audioQueue.length === 0 || waitedMs >= 5000) {
+                            if (audioQueue.length === 0 || waitedMs >= 10000) {
                                 clearInterval(checkInterval);
                                 console.log("Audio queue empty or timeout reached. Terminating voice session...");
                                 finishLiveVoiceInterview();
@@ -5048,16 +5072,30 @@ GUIDELINES:
                         return;
                     }
 
-                    // Set inactivity timeout: if no new AI turn within 45 seconds, auto-end
-                    // Only activate after enough progress (3+ effective turns)
-                    if (effectiveTurns >= 3) {
+                    // Concluding window: if AI used weak/farewell signals but hasn't triggered full auto-end,
+                    // set a shorter 10s window to auto-end (lets farewell audio finish playing)
+                    if (isAIConcluding && !state._concludingWindowTimer) {
+                        console.log('[AutoStop] Concluding language detected — setting 10s concluding window.');
+                        state._concludingWindowTimer = setTimeout(() => {
+                            state._concludingWindowTimer = null;
+                            if (state.liveWs && !state._isFinishingVoiceSession) {
+                                console.log('[AutoStop] Concluding window expired. Auto-ending interview.');
+                                state._isFinishingVoiceSession = false;
+                                finishLiveVoiceInterview();
+                            }
+                        }, 10000);
+                    }
+
+                    // Set inactivity timeout: if no new AI turn within 30 seconds, auto-end
+                    // Only activate after enough progress (2+ effective turns)
+                    if (effectiveTurns >= 2) {
                         state._liveInactivityTimer = setTimeout(() => {
-                            console.log(`Inactivity timeout after ${userTurnsCount} user turns. Auto-ending interview...`);
+                            console.log(`Inactivity timeout after ${userTurnsCount} user turns, ${effectiveTurns} effective turns. Auto-ending interview...`);
                             if (state.liveWs) {
                                 state._isFinishingVoiceSession = false;
                                 finishLiveVoiceInterview();
                             }
-                        }, 45000);
+                        }, 30000);
                     }
 
                     avatarStage.className = 'avatar-stage listening';
@@ -5192,6 +5230,11 @@ GUIDELINES:
         if (state._liveInactivityTimer) {
             clearTimeout(state._liveInactivityTimer);
             state._liveInactivityTimer = null;
+        }
+        // Clear concluding window timer
+        if (state._concludingWindowTimer) {
+            clearTimeout(state._concludingWindowTimer);
+            state._concludingWindowTimer = null;
         }
         if (window.speechSynthesis) {
             window.speechSynthesis.cancel();
@@ -8121,8 +8164,10 @@ Evaluate this full assessment and output a comprehensive certification report in
             summary: report.summary || '',
             topStrengths: report.topStrengths || [],
             focusAreas: report.focusAreas || [],
+            communicationScores: report.communicationScores || state.communicationScores || null,
             answers: state.answers || [],
-            proctoringViolations: { ...state.proctoringViolations }
+            proctoringViolations: { ...state.proctoringViolations },
+            passed: score >= CERT_PASS_THRESHOLD
         };
 
         if (!state.isPracticeMode && !state._viewingStoredReport) {
@@ -8423,6 +8468,16 @@ Evaluate this full assessment and output a comprehensive certification report in
                 const all = types.flatMap(t => typeScores[t] || []);
                 return all.length ? Math.round(all.reduce((s, v) => s + v, 0) / all.length) : score;
             };
+            // Calculate integrity trust score (same formula as visible report)
+            const v = state.proctoringViolations || {};
+            const trustScore = Math.max(60, 100 - (v.totalViolations || 0) * 5);
+            // Derive communication score from multi-dimensional evaluation if available
+            const commScores = report.communicationScores || state.communicationScores;
+            let commAvg = avgType(['communication', 'presentation']);
+            if (commScores) {
+                const commVals = [commScores.clarity, commScores.fluency, commScores.vocabulary, commScores.professionalism, commScores.structure, commScores.confidence].filter(v => typeof v === 'number');
+                commAvg = commVals.length > 0 ? Math.round(commVals.reduce((s, v) => s + v, 0) / commVals.length) : commAvg;
+            }
             const certData = {
                 certId: 'SIMP-' + Date.now().toString(36).toUpperCase().substring(0, 6),
                 name: state.candidateName || _b2bCandidateName || 'Candidate',
@@ -8430,12 +8485,20 @@ Evaluate this full assessment and output a comprehensive certification report in
                 phone: state.candidatePhone || _b2bPhone || '',
                 role: state.role || 'Professional',
                 level: state.level || 'mid-level',
-                date: new Date().toISOString(),
+                date: new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }),
                 overall: score,
-                technical: avgType(['technical', 'coding', 'domain']),
-                behavioral: avgType(['behavioral', 'attitude', 'culture-fit']),
+                cognitive: avgType(['cognitive', 'problem-solving', 'analytical']),
                 situational: avgType(['situational', 'scenario', 'case-study']),
+                attitude: avgType(['behavioral', 'attitude', 'culture-fit']),
+                jobScore: avgType(['technical', 'coding', 'domain']),
+                communication: commAvg,
+                integrity: trustScore,
+                summary: report.summary || '',
+                topStrengths: report.topStrengths || [],
+                focusAreas: report.focusAreas || [],
+                communicationScores: commScores || null,
                 reportHidden: true,
+                passed: score >= CERT_PASS_THRESHOLD,
                 answers: state.answers,
                 proctoringViolations: { ...state.proctoringViolations }
             };
@@ -8443,6 +8506,7 @@ Evaluate this full assessment and output a comprehensive certification report in
             const certs = JSON.parse(localStorage.getItem('simpatico_certifications') || '[]');
             certs.push(certData);
             localStorage.setItem('simpatico_certifications', JSON.stringify(certs));
+            state._lastCertId = certData.certId;
 
             // Sync to API for admin dashboard access
             fetch(`${API_BASE}/api/interview/save-result`, {
