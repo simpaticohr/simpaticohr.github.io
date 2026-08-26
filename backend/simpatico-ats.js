@@ -1512,6 +1512,8 @@ route("POST", "/api/interview/save", handleInterviewSave);
 route("POST", "/ai/interview-score", handleInterviewScore);
 route("GET",  "/api/interview/slots", handleListSlots);
 route("POST", "/api/interview/book-slot", handleBookSlot);
+route("POST", "/api/interview/save-result", handleInterviewSaveResult);
+route("GET",  "/api/interview/results", handleInterviewListResults);
 
 route("POST", "/attendance/records/upsert", handleUpsertAttendance);
 
@@ -13128,6 +13130,39 @@ Return ONLY valid JSON (no markdown fences, no preamble):
     ],
     answers: perAnswerResults
   });
+}
+
+async function handleInterviewSaveResult(request, env, ctx) {
+  const body = (await safeJson(request)) || {};
+  const certId = body.certId || `SIMP-${Date.now().toString(36).toUpperCase().substring(0, 6)}`;
+  body.certId = certId;
+  body.savedAt = new Date().toISOString();
+
+  if (env.HR_KV) {
+    try {
+      await env.HR_KV.put(`cert:${certId}`, JSON.stringify(body), { expirationTtl: 365 * 86400 });
+      const listKey = `cert_list:${ctx?.tenantId || "default"}`;
+      const rawList = (await env.HR_KV.get(listKey, { type: "json" })) || [];
+      const existingIdx = rawList.findIndex(c => c.certId === certId);
+      if (existingIdx >= 0) {
+        rawList[existingIdx] = body;
+      } else {
+        rawList.unshift(body);
+      }
+      await env.HR_KV.put(listKey, JSON.stringify(rawList.slice(0, 100)), { expirationTtl: 365 * 86400 });
+    } catch(kvErr) {
+      console.warn("[Interview Save Result] KV note:", kvErr.message);
+    }
+  }
+
+  return apiResponse({ success: true, certId });
+}
+
+async function handleInterviewListResults(request, env, ctx) {
+  if (!env.HR_KV) return apiResponse({ results: [] });
+  const listKey = `cert_list:${ctx?.tenantId || "default"}`;
+  const list = (await env.HR_KV.get(listKey, { type: "json" })) || [];
+  return apiResponse({ results: list });
 }
 
 
