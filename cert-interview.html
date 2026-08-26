@@ -3094,7 +3094,8 @@
         communicationScores: null,    // Multi-dimensional evaluation scores
         proctoringViolations: { tabSwitches: 0, pasteAttempts: 0, faceNotDetected: 0, multipleFaces: 0, screenShareDisconnected: 0, gazeAwayCount: 0, headTurnCount: 0, rapidKeyPattern: 0, windowResizeCount: 0, devToolsOpened: 0, totalViolations: 0 },
         wakeLockSentinel: null,  // Screen Wake Lock sentinel to prevent mobile screen lock
-        _isFinishingVoiceSession: false  // Guard flag for finishLiveVoiceInterview
+        _isFinishingVoiceSession: false,  // Guard flag for finishLiveVoiceInterview
+        _modelTurnCount: 0  // Independent model turn counter (not dependent on text buffer)
     };
 
     // ══════════════════════════════════════════
@@ -4666,6 +4667,46 @@
         }
     }
 
+    // ── Reusable concluding phrase detector for auto-stop ──
+    function _checkConcludingPhrases(aiTextLower, effectiveTurns, targetQuestions) {
+        const strongConcludingPhrases = [
+            'assessment is complete', 'interview is complete', 'interview is now complete',
+            'assessment is now complete', 'that concludes our', 'concludes our interview',
+            'completed all the questions', 'that was the last question',
+            'certification assessment is being finalized',
+            'this concludes', 'that concludes', 'we have concluded',
+            'concludes your assessment', 'concludes the interview',
+            'concludes this interview', 'concludes today',
+            'this brings us to the end', 'brings us to the end',
+            'that wraps up', 'this wraps up', 'wraps up our',
+            'we\'ve covered all', 'covered all the questions',
+            'end of the assessment', 'end of the interview',
+            'assessment has been completed', 'interview has been completed',
+            'no more questions', 'that was our final', 'this was our final',
+            'final question has been', 'last question of',
+            'assessment is being finalized', 'being finalized',
+            'evaluation is complete', 'evaluation is now complete',
+            'we are done', 'we\'re done with', 'that\'s all the questions',
+            'completed your certification', 'certification interview is over'
+        ];
+        const weakConcludingPhrases = [
+            'thank you for your time', 'best of luck', 'all the best',
+            'thank you for participating', 'good luck with',
+            'thank you for taking', 'thanks for your time',
+            'wish you all the best', 'wish you the best',
+            'good luck in your', 'best wishes',
+            'it was a pleasure', 'great talking to you',
+            'thank you so much for', 'appreciate your time'
+        ];
+        const hasStrongSignal = strongConcludingPhrases.some(phrase => aiTextLower.includes(phrase));
+        const hasWeakSignal = weakConcludingPhrases.some(phrase => aiTextLower.includes(phrase));
+        // Fuzzy word-pair detection: conclude-word + context-word
+        const concludeWords = ['conclud', 'complet', 'finish', 'wrap', 'final', 'done', 'end'];
+        const contextWords = ['interview', 'assessment', 'evaluation', 'session', 'question', 'certification'];
+        const hasFuzzyStrong = concludeWords.some(cw => aiTextLower.includes(cw)) && contextWords.some(iw => aiTextLower.includes(iw));
+        return hasStrongSignal || hasFuzzyStrong || (hasWeakSignal && effectiveTurns >= Math.ceil(targetQuestions * 0.6));
+    }
+
     async function startLiveVoiceInterview() {
         if (state.liveWs) {
             try { state.liveWs.close(); } catch(e) {}
@@ -4680,6 +4721,8 @@
         state.aiSpokenTextBuffer = '';
         state.userSpeechTranscript = '';
         state._wsSetupComplete = false;
+        state._modelTurnCount = 0;
+        state._concludingWindowTimer = null;
         nextPlayTime = 0;
         audioQueue = [];
 
@@ -4958,7 +5001,11 @@ GUIDELINES:
                 }
 
                 if (serverContent.turnComplete) {
-                    console.log("AI completed turn: " + state.aiSpokenTextBuffer);
+                    // ── INCREMENT INDEPENDENT MODEL TURN COUNTER ──
+                    // This counter works regardless of whether text is available
+                    // (in AUDIO-only mode, text arrives via async outputTranscription AFTER turnComplete)
+                    state._modelTurnCount = (state._modelTurnCount || 0) + 1;
+                    console.log(`AI completed turn #${state._modelTurnCount}: buffer="${(state.aiSpokenTextBuffer || '').substring(0, 80)}"`);
                     
                     // Only flush user transcript if there's actual meaningful speech content
                     const trimmedUserSpeech = (state.userSpeechTranscript || '').trim();
@@ -4971,61 +5018,30 @@ GUIDELINES:
                         state.userSpeechTranscript = '';
                     }
                     
-                    // Only push model turn if AI actually said something
-                    if ((state.aiSpokenTextBuffer || '').trim().length > 0) {
-                        state.liveTranscript.push({ role: 'model', parts: [{ text: state.aiSpokenTextBuffer }] });
-                    }
+                    // ALWAYS push model turn to transcript — even if text buffer is empty
+                    // In AUDIO-only mode (responseModalities:["AUDIO"]), part.text is never set;
+                    // the actual text arrives later via outputTranscription and will be patched in.
+                    const modelTurnText = (state.aiSpokenTextBuffer || '').trim();
+                    state.liveTranscript.push({
+                        role: 'model',
+                        parts: [{ text: modelTurnText || `(Turn ${state._modelTurnCount} — audio, transcription pending)` }],
+                        _turnIndex: state._modelTurnCount,
+                        _textPending: modelTurnText.length === 0  // Flag: text not yet available
+                    });
                     
-                    // Count REAL user turns (only entries with actual speech content > 5 chars)
+                    // Use _modelTurnCount for progress (not liveTranscript which may have empty entries)
                     const userTurnsCount = state.liveTranscript.filter(t => t.role === 'user' && t.parts[0]?.text?.trim().length > 5).length;
-                    const modelTurnsCount = state.liveTranscript.filter(t => t.role === 'model').length;
                     const targetQuestions = state.questionsCount || 5;
-                    // Use the higher of user turns or (model turns - 1) as progress indicator
-                    // since in audio-only mode, user turns may not be transcribed
-                    const effectiveTurns = Math.max(userTurnsCount, Math.max(0, modelTurnsCount - 1));
+                    // effectiveTurns: use independent model turn counter minus 1 (first turn is greeting)
+                    const effectiveTurns = Math.max(userTurnsCount, Math.max(0, state._modelTurnCount - 1));
                     state.currentIndex = Math.min(targetQuestions - 1, Math.max(0, effectiveTurns));
                     updateProgress();
                     document.getElementById('q-number').textContent = `Q${state.currentIndex + 1}`;
 
                     // Detect if AI is concluding — use EXPANDED phrase detection + fuzzy word-pair matching
+                    // Check both the current buffer AND accumulated outputTranscription text
                     const aiText = (state.aiSpokenTextBuffer || '').toLowerCase();
-                    const strongConcludingPhrases = [
-                        'assessment is complete', 'interview is complete', 'interview is now complete',
-                        'assessment is now complete', 'that concludes our', 'concludes our interview',
-                        'completed all the questions', 'that was the last question',
-                        'certification assessment is being finalized',
-                        'this concludes', 'that concludes', 'we have concluded',
-                        'concludes your assessment', 'concludes the interview',
-                        'concludes this interview', 'concludes today',
-                        'this brings us to the end', 'brings us to the end',
-                        'that wraps up', 'this wraps up', 'wraps up our',
-                        'we\'ve covered all', 'covered all the questions',
-                        'end of the assessment', 'end of the interview',
-                        'assessment has been completed', 'interview has been completed',
-                        'no more questions', 'that was our final', 'this was our final',
-                        'final question has been', 'last question of',
-                        'assessment is being finalized', 'being finalized',
-                        'evaluation is complete', 'evaluation is now complete',
-                        'we are done', 'we\'re done with', 'that\'s all the questions',
-                        'completed your certification', 'certification interview is over'
-                    ];
-                    const weakConcludingPhrases = [
-                        'thank you for your time', 'best of luck', 'all the best',
-                        'thank you for participating', 'good luck with',
-                        'thank you for taking', 'thanks for your time',
-                        'wish you all the best', 'wish you the best',
-                        'good luck in your', 'best wishes',
-                        'it was a pleasure', 'great talking to you',
-                        'thank you so much for', 'appreciate your time'
-                    ];
-                    const hasStrongSignal = strongConcludingPhrases.some(phrase => aiText.includes(phrase));
-                    const hasWeakSignal = weakConcludingPhrases.some(phrase => aiText.includes(phrase));
-                    // Fuzzy word-pair detection: if the AI text contains BOTH a conclude-word AND an interview-word, treat as strong
-                    const concludeWords = ['conclud', 'complet', 'finish', 'wrap', 'final', 'done', 'end'];
-                    const contextWords = ['interview', 'assessment', 'evaluation', 'session', 'question', 'certification'];
-                    const hasFuzzyStrong = concludeWords.some(cw => aiText.includes(cw)) && contextWords.some(iw => aiText.includes(iw));
-                    // Consider AI concluding if: strong signal, fuzzy strong, OR weak signal + answered most questions
-                    const isAIConcluding = hasStrongSignal || hasFuzzyStrong || (hasWeakSignal && effectiveTurns >= Math.ceil(targetQuestions * 0.6));
+                    const isAIConcluding = _checkConcludingPhrases(aiText, effectiveTurns, targetQuestions);
 
                     state.aiSpokenTextBuffer = '';
                     state.aiSpeakingActive = false;
@@ -5036,7 +5052,7 @@ GUIDELINES:
                         state._liveInactivityTimer = null;
                     }
 
-                    // Auto-end conditions (all require substantial participation):
+                    // Auto-end conditions (using independent _modelTurnCount):
                     // 1. User answered ALL target questions (via transcription)
                     // 2. AI used concluding language AND enough progress made
                     // 3. Model has spoken enough turns (targetQ * 2 — accounts for follow-ups)
@@ -5045,11 +5061,11 @@ GUIDELINES:
                     const shouldAutoEnd = (userTurnsCount >= targetQuestions) || 
                                           (effectiveTurns >= targetQuestions) ||
                                           (isAIConcluding && effectiveTurns >= Math.ceil(targetQuestions * 0.5)) ||
-                                          (modelTurnsCount >= (targetQuestions * 2)) ||
+                                          (state._modelTurnCount >= (targetQuestions * 2)) ||
                                           (effectiveTurns >= Math.ceil(targetQuestions * 0.8) && state.timerSeconds <= 0);
 
                     if (shouldAutoEnd) {
-                        console.log(`Interview auto-end: ${userTurnsCount}/${targetQuestions} user answers, ${modelTurnsCount} model turns, effectiveTurns: ${effectiveTurns}, AI concluding: ${isAIConcluding}, fuzzyStrong: ${hasFuzzyStrong}.`);
+                        console.log(`Interview auto-end: ${userTurnsCount}/${targetQuestions} user answers, _modelTurnCount: ${state._modelTurnCount}, effectiveTurns: ${effectiveTurns}, AI concluding: ${isAIConcluding}.`);
                         stopMicStreaming();
                         cleanupMicStream();
                         
@@ -5135,10 +5151,43 @@ GUIDELINES:
             }
 
             // Handle AI's speech transcription for subtitles
+            // In AUDIO-only mode, this is the PRIMARY source of text — arrives AFTER turnComplete
             if (msg.outputTranscription && msg.outputTranscription.text) {
                 state.aiSpokenTextBuffer += msg.outputTranscription.text;
                 document.getElementById('subtitles-text').textContent = state.aiSpokenTextBuffer;
                 document.getElementById('q-text').textContent = state.aiSpokenTextBuffer;
+
+                // ── PATCH LAST MODEL TURN IN TRANSCRIPT ──
+                // outputTranscription arrives after turnComplete, so find the last model
+                // entry that has _textPending=true and update it with actual text
+                const lastModelEntry = [...state.liveTranscript].reverse().find(t => t.role === 'model' && t._textPending);
+                if (lastModelEntry) {
+                    lastModelEntry.parts[0].text = state.aiSpokenTextBuffer;
+                    lastModelEntry._textPending = false;
+                }
+
+                // ── RE-RUN AUTO-END CHECK ON TRANSCRIPTION ──
+                // Since text wasn't available at turnComplete time, check now
+                if (state.liveWs && !state._isFinishingVoiceSession) {
+                    const oText = (state.aiSpokenTextBuffer || '').toLowerCase();
+                    const oUserTurns = state.liveTranscript.filter(t => t.role === 'user' && t.parts[0]?.text?.trim().length > 5).length;
+                    const oTargetQ = state.questionsCount || 5;
+                    const oEffective = Math.max(oUserTurns, Math.max(0, (state._modelTurnCount || 0) - 1));
+                    const oIsConcluding = _checkConcludingPhrases(oText, oEffective, oTargetQ);
+
+                    if (oIsConcluding && oEffective >= Math.ceil(oTargetQ * 0.5) && !state._concludingWindowTimer) {
+                        console.log(`[outputTranscription AutoStop] Concluding detected via transcription. effectiveTurns=${oEffective}, text="${oText.substring(0, 80)}"`);
+                        // Set a 8s window to let farewell audio finish, then auto-end
+                        state._concludingWindowTimer = setTimeout(() => {
+                            state._concludingWindowTimer = null;
+                            if (state.liveWs && !state._isFinishingVoiceSession) {
+                                console.log('[outputTranscription AutoStop] Concluding window expired. Auto-ending.');
+                                state._isFinishingVoiceSession = false;
+                                finishLiveVoiceInterview();
+                            }
+                        }, 8000);
+                    }
+                }
             }
         };
 
@@ -5161,14 +5210,15 @@ GUIDELINES:
             }
 
             const closedUserTurns = (state.liveTranscript || []).filter(t => t.role === 'user').length;
-            const closedModelTurns = (state.liveTranscript || []).filter(t => t.role === 'model').length;
+            // Use independent _modelTurnCount for accurate counting in AUDIO-only mode
+            const closedModelTurns = state._modelTurnCount || 0;
             const closedEffectiveTurns = Math.max(closedUserTurns, Math.max(0, closedModelTurns - 1));
             const closedTargetQ = state.questionsCount || 5;
 
-            // Auto-finish if substantive interview happened (use effective turns to account for audio-only mode)
-            if (state.liveWs && closedEffectiveTurns >= Math.max(2, Math.ceil(closedTargetQ / 2))) {
+            // Auto-finish if substantive interview happened (use _modelTurnCount for accuracy)
+            if (state.liveWs && (closedEffectiveTurns >= Math.max(2, Math.ceil(closedTargetQ / 2)) || closedModelTurns >= 3)) {
                 finishLiveVoiceInterview();
-            } else if (state.liveWs && closedEffectiveTurns === 0 && !state._isFinishingVoiceSession) {
+            } else if (state.liveWs && closedModelTurns === 0 && !state._isFinishingVoiceSession) {
                 console.warn('[Gemini Live] WebSocket disconnected before session start — transitioning to Interactive AI Voice Mode.');
                 state.liveWs = null;
                 stopMicStreaming();
@@ -5261,7 +5311,9 @@ GUIDELINES:
             micStream = null;
         }
 
-        if (state.liveTranscript.length < 2) {
+        // Use independent _modelTurnCount — in AUDIO-only mode, liveTranscript text
+        // may be sparse but the interview DID happen if model spoke 2+ turns
+        if (state.liveTranscript.length < 2 && (state._modelTurnCount || 0) < 2) {
             showError('setup-error', 'Interview ended too early. No conversation transcript was recorded.');
             showScreen('screen-setup');
             return;
@@ -8578,7 +8630,8 @@ Evaluate this full assessment and output a comprehensive certification report in
             liveWs: null,
             liveTranscript: [],
             proctoringViolations: { tabSwitches: 0, pasteAttempts: 0, faceNotDetected: 0, multipleFaces: 0, screenShareDisconnected: 0, totalViolations: 0 },
-            _isFinishingVoiceSession: false
+            _isFinishingVoiceSession: false,
+            _modelTurnCount: 0
         };
         const muteBtn = document.getElementById('btn-voice-mute');
         if (muteBtn) muteBtn.textContent = '🔇 Mute AI';
