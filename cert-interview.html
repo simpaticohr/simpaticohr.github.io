@@ -5337,68 +5337,66 @@ GUIDELINES:
                 cleanupWebcamFaceTracking();
             }
 
-            const report = await apiCall('/api/interview/report-from-transcript', {
-                sessionId: state.sessionId || crypto.randomUUID(),
-                role: state.role,
-                level: state.level,
-                transcript: state.liveTranscript,
-                candidate_name: _b2bCandidateName || null,
-                candidate_email: _b2bCandidateEmail || null,
-                mode: 'voice',
-                proctoring_violations: (_enableProctoring || _enableWebcamProctoring) ? state.proctoringViolations : null,
-                resume_matching_report: _resumeAnalysis
-            });
+            // ── REPORT GENERATION PIPELINE (optimized for speed) ──
+            // Strategy: Try Direct Gemini FIRST (uses same key as WS session, faster),
+            // then backend API with short timeout, then immediate client-side fallback.
+            let reportGenerated = false;
 
-            state.answers = report.answers || [];
-            renderReport(report);
-
-        } catch (err) {
-            console.error('Report generation via proxy failed, attempting Gemini direct evaluation:', err);
-
-            try {
-                const directReport = await generateDirectGeminiReport(state.liveTranscript, state.role, state.level, state.candidateName || _b2bCandidateName);
-                if (directReport) {
-                    state.answers = directReport.answers || [];
-                    renderReport(directReport);
-                    return;
-                }
-            } catch (dErr) {
-                console.warn('Direct Gemini report generation note:', dErr.message);
-            }
-
-            // Retry the API call up to 2 times with exponential backoff
-            let retrySuccess = false;
-            const reportPayload = {
-                sessionId: state.sessionId || crypto.randomUUID(),
-                role: state.role,
-                level: state.level,
-                transcript: state.liveTranscript,
-                candidate_name: _b2bCandidateName || null,
-                candidate_email: _b2bCandidateEmail || null,
-                mode: 'voice',
-                proctoring_violations: (_enableProctoring || _enableWebcamProctoring) ? state.proctoringViolations : null,
-                resume_matching_report: _resumeAnalysis
-            };
-
-            for (let attempt = 1; attempt <= 2; attempt++) {
+            // Step 1: Try Direct Gemini Report (fastest path when BYOK key is available)
+            const geminiKey = getActiveGeminiKey();
+            if (geminiKey) {
                 try {
                     document.getElementById('report-loading').querySelector('.loading-text').textContent =
-                        `Retrying report generation (attempt ${attempt}/2)...`;
-                    await new Promise(r => setTimeout(r, attempt * 1500));
-                    const retryReport = await apiCall('/api/interview/report-from-transcript', reportPayload);
-                    state.answers = retryReport.answers || [];
-                    renderReport(retryReport);
-                    retrySuccess = true;
-                    break;
-                } catch (retryErr) {
-                    console.warn(`Retry ${attempt}/2 failed:`, retryErr.message);
+                        'Evaluating assessment with AI...';
+                    const directReport = await generateDirectGeminiReport(state.liveTranscript, state.role, state.level, state.candidateName || _b2bCandidateName);
+                    if (directReport && directReport.overallScore != null) {
+                        state.answers = directReport.answers || [];
+                        if (directReport.communicationScores) state.communicationScores = directReport.communicationScores;
+                        renderReport(directReport);
+                        reportGenerated = true;
+                    }
+                } catch (dErr) {
+                    console.warn('Direct Gemini report failed, trying API:', dErr.message);
                 }
             }
 
-            if (!retrySuccess) {
-                // All retries exhausted — generate honest fallback from transcript
+            // Step 2: Try Backend API with 12s timeout (skip if direct Gemini worked)
+            if (!reportGenerated) {
+                try {
+                    document.getElementById('report-loading').querySelector('.loading-text').textContent =
+                        'Generating report via server...';
+                    const report = await apiCall('/api/interview/report-from-transcript', {
+                        sessionId: state.sessionId || crypto.randomUUID(),
+                        role: state.role,
+                        level: state.level,
+                        transcript: state.liveTranscript,
+                        candidate_name: _b2bCandidateName || null,
+                        candidate_email: _b2bCandidateEmail || null,
+                        mode: 'voice',
+                        proctoring_violations: (_enableProctoring || _enableWebcamProctoring) ? state.proctoringViolations : null,
+                        resume_matching_report: _resumeAnalysis
+                    }, 12000); // 12s timeout — fail fast
+
+                    state.answers = report.answers || [];
+                    renderReport(report);
+                    reportGenerated = true;
+                } catch (apiErr) {
+                    console.warn('API report generation failed:', apiErr.message);
+                }
+            }
+
+            // Step 3: Immediate client-side fallback (no retries — generate report NOW)
+            if (!reportGenerated) {
+                console.log('[Report] All remote methods failed. Using client-side fallback.');
+                document.getElementById('report-loading').querySelector('.loading-text').textContent =
+                    'Finalizing assessment results...';
                 renderHonestFallbackReport(state.liveTranscript, state.role, state.level);
             }
+
+        } catch (outerErr) {
+            console.error('Unexpected report generation error:', outerErr);
+            // Last-resort: generate basic report from whatever we have
+            renderHonestFallbackReport(state.liveTranscript, state.role, state.level);
         } finally {
             document.getElementById('report-loading').classList.add('hidden');
             const loadingText = document.getElementById('report-loading')?.querySelector('.loading-text');
@@ -6835,7 +6833,7 @@ GUIDELINES:
     }
 
     // ── API Calls ──
-    async function apiCall(endpoint, body) {
+    async function apiCall(endpoint, body, timeoutMs) {
         const headers = { 'Content-Type': 'application/json' };
         
         // Pass B2B API Key if available
@@ -6847,16 +6845,27 @@ GUIDELINES:
         const byokH = getByokHeaders();
         Object.assign(headers, byokH);
 
-        const response = await fetch(`${API_BASE}${endpoint}`, {
-            method: 'POST',
-            headers: headers,
-            body: JSON.stringify(body),
-        });
-        if (!response.ok) {
-            const err = await response.json().catch(() => ({}));
-            throw new Error(err.error || `Request failed (${response.status})`);
+        // Use AbortController for timeout (default 30s, configurable)
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), timeoutMs || 30000);
+
+        try {
+            const response = await fetch(`${API_BASE}${endpoint}`, {
+                method: 'POST',
+                headers: headers,
+                body: JSON.stringify(body),
+                signal: controller.signal
+            });
+            clearTimeout(timer);
+            if (!response.ok) {
+                const err = await response.json().catch(() => ({}));
+                throw new Error(err.error || `Request failed (${response.status})`);
+            }
+            return await response.json();
+        } catch(e) {
+            clearTimeout(timer);
+            throw e;
         }
-        return await response.json();
     }
 
     // ── Direct Google Gemini REST API Engine (BYOK & Super Admin Key) ──
