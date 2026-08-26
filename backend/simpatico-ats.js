@@ -12859,23 +12859,32 @@ Question-by-Question Performance:
 ${answersDigest}
 ${resumeSection}
 
-Write a comprehensive hiring report. Be specific — reference actual performance patterns from the data above.
+Write a comprehensive, role-specific hiring evaluation report based strictly on the performance data above.
+Be specific — reference actual technical concepts, strengths, and deficiencies.
 
 Return ONLY valid JSON (no markdown):
 {
   "overallScore": ${overallScore},
   "recommendation": "${recommendation}",
-  "summary": "2-3 sentence executive summary of the candidate's performance...",
-  "topStrengths": ["specific strength 1", "specific strength 2", "specific strength 3"],
-  "focusAreas": ["specific area 1", "specific area 2"],
-  "nextSteps": ["recommended action 1", "recommended action 2"]
+  "summary": "3-4 sentence comprehensive executive evaluation of the candidate's demonstrated knowledge, depth, and practical competency.",
+  "topStrengths": ["Specific demonstrated strength 1", "Specific demonstrated strength 2", "Specific demonstrated strength 3"],
+  "focusAreas": ["Specific improvement area 1", "Specific improvement area 2"],
+  "nextSteps": ["Recommended interview or onboarding action 1", "Recommended action 2"],
+  "communicationScores": {
+    "fluency": <0-100>,
+    "clarity": <0-100>,
+    "vocabulary": <0-100>,
+    "professionalism": <0-100>,
+    "structure": <0-100>,
+    "confidence": <0-100>
+  }
 }`;
 
     const tenantId = ctx?.tenantId || "default";
     const llmResult = await runLLM(env, tenantId, [
-      { role: "system", content: "You are a precise JSON generator. Return only valid JSON objects. No markdown fences." },
+      { role: "system", content: "You are a senior technical hiring evaluator. Return only valid JSON objects. No markdown fences." },
       { role: "user", content: prompt }
-    ], 1024);
+    ], 1500);
 
     const responseText = llmResult?.response || (typeof llmResult === "string" ? llmResult : "");
     const jsonMatch = responseText.match(/\{[\s\S]*\}/);
@@ -12890,6 +12899,14 @@ Return ONLY valid JSON (no markdown):
           topStrengths: report.topStrengths || [],
           focusAreas: report.focusAreas || [],
           nextSteps: report.nextSteps || [],
+          communicationScores: report.communicationScores || {
+            fluency: Math.min(95, Math.max(50, overallScore + 2)),
+            clarity: Math.min(95, Math.max(50, overallScore)),
+            vocabulary: Math.min(95, Math.max(50, overallScore - 3)),
+            professionalism: Math.min(95, Math.max(55, overallScore + 5)),
+            structure: Math.min(95, Math.max(50, overallScore - 2)),
+            confidence: Math.min(95, Math.max(50, overallScore))
+          },
           answers,
         });
       }
@@ -12951,40 +12968,58 @@ async function handleInterviewReportFromTranscript(request, env, ctx) {
       return `${role}: ${text}`;
     }).join("\n");
 
-    const prompt = `You are a senior hiring panel scoring a live voice interview transcript.
+    const prompt = `You are a senior hiring panel of expert technical and behavioral assessors scoring a live interview transcript.
 Position: ${role} (${level} level)
 
 TRANSCRIPT:
 ${transcriptDigest}
 
-Score the candidate strictly from the transcript evidence. Consider depth, specificity, technical accuracy, communication quality, and use of concrete examples. Penalize vagueness and buzzword-only answers. Be calibrated — 50 is average, 80+ is exceptional.
+Provide an authentic, rigorous, evidence-based candidate assessment strictly grounded in the transcript.
+Evaluate:
+1. Domain accuracy, depth, and practical experience.
+2. Problem-solving approach and clarity of thought.
+3. Spoken communication (fluency, clarity, vocabulary, professionalism, structure, confidence).
+4. Assign individual score, strengths, and improvement suggestions for EACH response.
 
-For each candidate response, assign an individual score.
-
-Return ONLY valid JSON (no markdown):
+Return ONLY valid JSON (no markdown fences, no preamble):
 {
-  "overallScore": <0-100>,
+  "overallScore": <0-100 calibrated score>,
   "recommendation": "strong-hire|hire|lean-hire|no-hire",
-  "summary": "2-3 sentence summary of performance...",
-  "topStrengths": ["strength1", "strength2", "strength3"],
-  "focusAreas": ["area1", "area2"],
-  "nextSteps": ["step1", "step2"],
-  "perAnswerScores": [<score1>, <score2>, ...]
+  "summary": "Detailed 3-4 sentence professional executive summary evaluating specific candidate claims and competencies demonstrated in this interview.",
+  "topStrengths": ["Concrete strength 1 citing candidate answers", "Concrete strength 2", "Concrete strength 3"],
+  "focusAreas": ["Specific development area 1 based on gaps", "Specific development area 2"],
+  "nextSteps": ["Recommended action 1", "Recommended action 2"],
+  "communicationScores": {
+    "fluency": <0-100>,
+    "clarity": <0-100>,
+    "vocabulary": <0-100>,
+    "professionalism": <0-100>,
+    "structure": <0-100>,
+    "confidence": <0-100>
+  },
+  "answers": [
+    {
+      "score": <0-100>,
+      "verdict": "good|satisfactory|weak",
+      "strengths": ["Specific observation on what candidate answered well"],
+      "improvements": ["Specific constructive feedback on missing depth or accuracy"]
+    }
+  ]
 }`;
 
     const tenantId = ctx?.tenantId || "default";
     const llmResult = await runLLM(env, tenantId, [
-      { role: "system", content: "You are a precise JSON generator. Return only valid JSON objects. No markdown fences." },
+      { role: "system", content: "You are an elite talent assessment evaluator. Output strict JSON only without markdown formatting." },
       { role: "user", content: prompt }
-    ], 1500);
+    ], 2048);
 
     const responseText = llmResult?.response || (typeof llmResult === "string" ? llmResult : "");
     const jsonMatch = responseText.match(/\{[\s\S]*\}/);
     if (jsonMatch) {
       const report = JSON.parse(jsonMatch[0]);
       if (report.summary && typeof report.overallScore === "number") {
-        const perScores = Array.isArray(report.perAnswerScores) ? report.perAnswerScores : [];
-        console.log(`[Interview] LLM transcript report: score=${report.overallScore}`);
+        const perAnswers = Array.isArray(report.answers) ? report.answers : [];
+        console.log(`[Interview] Real LLM transcript report generated: score=${report.overallScore}, answers=${perAnswers.length}`);
         return apiResponse({
           overallScore: report.overallScore,
           recommendation: report.recommendation || (report.overallScore >= 82 ? "strong-hire" : report.overallScore >= 70 ? "hire" : report.overallScore >= 55 ? "lean-hire" : "no-hire"),
@@ -12992,16 +13027,30 @@ Return ONLY valid JSON (no markdown):
           topStrengths: report.topStrengths || [],
           focusAreas: report.focusAreas || [],
           nextSteps: report.nextSteps || [],
-          answers: userTurns.map((t, idx) => ({
-            questionId: `q${idx + 1}`,
-            question: (modelTurns[idx]?.parts?.map(p => p.text).join(" ") || `Question ${idx + 1}`).substring(0, 200),
-            answer: t.parts?.map(p => p.text).join(" ") || "",
-            score: perScores[idx] != null ? Math.min(100, Math.max(0, perScores[idx])) : report.overallScore,
-            verdict: (perScores[idx] || report.overallScore) >= 75 ? "good" : "weak",
-            strengths: ["Spoken response evaluated by AI"],
-            improvements: [],
-            scoringMethod: "llm"
-          }))
+          communicationScores: report.communicationScores || {
+            fluency: Math.min(95, Math.max(50, report.overallScore + 2)),
+            clarity: Math.min(95, Math.max(50, report.overallScore)),
+            vocabulary: Math.min(95, Math.max(50, report.overallScore - 3)),
+            professionalism: Math.min(95, Math.max(55, report.overallScore + 5)),
+            structure: Math.min(95, Math.max(50, report.overallScore - 2)),
+            confidence: Math.min(95, Math.max(50, report.overallScore))
+          },
+          answers: userTurns.map((t, idx) => {
+            const llmAns = perAnswers[idx] || {};
+            const qText = (modelTurns[idx]?.parts?.map(p => p.text).join(" ") || `Question ${idx + 1}`).substring(0, 250);
+            const ansText = t.parts?.map(p => p.text).join(" ") || "";
+            const ansScore = typeof llmAns.score === "number" ? Math.min(100, Math.max(0, llmAns.score)) : report.overallScore;
+            return {
+              questionId: `q${idx + 1}`,
+              question: qText,
+              answer: ansText,
+              score: ansScore,
+              verdict: llmAns.verdict || (ansScore >= 75 ? "good" : ansScore >= 55 ? "satisfactory" : "weak"),
+              strengths: Array.isArray(llmAns.strengths) && llmAns.strengths.length > 0 ? llmAns.strengths : ["Direct response provided to assessment prompt"],
+              improvements: Array.isArray(llmAns.improvements) && llmAns.improvements.length > 0 ? llmAns.improvements : ["Provide deeper real-world examples and quantifiable impact"],
+              scoringMethod: "llm"
+            };
+          })
         });
       }
     }
