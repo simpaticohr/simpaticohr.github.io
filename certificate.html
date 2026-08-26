@@ -271,7 +271,7 @@
         </div>
       </div>
       <div class="org-info">
-        <div>Verify: <strong>https://simpaticohr.in/verify</strong></div>
+        <div>Verify: <a id="verifyLink" href="verify.html" target="_blank" style="color:var(--gold);text-decoration:none;font-weight:700;">https://simpaticohr.in/verify</a></div>
       </div>
     </div>
 
@@ -306,70 +306,50 @@
 <!-- Libraries -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <script>
 // ══════════════════════════════════════════
-//  QR CODE GENERATOR (Minimal, no dependency)
+//  AUTHENTIC SCANNABLE QR CODE GENERATOR
 // ══════════════════════════════════════════
 function generateQR(canvas, text) {
   const ctx = canvas.getContext('2d');
-  const size = canvas.width;
-  // Simple QR-like pattern generator for visual effect
-  // Uses a deterministic hash of the text to create a unique pattern
+  const size = canvas.width || 80;
+
+  // Clear canvas with crisp white background
   ctx.fillStyle = '#ffffff';
   ctx.fillRect(0, 0, size, size);
 
-  const moduleCount = 21; // QR v1
-  const cellSize = (size - 16) / moduleCount; // 8px padding each side
-  const offset = 8;
-
-  // Hash function for deterministic pattern
-  function hash(str, seed) {
-    let h = seed || 0;
-    for (let i = 0; i < str.length; i++) {
-      h = ((h << 5) - h) + str.charCodeAt(i);
-      h = h & h; // Convert to 32bit integer
-    }
-    return Math.abs(h);
-  }
-
-  ctx.fillStyle = '#000000';
-
-  // Finder patterns (top-left, top-right, bottom-left)
-  function drawFinder(x, y) {
-    // Outer
-    ctx.fillRect(offset + x * cellSize, offset + y * cellSize, 7 * cellSize, 7 * cellSize);
+  // High-reliability QR Server API with CORS for 100% standard smartphone scanning
+  const img = new Image();
+  img.crossOrigin = 'anonymous';
+  img.onload = () => {
     ctx.fillStyle = '#ffffff';
-    ctx.fillRect(offset + (x + 1) * cellSize, offset + (y + 1) * cellSize, 5 * cellSize, 5 * cellSize);
-    ctx.fillStyle = '#000000';
-    ctx.fillRect(offset + (x + 2) * cellSize, offset + (y + 2) * cellSize, 3 * cellSize, 3 * cellSize);
-  }
-
-  drawFinder(0, 0);
-  ctx.fillStyle = '#000000';
-  drawFinder(moduleCount - 7, 0);
-  ctx.fillStyle = '#000000';
-  drawFinder(0, moduleCount - 7);
-
-  // Data modules (deterministic from text hash)
-  ctx.fillStyle = '#000000';
-  for (let row = 0; row < moduleCount; row++) {
-    for (let col = 0; col < moduleCount; col++) {
-      // Skip finder pattern areas
-      if ((row < 8 && col < 8) || (row < 8 && col >= moduleCount - 8) || (row >= moduleCount - 8 && col < 8)) continue;
-      // Timing patterns
-      if (row === 6 || col === 6) {
-        if ((row + col) % 2 === 0) {
-          ctx.fillRect(offset + col * cellSize, offset + row * cellSize, cellSize, cellSize);
-        }
-        continue;
-      }
-      // Data
-      const h = hash(text, row * moduleCount + col);
-      if (h % 3 !== 0) {
-        ctx.fillRect(offset + col * cellSize, offset + row * cellSize, cellSize, cellSize);
+    ctx.fillRect(0, 0, size, size);
+    ctx.drawImage(img, 0, 0, size, size);
+  };
+  img.onerror = () => {
+    // Offline client-side QRCode library fallback
+    if (typeof QRCode !== 'undefined') {
+      try {
+        const tempDiv = document.createElement('div');
+        new QRCode(tempDiv, {
+          text: text,
+          width: size,
+          height: size,
+          correctLevel: QRCode.CorrectLevel.M
+        });
+        setTimeout(() => {
+          const qrImg = tempDiv.querySelector('img') || tempDiv.querySelector('canvas');
+          if (qrImg) {
+            ctx.drawImage(qrImg, 0, 0, size, size);
+          }
+        }, 60);
+      } catch(e) {
+        console.warn('[QR fallback note]', e);
       }
     }
-  }
+  };
+  img.src = 'https://api.qrserver.com/v1/create-qr-code/?size=' + (size * 2) + 'x' + (size * 2) + '&margin=2&ecc=M&data=' + encodeURIComponent(text);
 }
 
 // ══════════════════════════════════════════
@@ -377,14 +357,51 @@ function generateQR(canvas, text) {
 // ══════════════════════════════════════════
 window.addEventListener('DOMContentLoaded', () => {
   const params = new URLSearchParams(window.location.search);
-  const certId = params.get('certId');
+  const certId = params.get('certId') || params.get('id');
 
   const stored = JSON.parse(localStorage.getItem('simpatico_certifications') || '[]');
-  const cert = stored.find(c => c.certId === certId) || stored[stored.length - 1] || {
-    name:"Alex Vance", role:"Software Engineer", certId:"SIMP-102938",
-    date:new Date().toLocaleDateString('en-US',{year:'numeric',month:'long',day:'numeric'}),
-    cognitive:92, situational:95, attitude:98, jobScore:91, communication:89, integrity:100, overall:94
-  };
+  let cert = null;
+  if (certId) {
+    cert = stored.find(c => (c.certId || '').toUpperCase() === certId.toUpperCase());
+  }
+
+  // Cross-device fallback: if opened on a phone or recruiter computer without localStorage
+  if (!cert) {
+    const urlName = params.get('name');
+    const urlRole = params.get('role');
+    const urlScore = parseInt(params.get('overall') || params.get('score') || '0');
+    const urlDate = params.get('date');
+    const urlIntegrity = parseInt(params.get('integrity') || '100');
+
+    if (urlName || certId) {
+      cert = {
+        certId: certId || 'SIMP-VERIFIED',
+        name: urlName || 'Candidate',
+        role: urlRole || 'Professional',
+        overall: urlScore || 70,
+        date: urlDate || new Date().toLocaleDateString('en-US', { year:'numeric', month:'long', day:'numeric' }),
+        cognitive: parseInt(params.get('cog') || urlScore || '70'),
+        situational: parseInt(params.get('sit') || urlScore || '70'),
+        attitude: parseInt(params.get('att') || urlScore || '70'),
+        jobScore: parseInt(params.get('job') || urlScore || '65'),
+        communication: parseInt(params.get('comm') || urlScore || '60'),
+        integrity: urlIntegrity
+      };
+      try {
+        stored.push(cert);
+        localStorage.setItem('simpatico_certifications', JSON.stringify(stored));
+      } catch(e) {}
+    }
+  }
+
+  // Fallback to last stored certificate or active candidate
+  if (!cert) {
+    cert = stored[stored.length - 1] || {
+      name: "Faisalkvn", role: "HR Executive", certId: certId || "SIMP-MTACOR",
+      date: new Date().toLocaleDateString('en-US', { year:'numeric', month:'long', day:'numeric' }),
+      cognitive: 70, situational: 70, attitude: 70, jobScore: 65, communication: 57, integrity: 60, overall: 70
+    };
+  }
 
   document.getElementById('cName').textContent = cert.name || 'Candidate';
   document.getElementById('cRole').textContent = cert.role || 'Professional';
@@ -411,25 +428,25 @@ window.addEventListener('DOMContentLoaded', () => {
   document.getElementById('cExpiry').textContent = expiryText;
 
   // Scores
-  document.getElementById('sCog').textContent = (cert.cognitive||90)+'%';
-  document.getElementById('sSit').textContent = (cert.situational||92)+'%';
-  document.getElementById('sAtt').textContent = (cert.attitude||95)+'%';
-  document.getElementById('sJob').textContent = (cert.jobScore||91)+'%';
-  const comm = cert.communication || 89;
+  document.getElementById('sCog').textContent = (cert.cognitive||70)+'%';
+  document.getElementById('sSit').textContent = (cert.situational||70)+'%';
+  document.getElementById('sAtt').textContent = (cert.attitude||70)+'%';
+  document.getElementById('sJob').textContent = (cert.jobScore||65)+'%';
+  const comm = cert.communication || 57;
   document.getElementById('sComm').textContent = comm+'%';
-  document.getElementById('sInteg').textContent = (cert.integrity||100)+'%';
+  document.getElementById('sInteg').textContent = (cert.integrity||60)+'%';
 
-  const overall = cert.overall || Math.round(((cert.cognitive||90)+(cert.situational||92)+(cert.attitude||95)+(cert.jobScore||91)+comm+(cert.integrity||100))/6);
+  const overall = cert.overall || Math.round(((cert.cognitive||70)+(cert.situational||70)+(cert.attitude||70)+(cert.jobScore||65)+comm+(cert.integrity||60))/6);
   document.getElementById('overallScore').textContent = overall;
-  document.getElementById('overallGrade').textContent = overall>=90?'EXCELLENT':overall>=80?'VERY GOOD':overall>=70?'GOOD':'SATISFACTORY';
+  document.getElementById('overallGrade').textContent = overall>=85?'EXCELLENT':overall>=75?'VERY GOOD':overall>=65?'GOOD':'SATISFACTORY';
 
   // Communication bars
   document.getElementById('commBar').style.width = comm+'%';
   document.getElementById('commPct').textContent = comm+'%';
-  const fluency = Math.min(100, comm + Math.floor(Math.random()*6));
+  const fluency = Math.min(100, Math.max(40, comm + 2));
   document.getElementById('fluencyBar').style.width = fluency+'%';
   document.getElementById('fluencyPct').textContent = fluency+'%';
-  const conf = Math.max(70, comm - Math.floor(Math.random()*5));
+  const conf = Math.min(100, Math.max(50, (cert.attitude || 70)));
   document.getElementById('confBar').style.width = conf+'%';
   document.getElementById('confPct').textContent = conf+'%';
 
@@ -438,10 +455,17 @@ window.addEventListener('DOMContentLoaded', () => {
   if(cfg.signatoryName) document.getElementById('signatoryName').textContent = cfg.signatoryName;
   if(cfg.certTitle) document.getElementById('certTitle').textContent = cfg.certTitle;
 
-  // Generate QR code for verification
+  // Generate authentic, scannable QR code for verification
   const qrCanvas = document.getElementById('qrCanvas');
-  const verifyUrl = 'https://simpaticohr.in/verify?id=' + encodeURIComponent(cert.certId || 'SIMP-000000');
+  const origin = window.location.origin || 'https://simpaticohr.in';
+  const verifyUrl = `${origin}/verify.html?certId=${encodeURIComponent(cert.certId || 'SIMP-000000')}&name=${encodeURIComponent(cert.name || '')}&role=${encodeURIComponent(cert.role || '')}&score=${encodeURIComponent(overall)}&date=${encodeURIComponent(issueDate)}&integrity=${encodeURIComponent(cert.integrity || 100)}`;
+  
   generateQR(qrCanvas, verifyUrl);
+
+  const verifyLink = document.getElementById('verifyLink');
+  if (verifyLink) {
+    verifyLink.href = verifyUrl;
+  }
 });
 
 // ══════════════════════════════════════════
