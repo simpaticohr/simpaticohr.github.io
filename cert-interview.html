@@ -4677,42 +4677,21 @@
 
     // ── Reusable concluding phrase detector for auto-stop ──
     function _checkConcludingPhrases(aiTextLower, effectiveTurns, targetQuestions) {
-        const strongConcludingPhrases = [
+        if (!aiTextLower) return false;
+        // Never auto-conclude before candidate has reached all target questions
+        if (effectiveTurns < targetQuestions) return false;
+
+        const definitiveConcludingPhrases = [
             'assessment is complete', 'interview is complete', 'interview is now complete',
-            'assessment is now complete', 'that concludes our', 'concludes our interview',
+            'assessment is now complete', 'that concludes our interview',
             'completed all the questions', 'that was the last question',
-            'certification assessment is being finalized',
-            'this concludes', 'that concludes', 'we have concluded',
-            'concludes your assessment', 'concludes the interview',
-            'concludes this interview', 'concludes today',
-            'this brings us to the end', 'brings us to the end',
-            'that wraps up', 'this wraps up', 'wraps up our',
-            'we\'ve covered all', 'covered all the questions',
-            'end of the assessment', 'end of the interview',
-            'assessment has been completed', 'interview has been completed',
-            'no more questions', 'that was our final', 'this was our final',
-            'final question has been', 'last question of',
-            'assessment is being finalized', 'being finalized',
-            'evaluation is complete', 'evaluation is now complete',
-            'we are done', 'we\'re done with', 'that\'s all the questions',
-            'completed your certification', 'certification interview is over'
+            'concludes your assessment', 'concludes this interview',
+            'evaluation is now complete', 'assessment is now finalized',
+            'evaluation is finalized', 'that concludes all questions',
+            'that concludes all', 'all questions have been answered',
+            'completed your certification assessment'
         ];
-        const weakConcludingPhrases = [
-            'thank you for your time', 'best of luck', 'all the best',
-            'thank you for participating', 'good luck with',
-            'thank you for taking', 'thanks for your time',
-            'wish you all the best', 'wish you the best',
-            'good luck in your', 'best wishes',
-            'it was a pleasure', 'great talking to you',
-            'thank you so much for', 'appreciate your time'
-        ];
-        const hasStrongSignal = strongConcludingPhrases.some(phrase => aiTextLower.includes(phrase));
-        const hasWeakSignal = weakConcludingPhrases.some(phrase => aiTextLower.includes(phrase));
-        // Fuzzy word-pair detection: conclude-word + context-word
-        const concludeWords = ['conclud', 'complet', 'finish', 'wrap', 'final', 'done', 'end'];
-        const contextWords = ['interview', 'assessment', 'evaluation', 'session', 'question', 'certification'];
-        const hasFuzzyStrong = concludeWords.some(cw => aiTextLower.includes(cw)) && contextWords.some(iw => aiTextLower.includes(iw));
-        return hasStrongSignal || hasFuzzyStrong || (hasWeakSignal && effectiveTurns >= Math.ceil(targetQuestions * 0.6));
+        return definitiveConcludingPhrases.some(phrase => aiTextLower.includes(phrase));
     }
 
     async function startLiveVoiceInterview() {
@@ -4855,10 +4834,12 @@ NON-REPETITION RULES:
 ${previousTopics ? '4. AVOID topics related to these previously used question fingerprints from past sessions: ' + previousTopics : ''}
 
 GUIDELINES:
-1. Start by greeting the candidate, stating this is a certification assessment, and asking the first question.
-2. Keep transitions natural and concise. Briefly acknowledge answers before follow-ups or next questions.
-3. Do NOT use markdown, asterisks, bullet points, or JSON formatting. Use clean conversational English suitable for speech synthesis.
-4. Once all ${targetQuestions} main questions (with follow-ups) are complete, conclude by thanking the candidate and stating their certification assessment is being finalized.`;
+1. Start by greeting the candidate, stating this is a certification assessment, and asking Question 1.
+2. YOU MUST COMPLETE ALL ${targetQuestions} DISTINCT QUESTIONS. Clearly state the question number when introducing each main question (e.g., "Question 1 of ${targetQuestions}:", "Question 2 of ${targetQuestions}:", up to "Question ${targetQuestions} of ${targetQuestions}:").
+3. NEVER conclude or drop the interview early. Continue asking all ${targetQuestions} questions until every question has been answered.
+4. Keep transitions natural and concise. Briefly acknowledge answers before asking a follow-up or proceeding to the next numbered question.
+5. Do NOT use markdown, asterisks, bullet points, or JSON formatting. Use clean conversational English suitable for speech synthesis.
+6. ONLY AFTER all ${targetQuestions} numbered questions have been fully answered by the candidate, conclude the interview with the exact sentence: "That concludes all ${targetQuestions} questions of your certification assessment. Thank you for your time, and your evaluation is now finalized."`;
 
             // Official Google Gemini Multimodal Live WebSocket realtime model
             const wsModel = 'models/gemini-3.1-flash-live-preview';
@@ -5074,22 +5055,16 @@ GUIDELINES:
                         state._liveInactivityTimer = null;
                     }
 
-                    // Auto-end conditions (using independent _modelTurnCount):
-                    // 1. User answered ALL target questions (via transcription)
-                    // 2. AI used concluding language AND enough progress made
-                    // 3. Model has spoken enough turns (targetQ * 2 — accounts for follow-ups)
-                    // 4. Enough progress made and timer expired
-                    // 5. AI is concluding with even minimal progress (50%+)
-                    const shouldAutoEnd = (userTurnsCount >= targetQuestions) || 
-                                          (effectiveTurns >= targetQuestions) ||
-                                          (isAIConcluding && effectiveTurns >= Math.ceil(targetQuestions * 0.5)) ||
-                                          (state._modelTurnCount >= (targetQuestions * 2)) ||
-                                          (effectiveTurns >= Math.ceil(targetQuestions * 0.8) && state.timerSeconds <= 0);
+                    // Auto-end conditions:
+                    // Only auto-end when all target questions are genuinely completed and AI concluded
+                    const shouldAutoEnd = (isAIConcluding && effectiveTurns >= targetQuestions) ||
+                                          (userTurnsCount >= targetQuestions && isAIConcluding) ||
+                                          (userTurnsCount >= targetQuestions && state.timerSeconds <= 0);
 
                     if (shouldAutoEnd) {
                         if (state._autoEnding) return;
                         state._autoEnding = true;
-                        console.log(`Interview auto-end: ${userTurnsCount}/${targetQuestions} user answers, _modelTurnCount: ${state._modelTurnCount}, effectiveTurns: ${effectiveTurns}, AI concluding: ${isAIConcluding}.`);
+                        console.log(`Interview auto-end: all ${targetQuestions} questions completed successfully.`);
                         stopMicStreaming();
                         cleanupMicStream();
                         
@@ -5099,38 +5074,12 @@ GUIDELINES:
                             finishBtn.textContent = '⌛ Finalizing Report...';
                         }
                         
-                        // Clean single-fire timeout to allow farewell audio to finish cleanly
+                        // Clean timeout to allow farewell audio to finish cleanly
                         setTimeout(() => {
                             console.log("Auto-end timer fired. Finalizing voice interview...");
                             finishLiveVoiceInterview();
-                        }, 1500);
+                        }, 2500);
                         return;
-                    }
-
-                    // Concluding window: if AI used weak/farewell signals but hasn't triggered full auto-end,
-                    // set a shorter 10s window to auto-end (lets farewell audio finish playing)
-                    if (isAIConcluding && !state._concludingWindowTimer) {
-                        console.log('[AutoStop] Concluding language detected — setting 10s concluding window.');
-                        state._concludingWindowTimer = setTimeout(() => {
-                            state._concludingWindowTimer = null;
-                            if (state.liveWs && !state._isFinishingVoiceSession) {
-                                console.log('[AutoStop] Concluding window expired. Auto-ending interview.');
-                                state._isFinishingVoiceSession = false;
-                                finishLiveVoiceInterview();
-                            }
-                        }, 10000);
-                    }
-
-                    // Set inactivity timeout: if no new AI turn within 30 seconds, auto-end
-                    // Only activate after enough progress (2+ effective turns)
-                    if (effectiveTurns >= 2) {
-                        state._liveInactivityTimer = setTimeout(() => {
-                            console.log(`Inactivity timeout after ${userTurnsCount} user turns, ${effectiveTurns} effective turns. Auto-ending interview...`);
-                            if (state.liveWs) {
-                                state._isFinishingVoiceSession = false;
-                                finishLiveVoiceInterview();
-                            }
-                        }, 30000);
                     }
 
                     avatarStage.className = 'avatar-stage listening';
@@ -5194,9 +5143,9 @@ GUIDELINES:
                     const oEffective = Math.max(oUserTurns, Math.max(0, (state._modelTurnCount || 0) - 1));
                     const oIsConcluding = _checkConcludingPhrases(oText, oEffective, oTargetQ);
 
-                    if (oIsConcluding && oEffective >= Math.ceil(oTargetQ * 0.5) && !state._concludingWindowTimer) {
+                    if (oIsConcluding && oEffective >= oTargetQ && !state._concludingWindowTimer) {
                         console.log(`[outputTranscription AutoStop] Concluding detected via transcription. effectiveTurns=${oEffective}, text="${oText.substring(0, 80)}"`);
-                        // Set a 8s window to let farewell audio finish, then auto-end
+                        // Set a 5s window to let farewell audio finish, then auto-end
                         state._concludingWindowTimer = setTimeout(() => {
                             state._concludingWindowTimer = null;
                             if (state.liveWs && !state._isFinishingVoiceSession) {
@@ -5204,7 +5153,7 @@ GUIDELINES:
                                 state._isFinishingVoiceSession = false;
                                 finishLiveVoiceInterview();
                             }
-                        }, 8000);
+                        }, 5000);
                     }
                 }
             }
@@ -5234,8 +5183,8 @@ GUIDELINES:
             const closedEffectiveTurns = Math.max(closedUserTurns, Math.max(0, closedModelTurns - 1));
             const closedTargetQ = state.questionsCount || 5;
 
-            // Auto-finish if substantive interview happened (use _modelTurnCount for accuracy)
-            if (state.liveWs && (closedEffectiveTurns >= Math.max(2, Math.ceil(closedTargetQ / 2)) || closedModelTurns >= 3)) {
+            // Only auto-finish if all target questions were actually completed
+            if (state.liveWs && (closedEffectiveTurns >= closedTargetQ || closedUserTurns >= closedTargetQ)) {
                 finishLiveVoiceInterview();
             } else if (state.liveWs && closedModelTurns === 0 && !state._isFinishingVoiceSession) {
                 console.warn('[Gemini Live] WebSocket disconnected before session start — transitioning to Interactive AI Voice Mode.');
