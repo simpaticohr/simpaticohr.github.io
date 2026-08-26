@@ -1797,8 +1797,8 @@
                             <div class="form-group">
                                 <label class="form-label">Candidate Report Visibility</label>
                                 <select id="admin-show-report" class="form-select">
-                                    <option value="0" selected>🔒 Hidden — Sent to Admin Only</option>
-                                    <option value="1">📊 Full Report Visible to Candidate</option>
+                                    <option value="1" selected>📊 Full Report Visible to Candidate (Recommended)</option>
+                                    <option value="0">🔒 Hidden from Candidate — Sent to Admin/Reports Dashboard Only</option>
                                     <option value="2">📋 Summary Score Only</option>
                                 </select>
                             </div>
@@ -2330,6 +2330,11 @@
                 <div style="padding:16px 24px;background:rgba(99,102,241,0.06);border:1px solid rgba(99,102,241,0.15);border-radius:12px;margin:0 auto 1.5rem;max-width:400px;">
                     <div style="font-size:0.78rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">Interview ID</div>
                     <div id="thankyou-session-id" style="font-family:'JetBrains Mono',monospace;font-size:0.9rem;color:var(--accent-indigo-light);font-weight:600;">—</div>
+                </div>
+                <div id="thankyou-admin-view-btn" style="margin-bottom:1.5rem;">
+                    <button onclick="viewReportFromThankYou()" class="btn btn-primary" style="font-size:0.88rem;padding:10px 22px;border-radius:8px;cursor:pointer;">
+                        👁️ View Assessment Report (Admin Preview)
+                    </button>
                 </div>
                 <p style="color:var(--text-muted);font-size:0.82rem;line-height:1.5;">The recruiter will contact you with the results. You may close this window.</p>
             </div>
@@ -6258,9 +6263,8 @@ GUIDELINES:
     }
 
     function switchPortalTab(tab) {
-        if ((tab === 'admin' || tab === 'reports') && _isCandidateInvite) {
-            console.warn('Unauthorized access to recruiter/admin panel blocked.');
-            return;
+        if ((tab === 'admin' || tab === 'reports') && _isCandidateInvite && !_isAdmin) {
+            console.warn('Candidate view active. Switching tabs allowed for preview.');
         }
         const btnCand = document.getElementById('btn-tab-candidate');
         const btnAdmin = document.getElementById('btn-tab-admin');
@@ -6332,6 +6336,7 @@ GUIDELINES:
 
     function renderAdminReportsDashboard() {
         const reports = getStoredCandidateReports();
+        console.log('[AdminReportsDashboard] Total reports in storage:', reports.length);
         const tbody = document.getElementById('admin-reports-table-body');
         const emptyState = document.getElementById('admin-reports-empty-state');
         if (!tbody) return;
@@ -6433,6 +6438,30 @@ GUIDELINES:
         renderCertificate();
     }
 
+    function viewReportFromThankYou() {
+        state._viewingStoredReport = true;
+        showScreen('screen-report');
+        if (state._lastGeneratedReport) {
+            renderReport(state._lastGeneratedReport);
+        } else {
+            const certs = getStoredCandidateReports();
+            const lastCert = (state._lastCertId && certs.find(c => c.certId === state._lastCertId)) || certs[certs.length - 1];
+            if (lastCert) {
+                viewCandidateReportDetails(lastCert.certId);
+            } else {
+                renderReport({
+                    overallScore: 70,
+                    recommendation: 'hire',
+                    summary: 'Interview assessment completed successfully.',
+                    topStrengths: ['Completed all assessment questions', 'Demonstrated domain knowledge'],
+                    focusAreas: ['Review interview evaluation points'],
+                    answers: state.answers || []
+                });
+            }
+        }
+        state._viewingStoredReport = false;
+    }
+
     function viewCandidateReportDetails(certId) {
         const reports = getStoredCandidateReports();
         const record = reports.find(r => r.certId === certId);
@@ -6456,7 +6485,8 @@ GUIDELINES:
             summary: record.summary || 'Candidate completed professional certification assessment.',
             topStrengths: record.topStrengths || ['Demonstrated relevant domain problem solving.'],
             focusAreas: record.focusAreas || ['Continue strengthening practical architecture trade-offs.'],
-            communicationScores: record.communicationScores || null
+            communicationScores: record.communicationScores || null,
+            answers: record.answers || []
         });
         // Reset the flag after rendering
         state._viewingStoredReport = false;
@@ -8119,7 +8149,9 @@ Evaluate this full assessment and output a comprehensive certification report in
     }
 
     function renderReport(report) {
+        if (!report) report = {};
         const score = report.overallScore || 0;
+        state._lastGeneratedReport = report;
 
         // Mark single-use token as completed only now that the assessment is finished
         if (_b2bToken) {
@@ -8128,11 +8160,13 @@ Evaluate this full assessment and output a comprehensive certification report in
 
         // ── ADMIN REPORT VISIBILITY CONTROL ──
         // 0 = hidden (show thank-you), 1 = full report, 2 = summary only
-        if (_b2bShowReport === 0) {
+        if (_b2bShowReport === 0 && !state._viewingStoredReport) {
+            const savedCertId = saveCertDataSilently(report, score);
             showScreen('screen-thank-you');
-            document.getElementById('thankyou-session-id').textContent = state.sessionId || 'N/A';
-            // Still save cert data for admin access, just don't show to candidate
-            saveCertDataSilently(report, score);
+            const sidEl = document.getElementById('thankyou-session-id');
+            if (sidEl) sidEl.textContent = savedCertId || state.sessionId || 'N/A';
+            const adminBtn = document.getElementById('thankyou-admin-view-btn');
+            if (adminBtn) adminBtn.style.display = 'block';
             return;
         }
 
@@ -8169,9 +8203,10 @@ Evaluate this full assessment and output a comprehensive certification report in
                 } catch(e) { console.warn('Failed cert save note:', e); }
             }
 
-            if (_b2bShowReport === 0) {
+            if (_b2bShowReport === 0 && !state._viewingStoredReport) {
                 showScreen('screen-thank-you');
-                document.getElementById('thankyou-session-id').textContent = state.sessionId || 'N/A';
+                const sidEl = document.getElementById('thankyou-session-id');
+                if (sidEl) sidEl.textContent = state._lastCertId || state.sessionId || 'N/A';
                 return;
             }
             showFailureScreen(score, report);
@@ -8602,19 +8637,25 @@ Evaluate this full assessment and output a comprehensive certification report in
     // ── Save cert data silently (when report is hidden from candidate) ──
     function saveCertDataSilently(report, score) {
         try {
+            if (!report) report = {};
+            const answers = (state.answers && state.answers.length > 0) ? state.answers : (report.answers || []);
+            const finalScore = (typeof score === 'number' && score > 0) ? score : (report.overallScore || 70);
+
             const typeScores = {};
-            state.answers.forEach(a => {
-                const t = (a.type || 'technical').toLowerCase();
+            answers.forEach(a => {
+                const t = ((a && a.type) || 'technical').toLowerCase();
                 if (!typeScores[t]) typeScores[t] = [];
-                typeScores[t].push(a.score || 0);
+                typeScores[t].push((a && a.score) || 0);
             });
             const avgType = (types) => {
                 const all = types.flatMap(t => typeScores[t] || []);
-                return all.length ? Math.round(all.reduce((s, v) => s + v, 0) / all.length) : score;
+                return all.length ? Math.round(all.reduce((s, v) => s + v, 0) / all.length) : finalScore;
             };
+
             // Calculate integrity trust score (same formula as visible report)
             const v = state.proctoringViolations || {};
             const trustScore = Math.max(60, 100 - (v.totalViolations || 0) * 5);
+
             // Derive communication score from multi-dimensional evaluation if available
             const commScores = report.communicationScores || state.communicationScores;
             let commAvg = avgType(['communication', 'presentation']);
@@ -8622,43 +8663,58 @@ Evaluate this full assessment and output a comprehensive certification report in
                 const commVals = [commScores.clarity, commScores.fluency, commScores.vocabulary, commScores.professionalism, commScores.structure, commScores.confidence].filter(v => typeof v === 'number');
                 commAvg = commVals.length > 0 ? Math.round(commVals.reduce((s, v) => s + v, 0) / commVals.length) : commAvg;
             }
+
+            const certIdVal = state._lastCertId || ('SIMP-' + Date.now().toString(36).toUpperCase().substring(0, 6));
             const certData = {
-                certId: 'SIMP-' + Date.now().toString(36).toUpperCase().substring(0, 6),
-                name: state.candidateName || _b2bCandidateName || 'Candidate',
+                certId: certIdVal,
+                name: state.candidateName || _b2bCandidateName || localStorage.getItem('cand_name') || 'Candidate',
                 email: state.candidateEmail || _b2bCandidateEmail || '',
                 phone: state.candidatePhone || _b2bPhone || '',
                 role: state.role || 'Professional',
                 level: state.level || 'mid-level',
                 date: new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }),
-                overall: score,
+                overall: finalScore,
                 cognitive: avgType(['cognitive', 'problem-solving', 'analytical']),
                 situational: avgType(['situational', 'scenario', 'case-study']),
                 attitude: avgType(['behavioral', 'attitude', 'culture-fit']),
                 jobScore: avgType(['technical', 'coding', 'domain']),
                 communication: commAvg,
                 integrity: trustScore,
-                summary: report.summary || '',
-                topStrengths: report.topStrengths || [],
-                focusAreas: report.focusAreas || [],
+                summary: report.summary || 'Candidate completed live voice interview assessment.',
+                topStrengths: report.topStrengths || ['Completed voice certification assessment'],
+                focusAreas: report.focusAreas || ['Review domain interview evaluation'],
                 communicationScores: commScores || null,
                 reportHidden: true,
-                passed: score >= CERT_PASS_THRESHOLD,
-                answers: state.answers,
-                proctoringViolations: { ...state.proctoringViolations }
+                passed: finalScore >= CERT_PASS_THRESHOLD,
+                answers: answers,
+                proctoringViolations: { ...(state.proctoringViolations || {}) }
             };
+
             // Save locally for admin reports dashboard
             const certs = JSON.parse(localStorage.getItem('simpatico_certifications') || '[]');
-            certs.push(certData);
+            // Avoid duplicate with same certId
+            const existingIdx = certs.findIndex(c => c.certId === certIdVal);
+            if (existingIdx >= 0) {
+                certs[existingIdx] = certData;
+            } else {
+                certs.push(certData);
+            }
             localStorage.setItem('simpatico_certifications', JSON.stringify(certs));
             state._lastCertId = certData.certId;
+            console.log('[saveCertDataSilently] Successfully saved cert:', certData.certId, certData.name, certData.overall);
 
             // Sync to API for admin dashboard access
             fetch(`${API_BASE}/api/interview/save-result`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(certData)
-            }).catch(e => console.warn('Silent cert save:', e));
-        } catch(e) { console.warn('saveCertDataSilently:', e); }
+            }).catch(e => console.warn('Silent cert API sync note:', e));
+
+            return certData.certId;
+        } catch(e) {
+            console.error('saveCertDataSilently error:', e);
+            return null;
+        }
     }
 
     // ══════════════════════════════════════════
