@@ -5407,16 +5407,18 @@ GUIDELINES:
                 const modelTurns = state.liveTranscript.filter(t => t.role === 'model');
                 const qCount = Math.max(1, modelTurns.length || (state._modelTurnCount || 1) - 1);
 
-                // Compute authentic dynamic score from answer content
-                let calculatedScore = 72;
+                // Compute heuristic score from answer content — capped BELOW cert threshold
+                // since no AI evaluation was performed
+                let calculatedScore = 40;
                 if (userTurns.length > 0) {
                     const avgLen = userTurns.reduce((acc, t) => acc + (t.parts?.[0]?.text?.length || 0), 0) / userTurns.length;
-                    calculatedScore = Math.min(92, Math.max(55, Math.round(55 + (avgLen / 15))));
+                    calculatedScore = Math.min(60, Math.max(30, Math.round(35 + (avgLen / 20))));
                 }
 
                 const fallbackReport = {
                     overallScore: calculatedScore,
-                    recommendation: calculatedScore >= 82 ? 'strong-hire' : calculatedScore >= 70 ? 'hire' : calculatedScore >= 55 ? 'lean-hire' : 'no-hire',
+                    scoringMethod: 'heuristic',
+                    recommendation: 'lean-hire',
                     summary: `Candidate completed ${qCount} interview questions for ${state.role} (${state.level}). Responses demonstrate domain comprehension and practical alignment with core responsibilities.`,
                     topStrengths: [
                         `Completed ${qCount}-question assessment for ${state.role}`,
@@ -5438,7 +5440,7 @@ GUIDELINES:
                             question: m.parts?.[0]?.text || `Question ${i + 1}`,
                             answer: uText,
                             score: calculatedScore,
-                            verdict: calculatedScore >= 70 ? 'good' : 'satisfactory',
+                            verdict: 'satisfactory',
                             strengths: ['Addressed the assessment prompt directly'],
                             improvements: ['Incorporate specific quantitative benchmarks']
                         };
@@ -5511,14 +5513,15 @@ GUIDELINES:
                 state.answers = Array.from({ length: questionsAsked }, (_, i) => ({
                     question: 'Question ' + (i + 1) + ' (voice assessment)',
                     answer: '(Voice response — audio transcription was unavailable)',
-                    score: 68, verdict: 'good', type: 'technical', difficulty: 'medium',
+                    score: 40, verdict: 'weak', type: 'technical', difficulty: 'medium',
                     strengths: ['Completed live voice interview'],
-                    improvements: ['Audio transcription was not available for detailed scoring']
+                    improvements: ['Audio transcription was not available — AI could not evaluate responses']
                 }));
                 renderReport({
-                    overallScore: 70,
-                    recommendation: 'hire',
-                    summary: 'Completed ' + questionsAsked + '-question live voice assessment for ' + (role || 'Professional') + '. Audio transcription was not captured. This is an estimated completion score.',
+                    overallScore: 45,
+                    scoringMethod: 'heuristic',
+                    recommendation: 'lean-hire',
+                    summary: 'Completed ' + questionsAsked + '-question live voice assessment for ' + (role || 'Professional') + '. Audio transcription was not captured — AI could not evaluate responses. This is an estimated completion score and does NOT qualify for certification. Please retry with transcription enabled.',
                     topStrengths: ['Completed ' + questionsAsked + '-question live voice assessment', 'Engaged through full-duplex voice conversation'],
                     focusAreas: ['Retry with transcription enabled for precise AI-powered scoring'],
                     answers: state.answers
@@ -5538,17 +5541,18 @@ GUIDELINES:
             state.answers = modelTurns.map((t, i) => ({
                 question: (t.parts?.map(p => p.text).join(' ') || `Question ${i + 1}`).substring(0, 200),
                 answer: '(Voice response — transcription unavailable)',
-                score: 65,
-                verdict: 'good',
+                score: 40,
+                verdict: 'weak',
                 type: 'technical',
                 difficulty: 'medium',
                 strengths: ['Completed live voice interview'],
-                improvements: ['Enable audio transcription for detailed scoring']
+                improvements: ['AI could not evaluate — enable audio transcription for real scoring']
             }));
             renderReport({
-                overallScore: 70,
-                recommendation: 'hire',
-                summary: `Completed ${questionsAsked} questions in live full-duplex voice mode. User speech transcription was unavailable — this is an estimated score. Retry with transcription enabled for detailed evaluation.`,
+                overallScore: 45,
+                scoringMethod: 'heuristic',
+                recommendation: 'lean-hire',
+                summary: `Completed ${questionsAsked} questions in live full-duplex voice mode. User speech transcription was unavailable — AI could not evaluate responses. This is an estimated completion score and does NOT qualify for certification. Retry with transcription enabled.`,
                 topStrengths: [`Completed ${questionsAsked}-question live voice assessment`, 'Demonstrated engagement through voice interaction'],
                 focusAreas: ['Retry interview with audio transcription enabled for precise scoring'],
                 answers: state.answers
@@ -5571,13 +5575,14 @@ GUIDELINES:
             totalSentences += sentences.length;
             if (wordCount > 30) longResponseCount++;
 
-            // Per-answer calibrated rating based on spoken response depth
-            let answerScore = 58; // Baseline for voice assessment response
-            if (wordCount >= 5) answerScore += 10;
-            if (wordCount >= 15) answerScore += 10;
-            if (wordCount >= 30) answerScore += 7;
-            if (sentences.length >= 2) answerScore += 5;
-            answerScore = Math.min(88, Math.max(55, answerScore));
+            // Per-answer heuristic rating based on spoken response depth
+            // Capped below cert threshold — only AI evaluation can grant passing scores
+            let answerScore = 30; // Low baseline — no AI evaluation performed
+            if (wordCount >= 5) answerScore += 8;
+            if (wordCount >= 15) answerScore += 8;
+            if (wordCount >= 30) answerScore += 6;
+            if (sentences.length >= 2) answerScore += 4;
+            answerScore = Math.min(60, Math.max(25, answerScore));
             perAnswerScores.push(answerScore);
         });
 
@@ -5617,8 +5622,9 @@ GUIDELINES:
 
         renderReport({
             overallScore: avgScore,
-            recommendation: avgScore >= 80 ? 'strong-hire' : avgScore >= 70 ? 'hire' : avgScore >= 55 ? 'lean-hire' : 'no-hire',
-            summary: `Candidate completed ${userTurns.length} questions in live voice assessment for ${state.role} (${state.level}). Spoken responses demonstrate foundational competency and practical role familiarity.`,
+            scoringMethod: 'heuristic',
+            recommendation: 'lean-hire',
+            summary: `Candidate completed ${userTurns.length} questions in live voice assessment for ${state.role} (${state.level}). ⚠️ AI evaluation was unavailable — scores are heuristic estimates based on response length only and do NOT qualify for certification. Retry the assessment for AI-powered evaluation.`,
             topStrengths: strengths,
             focusAreas: focusAreas,
             nextSteps: [
@@ -6323,7 +6329,7 @@ GUIDELINES:
                     role: state.role || 'HR Executive',
                     level: state.level || 'Mid-Level',
                     date: new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }),
-                    overall: rep.overallScore || 70,
+                    overall: rep.overallScore || 0,
                     integrity: 100,
                     summary: rep.summary || '',
                     topStrengths: rep.topStrengths || [],
@@ -6483,11 +6489,12 @@ GUIDELINES:
                 viewCandidateReportDetails(lastCert.certId);
             } else {
                 renderReport({
-                    overallScore: 70,
-                    recommendation: 'hire',
-                    summary: 'Interview assessment completed successfully.',
-                    topStrengths: ['Completed all assessment questions', 'Demonstrated domain knowledge'],
-                    focusAreas: ['Review interview evaluation points'],
+                    overallScore: 0,
+                    scoringMethod: 'heuristic',
+                    recommendation: 'no-hire',
+                    summary: 'Interview assessment data could not be retrieved. No AI-evaluated score is available.',
+                    topStrengths: ['Completed assessment session'],
+                    focusAreas: ['Retake the assessment for an AI-evaluated score'],
                     answers: state.answers || []
                 });
             }
@@ -7595,7 +7602,7 @@ Evaluate this full assessment and output a comprehensive certification report in
                     type: q.type,
                     difficulty: q.difficulty,
                     answer,
-                    score: directEval.score || 75,
+                    score: directEval.score || 0,
                     verdict: directEval.verdict || 'good',
                     strengths: directEval.strengths || ['Good response'],
                     improvements: directEval.improvements || [],
@@ -8203,7 +8210,29 @@ Evaluate this full assessment and output a comprehensive certification report in
     function renderReport(report) {
         if (!report) report = {};
         const score = report.overallScore || 0;
+        const isHeuristic = report.scoringMethod === 'heuristic';
         state._lastGeneratedReport = report;
+
+        // ── HEURISTIC SCORING WARNING ──
+        // Show a clear warning when scores are client-side estimates, not AI-evaluated
+        let heuristicBanner = document.getElementById('report-heuristic-banner');
+        if (isHeuristic) {
+            if (!heuristicBanner) {
+                heuristicBanner = document.createElement('div');
+                heuristicBanner.id = 'report-heuristic-banner';
+                heuristicBanner.style.cssText = 'background:rgba(245,158,11,0.12);border:1px solid rgba(245,158,11,0.35);border-radius:12px;padding:14px 18px;margin-bottom:1.5rem;display:flex;align-items:flex-start;gap:12px;color:#fbbf24;font-size:0.88rem;line-height:1.5;';
+                const header = document.querySelector('#screen-report .report-header');
+                if (header && header.parentNode) {
+                    header.parentNode.insertBefore(heuristicBanner, header.nextSibling);
+                }
+            }
+            if (heuristicBanner) {
+                heuristicBanner.style.display = 'flex';
+                heuristicBanner.innerHTML = `<span style="font-size:1.4rem;flex-shrink:0;margin-top:2px;">⚠️</span><div><strong>Estimated Score — AI Evaluation Unavailable</strong><br>This score was generated by a client-side heuristic based on response length only. It does <strong>not</strong> reflect actual competency and does <strong>not</strong> qualify for certification. Please retry the assessment to receive a genuine AI-powered evaluation.</div>`;
+            }
+        } else if (heuristicBanner) {
+            heuristicBanner.style.display = 'none';
+        }
 
         // Mark single-use token as completed only now that the assessment is finished
         if (_b2bToken) {
@@ -8358,8 +8387,8 @@ Evaluate this full assessment and output a comprehensive certification report in
             </div>`;
 
         // Sync AI certification score & cryptographic signature to candidate profile
-        // Only sync if NOT in practice mode and score meets threshold
-        if (!state.isPracticeMode) {
+        // Only sync if NOT in practice mode, score meets threshold, AND score is from real AI evaluation
+        if (!state.isPracticeMode && !isHeuristic) {
             (async () => {
                 try {
                     const candEmail = _b2bCandidateEmail || localStorage.getItem('cand_email') || `${(state.role || 'candidate').toLowerCase().replace(/\s+/g, '.')}@simpaticohr.in`;
@@ -8429,7 +8458,8 @@ Evaluate this full assessment and output a comprehensive certification report in
             communicationScores: report.communicationScores || state.communicationScores || null,
             answers: state.answers || [],
             proctoringViolations: { ...state.proctoringViolations },
-            passed: score >= CERT_PASS_THRESHOLD
+            scoringMethod: isHeuristic ? 'heuristic' : 'ai',
+            passed: !isHeuristic && score >= CERT_PASS_THRESHOLD
         };
 
         if (!state._viewingStoredReport) {
@@ -8450,11 +8480,11 @@ Evaluate this full assessment and output a comprehensive certification report in
             } catch(e) { console.warn('Cert save note:', e); }
         }
 
-        // Show certificate button if score meets threshold
+        // Show certificate button if score meets threshold AND score is from real AI evaluation
         // For non-B2B (direct/candidate mode), always show if passed
         // For B2B, respect admin's cert_download setting
         const certBtn = document.getElementById('btn-view-cert');
-        const showCert = !state.isPracticeMode && score >= CERT_PASS_THRESHOLD && (_b2bCertDownload || !_b2bToken);
+        const showCert = !state.isPracticeMode && !isHeuristic && score >= CERT_PASS_THRESHOLD && (_b2bCertDownload || !_b2bToken);
         if (certBtn && showCert) {
             certBtn.style.display = 'inline-flex';
             const certPdfBtn = document.getElementById('btn-download-cert-pdf');
