@@ -12,6 +12,19 @@
       localStorage.removeItem('simpatico_token');
       localStorage.removeItem('simpatico_user');
       window.location.replace('career-lab-gate.html');
+      return;
+    }
+    // Candidate Tenant Isolation: auto-reset progress if a different candidate logs into this device
+    var currentUserId = String(u.id || u.email || '').trim().toLowerCase();
+    var lastCeUser = localStorage.getItem('ce_active_user');
+    if (lastCeUser && lastCeUser !== currentUserId) {
+      localStorage.removeItem('ce_progress');
+      localStorage.removeItem('ce_badges_prev');
+      localStorage.removeItem('ce_toggle_correction');
+      localStorage.removeItem('ce_toggle_spoken');
+    }
+    if (currentUserId) {
+      localStorage.setItem('ce_active_user', currentUserId);
     }
   } catch(e) { window.location.replace('career-lab-gate.html'); }
 })();
@@ -458,9 +471,12 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); min-
     </div>
 
     <div id="progress-summary" style="margin-top:2rem;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);padding:1.5rem;display:none;">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;flex-wrap:wrap;gap:8px;">
         <h3 style="font-size:1rem;font-weight:700;color:#fff;">&#128200; Your Progress</h3>
-        <span id="streak-badge" class="streak-badge">&#128293; 0 day streak</span>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <span id="streak-badge" class="streak-badge">&#128293; 0 day streak</span>
+          <button type="button" class="btn btn-ghost" style="padding:4px 10px;font-size:0.72rem;color:var(--red);border-color:rgba(239,68,68,0.3);" onclick="clearPracticeData()" title="Reset session history, XP, and badges for this user">&#128465; Reset Progress</button>
+        </div>
       </div>
       <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:1rem;">
         <div><div class="metric-label">Sessions</div><div id="stat-sessions" class="metric-value" style="color:var(--accent-light);">0</div></div>
@@ -935,7 +951,6 @@ function getUnlockedBadges(){const h=JSON.parse(localStorage.getItem('ce_progres
 
 function updateGamification(){
   const h=JSON.parse(localStorage.getItem('ce_progress')||'[]');
-  if(!h.length)return;
   const xp=getTotalXP();
   const lvl=getLevelFromXP(xp);
   const curThresh=LEVELS[lvl-1]||0;
@@ -1000,9 +1015,15 @@ function showLevelUp(lvl){
   setTimeout(()=>{if(ov.parentNode)ov.remove();},8000);
 }
 
-// Save badge state on first load
-if(!localStorage.getItem('ce_badges_prev')){
-  localStorage.setItem('ce_badges_prev',JSON.stringify(getUnlockedBadges()));
+// === RESET PROGRESS / TENANT DATA ===
+function clearPracticeData(){
+  if(confirm('Are you sure you want to reset all your practice progress, session history, XP, and badges on this device?')){
+    localStorage.removeItem('ce_progress');
+    localStorage.removeItem('ce_badges_prev');
+    updProgress();
+    updateGamification();
+    renderLP();
+  }
 }
 
 // === PDF CERTIFICATE (Canvas → PNG Download) ===
