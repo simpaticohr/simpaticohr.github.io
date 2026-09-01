@@ -8476,7 +8476,24 @@ Evaluate this full assessment and output a comprehensive certification report in
                 console.log('[renderReport] Saved certification to storage:', certIdVal, certData.name, certData.overall);
 
                 // Also sync to cloud API for admin dashboard & multi-device verification
-                apiCall('/api/interview/save-result', certData).catch(e => console.warn('Cloud sync note:', e));
+                apiCall('/api/interview/save-result', certData).then(res => {
+                    if (res && res.registrationNumber) {
+                        // Update local cert with server-assigned sequential registration number
+                        certData.registrationNumber = res.registrationNumber;
+                        if (res.certId && res.certId !== certIdVal) {
+                            certData.certId = res.certId;
+                            state._lastCertId = res.certId;
+                        }
+                        // Re-save with registration number
+                        try {
+                            const updatedCerts = JSON.parse(localStorage.getItem('simpatico_certifications') || '[]');
+                            const idx = updatedCerts.findIndex(c => c.certId === certIdVal || c.certId === res.certId);
+                            if (idx >= 0) updatedCerts[idx] = certData;
+                            localStorage.setItem('simpatico_certifications', JSON.stringify(updatedCerts));
+                        } catch(e) {}
+                        console.log('[renderReport] Registration number assigned:', res.registrationNumber);
+                    }
+                }).catch(e => console.warn('Cloud sync note:', e));
             } catch(e) { console.warn('Cert save note:', e); }
         }
 
@@ -8676,7 +8693,7 @@ Evaluate this full assessment and output a comprehensive certification report in
         const grade = overall >= 90 ? 'EXCELLENT' : overall >= 80 ? 'VERY GOOD' : overall >= 70 ? 'GOOD' : 'SATISFACTORY';
 
         const adminCfg = JSON.parse(localStorage.getItem('adminConfig') || '{}');
-        const sigName = adminCfg.signatoryName || 'Authorized Signatory — Simpatico HR';
+        const sigName = adminCfg.signatoryName || 'Faisal KVN — Founder & Managing Director, Simpatico HR';
         const certTitle = adminCfg.certTitle || 'Certificate of Assessment & Verification';
 
         // Build certificate HTML

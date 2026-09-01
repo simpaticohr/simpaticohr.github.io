@@ -13134,13 +13134,49 @@ Return ONLY valid JSON (no markdown fences, no preamble):
 
 async function handleInterviewSaveResult(request, env, ctx) {
   const body = (await safeJson(request)) || {};
-  const certId = body.certId || `SIMP-${Date.now().toString(36).toUpperCase().substring(0, 6)}`;
+
+  // Generate a proper sequential registration number if not provided or client-generated
+  let certId = body.certId;
+  if (env.HR_KV) {
+    try {
+      // Increment a persistent counter for sequential registration numbers
+      const counterKey = "cert_counter:global";
+      const currentCount = parseInt((await env.HR_KV.get(counterKey)) || "0", 10);
+      const nextCount = currentCount + 1;
+      await env.HR_KV.put(counterKey, String(nextCount));
+
+      // Format: SIMP-CERT-YYYYMMDD-XXXXX (e.g., SIMP-CERT-20260901-00042)
+      const now = new Date();
+      const dateStr = now.toISOString().slice(0, 10).replace(/-/g, "");
+      const seqStr = String(nextCount).padStart(5, "0");
+      const registrationNumber = `SIMP-CERT-${dateStr}-${seqStr}`;
+
+      // Keep the original certId for backward compatibility, add registrationNumber
+      body.registrationNumber = registrationNumber;
+      if (!certId || certId.startsWith("SIMP-") && certId.length <= 12) {
+        // Replace short client-generated IDs with the proper registration number
+        certId = registrationNumber;
+      }
+    } catch (regErr) {
+      console.warn("[Interview Save Result] Registration number generation note:", regErr.message);
+      if (!certId) {
+        certId = `SIMP-${Date.now().toString(36).toUpperCase().substring(0, 6)}`;
+      }
+    }
+  } else if (!certId) {
+    certId = `SIMP-${Date.now().toString(36).toUpperCase().substring(0, 6)}`;
+  }
+
   body.certId = certId;
   body.savedAt = new Date().toISOString();
 
   if (env.HR_KV) {
     try {
       await env.HR_KV.put(`cert:${certId}`, JSON.stringify(body), { expirationTtl: 365 * 86400 });
+      // Also store by registrationNumber for easy lookup during verification
+      if (body.registrationNumber && body.registrationNumber !== certId) {
+        await env.HR_KV.put(`cert:${body.registrationNumber}`, JSON.stringify(body), { expirationTtl: 365 * 86400 });
+      }
       const listKey = `cert_list:${ctx?.tenantId || "default"}`;
       const rawList = (await env.HR_KV.get(listKey, { type: "json" })) || [];
       const existingIdx = rawList.findIndex(c => c.certId === certId);
@@ -13155,8 +13191,9 @@ async function handleInterviewSaveResult(request, env, ctx) {
     }
   }
 
-  return apiResponse({ success: true, certId });
+  return apiResponse({ success: true, certId, registrationNumber: body.registrationNumber || certId });
 }
+
 
 async function handleInterviewListResults(request, env, ctx) {
   if (!env.HR_KV) return apiResponse({ results: [] });
