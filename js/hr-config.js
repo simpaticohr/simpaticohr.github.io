@@ -3,7 +3,7 @@
  * Points to the isolated 'production' environment.
  */
 // Fix "Not Secure" by enforcing HTTPS on production domain
-if (location.protocol !== 'https:' && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
+if (location.protocol === 'http:' && location.hostname && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
   location.replace(`https:${location.href.substring(location.protocol.length)}`);
 }
 
