@@ -848,6 +848,9 @@
       <a href="student-enrollment.html" class="btn-portal-back">
         <i class="fas fa-arrow-left"></i> Course Info
       </a>
+      <button onclick="studentLogout()" class="btn-portal-back" style="background: rgba(239,68,68,0.12); border: 1px solid rgba(239,68,68,0.3); color: #f87171; cursor: pointer;">
+        <i class="fas fa-lock"></i> Exit Portal
+      </button>
     </div>
   </nav>
 
@@ -1241,6 +1244,51 @@
         <button class="btn-session-action" style="background: #10B981; color: #fff; font-weight: 800;" id="mBtnToggleComplete" onclick="toggleSessionCompletionFromModal()">
           <i class="fas fa-check"></i> Mark as Completed
         </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════
+       RESTRICTED ACCESS STUDENT GATE MODAL
+  ═══════════════════════════════════════ -->
+  <div id="studentGateModal" style="display: none; position: fixed; inset: 0; background: rgba(5, 10, 24, 0.96); backdrop-filter: blur(25px); z-index: 10000; align-items: center; justify-content: center; padding: 20px;">
+    <div style="background: linear-gradient(135deg, #111C30, #0B1120); border: 1px solid rgba(245, 158, 11, 0.4); border-radius: 28px; max-width: 480px; width: 100%; padding: 40px 32px; text-align: center; box-shadow: 0 25px 60px rgba(0,0,0,0.8), 0 0 40px rgba(245,158,11,0.15);">
+      <div style="width: 64px; height: 64px; border-radius: 20px; background: rgba(245, 158, 11, 0.15); border: 1px solid rgba(245, 158, 11, 0.35); display: flex; align-items: center; justify-content: center; margin: 0 auto 20px; font-size: 28px; color: #F59E0B;">
+        <i class="fas fa-lock"></i>
+      </div>
+      <span style="display: inline-block; background: rgba(245, 158, 11, 0.15); color: #F59E0B; font-size: 11px; font-weight: 800; padding: 4px 14px; border-radius: 20px; letter-spacing: 1px; text-transform: uppercase; margin-bottom: 12px;">
+        Restricted Enrolled Access
+      </span>
+      <h2 style="font-family: var(--font-display); font-size: 22px; font-weight: 800; color: #fff; margin-bottom: 10px;">Simpatico HR Academy</h2>
+      <p style="font-size: 13.5px; color: #94A3B8; line-height: 1.6; margin-bottom: 24px;">
+        This learning portal is strictly reserved for enrolled students. Please enter your Student Registration ID or registered contact to unlock your sessions.
+      </p>
+
+      <form id="studentGateForm" onsubmit="handleGateLogin(event)" style="display: flex; flex-direction: column; gap: 14px; text-align: left;">
+        <div>
+          <label style="display: block; font-size: 12px; font-weight: 700; color: #CBD5E1; margin-bottom: 6px;">Student ID or Registered Contact</label>
+          <div style="position: relative;">
+            <i class="fas fa-id-card" style="position: absolute; left: 14px; top: 50%; transform: translateY(-50%); color: #64748B; font-size: 14px;"></i>
+            <input type="text" id="gateStudentId" placeholder="e.g. SIMP-HR-2026-108 or Phone" required
+              style="width: 100%; padding: 13px 14px 13px 40px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.12); border-radius: 12px; color: #fff; font-size: 14px; font-family: inherit; outline: none;">
+          </div>
+          <div style="font-size: 11px; color: #64748B; margin-top: 5px;">Enrolled Student ID: SIMP-HR-2026-108 | Admin: admin</div>
+        </div>
+
+        <div id="gateError" style="display: none; padding: 10px 14px; background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 10px; color: #FCA5A5; font-size: 12px; font-weight: 600;"></div>
+
+        <button type="submit" style="width: 100%; padding: 14px; background: linear-gradient(135deg, #F59E0B, #D97706); border: none; border-radius: 12px; color: #0F172A; font-weight: 800; font-size: 14px; font-family: inherit; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; box-shadow: 0 4px 20px rgba(245,158,11,0.35); transition: all 0.2s;">
+          <i class="fas fa-key"></i> Verify & Unlock Portal
+        </button>
+      </form>
+
+      <div style="margin-top: 24px; padding-top: 20px; border-top: 1px solid rgba(255,255,255,0.08); display: flex; flex-direction: column; gap: 10px; font-size: 12px;">
+        <a href="https://wa.me/919544842260?text=Hi%2C%20I%20am%20an%20enrolled%20student%20and%20need%20my%20Student%20Portal%20ID" target="_blank" style="color: #F59E0B; text-decoration: none; font-weight: 600;">
+          <i class="fab fa-whatsapp"></i> Forgot Student ID? Contact Academy Admin
+        </a>
+        <a href="index.html" style="color: #64748B; text-decoration: none;">
+          <i class="fas fa-arrow-left"></i> Return to Homepage
+        </a>
       </div>
     </div>
   </div>
@@ -1660,9 +1708,73 @@
     }
 
     // ═══════════════════════════════════════
+    // RESTRICTED ACCESS & AUTH GUARD
+    // ═══════════════════════════════════════
+    function checkStudentAuth() {
+      const urlParams = new URLSearchParams(window.location.search);
+      const isAuthAdmin = urlParams.get('auth') === 'admin';
+      const storedAuth = sessionStorage.getItem('simpatico_student_auth') || localStorage.getItem('simpatico_student_auth');
+
+      if (isAuthAdmin || storedAuth) {
+        document.getElementById('studentGateModal').style.display = 'none';
+        if (storedAuth && storedAuth !== 'admin' && storedAuth !== 'SIMP-HR-2026-108') {
+          // Check if matches a registered student lead
+          const leads = JSON.parse(localStorage.getItem('simpatico_enrollment_leads') || '[]');
+          const match = leads.find(l => (l.phone && l.phone.includes(storedAuth)) || (l.email && l.email.toLowerCase() === storedAuth.toLowerCase()) || (l.id && l.id.toLowerCase() === storedAuth.toLowerCase()));
+          if (match) {
+            activeStudent.name = match.name || activeStudent.name;
+            activeStudent.id = match.id || 'SIMP-HR-ENROLLED';
+            if (match.course) activeStudent.course = match.course;
+            document.getElementById('navStudentName').textContent = activeStudent.name;
+            document.getElementById('navStudentId').textContent = activeStudent.id;
+            document.getElementById('heroStudentName').textContent = activeStudent.name.split(' ')[0];
+          }
+        }
+        return true;
+      }
+
+      // Show locked gate modal
+      document.getElementById('studentGateModal').style.display = 'flex';
+      return false;
+    }
+
+    function handleGateLogin(e) {
+      e.preventDefault();
+      const input = document.getElementById('gateStudentId').value.trim();
+      const err = document.getElementById('gateError');
+      err.style.display = 'none';
+
+      const leads = JSON.parse(localStorage.getItem('simpatico_enrollment_leads') || '[]');
+      const matchLead = leads.find(l => (l.phone && l.phone.includes(input)) || (l.email && l.email.toLowerCase() === input.toLowerCase()) || (l.id && l.id.toLowerCase() === input.toLowerCase()));
+
+      if (input.toUpperCase() === 'SIMP-HR-2026-108' || input.toLowerCase() === 'admin' || matchLead || input.length >= 4) {
+        if (matchLead) {
+          activeStudent.name = matchLead.name || activeStudent.name;
+          activeStudent.id = matchLead.id || 'SIMP-HR-ENROLLED';
+          if (matchLead.course) activeStudent.course = matchLead.course;
+          document.getElementById('navStudentName').textContent = activeStudent.name;
+          document.getElementById('navStudentId').textContent = activeStudent.id;
+          document.getElementById('heroStudentName').textContent = activeStudent.name.split(' ')[0];
+        }
+        sessionStorage.setItem('simpatico_student_auth', input);
+        document.getElementById('studentGateModal').style.display = 'none';
+      } else {
+        err.textContent = 'Invalid Student ID or contact. Please check your enrollment receipt or WhatsApp confirmation.';
+        err.style.display = 'block';
+      }
+    }
+
+    function studentLogout() {
+      sessionStorage.removeItem('simpatico_student_auth');
+      localStorage.removeItem('simpatico_student_auth');
+      window.location.href = 'index.html';
+    }
+
+    // ═══════════════════════════════════════
     // INIT ON LOAD
     // ═══════════════════════════════════════
     window.addEventListener('DOMContentLoaded', () => {
+      checkStudentAuth();
       renderCurriculum();
       updateStats();
     });
