@@ -1,20 +1,45 @@
 <!doctype html>
 <html lang="en">
 <head>
-<!-- 🔒 ACCESS GUARD — Requires Career Lab auth -->
+<!-- 🔒 ACCESS GUARD — Supports Career Lab auth + Student Token sessions -->
 <script>
 (function(){
   try {
+    // Check for active token session first
+    var tokenSession = JSON.parse(localStorage.getItem('shr_english_session') || 'null');
+    var hasTokenSession = tokenSession && tokenSession.expiresAt && Date.now() < tokenSession.expiresAt;
+
+    // Check Career Lab auth
     var t = localStorage.getItem('simpatico_token');
     var u = JSON.parse(localStorage.getItem('simpatico_user') || '{}');
-    if (!t || (!u.id && !u.email)) { window.location.replace('career-lab-gate.html'); return; }
-    if (u.expiresAt && Date.now() > u.expiresAt) {
+    var hasCareerLabAuth = t && (u.id || u.email);
+
+    if (!hasTokenSession && !hasCareerLabAuth) {
+      window.location.replace('career-lab-gate.html');
+      return;
+    }
+
+    // If Career Lab auth exists, check its expiry
+    if (!hasTokenSession && hasCareerLabAuth && u.expiresAt && Date.now() > u.expiresAt) {
       localStorage.removeItem('simpatico_token');
       localStorage.removeItem('simpatico_user');
       window.location.replace('career-lab-gate.html');
       return;
     }
-    // Candidate Tenant Isolation: auto-reset progress if a different candidate logs into this device
+
+    // If token session expired, clean up and redirect to token gate
+    if (tokenSession && tokenSession.expiresAt && Date.now() >= tokenSession.expiresAt) {
+      localStorage.removeItem('shr_english_session');
+      localStorage.removeItem('simpatico_token');
+      localStorage.removeItem('simpatico_user');
+      window.location.replace('english-access.html');
+      return;
+    }
+
+    // Mark if this is a token-based session (used by timer logic later)
+    window._shrTokenSession = hasTokenSession ? tokenSession : null;
+
+    // Candidate Tenant Isolation
     var currentUserId = String(u.id || u.email || '').trim().toLowerCase();
     var lastCeUser = localStorage.getItem('ce_active_user');
     if (lastCeUser && lastCeUser !== currentUserId) {
@@ -389,9 +414,93 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); min-
 @keyframes evalSpin { to { transform: rotate(360deg); } }
 .eval-text { font-size: 1.1rem; font-weight: 700; color: #fff; text-align: center; }
 .eval-sub { font-size: 0.82rem; color: var(--text-sec); text-align: center; max-width: 350px; line-height: 1.5; }
+/* ═══ TOKEN SESSION COUNTDOWN TIMER BAR ═══ */
+.shr-timer-bar {
+  display: none;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 99999;
+  background: rgba(2,6,23,0.92);
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid rgba(16,185,129,0.2);
+  padding: 8px 20px;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: #10b981;
+  transition: all 0.3s;
+}
+.shr-timer-bar.active { display: flex; }
+.shr-timer-bar.warning { color: #f59e0b; border-bottom-color: rgba(245,158,11,0.3); }
+.shr-timer-bar.critical { color: #ef4444; border-bottom-color: rgba(239,68,68,0.4); animation: timerPulse 1s ease infinite; }
+.shr-timer-bar .timer-icon { font-size: 1rem; }
+.shr-timer-bar .timer-clock { font-size: 1.1rem; font-weight: 800; font-variant-numeric: tabular-nums; font-family: 'Courier New', monospace; letter-spacing: 1px; }
+.shr-timer-bar .timer-label { color: var(--text-muted, #94a3b8); font-weight: 500; font-size: 0.75rem; }
+.shr-timer-bar .timer-progress { flex: 1; max-width: 200px; height: 4px; background: rgba(255,255,255,0.08); border-radius: 2px; overflow: hidden; }
+.shr-timer-bar .timer-progress-fill { height: 100%; background: #10b981; border-radius: 2px; transition: width 1s linear, background 0.3s; }
+.shr-timer-bar.warning .timer-progress-fill { background: #f59e0b; }
+.shr-timer-bar.critical .timer-progress-fill { background: #ef4444; }
+@keyframes timerPulse { 0%,100%{opacity:1;} 50%{opacity:0.6;} }
+
+/* Session Expiry Overlay */
+.shr-expiry-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 999999;
+  background: rgba(2,6,23,0.96);
+  backdrop-filter: blur(20px);
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 16px;
+  text-align: center;
+  padding: 40px;
+  font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
+}
+.shr-expiry-overlay.active { display: flex; }
+.shr-expiry-overlay .expiry-icon { font-size: 4rem; margin-bottom: 8px; }
+.shr-expiry-overlay h2 { font-size: 1.8rem; font-weight: 800; color: #ef4444; }
+.shr-expiry-overlay p { color: #94a3b8; font-size: 0.95rem; max-width: 400px; line-height: 1.7; }
+.shr-expiry-overlay .btn-expired {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 14px 28px; border-radius: 14px;
+  background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1);
+  color: #fff; font-weight: 700; font-size: 0.9rem;
+  text-decoration: none; font-family: inherit;
+  transition: all 0.2s; margin-top: 8px;
+}
+.shr-expiry-overlay .btn-expired:hover { background: rgba(255,255,255,0.1); }
+
+/* Push body content down when timer bar is visible */
+body.shr-timer-active { padding-top: 44px !important; }
+body.shr-timer-active .nav { top: 44px; }
 </style>
 </head>
 <body>
+
+<!-- Token Session Countdown Timer -->
+<div class="shr-timer-bar" id="shrTimerBar">
+  <span class="timer-icon">&#x23F1;&#xFE0F;</span>
+  <span class="timer-label">Session:</span>
+  <span class="timer-clock" id="shrTimerClock">--:--</span>
+  <span class="timer-label">remaining</span>
+  <div class="timer-progress"><div class="timer-progress-fill" id="shrTimerProgress" style="width:100%"></div></div>
+</div>
+
+<!-- Session Expiry Overlay -->
+<div class="shr-expiry-overlay" id="shrExpiryOverlay">
+  <div class="expiry-icon">&#x23F0;</div>
+  <h2>Session Expired</h2>
+  <p>Your timed practice session has ended. Contact your academy admin for a new access token to continue practicing.</p>
+  <a href="english-access.html" class="btn-expired"><i class="fas fa-key"></i> Enter New Token</a>
+  <a href="index.html" class="btn-expired" style="opacity:0.6;"><i class="fas fa-home"></i> Back to Home</a>
+</div>
 
 <nav class="nav">
   <a class="logo" href="index.html">SIMPATICO <span>HR</span></a>
@@ -1141,6 +1250,60 @@ function initWaveform(){const cv=document.getElementById('waveform-canvas');if(!
 // Hook into mic processor to feed waveform
 const _origStartMic=startMic;
 startMic=async function(ws){await _origStartMic(ws);if(session.micProcessor){const origHandler=session.micProcessor.onaudioprocess;session.micProcessor.onaudioprocess=function(e){origHandler.call(this,e);const inp=e.inputBuffer.getChannelData(0);const step=Math.floor(inp.length/128);for(let i=0;i<128;i++){session.waveformData[i]=session.waveformData[i]*0.6+Math.abs(inp[i*step]||0)*0.4;}};}}
+// ═══════════════════════════════════════
+// TOKEN SESSION COUNTDOWN TIMER
+// ═══════════════════════════════════════
+(function initTokenTimer() {
+  var ts = window._shrTokenSession;
+  if (!ts || !ts.expiresAt) return;
+
+  var timerBar = document.getElementById('shrTimerBar');
+  var timerClock = document.getElementById('shrTimerClock');
+  var timerProgress = document.getElementById('shrTimerProgress');
+  var expiryOverlay = document.getElementById('shrExpiryOverlay');
+  var totalDuration = ts.durationMin * 60000;
+
+  timerBar.classList.add('active');
+  document.body.classList.add('shr-timer-active');
+
+  function updateTimer() {
+    var now = Date.now();
+    var remaining = Math.max(0, ts.expiresAt - now);
+    var pct = (remaining / totalDuration) * 100;
+
+    // Format mm:ss
+    var totalSec = Math.ceil(remaining / 1000);
+    var h = Math.floor(totalSec / 3600);
+    var m = Math.floor((totalSec % 3600) / 60);
+    var s = totalSec % 60;
+    timerClock.textContent = h > 0
+      ? h + ':' + String(m).padStart(2,'0') + ':' + String(s).padStart(2,'0')
+      : String(m).padStart(2,'0') + ':' + String(s).padStart(2,'0');
+
+    timerProgress.style.width = Math.max(0, pct) + '%';
+
+    // Color states
+    var minLeft = remaining / 60000;
+    timerBar.classList.remove('warning', 'critical');
+    if (minLeft <= 3) timerBar.classList.add('critical');
+    else if (minLeft <= 10) timerBar.classList.add('warning');
+
+    // Session expired
+    if (remaining <= 0) {
+      timerBar.classList.remove('active');
+      expiryOverlay.classList.add('active');
+      localStorage.removeItem('shr_english_session');
+      localStorage.removeItem('simpatico_token');
+      localStorage.removeItem('simpatico_user');
+      // Disconnect any active Gemini session
+      if (typeof endSession === 'function') { try { endSession(); } catch(e){} }
+      return;
+    }
+
+    requestAnimationFrame(updateTimer);
+  }
+  updateTimer();
+})();
 </script>
 </body>
 </html>
