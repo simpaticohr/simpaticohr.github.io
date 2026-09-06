@@ -1654,7 +1654,7 @@
           <label style="display: block; font-size: 12px; font-weight: 700; color: #CBD5E1; margin-bottom: 6px;">Student ID or Registered Contact</label>
           <div style="position: relative;">
             <i class="fas fa-id-card" style="position: absolute; left: 14px; top: 50%; transform: translateY(-50%); color: #64748B; font-size: 14px;"></i>
-            <input type="text" id="gateStudentId" placeholder="e.g. SIMP-HR-2026-108 or Phone" required
+            <input type="text" id="gateStudentId" placeholder="Student ID, Phone, or Email" required
               style="width: 100%; padding: 13px 14px 13px 40px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.12); border-radius: 12px; color: #fff; font-size: 14px; font-family: inherit; outline: none;">
           </div>
           <div style="font-size: 11px; color: #64748B; margin-top: 5px;">Enter your registered Student ID or phone number</div>
@@ -2741,30 +2741,28 @@
       }
     }
 
+    const STUDENT_API_BASE = 'https://evalis-api.simpaticohrconsultancy.workers.dev';
+
     // ═══════════════════════════════════════
     // RESTRICTED ACCESS & AUTH GUARD
     // ═══════════════════════════════════════
-    function checkStudentAuth() {
-      const urlParams = new URLSearchParams(window.location.search);
-      const isAuthAdmin = urlParams.get('auth') === 'admin';
-      const storedAuth = sessionStorage.getItem('simpatico_student_auth') || localStorage.getItem('simpatico_student_auth');
+    async function checkStudentAuth() {
+      const storedAuth = sessionStorage.getItem('simpatico_student_auth');
 
-      if (isAuthAdmin || storedAuth) {
-        document.getElementById('studentGateModal').style.display = 'none';
-        if (storedAuth && storedAuth !== 'admin' && storedAuth !== 'SIMP-HR-2026-108') {
-          // Check if matches a registered student lead
-          const leads = JSON.parse(localStorage.getItem('simpatico_enrollment_leads') || '[]');
-          const match = leads.find(l => (l.phone && l.phone.includes(storedAuth)) || (l.email && l.email.toLowerCase() === storedAuth.toLowerCase()) || (l.id && l.id.toLowerCase() === storedAuth.toLowerCase()));
-          if (match) {
-            activeStudent.name = match.name || activeStudent.name;
-            activeStudent.id = match.id || 'SIMP-HR-ENROLLED';
-            if (match.course) activeStudent.course = match.course;
+      if (storedAuth) {
+        try {
+          const saved = JSON.parse(storedAuth);
+          if (saved && saved.verified && saved.studentId) {
+            activeStudent.name = saved.name || activeStudent.name;
+            activeStudent.id = saved.studentId;
+            if (saved.course) activeStudent.course = saved.course;
             document.getElementById('navStudentName').textContent = activeStudent.name;
             document.getElementById('navStudentId').textContent = activeStudent.id;
             document.getElementById('heroStudentName').textContent = activeStudent.name.split(' ')[0];
+            document.getElementById('studentGateModal').style.display = 'none';
+            return true;
           }
-        }
-        return true;
+        } catch(e) {}
       }
 
       // Show locked gate modal
@@ -2772,30 +2770,61 @@
       return false;
     }
 
-    function handleGateLogin(e) {
+    async function handleGateLogin(e) {
       e.preventDefault();
       const input = document.getElementById('gateStudentId').value.trim();
       const err = document.getElementById('gateError');
+      const btn = e.target.querySelector('button[type="submit"]');
       err.style.display = 'none';
 
-      const leads = JSON.parse(localStorage.getItem('simpatico_enrollment_leads') || '[]');
-      const matchLead = leads.find(l => (l.phone && l.phone.includes(input)) || (l.email && l.email.toLowerCase() === input.toLowerCase()) || (l.id && l.id.toLowerCase() === input.toLowerCase()));
+      if (!input || input.length < 3) {
+        err.textContent = 'Please enter your Student ID, registered phone, or email.';
+        err.style.display = 'block';
+        return;
+      }
 
-      if (input.toUpperCase() === 'SIMP-HR-2026-108' || input.toLowerCase() === 'admin' || matchLead || input.length >= 4) {
-        if (matchLead) {
-          activeStudent.name = matchLead.name || activeStudent.name;
-          activeStudent.id = matchLead.id || 'SIMP-HR-ENROLLED';
-          if (matchLead.course) activeStudent.course = matchLead.course;
+      // Show loading state
+      const origText = btn.innerHTML;
+      btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Verifying...';
+      btn.disabled = true;
+
+      try {
+        const res = await fetch(`${STUDENT_API_BASE}/api/academy/verify-student`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ credential: input })
+        });
+        const data = await res.json();
+
+        if (data.verified && data.studentId) {
+          activeStudent.name = data.name || activeStudent.name;
+          activeStudent.id = data.studentId;
+          if (data.course) activeStudent.course = data.course;
           document.getElementById('navStudentName').textContent = activeStudent.name;
           document.getElementById('navStudentId').textContent = activeStudent.id;
           document.getElementById('heroStudentName').textContent = activeStudent.name.split(' ')[0];
+
+          // Store verified session
+          sessionStorage.setItem('simpatico_student_auth', JSON.stringify({
+            verified: true,
+            studentId: data.studentId,
+            name: data.name,
+            course: data.course,
+            ts: Date.now()
+          }));
+
+          document.getElementById('studentGateModal').style.display = 'none';
+        } else {
+          err.textContent = 'Student ID not found. Please enter the ID or phone number from your enrollment receipt. Contact Academy Admin if you need help.';
+          err.style.display = 'block';
         }
-        sessionStorage.setItem('simpatico_student_auth', input);
-        document.getElementById('studentGateModal').style.display = 'none';
-      } else {
-        err.textContent = 'Invalid Student ID or contact. Please check your enrollment receipt or WhatsApp confirmation.';
+      } catch (networkErr) {
+        err.textContent = 'Unable to verify at this time. Please check your internet connection and try again.';
         err.style.display = 'block';
       }
+
+      btn.innerHTML = origText;
+      btn.disabled = false;
     }
 
     function studentLogout() {

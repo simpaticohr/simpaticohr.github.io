@@ -1519,6 +1519,10 @@ route("GET",  "/api/interview/results", handleInterviewListResults);
 route("POST", "/api/academy/generate-student-id", handleGenerateStudentId);
 route("POST", "/api/academy/generate-cert-id", handleGenerateCertId);
 
+// ── Academy Student Enrollment & Verification ──
+route("POST", "/api/academy/enroll-student", handleEnrollStudent);
+route("POST", "/api/academy/verify-student", handleVerifyStudent);
+
 route("POST", "/attendance/records/upsert", handleUpsertAttendance);
 
 // ── ImageKit Interview Recording ──
@@ -13179,6 +13183,114 @@ async function handleGenerateCertId(request, env, ctx) {
   } catch (err) {
     console.warn("[Academy] Cert ID generation error:", err.message);
     return apiResponse({ error: err.message }, 500);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// ACADEMY — Student Enrollment Registry & Verification
+// ═══════════════════════════════════════════════════════════════
+
+async function handleEnrollStudent(request, env, ctx) {
+  if (!env.HR_KV) return apiResponse({ error: "KV not available" }, 500);
+  const body = (await safeJson(request)) || {};
+  const { studentId, name, phone, email, course } = body;
+  if (!studentId || !name) return apiResponse({ error: "studentId and name are required" }, 400);
+
+  try {
+    const record = {
+      studentId,
+      name,
+      phone: phone || "",
+      email: (email || "").toLowerCase(),
+      course: course || "",
+      enrolledAt: new Date().toISOString(),
+      active: true
+    };
+
+    // Store by studentId (primary key)
+    await env.HR_KV.put(`student:${studentId}`, JSON.stringify(record), { expirationTtl: 730 * 86400 });
+
+    // Index by phone for lookup
+    if (phone) {
+      const cleanPhone = phone.replace(/[^0-9]/g, "").slice(-10);
+      if (cleanPhone.length >= 10) {
+        await env.HR_KV.put(`student_phone:${cleanPhone}`, studentId, { expirationTtl: 730 * 86400 });
+      }
+    }
+
+    // Index by email for lookup
+    if (email) {
+      await env.HR_KV.put(`student_email:${email.toLowerCase()}`, studentId, { expirationTtl: 730 * 86400 });
+    }
+
+    // Append to enrolled students list
+    const listKey = "academy_enrolled_list";
+    const rawList = (await env.HR_KV.get(listKey, { type: "json" })) || [];
+    const existingIdx = rawList.findIndex(s => s.studentId === studentId);
+    if (existingIdx >= 0) {
+      rawList[existingIdx] = record;
+    } else {
+      rawList.unshift(record);
+    }
+    await env.HR_KV.put(listKey, JSON.stringify(rawList.slice(0, 500)), { expirationTtl: 730 * 86400 });
+
+    return apiResponse({ success: true, studentId, name });
+  } catch (err) {
+    console.warn("[Academy] Enroll student error:", err.message);
+    return apiResponse({ error: err.message }, 500);
+  }
+}
+
+async function handleVerifyStudent(request, env, ctx) {
+  if (!env.HR_KV) return apiResponse({ error: "KV not available", verified: false }, 500);
+  const body = (await safeJson(request)) || {};
+  const { credential } = body;
+  if (!credential) return apiResponse({ verified: false, error: "No credential provided" }, 400);
+
+  try {
+    const input = credential.trim();
+    let studentRecord = null;
+
+    // 1. Try direct student ID lookup
+    const byId = await env.HR_KV.get(`student:${input.toUpperCase()}`, { type: "json" });
+    if (byId && byId.active) {
+      studentRecord = byId;
+    }
+
+    // 2. Try phone lookup (last 10 digits)
+    if (!studentRecord) {
+      const cleanPhone = input.replace(/[^0-9]/g, "").slice(-10);
+      if (cleanPhone.length >= 10) {
+        const idByPhone = await env.HR_KV.get(`student_phone:${cleanPhone}`);
+        if (idByPhone) {
+          studentRecord = await env.HR_KV.get(`student:${idByPhone}`, { type: "json" });
+          if (studentRecord && !studentRecord.active) studentRecord = null;
+        }
+      }
+    }
+
+    // 3. Try email lookup
+    if (!studentRecord) {
+      const idByEmail = await env.HR_KV.get(`student_email:${input.toLowerCase()}`);
+      if (idByEmail) {
+        studentRecord = await env.HR_KV.get(`student:${idByEmail}`, { type: "json" });
+        if (studentRecord && !studentRecord.active) studentRecord = null;
+      }
+    }
+
+    if (studentRecord) {
+      return apiResponse({
+        verified: true,
+        studentId: studentRecord.studentId,
+        name: studentRecord.name,
+        course: studentRecord.course
+      });
+    }
+
+    return apiResponse({ verified: false });
+  } catch (err) {
+    console.warn("[Academy] Verify student error:", err.message);
+    return apiResponse({ verified: false, error: err.message }, 500);
   }
 }
 
