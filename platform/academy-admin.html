@@ -1711,8 +1711,8 @@
           <div class="form-row">
             <div class="form-group">
               <label class="form-label">Signatory 1 Name</label>
-              <input type="text" class="form-input" id="sig1Name" value="Muhammed Shafeek" oninput="updateCertPreview()">
-              <input type="text" class="form-input" id="sig1Role" value="Managing Director" style="margin-top:4px; font-size:11px;" oninput="updateCertPreview()">
+              <input type="text" class="form-input" id="sig1Name" value="Faisal KVN" oninput="updateCertPreview()">
+              <input type="text" class="form-input" id="sig1Role" value="Founder & Managing Director" style="margin-top:4px; font-size:11px;" oninput="updateCertPreview()">
             </div>
             <div class="form-group">
               <label class="form-label">Signatory 2 Name</label>
@@ -2244,10 +2244,10 @@
               <!-- Right: Dual Signatures -->
               <div class="cert-signatures">
                 <div class="sig-person">
-                  <div class="sig-pen" id="certPrSig1Pen">M. Shafeek</div>
+                  <div class="sig-pen" id="certPrSig1Pen">Faisal KVN</div>
                   <div class="sig-divider"></div>
-                  <div class="sig-name" id="certPrSig1Name">Muhammed Shafeek</div>
-                  <div class="sig-role" id="certPrSig1Role">Managing Director</div>
+                  <div class="sig-name" id="certPrSig1Name">Faisal KVN</div>
+                  <div class="sig-role" id="certPrSig1Role">Founder & Managing Director</div>
                 </div>
                 <div class="sig-person">
                   <div class="sig-pen" id="certPrSig2Pen">K. R. Varma</div>
@@ -2658,6 +2658,7 @@
     let currentTheme = 'navy';
     let currentFont = 'Great Vibes';
     let currentZoom = 1.0;
+    const ACADEMY_API_BASE = 'https://evalis-api.simpaticohrconsultancy.workers.dev';
 
     // Default Seed Registry in localStorage if empty
     const DEFAULT_REGISTRY = [
@@ -2858,7 +2859,17 @@
       document.getElementById('certDuration').value = "5 Months (32 Interactive Sessions)";
       document.getElementById('certGrade').value = "Distinction (Grade A+)";
       if (!document.getElementById('certCredId').value.includes('HRM')) {
-        document.getElementById('certCredId').value = "SHR-HRM-2026-" + Math.floor(1000 + Math.random() * 9000);
+        // Sequential server-side credential ID
+        fetch(`${ACADEMY_API_BASE}/api/academy/generate-cert-id`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ type: 'hrm' })
+        }).then(r => r.json()).then(res => {
+          if (res.credentialId) document.getElementById('certCredId').value = res.credentialId;
+          updateCertPreview();
+        }).catch(() => {
+          document.getElementById('certCredId').value = "SHR-HRM-" + new Date().getFullYear() + "-" + Math.floor(1000 + Math.random() * 9000);
+          updateCertPreview();
+        });
       }
       updateCertPreview();
     }
@@ -2870,7 +2881,17 @@
       document.getElementById('certDuration').value = "3 Months Intensive Practical Immersion";
       document.getElementById('certGrade').value = "Outstanding Practical Performance";
       if (!document.getElementById('certCredId').value.includes('INT')) {
-        document.getElementById('certCredId').value = "SHR-INT-2026-" + Math.floor(1000 + Math.random() * 9000);
+        // Sequential server-side credential ID
+        fetch(`${ACADEMY_API_BASE}/api/academy/generate-cert-id`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ type: 'intern' })
+        }).then(r => r.json()).then(res => {
+          if (res.credentialId) document.getElementById('certCredId').value = res.credentialId;
+          updateCertPreview();
+        }).catch(() => {
+          document.getElementById('certCredId').value = "SHR-INT-" + new Date().getFullYear() + "-" + Math.floor(1000 + Math.random() * 9000);
+          updateCertPreview();
+        });
       }
       updateCertPreview();
     }
@@ -2894,9 +2915,23 @@
       updateReceiptPreview();
     }
 
-    function generateNewReceiptNo() {
-      const rand = Math.floor(1000 + Math.random() * 9000);
-      document.getElementById('recNo').value = `SHR-REC-2026-${rand}`;
+    async function generateNewReceiptNo() {
+      try {
+        const res = await fetch(`${ACADEMY_API_BASE}/api/academy/generate-student-id`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({})
+        }).then(r => r.json());
+        if (res.studentId) {
+          document.getElementById('studentId').value = res.studentId;
+        }
+      } catch(e) {
+        // Offline fallback — random ID
+        const rand = Math.floor(100 + Math.random() * 900);
+        document.getElementById('studentId').value = `SIMP-HR-${new Date().getFullYear()}-${rand}`;
+      }
+      // Also generate receipt number (sequential receipt suffix from student sequence)
+      const recRand = Math.floor(1000 + Math.random() * 9000);
+      document.getElementById('recNo').value = `SHR-REC-${new Date().getFullYear()}-${recRand}`;
       updateReceiptPreview();
     }
 
@@ -3011,10 +3046,25 @@
       document.getElementById('certPrRecipientName').style.fontSize = `${size}px`;
     }
 
-    function generateNewCertId() {
-      const prefix = currentMode === 'intern-cert' ? 'SHR-INT-2026-' : 'SHR-HRM-2026-';
+    async function generateNewCertId() {
+      const type = currentMode === 'intern-cert' ? 'intern' : 'hrm';
+      try {
+        const res = await fetch(`${ACADEMY_API_BASE}/api/academy/generate-cert-id`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ type })
+        }).then(r => r.json());
+        if (res.credentialId) {
+          document.getElementById('certCredId').value = res.credentialId;
+          updateCertPreview();
+          return;
+        }
+      } catch(e) {
+        console.warn('[Academy] Cert ID API fallback:', e);
+      }
+      // Offline fallback
+      const prefix = currentMode === 'intern-cert' ? 'SHR-INT-' : 'SHR-HRM-';
       const rand = Math.floor(1000 + Math.random() * 9000);
-      document.getElementById('certCredId').value = prefix + rand;
+      document.getElementById('certCredId').value = prefix + new Date().getFullYear() + '-' + rand;
       updateCertPreview();
     }
 
@@ -3318,7 +3368,7 @@
       }
     }
 
-    function enrollFromApplication(id) {
+    async function enrollFromApplication(id) {
       const leads = JSON.parse(localStorage.getItem('simpatico_enrollment_leads') || '[]');
       const lead = leads.find(l => l.id === id);
       if (!lead) return;
@@ -3338,9 +3388,22 @@
         }
       }
 
-      // Generate a new student ID
-      const rand = Math.floor(100 + Math.random() * 900);
-      document.getElementById('studentId').value = `SIMP-HR-2026-${rand}`;
+      // Generate a sequential student ID via server API
+      try {
+        const idRes = await fetch(`${ACADEMY_API_BASE}/api/academy/generate-student-id`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({})
+        }).then(r => r.json());
+        if (idRes.studentId) {
+          document.getElementById('studentId').value = idRes.studentId;
+        } else {
+          const rand = Math.floor(100 + Math.random() * 900);
+          document.getElementById('studentId').value = `SIMP-HR-${new Date().getFullYear()}-${rand}`;
+        }
+      } catch(e) {
+        const rand = Math.floor(100 + Math.random() * 900);
+        document.getElementById('studentId').value = `SIMP-HR-${new Date().getFullYear()}-${rand}`;
+      }
       generateNewReceiptNo();
 
       // Mark lead as Enrolled

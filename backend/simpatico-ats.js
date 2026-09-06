@@ -1515,6 +1515,10 @@ route("POST", "/api/interview/book-slot", handleBookSlot);
 route("POST", "/api/interview/save-result", handleInterviewSaveResult);
 route("GET",  "/api/interview/results", handleInterviewListResults);
 
+// ── Academy Sequential ID Generators ──
+route("POST", "/api/academy/generate-student-id", handleGenerateStudentId);
+route("POST", "/api/academy/generate-cert-id", handleGenerateCertId);
+
 route("POST", "/attendance/records/upsert", handleUpsertAttendance);
 
 // ── ImageKit Interview Recording ──
@@ -13130,6 +13134,52 @@ Return ONLY valid JSON (no markdown fences, no preamble):
     ],
     answers: perAnswerResults
   });
+}
+
+// ═══════════════════════════════════════════════════════════════
+// ACADEMY — Sequential Student ID & Certificate Credential ID
+// ═══════════════════════════════════════════════════════════════
+
+async function handleGenerateStudentId(request, env, ctx) {
+  if (!env.HR_KV) return apiResponse({ error: "KV not available" }, 500);
+  try {
+    const counterKey = "student_counter:global";
+    const currentCount = parseInt((await env.HR_KV.get(counterKey)) || "108", 10);
+    const nextCount = currentCount + 1;
+    await env.HR_KV.put(counterKey, String(nextCount));
+
+    const year = new Date().getFullYear();
+    const seqStr = String(nextCount).padStart(3, "0");
+    const studentId = `SIMP-HR-${year}-${seqStr}`;
+
+    return apiResponse({ success: true, studentId, sequence: nextCount });
+  } catch (err) {
+    console.warn("[Academy] Student ID generation error:", err.message);
+    return apiResponse({ error: err.message }, 500);
+  }
+}
+
+async function handleGenerateCertId(request, env, ctx) {
+  if (!env.HR_KV) return apiResponse({ error: "KV not available" }, 500);
+  try {
+    const body = (await safeJson(request)) || {};
+    const type = (body.type || "hrm").toLowerCase();
+    const prefix = type === "intern" ? "SHR-INT" : "SHR-HRM";
+
+    const counterKey = "academy_cert_counter:global";
+    const currentCount = parseInt((await env.HR_KV.get(counterKey)) || "0", 10);
+    const nextCount = currentCount + 1;
+    await env.HR_KV.put(counterKey, String(nextCount));
+
+    const year = new Date().getFullYear();
+    const seqStr = String(nextCount).padStart(5, "0");
+    const credentialId = `${prefix}-${year}-${seqStr}`;
+
+    return apiResponse({ success: true, credentialId, sequence: nextCount });
+  } catch (err) {
+    console.warn("[Academy] Cert ID generation error:", err.message);
+    return apiResponse({ error: err.message }, 500);
+  }
 }
 
 async function handleInterviewSaveResult(request, env, ctx) {
