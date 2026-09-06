@@ -13168,7 +13168,7 @@ async function handleGenerateCertId(request, env, ctx) {
   try {
     const body = (await safeJson(request)) || {};
     const type = (body.type || "hrm").toLowerCase();
-    const prefix = type === "intern" ? "SHR-INT" : "SHR-HRM";
+    const prefix = type === "intern" ? "SHR-INT" : (type === "exp" || type === "recruiter" ? "SHR-EXP" : "SHR-HRM");
 
     const counterKey = "academy_cert_counter:global";
     const currentCount = parseInt((await env.HR_KV.get(counterKey)) || "0", 10);
