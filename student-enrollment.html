@@ -943,7 +943,7 @@ document.getElementById('studentProgram').addEventListener('change', function() 
 });
 
 // ── Form submission → WhatsApp
-function handleEnrollment(e) {
+async function handleEnrollment(e) {
   e.preventDefault();
 
   const name = document.getElementById('studentName').value.trim();
@@ -989,14 +989,24 @@ function handleEnrollment(e) {
 
     // Persist application to server-side backend (Cloudflare KV)
     try {
-      fetch('https://simpatico-hr-ats.simpaticohrconsultancy.workers.dev/api/academy/submit-application', {
+      const syncPromise = fetch('https://simpatico-hr-ats.simpaticohrconsultancy.workers.dev/api/academy/submit-application', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newLead)
+        body: JSON.stringify(newLead),
+        keepalive: true
       }).then(r => r.json()).then(res => {
-        if (res.success) console.log('[Enrollment] Application saved server-side:', res.id);
+        const savedId = res?.id || res?.data?.id;
+        if (res?.success || savedId) console.log('[Enrollment] Application saved server-side:', savedId || newLead.id);
       }).catch(e => console.warn('[Enrollment] Server sync note:', e));
-    } catch (fetchErr) {}
+
+      // Await server sync up to 2.5 seconds before opening WhatsApp
+      await Promise.race([
+        syncPromise,
+        new Promise(resolve => setTimeout(resolve, 2500))
+      ]);
+    } catch (fetchErr) {
+      console.warn('[Enrollment] Server sync error:', fetchErr);
+    }
   } catch (err) {
     console.warn('Local lead persistence error:', err);
   }
