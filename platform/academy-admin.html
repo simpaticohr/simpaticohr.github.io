@@ -2737,6 +2737,36 @@
     let currentFont = 'Great Vibes';
     let currentZoom = 1.0;
     const ACADEMY_API_BASE = 'https://simpatico-hr-ats.simpaticohrconsultancy.workers.dev';
+    let serverCandidates = []; // Candidates fetched from backend KV
+
+    // Purge outdated test/fake application records from localStorage
+    function purgeFakeApplications() {
+      try {
+        let leads = JSON.parse(localStorage.getItem('simpatico_enrollment_leads') || '[]');
+        const fakeIds = ['APP-9281', 'APP-9240', 'APP-9180'];
+        const fakeNames = ['Farhan K. P.', 'Sneha Varghese', 'Mohammed Basil', 'Aiswarya Rajeev', 'Nikhil Thomas', 'Shahana Shireen', 'Arjun K. V.'];
+        const cleaned = leads.filter(l => !fakeIds.includes(l.id) && !fakeNames.includes(l.name));
+        if (cleaned.length !== leads.length) {
+          localStorage.setItem('simpatico_enrollment_leads', JSON.stringify(cleaned));
+        }
+      } catch(e) {}
+    }
+
+    // Fetch candidates from server-side backend (Cloudflare KV)
+    async function fetchServerCandidates() {
+      try {
+        const res = await fetch(`${ACADEMY_API_BASE}/api/academy/list-students`);
+        const data = await res.json();
+        if (data.success && Array.isArray(data.candidates)) {
+          serverCandidates = data.candidates;
+          console.log('[Academy] Fetched', serverCandidates.length, 'candidates from server');
+          return serverCandidates;
+        }
+      } catch (err) {
+        console.warn('[Academy] Server fetch note:', err.message);
+      }
+      return [];
+    }
 
     // Default Seed Registry in localStorage if empty
     const DEFAULT_REGISTRY = [
@@ -2830,6 +2860,12 @@
       renderApplicationsTable();
       updateAppsBadge();
       loadFacultyBroadcastState();
+
+      // Fetch candidates from server and re-render
+      fetchServerCandidates().then(() => {
+        renderApplicationsTable();
+        updateAppsBadge();
+      });
 
       // Cross-tab real-time sync for applications & enrollments
       try {
@@ -3577,6 +3613,30 @@
         }
       });
 
+      // Merge server-side candidates from Cloudflare KV backend
+      if (serverCandidates && serverCandidates.length > 0) {
+        serverCandidates.forEach(sc => {
+          const scName = (sc.name || '').toLowerCase().trim();
+          if (scName && !leads.some(l => l.name.toLowerCase().trim() === scName)) {
+            leads.push({
+              id: sc.id || ('APP-SRV-' + Date.now().toString().slice(-5)),
+              studentId: sc.studentId || '',
+              name: sc.name,
+              phone: sc.phone || '',
+              email: sc.email || '',
+              qualification: sc.qualification || 'Graduate',
+              age: sc.age || '—',
+              program: sc.program || sc.course || 'Executive International HRM',
+              mode: sc.mode || 'Campus / Virtual',
+              location: sc.location || 'Perinthalmanna, Kerala',
+              date: sc.date || sc.enrolledAt || new Date().toISOString(),
+              status: sc.status || (sc.active ? 'Enrolled' : 'New'),
+              receiptId: sc.receiptId || ''
+            });
+          }
+        });
+      }
+
       // Synchronize students who have issued records in simpatico_academy_registry
       const registry = JSON.parse(localStorage.getItem('simpatico_academy_registry') || '[]');
       registry.forEach(r => {
@@ -3755,10 +3815,18 @@
       renderApplicationsTable(val);
     }
 
-    function syncAndRefreshCandidates() {
+    async function syncAndRefreshCandidates() {
+      const btn = event?.target?.closest?.('button');
+      if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Syncing...'; }
+
+      // Fetch latest from server
+      await fetchServerCandidates();
       renderApplicationsTable(document.getElementById('appsSearchInput')?.value || '');
       renderRegistryTable();
-      showToast('✅ Candidate directory synchronized with Academy Registry!');
+      updateAppsBadge();
+
+      if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-sync"></i> Refresh'; }
+      showToast(`✅ Synced ${serverCandidates.length} candidates from server + local registry!`);
     }
 
     function updateLeadStatus(id, newStatus) {

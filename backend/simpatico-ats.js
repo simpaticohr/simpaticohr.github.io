@@ -1522,6 +1522,8 @@ route("POST", "/api/academy/generate-cert-id", handleGenerateCertId);
 // ── Academy Student Enrollment & Verification ──
 route("POST", "/api/academy/enroll-student", handleEnrollStudent);
 route("POST", "/api/academy/verify-student", handleVerifyStudent);
+route("GET",  "/api/academy/list-students", handleListStudents);
+route("POST", "/api/academy/submit-application", handleSubmitApplication);
 
 route("POST", "/attendance/records/upsert", handleUpsertAttendance);
 
@@ -13291,6 +13293,89 @@ async function handleVerifyStudent(request, env, ctx) {
   } catch (err) {
     console.warn("[Academy] Verify student error:", err.message);
     return apiResponse({ verified: false, error: err.message }, 500);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// ACADEMY — List Enrolled Students & Applications (server-side)
+// ═══════════════════════════════════════════════════════════════
+
+async function handleListStudents(request, env, ctx) {
+  if (!env.HR_KV) return apiResponse({ error: "KV not available" }, 500);
+  try {
+    // Fetch enrolled students list
+    const enrolled = (await env.HR_KV.get("academy_enrolled_list", { type: "json" })) || [];
+
+    // Fetch pending applications
+    const applications = (await env.HR_KV.get("academy_applications_list", { type: "json" })) || [];
+
+    // Merge: enrolled students first, then applications (avoid duplicates by name)
+    const seen = new Set();
+    const merged = [];
+    for (const s of enrolled) {
+      const key = (s.name || "").toLowerCase().trim();
+      if (key && !seen.has(key)) {
+        seen.add(key);
+        merged.push({ ...s, status: s.status || "Enrolled" });
+      }
+    }
+    for (const a of applications) {
+      const key = (a.name || "").toLowerCase().trim();
+      if (key && !seen.has(key)) {
+        seen.add(key);
+        merged.push(a);
+      }
+    }
+
+    return apiResponse({ success: true, candidates: merged, total: merged.length });
+  } catch (err) {
+    console.warn("[Academy] List students error:", err.message);
+    return apiResponse({ error: err.message }, 500);
+  }
+}
+
+async function handleSubmitApplication(request, env, ctx) {
+  if (!env.HR_KV) return apiResponse({ error: "KV not available" }, 500);
+  const body = (await safeJson(request)) || {};
+  const { name, phone, email, age, qualification, program, mode, location, message } = body;
+  if (!name || !phone) return apiResponse({ error: "name and phone are required" }, 400);
+
+  try {
+    const appId = "APP-" + Date.now().toString().slice(-6);
+    const record = {
+      id: appId,
+      name,
+      phone: phone || "",
+      email: (email || "N/A").toLowerCase(),
+      age: age || "N/A",
+      qualification: qualification || "Graduate",
+      program: program || "",
+      mode: mode || "",
+      location: location || "Perinthalmanna / Kerala",
+      message: message || "",
+      date: new Date().toISOString(),
+      status: "New"
+    };
+
+    // Append to applications list in KV
+    const listKey = "academy_applications_list";
+    const rawList = (await env.HR_KV.get(listKey, { type: "json" })) || [];
+
+    // Avoid duplicates by name+phone
+    const cleanPhone = (phone || "").replace(/[^0-9]/g, "").slice(-10);
+    const exists = rawList.some(a => {
+      const aPhone = (a.phone || "").replace(/[^0-9]/g, "").slice(-10);
+      return a.name.toLowerCase() === name.toLowerCase() && aPhone === cleanPhone;
+    });
+    if (!exists) {
+      rawList.unshift(record);
+      await env.HR_KV.put(listKey, JSON.stringify(rawList.slice(0, 500)), { expirationTtl: 730 * 86400 });
+    }
+
+    return apiResponse({ success: true, id: appId, name });
+  } catch (err) {
+    console.warn("[Academy] Submit application error:", err.message);
+    return apiResponse({ error: err.message }, 500);
   }
 }
 
