@@ -13280,6 +13280,28 @@ async function handleVerifyStudent(request, env, ctx) {
       }
     }
 
+    // 4. Try scanning enrolled students list (handles receipt IDs, flexible phone formats, etc.)
+    if (!studentRecord) {
+      const enrolledList = (await env.HR_KV.get("academy_enrolled_list", { type: "json" })) || [];
+      const cleanInput = input.toLowerCase().replace(/[^a-z0-9]/g, "");
+      const cleanPhone = input.replace(/[^0-9]/g, "").slice(-10);
+      for (const s of enrolledList) {
+        const sId = (s.studentId || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+        const sPhone = (s.phone || "").replace(/[^0-9]/g, "").slice(-10);
+        const sEmail = (s.email || "").toLowerCase();
+        const sName = (s.name || "").toLowerCase();
+        if (
+          (sId && (sId === cleanInput || (cleanInput.length >= 4 && sId.includes(cleanInput)))) ||
+          (cleanPhone.length >= 10 && sPhone === cleanPhone) ||
+          (sEmail && sEmail === input.toLowerCase()) ||
+          (cleanInput.length >= 5 && sName.replace(/[^a-z0-9]/g, "").includes(cleanInput))
+        ) {
+          studentRecord = s;
+          break;
+        }
+      }
+    }
+
     if (studentRecord) {
       return apiResponse({
         verified: true,
