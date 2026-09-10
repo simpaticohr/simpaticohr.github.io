@@ -13203,21 +13203,30 @@ async function handleEnrollStudent(request, env, ctx) {
   try {
     // Auto-generate memorable secure student password if not explicitly provided
     // Candidates/students must NEVER use or share admin passcodes
-    let password = (body.password || "").trim();
+    let existingRecord = null;
+    try {
+      existingRecord = await env.HR_KV.get(`student:${studentId}`, { type: "json" });
+    } catch(e) {}
+
+    let password = (body.password || "").trim() || (existingRecord && existingRecord.password);
     if (!password) {
       const randDigits = Math.floor(1000 + Math.random() * 9000);
       password = `Student#${randDigits}`;
     }
 
+    const isActive = body.active !== undefined ? Boolean(body.active) : (body.status === "Dropped" || body.status === "Suspended" ? false : true);
+    const statusVal = body.status || (isActive ? "Enrolled" : "Dropped");
+
     const record = {
       studentId,
       name,
-      phone: phone || "",
-      email: (email || "").toLowerCase(),
-      course: course || "",
+      phone: phone || (existingRecord && existingRecord.phone) || "",
+      email: (email || (existingRecord && existingRecord.email) || "").toLowerCase(),
+      course: course || (existingRecord && existingRecord.course) || "",
       password,
-      enrolledAt: new Date().toISOString(),
-      active: true
+      enrolledAt: (existingRecord && existingRecord.enrolledAt) || new Date().toISOString(),
+      active: isActive,
+      status: statusVal
     };
 
     // Store by studentId (primary key)
@@ -13247,7 +13256,7 @@ async function handleEnrollStudent(request, env, ctx) {
     }
     await env.HR_KV.put(listKey, JSON.stringify(rawList.slice(0, 500)), { expirationTtl: 730 * 86400 });
 
-    return apiResponse({ success: true, studentId, name, password });
+    return apiResponse({ success: true, studentId, name, password, active: isActive, status: statusVal });
   } catch (err) {
     console.warn("[Academy] Enroll student error:", err.message);
     return apiResponse({ error: err.message }, 500);
@@ -13269,7 +13278,14 @@ async function handleVerifyStudent(request, env, ctx) {
 
     // 1. Try direct student ID lookup in KV
     const byId = await env.HR_KV.get(`student:${input}`, { type: "json" });
-    if (byId && byId.active) {
+    if (byId) {
+      if (byId.active === false || byId.status === "Dropped" || byId.status === "Suspended") {
+        return apiResponse({
+          verified: false,
+          suspended: true,
+          error: "Access Suspended: This student enrollment is no longer active. Please contact Academy Administration."
+        }, 403);
+      }
       studentRecord = byId;
     }
 
@@ -13280,6 +13296,13 @@ async function handleVerifyStudent(request, env, ctx) {
       for (const s of enrolledList) {
         const sId = (s.studentId || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
         if (sId && sId === cleanInput) {
+          if (s.active === false || s.status === "Dropped" || s.status === "Suspended") {
+            return apiResponse({
+              verified: false,
+              suspended: true,
+              error: "Access Suspended: This student enrollment is no longer active. Please contact Academy Administration."
+            }, 403);
+          }
           studentRecord = s;
           break;
         }
@@ -13323,6 +13346,7 @@ async function handleVerifyStudent(request, env, ctx) {
         studentId: studentRecord.studentId,
         name: studentRecord.name,
         course: studentRecord.course,
+        status: studentRecord.status || "Enrolled",
         completedSessions,
         currentSession
       });

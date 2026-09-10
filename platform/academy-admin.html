@@ -2412,6 +2412,12 @@
             <button class="tab-btn" id="filterTabEnrolled" onclick="setCandidateFilter('Enrolled')" style="border: 1px solid rgba(16,185,129,0.35);">
               <i class="fas fa-check-circle" style="color: #10B981;"></i> Enrolled Candidates <span id="countPillEnrolled" style="background: rgba(16,185,129,0.2); color: #10B981; padding: 2px 7px; border-radius: 10px; font-size: 11px; margin-left: 4px; font-weight: 700;">0</span>
             </button>
+            <button class="tab-btn" id="filterTabCompleted" onclick="setCandidateFilter('Completed')" style="border: 1px solid rgba(59,130,246,0.35);">
+              <i class="fas fa-graduation-cap" style="color: #60A5FA;"></i> Completed / Alumni <span id="countPillCompleted" style="background: rgba(59,130,246,0.2); color: #93C5FD; padding: 2px 7px; border-radius: 10px; font-size: 11px; margin-left: 4px; font-weight: 700;">0</span>
+            </button>
+            <button class="tab-btn" id="filterTabDropped" onclick="setCandidateFilter('Dropped')" style="border: 1px solid rgba(239,68,68,0.35);">
+              <i class="fas fa-ban" style="color: #EF4444;"></i> Dropped / Suspended <span id="countPillDropped" style="background: rgba(239,68,68,0.2); color: #FCA5A5; padding: 2px 7px; border-radius: 10px; font-size: 11px; margin-left: 4px; font-weight: 700;">0</span>
+            </button>
             <button class="tab-btn" id="filterTabNew" onclick="setCandidateFilter('New')">
               <i class="fas fa-inbox" style="color: #EF4444;"></i> New Applications <span id="countPillNew" style="background: rgba(239,68,68,0.2); color: #F87171; padding: 2px 7px; border-radius: 10px; font-size: 11px; margin-left: 4px; font-weight: 700;">0</span>
             </button>
@@ -3715,14 +3721,59 @@
         if (currentMode === 'intern-cert') certTypeTitle = 'Intern Certificate';
         else if (currentMode === 'exp-cert') certTypeTitle = 'Experience Certificate';
 
+        const candStudentId = document.getElementById('certCandidateId')?.value || '';
+        const candName = document.getElementById('certCandidateName').value;
+
         newEntry = {
-          type: certTypeTitle,
+          type: 'Certificate',
+          certType: certTypeTitle,
           id: document.getElementById('certCredId').value,
-          student: document.getElementById('certCandidateName').value,
+          studentId: candStudentId,
+          student: candName,
           title: document.getElementById('certTitle').value,
+          specialization: document.getElementById('certSpecialization')?.value || '',
+          citation: document.getElementById('certCitation')?.value || '',
+          signatory: document.getElementById('sig1Name')?.value || 'Faisal KVN',
+          signatoryTitle: document.getElementById('sig1Title')?.value || 'Founder & Managing Director',
           amount: 0,
-          date: document.getElementById('certDate').value
+          date: document.getElementById('certDate').value,
+          status: 'Completed'
         };
+
+        // If issued to a registered student, elevate their status to Completed (Alumni)
+        if (candStudentId) {
+          try {
+            const studentsMap = JSON.parse(localStorage.getItem('simpatico_enrolled_students') || '{}');
+            const key = candStudentId.toUpperCase();
+            if (!studentsMap[key]) studentsMap[key] = { id: candStudentId, name: candName };
+            studentsMap[key].status = 'Completed';
+            studentsMap[key].active = true;
+            studentsMap[key].certificateId = newEntry.id;
+            studentsMap[key].certificateTitle = newEntry.title;
+            studentsMap[key].completedAt = new Date().toISOString();
+            localStorage.setItem('simpatico_enrolled_students', JSON.stringify(studentsMap));
+          } catch(e) {}
+
+          const leads = JSON.parse(localStorage.getItem('simpatico_enrollment_leads') || '[]');
+          const matchLead = leads.find(l => (l.studentId && l.studentId.toUpperCase() === candStudentId.toUpperCase()) || (l.name && l.name.toLowerCase() === candName.toLowerCase()));
+          if (matchLead) {
+            matchLead.status = 'Completed';
+            matchLead.certificateId = newEntry.id;
+            localStorage.setItem('simpatico_enrollment_leads', JSON.stringify(leads));
+          }
+
+          // Sync to Cloudflare KV
+          fetch(`${ACADEMY_API_BASE}/api/academy/enroll-student`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              studentId: candStudentId,
+              name: candName,
+              active: true,
+              status: 'Completed'
+            })
+          }).catch(() => {});
+        }
       }
 
       records.unshift(newEntry);
@@ -3979,21 +4030,25 @@
       // Compute status counts for filter pills
       const countTotal = allCandidates.filter(c => c.status !== 'Archived').length;
       const countEnrolled = allCandidates.filter(c => c.status === 'Enrolled').length;
+      const countCompleted = allCandidates.filter(c => c.status === 'Completed').length;
+      const countDropped = allCandidates.filter(c => c.status === 'Dropped').length;
       const countNew = allCandidates.filter(c => c.status === 'New').length;
       const countContacted = allCandidates.filter(c => c.status === 'Contacted').length;
       const countArchived = allCandidates.filter(c => c.status === 'Archived').length;
 
-      document.getElementById('countPillAll').textContent = countTotal;
-      document.getElementById('countPillEnrolled').textContent = countEnrolled;
-      document.getElementById('countPillNew').textContent = countNew;
-      document.getElementById('countPillContacted').textContent = countContacted;
-      document.getElementById('countPillArchived').textContent = countArchived;
+      if (document.getElementById('countPillAll')) document.getElementById('countPillAll').textContent = countTotal;
+      if (document.getElementById('countPillEnrolled')) document.getElementById('countPillEnrolled').textContent = countEnrolled;
+      if (document.getElementById('countPillCompleted')) document.getElementById('countPillCompleted').textContent = countCompleted;
+      if (document.getElementById('countPillDropped')) document.getElementById('countPillDropped').textContent = countDropped;
+      if (document.getElementById('countPillNew')) document.getElementById('countPillNew').textContent = countNew;
+      if (document.getElementById('countPillContacted')) document.getElementById('countPillContacted').textContent = countContacted;
+      if (document.getElementById('countPillArchived')) document.getElementById('countPillArchived').textContent = countArchived;
 
       // Update header badge
       const badge = document.getElementById('appsBadge');
       if (badge) {
         if (countNew > 0) {
-          badge.textContent = `${countEnrolled} (${countNew} new)`;
+          badge.textContent = `${countEnrolled} enrolled (${countNew} new)`;
           badge.style.background = '#EF4444';
         } else {
           badge.textContent = `${countEnrolled} enrolled`;
@@ -4034,6 +4089,12 @@
           emptyTitle = 'No Enrolled Candidates Found';
           emptyDesc = 'Convert applicants to enrolled students or click Quick Enroll to issue a fee receipt.';
           actionBtn = `<button class="btn-action btn-gold" onclick="switchStudioMode('receipt')" style="margin-top:10px;"><i class="fas fa-plus"></i> + Quick Enroll Student</button>`;
+        } else if (activeCandidateFilter === 'Completed') {
+          emptyTitle = 'No Completed Alumni Yet';
+          emptyDesc = 'Students who finish the program can be set to Completed to award alumni credentials.';
+        } else if (activeCandidateFilter === 'Dropped') {
+          emptyTitle = 'No Dropped Students';
+          emptyDesc = 'No student enrollments are currently suspended or marked as dropped.';
         }
 
         tbody.innerHTML = `
@@ -4055,8 +4116,13 @@
 
       filtered.forEach((l) => {
         const tr = document.createElement('tr');
-        const isEnrolled = l.status === 'Enrolled';
-        const stColor = isEnrolled ? '#10B981' : (l.status === 'Contacted' ? '#F59E0B' : (l.status === 'New' ? '#EF4444' : '#64748B'));
+        const isEnrolled = l.status === 'Enrolled' || l.status === 'Completed' || l.status === 'Dropped';
+        let stColor = '#64748B';
+        if (l.status === 'Enrolled') stColor = '#10B981';
+        else if (l.status === 'Completed') stColor = '#3B82F6';
+        else if (l.status === 'Dropped') stColor = '#EF4444';
+        else if (l.status === 'New') stColor = '#EF4444';
+        else if (l.status === 'Contacted') stColor = '#F59E0B';
 
         // Student ID badge
         const studentIdBadge = l.studentId 
@@ -4065,6 +4131,15 @@
         const passwordBadge = (isEnrolled && l.password)
           ? `<span title="Student Portal Password" style="display:inline-block; font-family:monospace; font-size:10px; background:rgba(245,158,11,0.12); border:1px solid rgba(245,158,11,0.3); color:#F59E0B; padding:1px 6px; border-radius:4px; font-weight:700; margin-left:4px;"><i class="fas fa-key" style="font-size:8.5px; margin-right:2px;"></i>${l.password}</span>`
           : '';
+
+        let statusSubtext = '';
+        if (l.status === 'Enrolled') {
+          statusSubtext = '<div style="font-size:10.5px; color:#10B981;"><i class="fas fa-check-circle"></i> Active Cohort Student</div>';
+        } else if (l.status === 'Completed') {
+          statusSubtext = '<div style="font-size:10.5px; color:#60A5FA; font-weight:700;"><i class="fas fa-graduation-cap"></i> Program Graduate (Alumni)</div>';
+        } else if (l.status === 'Dropped') {
+          statusSubtext = '<div style="font-size:10.5px; color:#EF4444; font-weight:700;"><i class="fas fa-ban"></i> Access Suspended (Dropped)</div>';
+        }
 
         tr.innerHTML = `
           <td>
@@ -4081,7 +4156,7 @@
           </td>
           <td>
             <strong style="color:var(--gold-light); font-size:12.5px;">${l.program}</strong>
-            ${isEnrolled ? '<div style="font-size:10.5px; color:#10B981;"><i class="fas fa-check-circle"></i> Active Cohort Student</div>' : ''}
+            ${statusSubtext}
           </td>
           <td>
             <div style="font-size:12px; color:#E2E8F0;">${l.mode || 'Campus / Virtual'}</div>
@@ -4089,7 +4164,9 @@
           </td>
           <td>
             <select onchange="updateLeadStatus('${l.id}', this.value)" style="background:${stColor}22; color:${stColor}; border:1px solid ${stColor}66; padding:4px 8px; border-radius:6px; font-weight:700; font-size:11px; outline:none; cursor:pointer;">
-              <option value="Enrolled" ${l.status === 'Enrolled' ? 'selected' : ''} style="background:#131D31; color:#10B981;">🟢 Enrolled</option>
+              <option value="Enrolled" ${l.status === 'Enrolled' ? 'selected' : ''} style="background:#131D31; color:#10B981;">🟢 Enrolled (Active)</option>
+              <option value="Completed" ${l.status === 'Completed' ? 'selected' : ''} style="background:#131D31; color:#60A5FA;">🎓 Completed (Alumni)</option>
+              <option value="Dropped" ${l.status === 'Dropped' ? 'selected' : ''} style="background:#131D31; color:#F87171;">⛔ Dropped (Suspended)</option>
               <option value="New" ${l.status === 'New' ? 'selected' : ''} style="background:#131D31; color:#EF4444;">🔴 New Lead</option>
               <option value="Contacted" ${l.status === 'Contacted' ? 'selected' : ''} style="background:#131D31; color:#F59E0B;">🟡 Contacted</option>
               <option value="Archived" ${l.status === 'Archived' ? 'selected' : ''} style="background:#131D31; color:#64748B;">⚪ Archived</option>
@@ -4142,14 +4219,69 @@
       showToast(`✅ Synced ${serverCandidates.length} candidates from server + local registry!`);
     }
 
-    function updateLeadStatus(id, newStatus) {
+    async function updateLeadStatus(id, newStatus) {
       const leads = JSON.parse(localStorage.getItem('simpatico_enrollment_leads') || '[]');
       const lead = leads.find(l => l.id === id);
       if (lead) {
         lead.status = newStatus;
         localStorage.setItem('simpatico_enrollment_leads', JSON.stringify(leads));
+
+        const studentId = lead.studentId || (lead.id && lead.id.startsWith('SIMP-') ? lead.id : '');
+        const isActive = (newStatus !== 'Dropped' && newStatus !== 'Archived');
+
+        // Update local enrolled students map
+        try {
+          const studentsMap = JSON.parse(localStorage.getItem('simpatico_enrolled_students') || '{}');
+          const studentKey = (studentId || lead.name).toUpperCase();
+          if (studentsMap[studentKey] || studentId) {
+            if (!studentsMap[studentKey]) studentsMap[studentKey] = { id: studentId, name: lead.name };
+            studentsMap[studentKey].status = newStatus;
+            studentsMap[studentKey].active = isActive;
+            localStorage.setItem('simpatico_enrolled_students', JSON.stringify(studentsMap));
+          }
+        } catch(e) {}
+
+        // Update local registry
+        try {
+          const registry = JSON.parse(localStorage.getItem('simpatico_academy_registry') || '[]');
+          let regChanged = false;
+          registry.forEach(r => {
+            if ((studentId && (r.studentId === studentId || r.id === studentId)) || (r.student && r.student.toLowerCase() === lead.name.toLowerCase())) {
+              r.status = newStatus;
+              r.active = isActive;
+              regChanged = true;
+            }
+          });
+          if (regChanged) localStorage.setItem('simpatico_academy_registry', JSON.stringify(registry));
+        } catch(e) {}
+
+        // Sync with Cloudflare KV in background
+        if (studentId) {
+          try {
+            fetch(`${ACADEMY_API_BASE}/api/academy/enroll-student`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                studentId: studentId,
+                name: lead.name,
+                phone: lead.phone || '',
+                email: lead.email || '',
+                course: lead.program || '5-Month Executive International HRM Program',
+                active: isActive,
+                status: newStatus
+              })
+            }).catch(() => {});
+          } catch(e) {}
+        }
+
         renderApplicationsTable(document.getElementById('appsSearchInput')?.value || '');
-        showToast(`Candidate ${lead.name} status updated to ${newStatus}`);
+        if (newStatus === 'Dropped') {
+          showToast(`⛔ Access Suspended: ${lead.name} marked as Dropped. Portal login revoked.`);
+        } else if (newStatus === 'Completed') {
+          showToast(`🎓 Program Completed: ${lead.name} marked as Alumni! You can now issue their Certificate.`);
+        } else {
+          showToast(`Candidate ${lead.name} status updated to ${newStatus}`);
+        }
       }
     }
 
