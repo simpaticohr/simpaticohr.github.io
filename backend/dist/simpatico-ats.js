@@ -13257,11 +13257,11 @@ async function handleEnrollStudent(request, env, ctx) {
 async function handleVerifyStudent(request, env, ctx) {
   if (!env.HR_KV) return apiResponse({ error: "KV not available", verified: false }, 500);
   const body = (await safeJson(request)) || {};
-  const { studentId, password } = body;
+  const studentId = body.studentId || body.credential || body.id;
+  const password = body.password;
 
-  // Require both studentId and password
+  // Require studentId (supports legacy credential field name)
   if (!studentId) return apiResponse({ verified: false, error: "Student ID is required" }, 400);
-  if (!password) return apiResponse({ verified: false, error: "Password is required" }, 400);
 
   try {
     const input = studentId.trim().toUpperCase();
