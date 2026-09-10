@@ -3461,13 +3461,6 @@ async function initApp() {
     }
     window._lastLoadedStorageKey = currentStorageKey;
 
-    // Verify local DataStore matches current tenant_id; if mismatch, re-initialize
-    const currentStorageKey = DataStore._storageKey;
-    if (window._lastLoadedStorageKey && window._lastLoadedStorageKey !== currentStorageKey) {
-        console.log('[init] Tenant storage key changed — refreshing appData cache');
-    }
-    window._lastLoadedStorageKey = currentStorageKey;
-
     // Initialize local session data from the REAL logged-in user
     DataStore.update(data => { 
         data.user.isLoggedIn = true; 
@@ -4335,11 +4328,66 @@ function scopeRules(css, scope) {
     });
 }
 
+function renderModuleFrame(container, sectionId, href) {
+    const frameId = `frame-${sectionId}`;
+    container.innerHTML = `
+        <div id="loading-${sectionId}" style="display:flex;justify-content:center;align-items:center;height:300px;background:white;border-radius:12px;">
+            <div class="text-center" style="text-align:center;">
+                <i class="fas fa-circle-notch fa-spin mb-3" style="font-size:2.5rem;color:var(--primary);margin-bottom:12px;"></i>
+                <div style="font-weight:600;color:var(--text-secondary);">Initializing SaaS Engine...</div>
+            </div>
+        </div>
+        <iframe id="${frameId}" src="${href}" 
+            style="width:100%; min-height:85vh; border:none; border-radius:12px; background:transparent; display:none;" 
+            loading="lazy">
+        </iframe>
+    `;
+    const iframe = document.getElementById(frameId);
+    const loader = document.getElementById(`loading-${sectionId}`);
+    if (iframe) {
+        iframe.onload = () => {
+            if (loader) loader.style.display = 'none';
+            iframe.style.display = 'block';
+            try {
+                const doc = iframe.contentDocument || iframe.contentWindow.document;
+                if (doc && doc.body) {
+                    doc.body.classList.add('emb');
+                    const syncHeight = () => {
+                        try {
+                            const h = doc.documentElement.scrollHeight || doc.body.scrollHeight;
+                            if (h && h > 400) {
+                                iframe.style.height = (h + 30) + 'px';
+                            }
+                        } catch(e) {}
+                    };
+                    syncHeight();
+                    setTimeout(syncHeight, 400);
+                    setTimeout(syncHeight, 1200);
+                }
+            } catch (e) {
+                // Cross-origin restriction (safe fallback: min-height 85vh already set)
+            }
+        };
+        iframe.onerror = () => {
+            if (loader) loader.style.display = 'none';
+            container.innerHTML = `<div style="padding:40px;text-align:center;color:var(--danger);">Failed to load module.</div>`;
+            loadedModules[sectionId] = false;
+        };
+    }
+}
+
 async function loadExternalModule(sectionId, href) {
     const container = document.getElementById(sectionId + '-module-container');
     if (!container || loadedModules[sectionId]) return;
     
     loadedModules[sectionId] = true;
+
+    // Direct iframe render for file:/// protocol (fetch is blocked by browser sandbox)
+    if (window.location.protocol === 'file:') {
+        renderModuleFrame(container, sectionId, href);
+        return;
+    }
+
     container.innerHTML = `
         <div id="loading-${sectionId}" style="display:flex;justify-content:center;align-items:center;height:400px;background:white;border-radius:12px;">
             <div class="text-center">
@@ -4474,9 +4522,14 @@ async function loadExternalModule(sectionId, href) {
         setTimeout(() => { window.dispatchEvent(new Event('SimpaticoSPA')); }, 150);
 
     } catch (error) {
-        console.error("Fetch Error:", error);
-        container.innerHTML = `<div style="padding:40px;text-align:center;color:var(--danger);">Failed to load module. Check console.</div>`;
-        loadedModules[sectionId] = false; 
+        console.warn(`[Module Loader] Fetch injection failed for ${sectionId}, falling back to iframe:`, error);
+        try {
+            renderModuleFrame(container, sectionId, href);
+        } catch (frameErr) {
+            console.error("Iframe fallback also failed:", frameErr);
+            container.innerHTML = `<div style="padding:40px;text-align:center;color:var(--danger);">Failed to load module. Check console.</div>`;
+            loadedModules[sectionId] = false; 
+        }
     }
 }
 

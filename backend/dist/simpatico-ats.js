@@ -1524,6 +1524,8 @@ route("POST", "/api/academy/enroll-student", handleEnrollStudent);
 route("POST", "/api/academy/verify-student", handleVerifyStudent);
 route("GET",  "/api/academy/list-students", handleListStudents);
 route("POST", "/api/academy/submit-application", handleSubmitApplication);
+route("POST", "/api/academy/save-progress", handleSaveProgress);
+route("POST", "/api/academy/reset-password", handleResetPassword);
 
 route("POST", "/attendance/records/upsert", handleUpsertAttendance);
 
@@ -13199,12 +13201,21 @@ async function handleEnrollStudent(request, env, ctx) {
   if (!studentId || !name) return apiResponse({ error: "studentId and name are required" }, 400);
 
   try {
+    // Auto-generate memorable secure student password if not explicitly provided
+    // Candidates/students must NEVER use or share admin passcodes
+    let password = (body.password || "").trim();
+    if (!password) {
+      const randDigits = Math.floor(1000 + Math.random() * 9000);
+      password = `Student#${randDigits}`;
+    }
+
     const record = {
       studentId,
       name,
       phone: phone || "",
       email: (email || "").toLowerCase(),
       course: course || "",
+      password,
       enrolledAt: new Date().toISOString(),
       active: true
     };
@@ -13236,7 +13247,7 @@ async function handleEnrollStudent(request, env, ctx) {
     }
     await env.HR_KV.put(listKey, JSON.stringify(rawList.slice(0, 500)), { expirationTtl: 730 * 86400 });
 
-    return apiResponse({ success: true, studentId, name });
+    return apiResponse({ success: true, studentId, name, password });
   } catch (err) {
     console.warn("[Academy] Enroll student error:", err.message);
     return apiResponse({ error: err.message }, 500);
@@ -13246,75 +13257,154 @@ async function handleEnrollStudent(request, env, ctx) {
 async function handleVerifyStudent(request, env, ctx) {
   if (!env.HR_KV) return apiResponse({ error: "KV not available", verified: false }, 500);
   const body = (await safeJson(request)) || {};
-  const { credential } = body;
-  if (!credential) return apiResponse({ verified: false, error: "No credential provided" }, 400);
+  const { studentId, password } = body;
+
+  // Require both studentId and password
+  if (!studentId) return apiResponse({ verified: false, error: "Student ID is required" }, 400);
+  if (!password) return apiResponse({ verified: false, error: "Password is required" }, 400);
 
   try {
-    const input = credential.trim();
+    const input = studentId.trim().toUpperCase();
     let studentRecord = null;
 
-    // 1. Try direct student ID lookup
-    const byId = await env.HR_KV.get(`student:${input.toUpperCase()}`, { type: "json" });
+    // 1. Try direct student ID lookup in KV
+    const byId = await env.HR_KV.get(`student:${input}`, { type: "json" });
     if (byId && byId.active) {
       studentRecord = byId;
     }
 
-    // 2. Try phone lookup (last 10 digits)
-    if (!studentRecord) {
-      const cleanPhone = input.replace(/[^0-9]/g, "").slice(-10);
-      if (cleanPhone.length >= 10) {
-        const idByPhone = await env.HR_KV.get(`student_phone:${cleanPhone}`);
-        if (idByPhone) {
-          studentRecord = await env.HR_KV.get(`student:${idByPhone}`, { type: "json" });
-          if (studentRecord && !studentRecord.active) studentRecord = null;
-        }
-      }
-    }
-
-    // 3. Try email lookup
-    if (!studentRecord) {
-      const idByEmail = await env.HR_KV.get(`student_email:${input.toLowerCase()}`);
-      if (idByEmail) {
-        studentRecord = await env.HR_KV.get(`student:${idByEmail}`, { type: "json" });
-        if (studentRecord && !studentRecord.active) studentRecord = null;
-      }
-    }
-
-    // 4. Try scanning enrolled students list (handles receipt IDs, flexible phone formats, etc.)
+    // 2. Fallback: scan enrolled students list (exact Student ID match only)
     if (!studentRecord) {
       const enrolledList = (await env.HR_KV.get("academy_enrolled_list", { type: "json" })) || [];
-      const cleanInput = input.toLowerCase().replace(/[^a-z0-9]/g, "");
-      const cleanPhone = input.replace(/[^0-9]/g, "").slice(-10);
+      const cleanInput = input.replace(/[^A-Z0-9]/g, "");
       for (const s of enrolledList) {
-        const sId = (s.studentId || "").toLowerCase().replace(/[^a-z0-9]/g, "");
-        const sPhone = (s.phone || "").replace(/[^0-9]/g, "").slice(-10);
-        const sEmail = (s.email || "").toLowerCase();
-        const sName = (s.name || "").toLowerCase();
-        if (
-          (sId && (sId === cleanInput || (cleanInput.length >= 4 && sId.includes(cleanInput)))) ||
-          (cleanPhone.length >= 10 && sPhone === cleanPhone) ||
-          (sEmail && sEmail === input.toLowerCase()) ||
-          (cleanInput.length >= 5 && sName.replace(/[^a-z0-9]/g, "").includes(cleanInput))
-        ) {
+        const sId = (s.studentId || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+        if (sId && sId === cleanInput) {
           studentRecord = s;
           break;
         }
       }
     }
 
+    // Verify password
     if (studentRecord) {
+      const storedPassword = (studentRecord.password || studentRecord.pw || "").trim();
+
+      // Legacy fallback: allow last 6 digits of registered phone number ONLY
+      // Candidate passwords are never permitted to match admin passcodes
+      const phoneDigits = (studentRecord.phone || "").replace(/[^0-9]/g, "").slice(-6);
+      const isLegacyPhoneMatch = !storedPassword && phoneDigits.length >= 6 && password === phoneDigits;
+
+      if (storedPassword ? (storedPassword !== password) : !isLegacyPhoneMatch) {
+        return apiResponse({ verified: false, error: "Invalid Student ID or password" });
+      }
+
+      // Upgrade legacy record with verified password for permanent persistence
+      if (!storedPassword && isLegacyPhoneMatch) {
+        studentRecord.password = password;
+        try {
+          await env.HR_KV.put(`student:${studentRecord.studentId}`, JSON.stringify(studentRecord), { expirationTtl: 730 * 86400 });
+        } catch (e) {}
+      }
+
+      // Load student progress from KV
+      let completedSessions = [];
+      let currentSession = 1;
+      try {
+        const progress = await env.HR_KV.get(`student_progress:${studentRecord.studentId}`, { type: "json" });
+        if (progress) {
+          completedSessions = progress.completedSessions || [];
+          currentSession = progress.currentSession || 1;
+        }
+      } catch (e) {}
+
       return apiResponse({
         verified: true,
         studentId: studentRecord.studentId,
         name: studentRecord.name,
-        course: studentRecord.course
+        course: studentRecord.course,
+        completedSessions,
+        currentSession
       });
     }
 
-    return apiResponse({ verified: false });
+    return apiResponse({ verified: false, error: "Invalid Student ID or password" });
   } catch (err) {
     console.warn("[Academy] Verify student error:", err.message);
     return apiResponse({ verified: false, error: err.message }, 500);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// ACADEMY — Save Student Curriculum Progress
+// ═══════════════════════════════════════════════════════════════
+
+async function handleSaveProgress(request, env, ctx) {
+  if (!env.HR_KV) return apiResponse({ error: "KV not available" }, 500);
+  const body = (await safeJson(request)) || {};
+  const { studentId, completedSessions, currentSession } = body;
+  if (!studentId) return apiResponse({ error: "studentId is required" }, 400);
+
+  try {
+    const progressKey = `student_progress:${studentId.trim().toUpperCase()}`;
+    const progress = {
+      completedSessions: Array.isArray(completedSessions) ? completedSessions : [],
+      currentSession: currentSession || 1,
+      updatedAt: new Date().toISOString()
+    };
+    await env.HR_KV.put(progressKey, JSON.stringify(progress), { expirationTtl: 730 * 86400 });
+    return apiResponse({ success: true });
+  } catch (err) {
+    console.warn("[Academy] Save progress error:", err.message);
+    return apiResponse({ error: err.message }, 500);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// ACADEMY — Reset or Update Student Password
+// ═══════════════════════════════════════════════════════════════
+
+async function handleResetPassword(request, env, ctx) {
+  if (!env.HR_KV) return apiResponse({ error: "KV not available" }, 500);
+  const body = (await safeJson(request)) || {};
+  const { studentId } = body;
+  let { password } = body;
+  if (!studentId) return apiResponse({ error: "studentId is required" }, 400);
+
+  try {
+    const input = studentId.trim().toUpperCase();
+    let studentRecord = await env.HR_KV.get(`student:${input}`, { type: "json" });
+
+    const listKey = "academy_enrolled_list";
+    const rawList = (await env.HR_KV.get(listKey, { type: "json" })) || [];
+    const idx = rawList.findIndex(s => (s.studentId || "").toUpperCase() === input);
+
+    if (!studentRecord && idx >= 0) {
+      studentRecord = rawList[idx];
+    }
+    if (!studentRecord) {
+      return apiResponse({ error: "Student not found" }, 404);
+    }
+
+    if (!password || !password.trim()) {
+      const randDigits = Math.floor(1000 + Math.random() * 9000);
+      password = `Student#${randDigits}`;
+    } else {
+      password = password.trim();
+    }
+
+    studentRecord.password = password;
+    await env.HR_KV.put(`student:${studentRecord.studentId}`, JSON.stringify(studentRecord), { expirationTtl: 730 * 86400 });
+
+    if (idx >= 0) {
+      rawList[idx].password = password;
+      await env.HR_KV.put(listKey, JSON.stringify(rawList.slice(0, 500)), { expirationTtl: 730 * 86400 });
+    }
+
+    return apiResponse({ success: true, studentId: studentRecord.studentId, password });
+  } catch (err) {
+    console.warn("[Academy] Reset password error:", err.message);
+    return apiResponse({ error: err.message }, 500);
   }
 }
 
