@@ -2661,7 +2661,7 @@
             <p>For fee verification or taxation inquiries, contact accounts@simpaticohr.in or call +91 95448 42260.</p>
           </div>
           <div class="sig-box">
-            <div class="sig-img" id="srModalSigImg" contenteditable="true" spellcheck="false" title="Click to edit signature">Faisal KVN</div>
+            <div class="sig-img" id="srModalSigImg" contenteditable="true" spellcheck="false" title="Click to edit signature">Faisal K</div>
             <div class="sig-line"></div>
             <div class="sig-title" id="srModalSigTitle" contenteditable="true" spellcheck="false" title="Click to edit title / designation">Founder &amp; Managing Director</div>
             <div class="sig-sub" id="srModalSigSub" contenteditable="true" spellcheck="false" title="Click to edit department / campus">Finance &amp; Academic Admissions</div>
@@ -2706,11 +2706,17 @@
             <div style="color: #059669; font-weight: 700; margin-top: 3px;"><i class="fas fa-shield-alt"></i> Officially Verified &amp; Registered</div>
           </div>
           <div style="text-align: center;">
-            <div style="font-family: 'Great Vibes', cursive, 'Brush Script MT'; font-size: 24px; color: #1E293B;" id="certModalSig">Faisal KVN</div>
+            <div style="font-family: 'Great Vibes', cursive, 'Brush Script MT'; font-size: 24px; color: #1E293B;" id="certModalSig">Faisal K</div>
             <div style="width: 150px; height: 1px; background: #0F172A; margin: 2px auto 4px;"></div>
             <div style="font-size: 11px; font-weight: 800; color: #0F172A;" id="certModalSigTitle">Founder &amp; Managing Director</div>
             <div style="font-size: 9.5px; color: #64748B;">Simpatico HR Academy, Perinthalmanna</div>
           </div>
+        </div>
+
+        <!-- Business Address -->
+        <div style="text-align: center; margin-top: 14px; padding-top: 8px; border-top: 1px solid #E2E8F0; font-size: 8.5px; color: #94A3B8; letter-spacing: 0.5px; text-transform: uppercase; line-height: 1.6;">
+          <i class="fas fa-map-marker-alt" style="color: #CBD5E1; margin-right: 3px;"></i>
+          Opp GMHSS, SMS Arcade, First Floor, Perinthalmanna — Pin 679322, Malappuram District, Kerala, India
         </div>
       </div>
 
@@ -5117,7 +5123,7 @@
       let certId = `SHR-HRM-${new Date().getFullYear()}-${activeStudent.id ? activeStudent.id.replace(/[^0-9]/g,'') : '8941'}`;
       let certTitle = 'Executive Diploma in International HRM';
       let certDate = new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
-      let signatory = 'Faisal KVN';
+      let signatory = 'Faisal K';
       let signatoryTitle = 'Founder & Managing Director';
 
       // Check registry for any issued certificate for this student
@@ -5410,7 +5416,7 @@
       if (el('srModalCalcBal')) el('srModalCalcBal').textContent = `₹${balance.toLocaleString('en-IN')}`;
 
       // Authorized Signatory population
-      if (el('srModalSigImg')) el('srModalSigImg').textContent = rec.signatory || 'Faisal KVN';
+      if (el('srModalSigImg')) el('srModalSigImg').textContent = rec.signatory || 'Faisal K';
       if (el('srModalSigTitle')) el('srModalSigTitle').textContent = rec.signatoryTitle || 'Founder & Managing Director';
       if (el('srModalSigSub')) el('srModalSigSub').textContent = rec.signatorySub || 'Finance & Academic Admissions';
     }
@@ -6173,7 +6179,7 @@
             utr: 'UPI/619283749102',
             dueDate: '2026-10-15',
             date: '2026-09-04',
-            signatory: 'Faisal KVN',
+            signatory: 'Faisal K',
             signatoryTitle: 'Founder & Managing Director',
             signatorySub: 'Simpatico HR Academy, Perinthalmanna'
           });
@@ -6271,10 +6277,17 @@
       btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Verifying...';
       btn.disabled = true;
 
+      // Strict password comparison helper — case-sensitive exact match only
+      function passwordMatches(storedPw, inputPw) {
+        if (!storedPw || !inputPw) return false;
+        return storedPw.trim() === inputPw.trim();
+      }
+
       try {
         let studentRecord = null;
+        let apiReachable = false;
 
-        // 1. Try server API verification (send studentId + credential for live Cloudflare worker compatibility)
+        // 1. Try server API verification (primary — strictest, admin-generated passwords in KV)
         try {
           const res = await fetch(`${STUDENT_API_BASE}/api/academy/verify-student`, {
             method: 'POST',
@@ -6285,6 +6298,7 @@
               password: password
             })
           });
+          apiReachable = true;
           const raw = await res.json();
           const data = (raw && raw.data) ? raw.data : raw;
           if (data && (data.suspended || (data.error && data.error.includes('Suspended')))) {
@@ -6295,12 +6309,21 @@
           if (data && data.verified && (data.studentId || data.id)) {
             studentRecord = data;
           }
+          // If API responded but did not verify, reject immediately (server is authoritative)
+          if (!studentRecord && data && data.error) {
+            err.textContent = data.error;
+            err.style.display = 'block';
+            return;
+          }
         } catch (apiErr) {
           console.warn('[Academy] API verification notice:', apiErr);
+          // API unreachable — allow offline fallbacks below
         }
 
-        // 2. Verified Demo Profiles (offline / fast fallback)
-        if (!studentRecord) {
+        // ── Offline fallbacks (only when server API is unreachable) ──
+
+        // 2. Demo Profiles — strict password match only
+        if (!studentRecord && !apiReachable) {
           const DEMO_ACADEMY_PROFILES = [
             { studentId: 'SIMP-HR-2026-108', name: 'Muhemmed Mishhab', password: 'Student#0108', course: '5-Month Executive International HRM Program' },
             { studentId: 'SIMP-HR-2026-119', name: 'Mohammed Mishhab P', password: 'Student#0119', course: '5-Month Executive International HRM Program' },
@@ -6309,50 +6332,22 @@
           ];
           const cleanInput = studentId.toUpperCase();
           const match = DEMO_ACADEMY_PROFILES.find(s => {
-            const idMatch = s.studentId.toUpperCase() === cleanInput ||
-                           (s.studentId.startsWith('SIMP-HR-') && (cleanInput === 'MISHHAB' || cleanInput === 'MUHEMMED'));
-            const pwMatch = !s.password || s.password === password || password === 'Student#0108' || password === 'mishhab@2026' || password === 'Student#2026';
-            return idMatch && pwMatch;
+            const idMatch = s.studentId.toUpperCase() === cleanInput;
+            return idMatch && passwordMatches(s.password, password);
           });
           if (match) {
             studentRecord = {
               verified: true,
               studentId: match.studentId,
               name: match.name,
-              password: match.password || password,
+              password: match.password,
               course: match.course
             };
           }
         }
 
-        // 2b. Sequential ID fallback (e.g. SIMP-HR-2026-124 generated by Academy Admin)
-        if (!studentRecord && /^SIMP-HR-2026-\d+$/i.test(studentId)) {
-          const seqMatch = studentId.match(/\d+$/);
-          const digits = seqMatch ? seqMatch[0] : '';
-          const validPasswords = [
-            `Student#${digits.padStart(4, '0')}`,
-            `Student#${digits}`,
-            'Student#0108',
-            'Student#0124',
-            'Student#2026',
-            'mishhab@2026'
-          ];
-          const isPwMatch = validPasswords.includes(password) ||
-                            password.toLowerCase() === `student#${digits.toLowerCase()}` ||
-                            (password.length >= 6 && (password.startsWith('Student#') || password.includes('#') || password === digits));
-          if (isPwMatch) {
-            studentRecord = {
-              verified: true,
-              studentId: studentId.toUpperCase(),
-              name: `Enrolled Student (${studentId.toUpperCase()})`,
-              password: password,
-              course: '5-Month Executive International HRM Program'
-            };
-          }
-        }
-
         // 3. Offline fallback — check local enrolled students map (generated by Admin Studio)
-        if (!studentRecord) {
+        if (!studentRecord && !apiReachable) {
           try {
             const enrolledMap = JSON.parse(localStorage.getItem('simpatico_enrolled_students') || '{}');
             const cleanInput = studentId.toUpperCase();
@@ -6368,12 +6363,12 @@
                 err.style.display = 'block';
                 return;
               }
-              if (!enr.password || enr.password === password || enr.password.toLowerCase() === password.toLowerCase() || password === 'Student#0108') {
+              if (passwordMatches(enr.password, password)) {
                 studentRecord = {
                   verified: true,
                   studentId: enr.id || studentId,
                   name: enr.name,
-                  password: enr.password || password,
+                  password: enr.password,
                   course: enr.course || '5-Month Executive International HRM Program',
                   status: enr.status || 'Enrolled'
                 };
@@ -6382,8 +6377,8 @@
           } catch(e) {}
         }
 
-        // 4. Offline fallback — check local registry with password
-        if (!studentRecord) {
+        // 4. Offline fallback — check local registry with strict password
+        if (!studentRecord && !apiReachable) {
           try {
             const registry = JSON.parse(localStorage.getItem('simpatico_academy_registry') || '[]');
             const cleanId = studentId.toUpperCase();
@@ -6396,23 +6391,22 @@
               const idMatches = (rId === cleanId) || (rStudentId === cleanId) ||
                                 (cleanPhone.length >= 10 && rPhone.endsWith(cleanPhone.slice(-10))) ||
                                 (rEmail && rEmail === studentId.toLowerCase());
-              const pwdMatches = !r.password || r.password === password || (r.password && r.password.toLowerCase() === password.toLowerCase()) || password === 'Student#0108';
-              return idMatches && pwdMatches;
+              return idMatches && passwordMatches(r.password, password);
             });
             if (matched) {
               studentRecord = {
                 verified: true,
                 studentId: matched.studentId || matched.id,
                 name: matched.student || matched.name,
-                password: matched.password || password,
+                password: matched.password,
                 course: matched.title || matched.course || '5-Month Executive International HRM Program'
               };
             }
           } catch(e) {}
         }
 
-        // 5. Offline fallback — check enrollment leads with password
-        if (!studentRecord) {
+        // 5. Offline fallback — check enrollment leads with strict password
+        if (!studentRecord && !apiReachable) {
           try {
             const leads = JSON.parse(localStorage.getItem('simpatico_enrollment_leads') || '[]');
             const cleanId = studentId.toUpperCase();
@@ -6424,15 +6418,14 @@
               const idMatches = (lId === cleanId) ||
                                 (cleanPhone.length >= 10 && lPhone.endsWith(cleanPhone.slice(-10))) ||
                                 (lEmail && lEmail === studentId.toLowerCase());
-              const pwdMatches = !l.password || l.password === password || (l.password && l.password.toLowerCase() === password.toLowerCase()) || password === 'Student#0108';
-              return idMatches && pwdMatches;
+              return idMatches && passwordMatches(l.password, password);
             });
             if (leadMatch) {
               studentRecord = {
                 verified: true,
                 studentId: leadMatch.studentId || leadMatch.id,
                 name: leadMatch.name,
-                password: leadMatch.password || password,
+                password: leadMatch.password,
                 course: leadMatch.program || '5-Month Executive International HRM Program'
               };
             }
