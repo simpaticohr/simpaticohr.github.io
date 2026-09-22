@@ -800,11 +800,52 @@
       font-weight: 700;
     }
     /* Drawn signature in receipt/cert previews */
-    .sig-img img, .sig-pen img {
+    .sig-img img {
       height: 36px;
       object-fit: contain;
       display: block;
       margin: 0 auto;
+    }
+    .sig-pen img {
+      height: 38px;
+      max-width: 125px;
+      object-fit: contain;
+      display: block;
+      margin: 0 auto;
+      filter: brightness(0) invert(1) drop-shadow(0 0 1px rgba(212,175,55,0.7));
+      transition: filter 0.3s;
+    }
+    .cert-theme-ivory .sig-pen img {
+      filter: none;
+    }
+    .sig-pen svg {
+      height: 38px;
+      width: auto;
+      max-width: 130px;
+      display: block;
+      margin: 0 auto;
+    }
+    .sig-pad-thumb {
+      min-width: 60px;
+      height: 34px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(0,0,0,0.25);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 6px;
+      padding: 2px 6px;
+    }
+    .sig-pad-thumb img {
+      max-height: 26px;
+      max-width: 65px;
+      object-fit: contain;
+    }
+    .sig-pad-thumb svg {
+      height: 26px;
+      width: auto;
+      max-width: 70px;
+      color: var(--gold-primary);
     }
 
     /* ═══════════════════════════════════════
@@ -1213,13 +1254,14 @@
     }
     .sig-person { width: 120px; }
     .sig-pen {
-      height: 34px;
+      min-height: 40px;
       font-family: 'Great Vibes', cursive;
       font-size: 24px;
       color: #D4AF37;
       display: flex;
       align-items: center;
       justify-content: center;
+      overflow: visible;
     }
     .cert-theme-ivory .sig-pen { color: #0F172A; }
     .sig-divider {
@@ -2312,23 +2354,108 @@
           </div>
         </div>
 
-        <!-- Signatories -->
+        <!-- Signatories & Handwritten Signatures -->
         <div class="form-section" style="margin-top: 16px;">
           <div class="section-title">
-            <span><i class="fas fa-signature"></i> Authorized Signatories</span>
+            <span><i class="fas fa-signature"></i> Authorized Signatories &amp; Signatures</span>
           </div>
           <div class="form-row">
             <div class="form-group">
-              <label class="form-label">Signatory 1 Name</label>
+              <label class="form-label">Signatory 1 Name (Director)</label>
               <input type="text" class="form-input" id="sig1Name" value="Faisal K" oninput="updateCertPreview()">
-              <input type="text" class="form-input" id="sig1Role" value="Founder & Managing Director" style="margin-top:4px; font-size:11px;" oninput="updateCertPreview()">
+              <input type="text" class="form-input" id="sig1Role" value="Founder &amp; Managing Director" style="margin-top:4px; font-size:11px;" oninput="updateCertPreview()">
             </div>
             <div class="form-group" id="sig2Group" style="display: none;">
-              <label class="form-label">Signatory 2 Name</label>
+              <label class="form-label" id="sig2Label">Signatory 2 Name</label>
               <input type="text" class="form-input" id="sig2Name" value="" oninput="updateCertPreview()">
               <input type="text" class="form-input" id="sig2Role" value="" style="margin-top:4px; font-size:11px;" oninput="updateCertPreview()">
             </div>
           </div>
+
+          <!-- Signatory 1 Handwritten Signature Controls -->
+          <div class="sig-pad-wrapper" id="certSig1PadSection" style="margin-top: 14px;">
+            <div class="sig-pad-header">
+              <div class="sig-pad-title"><i class="fas fa-pen-nib"></i> Signatory 1 Handwritten Signature (Faisal K)</div>
+              <div class="sig-pad-mode-toggle" id="certSig1ModeToggle">
+                <button id="certSig1ModeAuth" class="active" onclick="setCertSigMode(1, 'authentic')">✍️ Authentic</button>
+                <button id="certSig1ModeDraw" onclick="setCertSigMode(1, 'draw')">🖌️ Draw</button>
+                <button id="certSig1ModeUpload" onclick="setCertSigMode(1, 'upload')">📁 Upload</button>
+                <button id="certSig1ModeText" onclick="setCertSigMode(1, 'text')">Aa Cursive</button>
+              </div>
+            </div>
+
+            <!-- Draw Canvas for Sig 1 -->
+            <div id="certSig1CanvasArea" style="display:none; margin-top: 8px;">
+              <div class="sig-pad-canvas-wrap" id="certSig1CanvasWrap">
+                <canvas id="certSig1Canvas" width="460" height="120"></canvas>
+                <div class="sig-pad-hint"><i class="fas fa-pen-fancy"></i>&nbsp; Draw Signatory 1 signature here</div>
+              </div>
+              <div class="sig-pad-actions">
+                <button class="sig-pad-btn-clear" onclick="clearCertSigPad(1)"><i class="fas fa-eraser"></i> Clear</button>
+                <button class="sig-pad-btn-save" onclick="saveCertSigPad(1)"><i class="fas fa-check"></i> Save Signature</button>
+                <button class="sig-pad-btn-remove" onclick="removeCertSavedSig(1)"><i class="fas fa-undo"></i> Reset to Authentic</button>
+              </div>
+            </div>
+
+            <!-- Upload Area for Sig 1 -->
+            <div id="certSig1UploadArea" style="display:none; margin-top: 8px;">
+              <input type="file" id="certSig1FileInput" accept="image/*" style="display:none;" onchange="handleCertSigUpload(1, this)">
+              <button type="button" class="btn-action btn-outline" style="width:100%; justify-content:center; padding:9px; font-size:12px;" onclick="document.getElementById('certSig1FileInput').click()">
+                <i class="fas fa-cloud-arrow-up"></i> Upload Signature Image (PNG / JPG)
+              </button>
+            </div>
+
+            <!-- Preview Indicator for Sig 1 -->
+            <div class="sig-pad-preview visible" id="certSig1Preview">
+              <div class="sig-pad-thumb" id="certSig1PreviewThumb"></div>
+              <div class="sig-pad-preview-label" id="certSig1PreviewLabel">
+                <i class="fas fa-check-circle"></i> Authentic Vector Handwritten Signature Active
+              </div>
+            </div>
+          </div>
+
+          <!-- Signatory 2 Handwritten Signature Controls (Active for Internship & Experience certs) -->
+          <div class="sig-pad-wrapper" id="certSig2PadSection" style="margin-top: 14px; display: none;">
+            <div class="sig-pad-header">
+              <div class="sig-pad-title" id="certSig2Title"><i class="fas fa-pen-nib"></i> Signatory 2 Handwritten Signature</div>
+              <div class="sig-pad-mode-toggle" id="certSig2ModeToggle">
+                <button id="certSig2ModeAuth" class="active" onclick="setCertSigMode(2, 'authentic')">✍️ Authentic</button>
+                <button id="certSig2ModeDraw" onclick="setCertSigMode(2, 'draw')">🖌️ Draw</button>
+                <button id="certSig2ModeUpload" onclick="setCertSigMode(2, 'upload')">📁 Upload</button>
+                <button id="certSig2ModeText" onclick="setCertSigMode(2, 'text')">Aa Cursive</button>
+              </div>
+            </div>
+
+            <!-- Draw Canvas for Sig 2 -->
+            <div id="certSig2CanvasArea" style="display:none; margin-top: 8px;">
+              <div class="sig-pad-canvas-wrap" id="certSig2CanvasWrap">
+                <canvas id="certSig2Canvas" width="460" height="120"></canvas>
+                <div class="sig-pad-hint"><i class="fas fa-pen-fancy"></i>&nbsp; Draw Signatory 2 signature here</div>
+              </div>
+              <div class="sig-pad-actions">
+                <button class="sig-pad-btn-clear" onclick="clearCertSigPad(2)"><i class="fas fa-eraser"></i> Clear</button>
+                <button class="sig-pad-btn-save" onclick="saveCertSigPad(2)"><i class="fas fa-check"></i> Save Signature</button>
+                <button class="sig-pad-btn-remove" onclick="removeCertSavedSig(2)"><i class="fas fa-undo"></i> Reset to Authentic</button>
+              </div>
+            </div>
+
+            <!-- Upload Area for Sig 2 -->
+            <div id="certSig2UploadArea" style="display:none; margin-top: 8px;">
+              <input type="file" id="certSig2FileInput" accept="image/*" style="display:none;" onchange="handleCertSigUpload(2, this)">
+              <button type="button" class="btn-action btn-outline" style="width:100%; justify-content:center; padding:9px; font-size:12px;" onclick="document.getElementById('certSig2FileInput').click()">
+                <i class="fas fa-cloud-arrow-up"></i> Upload Signatory 2 Signature Image
+              </button>
+            </div>
+
+            <!-- Preview Indicator for Sig 2 -->
+            <div class="sig-pad-preview visible" id="certSig2Preview">
+              <div class="sig-pad-thumb" id="certSig2PreviewThumb"></div>
+              <div class="sig-pad-preview-label" id="certSig2PreviewLabel">
+                <i class="fas fa-check-circle"></i> Authentic Vector Handwritten Signature Active
+              </div>
+            </div>
+          </div>
+
         </div>
       </div>
 
@@ -3790,6 +3917,9 @@
       if (sig2GroupHrm) sig2GroupHrm.style.display = 'none';
       const sig2PersonHrm = document.getElementById('certSig2Person');
       if (sig2PersonHrm) sig2PersonHrm.style.display = 'none';
+      const sig2PadHrm = document.getElementById('certSig2PadSection');
+      if (sig2PadHrm) sig2PadHrm.style.display = 'none';
+      updateCertSigThumb(1);
 
       if (!document.getElementById('certCredId').value.includes('HRM')) {
         // Sequential server-side credential ID
@@ -3816,6 +3946,12 @@
       if (sig2GroupInt) sig2GroupInt.style.display = '';
       const sig2PersonInt = document.getElementById('certSig2Person');
       if (sig2PersonInt) sig2PersonInt.style.display = '';
+      const sig2PadInt = document.getElementById('certSig2PadSection');
+      if (sig2PadInt) {
+        sig2PadInt.style.display = 'block';
+        const t = document.getElementById('certSig2Title');
+        if (t) t.innerHTML = '<i class="fas fa-pen-nib"></i> Signatory 2 Handwritten Signature (K. R. Varma)';
+      }
 
       document.getElementById('certTitle').value = "Certificate of HR Practical Internship";
       document.getElementById('certSpecialization').value = "Live Recruitment Operations • ATS Pipeline • Industrial HR Immersion";
@@ -3826,6 +3962,8 @@
       document.getElementById('sig1Role').value = "Founder & Managing Director";
       document.getElementById('sig2Name').value = "K. R. Varma";
       document.getElementById('sig2Role').value = "Dean of Academic Affairs";
+      updateCertSigThumb(1);
+      updateCertSigThumb(2);
 
       if (!document.getElementById('certCredId').value.includes('INT')) {
         // Sequential server-side credential ID
@@ -3852,6 +3990,12 @@
       if (sig2GroupExp) sig2GroupExp.style.display = '';
       const sig2PersonExp = document.getElementById('certSig2Person');
       if (sig2PersonExp) sig2PersonExp.style.display = '';
+      const sig2PadExp = document.getElementById('certSig2PadSection');
+      if (sig2PadExp) {
+        sig2PadExp.style.display = 'block';
+        const t = document.getElementById('certSig2Title');
+        if (t) t.innerHTML = '<i class="fas fa-pen-nib"></i> Signatory 2 Handwritten Signature (M. Shafeek)';
+      }
 
       const engType = document.getElementById('certEngagementType')?.value || 'Part-Time (20 hrs/week)';
       const role = document.getElementById('certRecruiterRole')?.value || 'Associate HR Recruiter';
@@ -3871,6 +4015,8 @@
       document.getElementById('sig1Role').value = "Founder & Managing Director";
       document.getElementById('sig2Name').value = "M. Shafeek";
       document.getElementById('sig2Role').value = "Head of Talent Acquisition & HR Operations";
+      updateCertSigThumb(1);
+      updateCertSigThumb(2);
 
       if (!document.getElementById('certCredId').value.includes('EXP')) {
         // Sequential server-side credential ID
@@ -4174,22 +4320,241 @@
         const role = document.getElementById('certPrSig1Role')?.textContent.trim();
         if (name && document.getElementById('sig1Name')) document.getElementById('sig1Name').value = name;
         if (role && document.getElementById('sig1Role')) document.getElementById('sig1Role').value = role;
-        if (document.getElementById('certPrSig1Pen') && document.activeElement !== document.getElementById('certPrSig1Pen')) {
-          document.getElementById('certPrSig1Pen').textContent = name;
-        }
+        updateCertPreview();
       } else if (idx === 2) {
         const name = document.getElementById('certPrSig2Name')?.textContent.trim();
         const role = document.getElementById('certPrSig2Role')?.textContent.trim();
         if (name && document.getElementById('sig2Name')) document.getElementById('sig2Name').value = name;
         if (role && document.getElementById('sig2Role')) document.getElementById('sig2Role').value = role;
-        if (document.getElementById('certPrSig2Pen') && document.activeElement !== document.getElementById('certPrSig2Pen')) {
-          document.getElementById('certPrSig2Pen').textContent = name;
-        }
+        updateCertPreview();
       }
     }
 
     // ═══════════════════════════════════════
-    // SIGNATURE DRAWING PAD ENGINE
+    // AUTHENTIC VECTOR SIGNATURE PROVIDER
+    // ═══════════════════════════════════════
+    function getAuthenticSignatureSvg(name, idx) {
+      const n = (name || '').toLowerCase();
+      if (idx === 2 && (n.includes('shafeek') || n.includes('recruiter') || n.includes('operations') || n.includes('talent'))) {
+        // M. Shafeek — Executive Head of TA Signature
+        return `<svg viewBox="0 0 200 60" class="auth-sig-svg" style="height:38px;width:auto;overflow:visible;" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M 16 46 L 22 18 L 34 38 L 44 20 L 50 46" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+          <circle cx="56" cy="44" r="1.8" fill="currentColor"/>
+          <path d="M 68 36 C 72 26, 82 22, 84 32 C 86 42, 72 40, 78 48 C 84 54, 94 44, 98 32 C 102 20, 104 14, 108 30 C 110 38, 114 44, 120 34 C 124 26, 128 32, 132 42 C 136 34, 142 26, 148 30 C 154 36, 158 44, 166 38" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M 30 52 Q 95 48, 172 49" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+          <circle cx="178" cy="48" r="1.6" fill="currentColor"/>
+        </svg>`;
+      } else if (idx === 2 || n.includes('varma') || n.includes('dean')) {
+        // K. R. Varma — Dean of Academic Affairs Signature
+        return `<svg viewBox="0 0 200 60" class="auth-sig-svg" style="height:38px;width:auto;overflow:visible;" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M 18 16 L 22 46 M 20 32 L 38 18 M 28 28 L 42 46" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"/>
+          <circle cx="48" cy="44" r="1.6" fill="currentColor"/>
+          <path d="M 58 18 C 66 18, 76 20, 74 30 C 72 38, 62 36, 60 46 M 60 22 L 60 46 M 70 34 L 82 46" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"/>
+          <circle cx="88" cy="44" r="1.6" fill="currentColor"/>
+          <path d="M 98 26 L 108 46 L 118 24 C 122 34, 128 42, 134 32 C 140 24, 145 36, 152 44 C 158 38, 168 28, 175 32" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M 22 52 Q 100 48, 178 50" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+          <circle cx="184" cy="50" r="1.6" fill="currentColor"/>
+        </svg>`;
+      } else {
+        // Faisal K — Founder & Managing Director Signature
+        return `<svg viewBox="0 0 200 60" class="auth-sig-svg" style="height:38px;width:auto;overflow:visible;" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M 15 42 C 22 18, 30 10, 36 22 C 40 32, 42 48, 48 24 C 54 14, 62 18, 68 32 C 72 40, 78 42, 85 28 C 92 16, 98 22, 105 34 C 112 44, 122 26, 132 20 C 140 16, 146 24, 154 35" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M 28 26 L 50 24" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          <path d="M 20 48 Q 80 44, 145 47 T 180 45" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+          <circle cx="186" cy="44" r="1.8" fill="currentColor"/>
+        </svg>`;
+      }
+    }
+
+    function renderCertSignatoryPen(idx, name) {
+      const pen = document.getElementById(idx === 1 ? 'certPrSig1Pen' : 'certPrSig2Pen');
+      if (!pen) return;
+      const modeKey = idx === 1 ? 'cert_sig1_mode' : 'cert_sig2_mode';
+      const imgKey = idx === 1 ? 'simpatico_admin_signature_img' : 'simpatico_admin_signature2_img';
+      const mode = localStorage.getItem(modeKey) || 'authentic';
+      const savedImg = localStorage.getItem(imgKey);
+
+      if ((mode === 'draw' || mode === 'upload') && savedImg) {
+        pen.innerHTML = `<img src="${savedImg}" alt="Signature">`;
+        pen.contentEditable = 'false';
+      } else if (mode === 'text') {
+        pen.textContent = name;
+        pen.style.fontFamily = "'Great Vibes', cursive";
+        pen.contentEditable = 'true';
+      } else {
+        // Default: Authentic vector handwritten signature
+        pen.innerHTML = getAuthenticSignatureSvg(name, idx);
+        pen.contentEditable = 'false';
+      }
+    }
+
+    function updateCertSigThumb(idx) {
+      const thumb = document.getElementById(idx === 1 ? 'certSig1PreviewThumb' : 'certSig2PreviewThumb');
+      const label = document.getElementById(idx === 1 ? 'certSig1PreviewLabel' : 'certSig2PreviewLabel');
+      if (!thumb || !label) return;
+      const modeKey = idx === 1 ? 'cert_sig1_mode' : 'cert_sig2_mode';
+      const imgKey = idx === 1 ? 'simpatico_admin_signature_img' : 'simpatico_admin_signature2_img';
+      const mode = localStorage.getItem(modeKey) || 'authentic';
+      const savedImg = localStorage.getItem(imgKey);
+      const name = (idx === 1 ? document.getElementById('sig1Name')?.value : document.getElementById('sig2Name')?.value) || (idx === 1 ? 'Faisal K' : 'Signatory 2');
+
+      if ((mode === 'draw' || mode === 'upload') && savedImg) {
+        thumb.innerHTML = `<img src="${savedImg}" alt="Signature">`;
+        label.innerHTML = `<i class="fas fa-check-circle"></i> Custom ${mode === 'draw' ? 'Drawn' : 'Uploaded'} Signature Active`;
+        label.style.color = '#34D399';
+      } else if (mode === 'text') {
+        thumb.innerHTML = `<span style="font-family:'Great Vibes',cursive;font-size:14px;color:var(--gold-primary);">${escapeHtml(name)}</span>`;
+        label.innerHTML = `<i class="fas fa-font"></i> Cursive Font Signature Active`;
+        label.style.color = '#93C5FD';
+      } else {
+        thumb.innerHTML = getAuthenticSignatureSvg(name, idx);
+        label.innerHTML = `<i class="fas fa-check-circle"></i> Authentic Vector Handwritten Signature Active`;
+        label.style.color = '#34D399';
+      }
+    }
+
+    // ═══════════════════════════════════════
+    // CERTIFICATE SIGNATURE DRAWING & UPLOAD ENGINE
+    // ═══════════════════════════════════════
+    const certSigPadCtx = { 1: null, 2: null };
+    const certSigPadDrawing = { 1: false, 2: false };
+    const certSigPadHasStrokes = { 1: false, 2: false };
+
+    function initCertSigPad(idx) {
+      const canvas = document.getElementById(`certSig${idx}Canvas`);
+      if (!canvas) return;
+      const ctx = canvas.getContext('2d');
+      ctx.lineWidth = 2.5;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.strokeStyle = '#0F172A';
+      certSigPadCtx[idx] = ctx;
+
+      const getPos = (e) => {
+        const rect = canvas.getBoundingClientRect();
+        const scaleX = canvas.width / rect.width;
+        const scaleY = canvas.height / rect.height;
+        return { x: (e.clientX - rect.left) * scaleX, y: (e.clientY - rect.top) * scaleY };
+      };
+
+      const start = (e) => {
+        certSigPadDrawing[idx] = true;
+        const pos = getPos(e);
+        ctx.beginPath();
+        ctx.moveTo(pos.x, pos.y);
+        certSigPadHasStrokes[idx] = true;
+        document.getElementById(`certSig${idx}CanvasWrap`)?.classList.add('has-signature');
+      };
+      const move = (e) => {
+        if (!certSigPadDrawing[idx]) return;
+        const pos = getPos(e);
+        ctx.lineTo(pos.x, pos.y);
+        ctx.stroke();
+      };
+      const end = () => { certSigPadDrawing[idx] = false; };
+
+      canvas.addEventListener('mousedown', start);
+      canvas.addEventListener('mousemove', move);
+      canvas.addEventListener('mouseup', end);
+      canvas.addEventListener('mouseleave', end);
+
+      canvas.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        const t = e.touches[0];
+        start({ clientX: t.clientX, clientY: t.clientY });
+      }, { passive: false });
+      canvas.addEventListener('touchmove', (e) => {
+        e.preventDefault();
+        const t = e.touches[0];
+        move({ clientX: t.clientX, clientY: t.clientY });
+      }, { passive: false });
+      canvas.addEventListener('touchend', end);
+    }
+
+    function setCertSigMode(idx, mode) {
+      localStorage.setItem(`cert_sig${idx}_mode`, mode);
+
+      const toggle = document.getElementById(`certSig${idx}ModeToggle`);
+      if (toggle) {
+        toggle.querySelectorAll('button').forEach(b => b.classList.remove('active'));
+        const btnMap = { 'authentic': 'Auth', 'draw': 'Draw', 'upload': 'Upload', 'text': 'Text' };
+        document.getElementById(`certSig${idx}Mode${btnMap[mode]}`)?.classList.add('active');
+      }
+
+      const canvasArea = document.getElementById(`certSig${idx}CanvasArea`);
+      const uploadArea = document.getElementById(`certSig${idx}UploadArea`);
+      if (canvasArea) canvasArea.style.display = (mode === 'draw') ? 'block' : 'none';
+      if (uploadArea) uploadArea.style.display = (mode === 'upload') ? 'block' : 'none';
+
+      updateCertSigThumb(idx);
+      updateCertPreview();
+
+      if (idx === 1 && (mode === 'draw' || mode === 'upload')) {
+        const saved = localStorage.getItem('simpatico_admin_signature_img');
+        if (saved) applyDrawnSignatureToAll(saved);
+      }
+    }
+
+    function clearCertSigPad(idx) {
+      const canvas = document.getElementById(`certSig${idx}Canvas`);
+      if (canvas && certSigPadCtx[idx]) {
+        certSigPadCtx[idx].clearRect(0, 0, canvas.width, canvas.height);
+      }
+      certSigPadHasStrokes[idx] = false;
+      document.getElementById(`certSig${idx}CanvasWrap`)?.classList.remove('has-signature');
+    }
+
+    function saveCertSigPad(idx) {
+      if (!certSigPadHasStrokes[idx]) {
+        alert('Please draw a signature first.');
+        return;
+      }
+      const canvas = document.getElementById(`certSig${idx}Canvas`);
+      const dataUrl = trimCanvasToSignature(canvas);
+      const imgKey = idx === 1 ? 'simpatico_admin_signature_img' : 'simpatico_admin_signature2_img';
+      localStorage.setItem(imgKey, dataUrl);
+      localStorage.setItem(`cert_sig${idx}_mode`, 'draw');
+
+      updateCertSigThumb(idx);
+      updateCertPreview();
+
+      if (idx === 1) {
+        applyDrawnSignatureToAll(dataUrl);
+        showSigPreview(dataUrl);
+      }
+    }
+
+    function removeCertSavedSig(idx) {
+      const imgKey = idx === 1 ? 'simpatico_admin_signature_img' : 'simpatico_admin_signature2_img';
+      localStorage.removeItem(imgKey);
+      clearCertSigPad(idx);
+      setCertSigMode(idx, 'authentic');
+      if (idx === 1) {
+        removeDrawnSignatureFromAll();
+      }
+    }
+
+    function handleCertSigUpload(idx, input) {
+      if (!input.files || !input.files[0]) return;
+      const file = input.files[0];
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const dataUrl = e.target.result;
+        const imgKey = idx === 1 ? 'simpatico_admin_signature_img' : 'simpatico_admin_signature2_img';
+        localStorage.setItem(imgKey, dataUrl);
+        localStorage.setItem(`cert_sig${idx}_mode`, 'upload');
+        updateCertSigThumb(idx);
+        updateCertPreview();
+        if (idx === 1) {
+          applyDrawnSignatureToAll(dataUrl);
+          showSigPreview(dataUrl);
+        }
+      };
+      reader.readAsDataURL(file);
+    }
+
+    // ═══════════════════════════════════════
+    // SIGNATURE DRAWING PAD ENGINE (RECEIPT STUDIO)
     // ═══════════════════════════════════════
     let sigPadDrawing = false;
     let sigPadCtx = null;
@@ -4198,25 +4563,30 @@
 
     function initSigPad() {
       const canvas = document.getElementById('sigPadCanvas');
-      if (!canvas) return;
-      sigPadCtx = canvas.getContext('2d');
-      sigPadCtx.lineWidth = 2.5;
-      sigPadCtx.lineCap = 'round';
-      sigPadCtx.lineJoin = 'round';
-      sigPadCtx.strokeStyle = '#0F172A';
+      if (canvas) {
+        sigPadCtx = canvas.getContext('2d');
+        sigPadCtx.lineWidth = 2.5;
+        sigPadCtx.lineCap = 'round';
+        sigPadCtx.lineJoin = 'round';
+        sigPadCtx.strokeStyle = '#0F172A';
 
-      // Mouse events
-      canvas.addEventListener('mousedown', sigPadStart);
-      canvas.addEventListener('mousemove', sigPadMove);
-      canvas.addEventListener('mouseup', sigPadEnd);
-      canvas.addEventListener('mouseleave', sigPadEnd);
+        // Mouse events
+        canvas.addEventListener('mousedown', sigPadStart);
+        canvas.addEventListener('mousemove', sigPadMove);
+        canvas.addEventListener('mouseup', sigPadEnd);
+        canvas.addEventListener('mouseleave', sigPadEnd);
 
-      // Touch events
-      canvas.addEventListener('touchstart', sigPadTouchStart, { passive: false });
-      canvas.addEventListener('touchmove', sigPadTouchMove, { passive: false });
-      canvas.addEventListener('touchend', sigPadEnd);
+        // Touch events
+        canvas.addEventListener('touchstart', sigPadTouchStart, { passive: false });
+        canvas.addEventListener('touchmove', sigPadTouchMove, { passive: false });
+        canvas.addEventListener('touchend', sigPadEnd);
+      }
 
-      // Load saved signature on init
+      // Initialize certificate signature pads as well
+      initCertSigPad(1);
+      initCertSigPad(2);
+
+      // Load saved signatures on init
       loadSavedSig();
     }
 
@@ -4284,8 +4654,11 @@
       // Trim whitespace around signature
       const dataUrl = trimCanvasToSignature(canvas);
       localStorage.setItem(SIG_STORAGE_KEY, dataUrl);
+      localStorage.setItem('cert_sig1_mode', 'draw');
       showSigPreview(dataUrl);
       applyDrawnSignatureToAll(dataUrl);
+      updateCertSigThumb(1);
+      updateCertPreview();
     }
 
     function trimCanvasToSignature(canvas) {
@@ -4330,24 +4703,35 @@
       document.getElementById('sigPadPreview').classList.remove('visible');
       setSigMode('text');
       removeDrawnSignatureFromAll();
+      updateCertSigThumb(1);
+      updateCertPreview();
     }
 
     function loadSavedSig() {
-      const saved = localStorage.getItem(SIG_STORAGE_KEY);
-      if (saved) {
-        showSigPreview(saved);
-        applyDrawnSignatureToAll(saved);
-        // Auto-switch to draw mode indicator
-        document.getElementById('sigModeText').classList.remove('active');
-        document.getElementById('sigModeDraw').classList.add('active');
+      const saved1 = localStorage.getItem(SIG_STORAGE_KEY);
+      if (saved1) {
+        showSigPreview(saved1);
+        applyDrawnSignatureToAll(saved1);
+        document.getElementById('sigModeText')?.classList.remove('active');
+        document.getElementById('sigModeDraw')?.classList.add('active');
       }
+
+      // Initialize certificate modes
+      const sig1Mode = localStorage.getItem('cert_sig1_mode') || (saved1 ? 'draw' : 'authentic');
+      const sig2Mode = localStorage.getItem('cert_sig2_mode') || 'authentic';
+      setCertSigMode(1, sig1Mode);
+      setCertSigMode(2, sig2Mode);
+      updateCertSigThumb(1);
+      updateCertSigThumb(2);
     }
 
     function showSigPreview(dataUrl) {
       const preview = document.getElementById('sigPadPreview');
       const img = document.getElementById('sigPadPreviewImg');
-      img.src = dataUrl;
-      preview.classList.add('visible');
+      if (preview && img) {
+        img.src = dataUrl;
+        preview.classList.add('visible');
+      }
     }
 
     function setSigMode(mode) {
@@ -4356,13 +4740,13 @@
       const drawBtn = document.getElementById('sigModeDraw');
 
       if (mode === 'draw') {
-        canvasArea.style.display = 'block';
-        textBtn.classList.remove('active');
-        drawBtn.classList.add('active');
+        if (canvasArea) canvasArea.style.display = 'block';
+        if (textBtn) textBtn.classList.remove('active');
+        if (drawBtn) drawBtn.classList.add('active');
       } else {
-        canvasArea.style.display = 'none';
-        textBtn.classList.add('active');
-        drawBtn.classList.remove('active');
+        if (canvasArea) canvasArea.style.display = 'none';
+        if (textBtn) textBtn.classList.add('active');
+        if (drawBtn) drawBtn.classList.remove('active');
       }
     }
 
@@ -4374,7 +4758,7 @@
         prSigImg.contentEditable = 'false';
       }
 
-      // Certificate preview — replace text with image for signatory 1
+      // Certificate preview — signatory 1
       const certPrSig1Pen = document.getElementById('certPrSig1Pen');
       if (certPrSig1Pen) {
         certPrSig1Pen.innerHTML = `<img src="${dataUrl}" alt="Signature">`;
@@ -4394,12 +4778,12 @@
         prSigImg.contentEditable = 'true';
       }
 
-      // Restore certificate signature 1 to text
+      // Restore certificate signature 1 to authentic vector
       const certPrSig1Pen = document.getElementById('certPrSig1Pen');
       if (certPrSig1Pen) {
         const sig1Name = document.getElementById('sig1Name')?.value || sigName;
-        certPrSig1Pen.textContent = sig1Name;
-        certPrSig1Pen.contentEditable = 'true';
+        certPrSig1Pen.innerHTML = getAuthenticSignatureSvg(sig1Name, 1);
+        certPrSig1Pen.contentEditable = 'false';
       }
     }
 
@@ -4476,26 +4860,30 @@
 
       document.getElementById('certPrSig1Name').textContent = sig1Name;
       document.getElementById('certPrSig1Role').textContent = sig1Role;
-      // Only overwrite pen with text if no drawn signature is saved
-      const hasDrawnSigCert = localStorage.getItem('simpatico_admin_signature_img');
-      if (!hasDrawnSigCert) {
-        document.getElementById('certPrSig1Pen').textContent = sig1Name;
-      }
+      renderCertSignatoryPen(1, sig1Name);
 
       const sig2Person = document.getElementById('certSig2Person');
       const sig2Group = document.getElementById('sig2Group');
+      const certSig2Pad = document.getElementById('certSig2PadSection');
       if (currentMode === 'hrm-cert' || !sig2Name.trim()) {
         if (sig2Person) sig2Person.style.display = 'none';
         if (sig2Group && currentMode === 'hrm-cert') sig2Group.style.display = 'none';
+        if (certSig2Pad) certSig2Pad.style.display = 'none';
       } else {
         if (sig2Person) sig2Person.style.display = '';
         if (sig2Group) sig2Group.style.display = '';
+        if (certSig2Pad) {
+          certSig2Pad.style.display = 'block';
+          const sig2Title = document.getElementById('certSig2Title');
+          if (sig2Title) {
+            sig2Title.innerHTML = `<i class="fas fa-pen-nib"></i> Signatory 2 Handwritten Signature (${escapeHtml(sig2Name)})`;
+          }
+        }
         const prSig2Name = document.getElementById('certPrSig2Name');
         const prSig2Role = document.getElementById('certPrSig2Role');
-        const prSig2Pen = document.getElementById('certPrSig2Pen');
         if (prSig2Name) prSig2Name.textContent = sig2Name;
         if (prSig2Role) prSig2Role.textContent = sig2Role;
-        if (prSig2Pen) prSig2Pen.textContent = sig2Name;
+        renderCertSignatoryPen(2, sig2Name);
       }
 
       // Update dynamic headers and context text
