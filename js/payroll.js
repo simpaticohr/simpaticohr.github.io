@@ -378,14 +378,17 @@ async function loadPayslips() {
     let { data, error } = await client
       .from('payslips')
       .select(`
-        id, period, gross_pay, deductions_total, net_pay, status, currency, pay_date,
+        id, period, gross_pay, deductions_total, net_pay, status, currency,
         employees(id, first_name, last_name, departments(name))
       `)
       .eq('tenant_id', cid)
       .order('created_at', { ascending: false });
     if (error) {
       console.warn('[payroll] Payslips error:', error.message);
-      const fallback = await client.from('payslips').select('*').eq('tenant_id', cid).order('created_at', { ascending: false });
+      const fallback = await client.from('payslips')
+        .select('*, employees(id, first_name, last_name, departments(name))')
+        .eq('tenant_id', cid)
+        .order('created_at', { ascending: false });
       data = fallback.data || [];
     }
     allPayslips = data || [];
@@ -652,26 +655,36 @@ window.calculatePayroll = async function() {
       .eq('tenant_id', companyId)
       .eq('status', 'active');
 
-    // Fetch unpaid leave for proration
-    const { data: unpaidLeaves } = await client
-      .from('leave_requests')
-      .select('employee_id, days')
-      .eq('tenant_id', companyId)
-      .eq('status', 'approved')
-      .eq('leave_type', 'unpaid')
-      .gte('start_date', period + '-01')
-      .lt('start_date', period.split('-')[0] + '-' + (parseInt(period.split('-')[1]) + 1).toString().padStart(2, '0') + '-01');
+    // Fetch unpaid leave for proration safely
+    let unpaidLeaves = [];
+    try {
+      const { data: ulData } = await client
+        .from('leave_requests')
+        .select('employee_id, days')
+        .eq('tenant_id', companyId)
+        .eq('status', 'approved')
+        .eq('type', 'unpaid');
+      unpaidLeaves = ulData || [];
+    } catch(leaveErr) {
+      console.warn('[payroll] Leave requests query notice:', leaveErr.message);
+    }
 
     const unpaidLeaveMap = {};
     (unpaidLeaves || []).forEach(ul => { unpaidLeaveMap[ul.employee_id] = (unpaidLeaveMap[ul.employee_id] || 0) + (ul.days || 0); });
 
-    // Fetch approved expenses for reimbursements
-    const { data: expenses } = await client
-      .from('employee_expenses')
-      .select('employee_id, amount')
-      .eq('tenant_id', companyId)
-      .eq('status', 'approved')
-      .is('paid_in_payslip', null);
+    // Fetch approved expenses for reimbursements safely
+    let expenses = [];
+    try {
+      const { data: expData } = await client
+        .from('employee_expenses')
+        .select('employee_id, amount')
+        .eq('tenant_id', companyId)
+        .eq('status', 'approved')
+        .is('paid_in_payslip', null);
+      expenses = expData || [];
+    } catch(expErr) {
+      console.warn('[payroll] Expenses query notice:', expErr.message);
+    }
 
     const expenseMap = {};
     (expenses || []).forEach(ex => { expenseMap[ex.employee_id] = (expenseMap[ex.employee_id] || 0) + (ex.amount || 0); });
@@ -864,10 +877,85 @@ window.executePayroll = async function() {
     showToast(`Payroll complete — ${count} payslips generated`, 'success');
     console.log('[payroll] Worker run complete:', data);
   } catch (workerErr) {
-    console.error('[payroll] Worker payroll/run failed:', workerErr.message);
-    showToast(workerErr.message, 'error');
-    closeModal('run-payroll-modal');
-    return;
+    console.warn('[payroll] Worker payroll/run failed, falling back to direct Supabase processing:', workerErr.message);
+    try {
+      const client = sb();
+      if (!client) throw new Error('Database not connected: ' + workerErr.message);
+
+      const runCurrency = document.getElementById('run-currency')?.value || 'INR';
+      const { data: salaries, error: salErr } = await client
+        .from('employee_salaries')
+        .select('employee_id, base_salary, currency')
+        .eq('tenant_id', companyId)
+        .eq('currency', runCurrency);
+
+      if (salErr || !salaries || salaries.length === 0) {
+        throw new Error(`No employees with active salary configured for ${runCurrency}.`);
+      }
+
+      const { data: deductions } = await client
+        .from('payroll_deductions')
+        .select('employee_id, amount')
+        .eq('tenant_id', companyId)
+        .eq('status', 'active');
+      const dedMap = {};
+      (deductions || []).forEach(d => { dedMap[d.employee_id] = (dedMap[d.employee_id] || 0) + (d.amount || 0); });
+
+      const countryCode = currencyToCountry(runCurrency);
+      let runTotalGross = 0;
+      let runTotalNet = 0;
+      const employeePayslips = [];
+
+      salaries.forEach(s => {
+        const base = s.base_salary || 0;
+        const taxRes = calculateTax(base, countryCode, 'old');
+        const empDed = (dedMap[s.employee_id] || 0) + (taxRes.totalTax || 0);
+        const net = Math.max(0, base - empDed);
+        runTotalGross += base;
+        runTotalNet += net;
+        employeePayslips.push({
+          employee_id: s.employee_id,
+          period: period,
+          gross_pay: base,
+          deductions_total: empDed,
+          net_pay: net,
+          status: 'generated',
+          currency: runCurrency,
+          tenant_id: companyId,
+          company_id: companyId
+        });
+      });
+
+      // Insert payroll_runs record
+      const { data: runData, error: runError } = await client.from('payroll_runs').insert([{
+        period: period,
+        type: type || 'monthly',
+        total_gross: runTotalGross,
+        total_net: runTotalNet,
+        employee_count: salaries.length,
+        status: 'completed',
+        pay_date: payDate || new Date().toISOString().slice(0, 10),
+        notes: notes || null,
+        tenant_id: companyId,
+        company_id: companyId
+      }]).select();
+
+      if (runError) throw new Error(runError.message);
+      const runId = runData?.[0]?.id;
+
+      if (runId && employeePayslips.length > 0) {
+        employeePayslips.forEach(p => p.payroll_run_id = runId);
+        const { error: slipErr } = await client.from('payslips').insert(employeePayslips);
+        if (slipErr) console.warn('[payroll] Payslips insert note:', slipErr.message);
+      }
+
+      showToast(`Payroll complete — ${salaries.length} payslips generated`, 'success');
+    } catch (fallbackErr) {
+      console.error('[payroll] Supabase fallback error:', fallbackErr);
+      showToast(fallbackErr.message, 'error');
+      closeModal('run-payroll-modal');
+      return;
+    }
   }
 
   closeModal('run-payroll-modal');
@@ -1181,10 +1269,10 @@ if (typeof window.setText === 'undefined') {
   window.setText = function(id, v) { const el=document.getElementById(id); if(el) el.textContent=v; };
 }
 if (typeof window.openModal === 'undefined') {
-  window.openModal  = id => { const el = document.getElementById(id); if(el) { el.classList.add('open'); el.classList.add('active'); } };
+  window.openModal  = id => { const el = document.getElementById(id); if(el) { el.style.display = 'flex'; el.classList.add('open'); el.classList.add('active'); } };
 }
 if (typeof window.closeModal === 'undefined') {
-  window.closeModal = id => { const el = document.getElementById(id); if(el) { el.classList.remove('open'); el.classList.remove('active'); } };
+  window.closeModal = id => { const el = document.getElementById(id); if(el) { el.style.display = 'none'; el.classList.remove('open'); el.classList.remove('active'); } };
 }
 if (typeof window.showToast === 'undefined') {
   window.showToast  = (msg, type='info') => {

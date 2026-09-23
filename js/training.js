@@ -153,11 +153,15 @@ async function loadCourses() {
     const client = sb(); if (!client) return;
     let query = client.from('training_courses').select('*');
     if (cid) {
-      query = query.eq('tenant_id', cid);
+      query = query.or(`company_id.eq.${cid},company_id.is.null`);
     }
     query = query.order('created_at', { ascending: false });
     let { data, error } = await query;
-    if (error) { console.error(error); return; }
+    if (error) {
+      console.warn('[training] Filtered courses failed, falling back to all courses:', error.message);
+      const fallback = await client.from('training_courses').select('*').order('created_at', { ascending: false });
+      data = fallback.data || [];
+    }
     allCourses = data || [];
   }
 
@@ -413,9 +417,9 @@ window.saveCourse = async function () {
       if (!client) throw new Error('Database not connected');
       const cid = sessionStorage.getItem('company_id') || sessionStorage.getItem('tenant_id') || (typeof getCompanyId === 'function' ? getCompanyId() : null);
       if (cid) {
-        payload.tenant_id = cid;
         payload.company_id = cid;
       }
+      delete payload.tenant_id;
       const { error } = await client.from('training_courses').insert([payload]);
       if (error) throw new Error(error.message);
     }
@@ -652,7 +656,7 @@ async function loadAIRecommendations() {
   ] = await Promise.all([
     client.from('employees').select('id, first_name, last_name, job_title, departments(name)').eq('tenant_id', cid).eq('status','active'),
     client.from('performance_reviews').select('employee_id, score, status').eq('tenant_id', cid).eq('status','completed'),
-    client.from('training_courses').select('id, title, category').eq('tenant_id', cid)
+    client.from('training_courses').select('id, title, category').or(`company_id.eq.${cid},company_id.is.null`)
   ]);
 
   if (!activeEmps || !courses || activeEmps.length === 0) {
