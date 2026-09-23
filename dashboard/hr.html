@@ -29,6 +29,54 @@
             --border: #e2e8f0;
             --sidebar-width: 260px;
             --whatsapp: #25d366;
+            --p: #4f46e5;
+            --pd: #3730a3;
+            --card: #ffffff;
+            --txt: #0f172a;
+            --bdr: #cbd5e1;
+            --dim: #64748b;
+        }
+
+        /* Universal module modal styling & primary button fix */
+        .mo {
+            position: fixed !important;
+            inset: 0 !important;
+            background: rgba(15, 23, 42, 0.65) !important;
+            backdrop-filter: blur(4px) !important;
+            -webkit-backdrop-filter: blur(4px) !important;
+            z-index: 100050 !important;
+            display: none;
+            align-items: center !important;
+            justify-content: center !important;
+            padding: 16px !important;
+        }
+        .mo.on, .mo.active, .mo.open {
+            display: flex !important;
+        }
+        .mo .mb {
+            background: #ffffff !important;
+            background-color: #ffffff !important;
+            color: #0f172a !important;
+            border: 1px solid #e2e8f0 !important;
+            border-radius: 16px !important;
+            padding: 28px !important;
+            width: 100% !important;
+            max-width: 580px !important;
+            max-height: 90vh !important;
+            overflow-y: auto !important;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25), 0 0 0 1px rgba(0, 0, 0, 0.05) !important;
+            position: relative !important;
+        }
+        .btn.bp, button.btn.bp {
+            background-color: #4f46e5 !important;
+            color: #ffffff !important;
+            border: 1px solid #4338ca !important;
+            box-shadow: 0 2px 6px rgba(79, 70, 229, 0.35) !important;
+        }
+        .btn.bp:hover, button.btn.bp:hover {
+            background-color: #3730a3 !important;
+            border-color: #312e81 !important;
+            color: #ffffff !important;
         }
 
         * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -3463,6 +3511,7 @@ async function initApp() {
     }
     window._lastLoadedStorageKey = currentStorageKey;
 
+
     // Initialize local session data from the REAL logged-in user
     DataStore.update(data => { 
         data.user.isLoggedIn = true; 
@@ -3616,6 +3665,14 @@ async function syncWithSupabase() {
                     return;
                 }
             }
+            localStorage.setItem('simpatico_company', JSON.stringify(comp[0]));
+        }
+    } catch(e) {}
+
+    // 0. Fetch Company details — verify active subscription / tenant status
+    try {
+        const { data: comp } = await db.from('companies').select('*').eq('id', companyId).limit(1);
+        if (comp?.[0]) {
             localStorage.setItem('simpatico_company', JSON.stringify(comp[0]));
         }
     } catch(e) {}
@@ -4350,14 +4407,18 @@ function scopeModuleCss(cssText, containerId) {
     return css;
 }
 function scopeRules(css, scope) {
+    const modName = scope.replace('#', '').replace('-module-container', '');
     return css.replace(/([^{}]+)\{([^{}]*)\}/g, (match, sel, decls) => {
         sel = sel.trim();
         if (!sel || sel.startsWith('@') || sel.startsWith('/*__KF')) return match;
         const scoped = sel.split(',').map(s => {
             s = s.trim(); if (!s) return '';
-            if (/^(html|body|\*)$/.test(s)) return scope;
-            if (/^(html|body)\s/.test(s)) return scope + ' ' + s.replace(/^(html|body)\s+/, '');
+            if (/^(html|body|\*|:root)$/.test(s)) return `${scope}, :root`;
+            if (/^(html|body|:root)\s/.test(s)) return scope + ' ' + s.replace(/^(html|body|:root)\s+/, '');
             if (s.startsWith('*::') || s.startsWith('*,')) return scope + ' ' + s;
+            if (s.startsWith('.mo') || s.startsWith('.mb') || s.startsWith('.modal') || s.startsWith('.drawer') || s.startsWith('.tc') || s.startsWith('.dr')) {
+                return `${scope} ${s}, body > [data-from-module="${modName}"] ${s}, body > [data-from-module="${modName}"]${s}, body > ${s}`;
+            }
             return scope + ' ' + s;
         }).join(',');
         return scoped + '{' + decls + '}';
