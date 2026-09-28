@@ -3617,6 +3617,36 @@ const TAX_PROFILES = {
       unemployment: 0.013,
       care: 0.01525
     }
+  },
+  NZ: {
+    name: 'New Zealand',
+    slabs: [
+      { min: 0, max: 14000, rate: 0.105 },
+      { min: 14000, max: 48000, rate: 0.175 },
+      { min: 48000, max: 70000, rate: 0.30 },
+      { min: 70000, max: 180000, rate: 0.33 },
+      { min: 180000, max: Infinity, rate: 0.39 }
+    ],
+    acc: 0.0139
+  },
+  SG: {
+    name: 'Singapore',
+    slabs: [
+      { min: 0, max: 20000, rate: 0 },
+      { min: 20000, max: 30000, rate: 0.02 },
+      { min: 30000, max: 40000, rate: 0.035 },
+      { min: 40000, max: 80000, rate: 0.07 },
+      { min: 80000, max: 120000, rate: 0.115 },
+      { min: 120000, max: 160000, rate: 0.15 },
+      { min: 160000, max: 200000, rate: 0.18 },
+      { min: 200000, max: 240000, rate: 0.19 },
+      { min: 240000, max: 280000, rate: 0.195 },
+      { min: 280000, max: 320000, rate: 0.20 },
+      { min: 320000, max: 500000, rate: 0.22 },
+      { min: 500000, max: 1000000, rate: 0.23 },
+      { min: 1000000, max: Infinity, rate: 0.24 }
+    ],
+    cpf: { rate: 0.20, maxWage: 6800 }
   }
 };
 
@@ -3663,6 +3693,10 @@ function calculateTax(monthlyIncome, countryCode = 'IN', taxRegime = 'old') {
     socialTax += monthlyIncome * profile.medicare;
   } else if (countryCode === 'DE') {
     socialTax += monthlyIncome * (profile.social.health + profile.social.pension + profile.social.unemployment + profile.social.care);
+  } else if (countryCode === 'NZ') {
+    socialTax += monthlyIncome * profile.acc;
+  } else if (countryCode === 'SG') {
+    socialTax += Math.min(monthlyIncome, profile.cpf.maxWage) * profile.cpf.rate;
   }
 
   return {
@@ -3673,7 +3707,7 @@ function calculateTax(monthlyIncome, countryCode = 'IN', taxRegime = 'old') {
 }
 
 function currencyToCountry(currency) {
-  return { INR: 'IN', USD: 'US', GBP: 'UK', AED: 'AE', EUR: 'DE', CAD: 'CA', AUD: 'AU' }[currency] || 'IN';
+  return { INR: 'IN', USD: 'US', GBP: 'UK', AED: 'AE', EUR: 'DE', CAD: 'CA', AUD: 'AU', NZD: 'NZ', SGD: 'SG' }[currency] || 'IN';
 }
 
 async function handleCalculatePayroll(request, env, ctx) {
@@ -3763,7 +3797,10 @@ async function handleCalculatePayroll(request, env, ctx) {
 
     const empDeds = deductions
       .filter((d) => d.employee_id === s.employee_id)
-      .reduce((sum, d) => sum + Number(d.amount), 0);
+      .reduce((sum, d) => {
+        const amt = Number(d.amount) || 0;
+        return sum + (d.frequency === 'annual' ? amt / 12 : amt);
+      }, 0);
 
     const unpaidDays = unpaidLeave
       .filter((l) => l.employee_id === s.employee_id)
@@ -12341,7 +12378,7 @@ async function handleInterviewAIConfig(request, env, ctx, params, url) {
   return apiResponse({
     available: true,
     provider: "gemini",
-    model: company.ai_model || "gemini-3.1-flash",
+    model: company.ai_model || "gemini-3.8-live",
   });
 }
 
@@ -12402,7 +12439,7 @@ async function handleBYOKValidate(request, env, ctx) {
 
   const RECOMMENDED = {
     openai: ["gpt-4o", "gpt-4o-mini", "gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano", "o4-mini"],
-    gemini: ["gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-3.5-pro", "gemini-3.1-flash", "gemini-3.1-flash-lite", "gemini-3.1-pro", "gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.5-pro", "gemini-2.0-flash", "gemini-2.0-flash-lite"],
+    gemini: ["gemini-3.8-flash", "gemini-3.8-live", "gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-3.5-pro", "gemini-3.1-flash", "gemini-3.1-flash-lite", "gemini-3.1-pro", "gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.5-pro", "gemini-2.0-flash", "gemini-2.0-flash-lite"],
     anthropic: ["claude-sonnet-4-20250514", "claude-3-5-sonnet-20241022", "claude-3-haiku-20240307"],
     deepseek: ["deepseek-chat", "deepseek-reasoner"],
     kimi: ["kimi-k2-0520", "moonshot-v1-128k", "moonshot-v1-32k"],
@@ -12428,6 +12465,7 @@ async function handleBYOKValidate(request, env, ctx) {
       // Only include models that work with the OpenAI-compatible chat endpoint
       // Exclude: gemma (local models), embedding, AQA, imagen, preview/experimental builds
       const GEMINI_CHAT_VERIFIED = [
+        "gemini-3.8-flash", "gemini-3.8-live",
         "gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-3.5-pro",
         "gemini-3.1-flash", "gemini-3.1-flash-lite", "gemini-3.1-pro",
         "gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.5-pro",
@@ -12463,6 +12501,22 @@ async function handleBYOKValidate(request, env, ctx) {
       
       // Inject next-gen models for BYOK selection
       models.unshift(
+        {
+          id: "gemini-3.8-flash",
+          name: "Gemini 3.8 Flash (Ultra Fast AI)",
+          context_window: 1048576,
+          output_limit: 8192,
+          recommended: true,
+          verified: true
+        },
+        {
+          id: "gemini-3.8-live",
+          name: "Gemini 3.8 Live (Full-Duplex Realtime Voice)",
+          context_window: 1048576,
+          output_limit: 8192,
+          recommended: true,
+          verified: true
+        },
         {
           id: "gemini-3.5-flash",
           name: "Gemini 3.5 Flash (Fastest / Newest)",

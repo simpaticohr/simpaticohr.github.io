@@ -1713,8 +1713,9 @@
             { id: 'gemini-1.5-pro', name: 'Gemini 1.5 Pro (High Reasoning)' },
             { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash (Fast / Stable)' },
             { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro (Advanced Reasoning)' },
-            { id: 'gemini-3.5-flash', name: 'Gemini 3.5 Flash (Fastest / Newest)' },
-            { id: 'gemini-3.1-flash-live-preview', name: '🎙️ Gemini 3.1 Flash Live Preview (Full-Duplex Voice)' }
+            { id: 'gemini-3.8-flash', name: 'Gemini 3.8 Flash (Ultra Fast AI / Newest)' },
+            { id: 'gemini-3.8-live', name: '🎙️ Gemini 3.8 Live (Full-Duplex Voice)' },
+            { id: 'gemini-3.5-flash', name: 'Gemini 3.5 Flash' }
         ],
         openai: [
             { id: 'gpt-4o-mini', name: 'GPT-4o Mini (Cost-Effective & Fast)' },
@@ -3180,7 +3181,7 @@ Be professional, highly strategic, clear, and action-oriented. Keep your spoken 
                 // Setup configuration message
                 const setupMsg = {
                     setup: {
-                        model: "models/gemini-3.1-flash-live-preview",
+                        model: "models/gemini-3.8-live",
                         generationConfig: {
                             responseModalities: ["AUDIO"],
                             speechConfig: {

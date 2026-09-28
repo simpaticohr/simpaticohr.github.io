@@ -651,7 +651,7 @@ window.calculatePayroll = async function() {
 
     const { data: deductions } = await client
       .from('payroll_deductions')
-      .select('employee_id, amount')
+      .select('employee_id, amount, frequency')
       .eq('tenant_id', companyId)
       .eq('status', 'active');
 
@@ -703,7 +703,10 @@ window.calculatePayroll = async function() {
     });
 
     const dedMap = {};
-    (deductions || []).forEach(d => { dedMap[d.employee_id] = (dedMap[d.employee_id] || 0) + (d.amount || 0); });
+    (deductions || []).forEach(d => {
+      const monthlyAmt = d.frequency === 'annual' ? (d.amount || 0) / 12 : (d.amount || 0);
+      dedMap[d.employee_id] = (dedMap[d.employee_id] || 0) + monthlyAmt;
+    });
 
     const countryCode = currencyToCountry(currency);
     const taxProfile = TAX_PROFILES[countryCode];
@@ -895,11 +898,14 @@ window.executePayroll = async function() {
 
       const { data: deductions } = await client
         .from('payroll_deductions')
-        .select('employee_id, amount')
+        .select('employee_id, amount, frequency')
         .eq('tenant_id', companyId)
         .eq('status', 'active');
       const dedMap = {};
-      (deductions || []).forEach(d => { dedMap[d.employee_id] = (dedMap[d.employee_id] || 0) + (d.amount || 0); });
+      (deductions || []).forEach(d => {
+        const monthlyAmt = d.frequency === 'annual' ? (d.amount || 0) / 12 : (d.amount || 0);
+        dedMap[d.employee_id] = (dedMap[d.employee_id] || 0) + monthlyAmt;
+      });
 
       const countryCode = currencyToCountry(runCurrency);
       let runTotalGross = 0;
@@ -1121,6 +1127,8 @@ window.saveSalary = async function() {
   const payload = {
     employee_id: empId,
     base_salary: amount,
+    allowances: { hra: hraAmount, special: specialAmount },
+    tax_regime: taxRegime,
     currency: currency,
     employment_type: empType,
     effective_date: effDate || new Date().toISOString().slice(0,10),
