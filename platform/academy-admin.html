@@ -2608,13 +2608,20 @@
             <span class="tool-badge-pill" style="background:rgba(212,175,55,0.15); color:var(--gold-primary);">Bilingual</span>
           </div>
           <p style="font-size:11.5px; color:var(--text-muted); line-height:1.5; margin-bottom:10px;">Create one elaborated HRM lesson — English + മലയാളം + terms + example + viva — then publish to any session.</p>
+
+          <!-- Auto-Generate Status Indicator -->
+          <div id="hrmAutoGenStatus" style="display:none; padding:8px 14px; border-radius:10px; background:linear-gradient(135deg,rgba(37,99,235,0.12),rgba(124,58,237,0.12)); border:1px solid rgba(124,58,237,0.3); margin-bottom:12px; font-size:11.5px; font-weight:600; color:#A78BFA; display:flex; align-items:center; gap:8px;">
+            <span class="hrm-auto-gen-pulse" style="width:8px; height:8px; border-radius:50%; background:#7C3AED; display:inline-block;"></span>
+            <span id="hrmAutoGenStatusText">Auto-generate ready — type a title or select a session</span>
+          </div>
+
           <div class="form-group">
             <label class="form-label">Target Curriculum Session</label>
-            <select class="form-select" id="hrmCourseSession" onchange="previewHrmCourseLesson()"></select>
+            <select class="form-select" id="hrmCourseSession" onchange="onHrmSessionChange()"></select>
           </div>
           <div class="form-group">
-            <label class="form-label">Lesson Title (English)</label>
-            <input type="text" class="form-input" id="hrmLessonTitleEn" placeholder="e.g. What is Strategic HRM?">
+            <label class="form-label">Lesson Title (English) <span style="font-size:9px; color:#A78BFA; font-weight:700; margin-left:6px;"><i class="fas fa-bolt" style="font-size:8px;"></i> AUTO-GENERATES ON TYPE</span></label>
+            <input type="text" class="form-input" id="hrmLessonTitleEn" placeholder="e.g. What is Strategic HRM?" oninput="onHrmTitleInput()">
           </div>
           <div class="form-group">
             <label class="form-label">പാഠ ശീർഷകം (മലയാളം)</label>
@@ -2662,15 +2669,134 @@
             <input type="text" class="form-input" id="hrmLessonVideo" placeholder="https://www.youtube-nocookie.com/embed/...">
           </div>
           <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px;">
-            <button type="button" class="btn-action btn-outline" style="justify-content:center;" onclick="loadHrmStarterTemplate()"><i class="fas fa-magic"></i> Template</button>
+            <button type="button" class="btn-action btn-gold" id="btnHrmAiGenerate" style="justify-content:center; background:linear-gradient(135deg,#2563EB,#7C3AED); color:#fff; font-weight:800;" onclick="generateHrmLessonWithAI()"><i class="fas fa-sparkles"></i> <span id="hrmAiBtnText">AI Auto-Generate</span></button>
             <button type="button" class="btn-action btn-gold" style="justify-content:center;" onclick="publishHrmCourseLesson()"><i class="fas fa-cloud-upload-alt"></i> Publish Lesson</button>
           </div>
-          <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:8px; margin-top:8px;">
+          <div style="display:grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap:8px; margin-top:8px;">
+            <button type="button" class="btn-action btn-outline" style="justify-content:center; font-size:11px;" onclick="loadHrmStarterTemplate()"><i class="fas fa-magic"></i> Template</button>
             <button type="button" class="btn-action btn-outline" style="justify-content:center; font-size:11px;" onclick="previewHrmCourseLesson()"><i class="fas fa-eye"></i> Preview</button>
             <button type="button" class="btn-action btn-outline" style="justify-content:center; font-size:11px;" onclick="speakHrmLesson('en')"><i class="fas fa-volume-up"></i> English</button>
             <button type="button" class="btn-action btn-outline" style="justify-content:center; font-size:11px;" onclick="speakHrmLesson('ml')"><i class="fas fa-volume-up"></i> മലയാളം</button>
           </div>
           <div class="hrm-preview-box" id="hrmBuilderPreview" style="min-height:80px; font-size:12px;">Select session + write (or Template), then Preview.</div>
+        </div>
+
+        <!-- ═══════════════════════════════════════
+             BATCH AUTO-GENERATE ALL 32 SESSIONS
+        ═══════════════════════════════════════ -->
+        <div class="form-section" style="margin-top: 16px; border-color: rgba(16,185,129,0.4);">
+          <div class="section-title">
+            <span><i class="fas fa-rocket" style="color:#10B981;"></i> Batch Auto-Generate</span>
+            <span class="tool-badge-pill" style="background:rgba(16,185,129,0.15); color:#10B981;">ALL 32</span>
+          </div>
+          <p style="font-size:11.5px; color:var(--text-muted); line-height:1.5; margin-bottom:10px;">One click to AI-generate bilingual content for ALL 32 sessions. Skips sessions that already have content.</p>
+          <div style="display:flex; gap:8px; margin-bottom:10px;">
+            <button type="button" class="btn-action" id="btnBatchGenerate" style="flex:1; justify-content:center; background:linear-gradient(135deg,#059669,#10B981); color:#fff; font-weight:800; padding:12px;" onclick="batchGenerateAllSessions()">
+              <i class="fas fa-bolt"></i> <span id="batchGenBtnText">Generate All 32 Sessions</span>
+            </button>
+            <button type="button" class="btn-action btn-outline" style="justify-content:center; font-size:11px; padding:12px;" onclick="batchPublishAllGenerated()">
+              <i class="fas fa-cloud-upload-alt"></i> Publish All
+            </button>
+          </div>
+          <!-- Progress Bar -->
+          <div id="batchProgressWrap" style="display:none;">
+            <div style="display:flex; justify-content:space-between; font-size:11px; color:var(--text-muted); margin-bottom:4px;">
+              <span id="batchProgressLabel">Generating...</span>
+              <span id="batchProgressCount">0 / 32</span>
+            </div>
+            <div style="width:100%; height:8px; background:rgba(255,255,255,0.08); border-radius:6px; overflow:hidden;">
+              <div id="batchProgressBar" style="height:100%; width:0%; background:linear-gradient(90deg,#10B981,#34D399); border-radius:6px; transition:width 0.3s;"></div>
+            </div>
+            <div id="batchSessionLog" style="margin-top:8px; max-height:120px; overflow-y:auto; font-size:10.5px; color:var(--text-muted); line-height:1.6;"></div>
+          </div>
+        </div>
+
+        <!-- ═══════════════════════════════════════
+             AI TEACHING SCRIPT GENERATOR
+        ═══════════════════════════════════════ -->
+        <div class="form-section" style="margin-top: 16px; border-color: rgba(59,130,246,0.4);">
+          <div class="section-title">
+            <span><i class="fas fa-chalkboard" style="color:#3B82F6;"></i> AI Teaching Script</span>
+            <span class="tool-badge-pill" style="background:rgba(59,130,246,0.15); color:#60A5FA;">For You</span>
+          </div>
+          <p style="font-size:11.5px; color:var(--text-muted); line-height:1.5; margin-bottom:10px;">AI creates a step-by-step <strong style="color:#60A5FA;">teaching guide for the teacher</strong> — what to say, how to explain, real examples, timing cues, and board notes.</p>
+          <div class="form-group">
+            <label class="form-label">Session to Script</label>
+            <select class="form-select" id="teachingScriptSession">
+              <!-- Populated dynamically -->
+            </select>
+          </div>
+          <div class="form-row">
+            <div class="form-group" style="flex:1;">
+              <label class="form-label">Class Duration</label>
+              <select class="form-select" id="teachingScriptDuration">
+                <option value="45">45 Minutes</option>
+                <option value="90" selected>90 Minutes</option>
+                <option value="120">120 Minutes</option>
+              </select>
+            </div>
+            <div class="form-group" style="flex:1;">
+              <label class="form-label">Difficulty Level</label>
+              <select class="form-select" id="teachingScriptLevel">
+                <option value="beginner" selected>Beginner (Non-Expert)</option>
+                <option value="intermediate">Intermediate</option>
+                <option value="advanced">Advanced (Expert)</option>
+              </select>
+            </div>
+          </div>
+          <button type="button" class="btn-action" id="btnGenScript" style="width:100%; justify-content:center; background:linear-gradient(135deg,#2563EB,#3B82F6); color:#fff; font-weight:800; padding:11px;" onclick="generateTeachingScript()">
+            <i class="fas fa-sparkles"></i> <span id="scriptBtnText">Generate My Teaching Script</span>
+          </button>
+          <div id="teachingScriptOutput" class="hrm-preview-box" style="min-height:60px; font-size:12px; margin-top:8px; display:none;"></div>
+          <div id="teachingScriptActions" style="display:none; grid-template-columns: 1fr 1fr 1fr; gap:8px; margin-top:8px;">
+            <button type="button" class="btn-action btn-outline" style="justify-content:center; font-size:11px;" onclick="copyTeachingScript()"><i class="fas fa-copy"></i> Copy</button>
+            <button type="button" class="btn-action btn-outline" style="justify-content:center; font-size:11px;" onclick="printTeachingScript()"><i class="fas fa-print"></i> Print</button>
+            <button type="button" class="btn-action btn-outline" style="justify-content:center; font-size:11px;" onclick="speakTeachingScript()"><i class="fas fa-volume-up"></i> Read</button>
+          </div>
+        </div>
+
+        <!-- ═══════════════════════════════════════
+             AI QUIZ / MCQ BUILDER
+        ═══════════════════════════════════════ -->
+        <div class="form-section" style="margin-top: 16px; border-color: rgba(245,158,11,0.4);">
+          <div class="section-title">
+            <span><i class="fas fa-question-circle" style="color:#F59E0B;"></i> AI Quiz Builder</span>
+            <span class="tool-badge-pill" style="background:rgba(245,158,11,0.15); color:#F59E0B;">MCQ + Keys</span>
+          </div>
+          <p style="font-size:11.5px; color:var(--text-muted); line-height:1.5; margin-bottom:10px;">Auto-generate MCQ quizzes with answer keys from lesson content. Students can self-assess knowledge.</p>
+          <div class="form-group">
+            <label class="form-label">Session for Quiz</label>
+            <select class="form-select" id="quizBuildSession">
+              <!-- Populated dynamically -->
+            </select>
+          </div>
+          <div class="form-row">
+            <div class="form-group" style="flex:1;">
+              <label class="form-label">Number of Questions</label>
+              <select class="form-select" id="quizNumQuestions">
+                <option value="5">5 Questions</option>
+                <option value="10" selected>10 Questions</option>
+                <option value="15">15 Questions</option>
+                <option value="20">20 Questions</option>
+              </select>
+            </div>
+            <div class="form-group" style="flex:1;">
+              <label class="form-label">Quiz Language</label>
+              <select class="form-select" id="quizLanguage">
+                <option value="en" selected>English Only</option>
+                <option value="both">Bilingual (EN + ML)</option>
+              </select>
+            </div>
+          </div>
+          <button type="button" class="btn-action" id="btnGenQuiz" style="width:100%; justify-content:center; background:linear-gradient(135deg,#D97706,#F59E0B); color:#0F172A; font-weight:800; padding:11px;" onclick="generateQuizForSession()">
+            <i class="fas fa-sparkles"></i> <span id="quizBtnText">Generate Quiz with Answer Key</span>
+          </button>
+          <div id="quizBuilderOutput" class="hrm-preview-box" style="min-height:60px; font-size:12px; margin-top:8px; display:none;"></div>
+          <div id="quizBuilderActions" style="display:none; grid-template-columns: 1fr 1fr 1fr; gap:8px; margin-top:8px;">
+            <button type="button" class="btn-action btn-outline" style="justify-content:center; font-size:11px;" onclick="copyQuizContent()"><i class="fas fa-copy"></i> Copy</button>
+            <button type="button" class="btn-action btn-outline" style="justify-content:center; font-size:11px;" onclick="printQuizContent()"><i class="fas fa-print"></i> Print</button>
+            <button type="button" class="btn-action btn-gold" style="justify-content:center; font-size:11px;" onclick="publishQuizToStudents()"><i class="fas fa-paper-plane"></i> Publish</button>
+          </div>
         </div>
 
         <!-- Student Mentorship & Voice Advisory Dispatcher -->
@@ -6331,6 +6457,160 @@
       previewHrmCourseLesson();
       showToast('Starter bilingual HRM template loaded — edit then Publish.');
     }
+    // ═══ AUTO-GENERATE ENGINE: Debounce + Status ═══
+    let _hrmAutoGenTimer = null;
+    let _hrmAutoGenRunning = false;
+    const HRM_AUTO_GEN_DELAY = 1500; // ms after user stops typing
+
+    function setHrmAutoGenStatus(text, color, pulsing) {
+      const box = document.getElementById('hrmAutoGenStatus');
+      const txt = document.getElementById('hrmAutoGenStatusText');
+      if (!box) return;
+      box.style.display = 'flex';
+      if (txt) txt.textContent = text;
+      const pulse = box.querySelector('.hrm-auto-gen-pulse');
+      if (pulse) {
+        pulse.style.background = color || '#7C3AED';
+        pulse.style.animation = pulsing ? 'pulse 1s infinite' : 'none';
+      }
+      box.style.borderColor = (color || 'rgba(124,58,237,0.3)');
+    }
+
+    function isHrmFormEmpty() {
+      const en = document.getElementById('hrmLessonEn')?.value.trim();
+      const ml = document.getElementById('hrmLessonMl')?.value.trim();
+      const terms = document.getElementById('hrmLessonTerms')?.value.trim();
+      const example = document.getElementById('hrmLessonExample')?.value.trim();
+      return !en && !ml && !terms && !example;
+    }
+
+    function onHrmTitleInput() {
+      if (_hrmAutoGenTimer) clearTimeout(_hrmAutoGenTimer);
+      const title = document.getElementById('hrmLessonTitleEn')?.value.trim();
+      if (!title || title.length < 4) {
+        setHrmAutoGenStatus('Type a lesson title (4+ characters) to auto-generate content...', '#64748B', false);
+        return;
+      }
+      setHrmAutoGenStatus('⏳ Waiting for you to finish typing... (' + (HRM_AUTO_GEN_DELAY/1000) + 's)', '#F59E0B', true);
+      _hrmAutoGenTimer = setTimeout(function () {
+        if (!isHrmFormEmpty()) {
+          setHrmAutoGenStatus('Form already has content — click AI Auto-Generate to regenerate', '#3B82F6', false);
+          return;
+        }
+        triggerHrmAutoGenerate();
+      }, HRM_AUTO_GEN_DELAY);
+    }
+
+    function onHrmSessionChange() {
+      previewHrmCourseLesson();
+      const sid = document.getElementById('hrmCourseSession')?.value || '9';
+      const sessionTitle = HRM_SESSION_TITLES[sid] || '';
+      // Auto-fill title if empty
+      const titleEl = document.getElementById('hrmLessonTitleEn');
+      if (titleEl && !titleEl.value.trim()) {
+        titleEl.value = sessionTitle;
+      }
+      // Auto-detect module from session number
+      const modMap = { 1:1,2:1,3:1,4:1,5:2,6:2,7:2,8:2,9:2,10:2,11:3,12:3,13:3,14:3,15:4,16:3,17:4,18:4,19:4,20:4,21:4,22:5,23:5,24:5,25:5,26:5,27:6,28:6,29:6,30:6,31:6,32:6 };
+      const mod = modMap[Number(sid)] || 1;
+      const modEl = document.getElementById('hrmLessonModule');
+      if (modEl) modEl.value = String(mod);
+      // Auto-generate if form is empty
+      if (isHrmFormEmpty()) {
+        setHrmAutoGenStatus('🎯 Session changed — auto-generating lesson content...', '#7C3AED', true);
+        setTimeout(function () { triggerHrmAutoGenerate(); }, 300);
+      }
+    }
+
+    async function triggerHrmAutoGenerate() {
+      if (_hrmAutoGenRunning) return;
+      _hrmAutoGenRunning = true;
+      setHrmAutoGenStatus('🤖 AI is generating bilingual content...', '#7C3AED', true);
+      try {
+        await generateHrmLessonWithAI();
+        if (!isHrmFormEmpty()) {
+          setHrmAutoGenStatus('✅ Content auto-generated! Review and edit, then Publish.', '#10B981', false);
+        } else {
+          setHrmAutoGenStatus('⚠️ Generation used offline template — add BYOK Gemini key for full AI', '#F59E0B', false);
+        }
+      } catch (e) {
+        setHrmAutoGenStatus('❌ Auto-generate failed — try manually or check your API key', '#EF4444', false);
+      } finally {
+        _hrmAutoGenRunning = false;
+      }
+    }
+
+    function setHrmAiLoading(on) {
+      const b = document.getElementById('btnHrmAiGenerate');
+      const t = document.getElementById('hrmAiBtnText');
+      if (t) t.textContent = on ? 'Generating...' : 'AI Auto-Generate';
+      if (b) { b.disabled = !!on; b.style.opacity = on ? '0.7' : '1'; }
+    }
+    function parseHrmAiJson(raw) {
+      if (!raw) return null;
+      let c = String(raw).replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
+      const m = c.match(/\{[\s\S]*\}/);
+      if (m) c = m[0];
+      try { return JSON.parse(c); } catch (e) { return null; }
+    }
+    function fillHrmFormFromAI(d, sid) {
+      if (!d) return false;
+      const g = function (v) { return String(v == null ? '' : v).trim(); };
+      const viva = Array.isArray(d.viva) ? d.viva.join('\n') : g(d.viva);
+      const terms = Array.isArray(d.terms) ? d.terms.join('; ') : g(d.terms);
+      document.getElementById('hrmLessonTitleEn').value = g(d.titleEn) || ('Session ' + sid + ': ' + (HRM_SESSION_TITLES[sid] || 'HRM Master Lesson'));
+      document.getElementById('hrmLessonTitleMl').value = g(d.titleMl) || ('സെഷൻ ' + sid + ' — വിശദമായ പഠനം');
+      document.getElementById('hrmLessonEn').value = g(d.en);
+      document.getElementById('hrmLessonMl').value = g(d.ml);
+      document.getElementById('hrmLessonTerms').value = terms;
+      document.getElementById('hrmLessonExample').value = g(d.example);
+      document.getElementById('hrmLessonViva').value = viva;
+      if (d.module && document.getElementById('hrmLessonModule')) {
+        document.getElementById('hrmLessonModule').value = String(d.module);
+      }
+      return !!(g(d.en) || g(d.ml));
+    }
+    async function generateHrmLessonWithAI() {
+      const sid = document.getElementById('hrmCourseSession')?.value || '9';
+      const sessionTitle = HRM_SESSION_TITLES[sid] || ('Session ' + sid);
+      const customTitle = document.getElementById('hrmLessonTitleEn')?.value.trim();
+      const topicForAI = customTitle || sessionTitle;
+      const key = (document.getElementById('byokGeminiKey')?.value || (typeof getSavedGeminiKey === 'function' ? getSavedGeminiKey() : '')).trim();
+      const modelSel = document.getElementById('byokGeminiModel')?.value || 'gemini-3.8-flash';
+      setHrmAiLoading(true);
+      showToast('AI generating "' + topicForAI + '" bilingual lesson...');
+      const prompt = 'You are Senior HR Faculty for Simpatico HR Academy (Kerala + UAE). Generate ONE elaborated HRM lesson for Session ' + sid + ': "' + topicForAI + '". Respond with STRICT JSON ONLY, no markdown, no code fences. Schema: {"titleEn": "...", "titleMl": "...", "module": "1-6", "en": "5-8 sentence elaborated English explanation with concept, why it matters, steps, statute/formula, corporate tip", "ml": "same lesson in simple Malayalam, 5-8 sentences", "terms": ["Term = പദം", "...5 items"], "example": "one real corporate numeric example with steps", "viva": ["Q1", "Q2", "Q3", "Q4 including 1 Malayalam question"]}. Keep English legal terms exact (MOHRE, WPS, Article 51, PF, ESI). Malayalam must be natural Kerala style.';
+      try {
+        if (key) {
+          const rawApi = String(modelSel).startsWith('models/') ? String(modelSel).replace('models/', '') : String(modelSel);
+          const apiModel = (rawApi.includes('live') || rawApi.includes('realtime')) ? 'gemini-3.8-flash' : rawApi;
+          const res = await fetch('https://generativelanguage.googleapis.com/v1beta/models/' + apiModel + ':generateContent?key=' + encodeURIComponent(key), {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: { temperature: 0.7, maxOutputTokens: 2000, responseMimeType: 'application/json' } })
+          });
+          if (res.ok) {
+            const data = await res.json();
+            const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+            const parsed = parseHrmAiJson(text);
+            if (parsed && fillHrmFormFromAI(parsed, sid)) {
+              previewHrmCourseLesson();
+              showToast('AI lesson generated — review then Publish!');
+              return;
+            }
+          }
+          showToast('AI returned unusable text — loaded offline template instead.');
+        } else {
+          showToast('No Gemini key — loaded offline template. Add BYOK key for full AI.');
+        }
+      } catch (e) {
+        showToast('AI error — loaded offline template instead.');
+      } finally {
+        setHrmAiLoading(false);
+      }
+      loadHrmStarterTemplate();
+      const t = document.getElementById('hrmLessonTitleEn');
+      if (t && sessionTitle) t.value = 'Session ' + sid + ': ' + sessionTitle;
+    }
     function publishHrmCourseLesson() {
       const f = collectHrmForm();
       if (!f.en && !f.ml) { alert('Please write at least the English or Malayalam explanation before publishing.'); return; }
@@ -6477,6 +6757,387 @@
       URL.revokeObjectURL(a.href);
       showToast('Exported ' + lessons.length + ' HRM bilingual lesson(s).');
     }
+
+    // ═══════════════════════════════════════
+    //  BATCH AUTO-GENERATE ALL 32 SESSIONS
+    // ═══════════════════════════════════════
+    let _batchRunning = false;
+    const MODULE_MAP = {1:1,2:1,3:1,4:1,5:2,6:2,7:2,8:2,9:2,10:2,11:3,12:3,13:3,14:3,15:4,16:3,17:4,18:4,19:4,20:4,21:4,22:5,23:5,24:5,25:5,26:5,27:6,28:6,29:6,30:6,31:6,32:6};
+
+    async function batchGenerateAllSessions() {
+      if (_batchRunning) { showToast('Batch generation already in progress...'); return; }
+      const key = (document.getElementById('byokGeminiKey')?.value || (typeof getSavedGeminiKey === 'function' ? getSavedGeminiKey() : '')).trim();
+      if (!key) { alert('Please add your BYOK Gemini API Key first (scroll to the Gemini section below).'); return; }
+      const modelSel = document.getElementById('byokGeminiModel')?.value || 'gemini-3.8-flash';
+      const rawApi = String(modelSel).startsWith('models/') ? String(modelSel).replace('models/', '') : String(modelSel);
+      const apiModel = (rawApi.includes('live') || rawApi.includes('realtime')) ? 'gemini-3.8-flash' : rawApi;
+
+      _batchRunning = true;
+      const store = getHrmStore();
+      const sessionsToGen = [];
+      for (let i = 1; i <= 32; i++) {
+        const d = store[String(i)];
+        if (d && (d.hrmEn || d.hrmMl)) continue; // skip existing
+        sessionsToGen.push(i);
+      }
+      if (!sessionsToGen.length) {
+        showToast('All 32 sessions already have content! Delete some to regenerate.');
+        _batchRunning = false;
+        return;
+      }
+
+      // Show progress UI
+      const wrap = document.getElementById('batchProgressWrap');
+      const bar = document.getElementById('batchProgressBar');
+      const label = document.getElementById('batchProgressLabel');
+      const count = document.getElementById('batchProgressCount');
+      const log = document.getElementById('batchSessionLog');
+      const btn = document.getElementById('btnBatchGenerate');
+      const btnTxt = document.getElementById('batchGenBtnText');
+      wrap.style.display = 'block';
+      log.innerHTML = '';
+      btn.disabled = true;
+      btn.style.opacity = '0.6';
+      btnTxt.textContent = 'Generating...';
+
+      let done = 0;
+      const total = sessionsToGen.length;
+
+      for (const sid of sessionsToGen) {
+        const sessionTitle = HRM_SESSION_TITLES[sid] || ('Session ' + sid);
+        label.textContent = 'Session ' + sid + ': ' + sessionTitle;
+        count.textContent = done + ' / ' + total;
+        bar.style.width = ((done / total) * 100) + '%';
+
+        try {
+          const prompt = 'You are Senior HR Faculty for Simpatico HR Academy (Kerala + UAE). Generate ONE elaborated HRM lesson for Session ' + sid + ': "' + sessionTitle + '". Respond with STRICT JSON ONLY, no markdown, no code fences. Schema: {"titleEn": "...", "titleMl": "...", "module": "' + (MODULE_MAP[sid] || 1) + '", "en": "5-8 sentence elaborated English explanation with concept, why it matters, steps, statute/formula, corporate tip", "ml": "same lesson in simple Malayalam, 5-8 sentences", "terms": ["Term = പദം", "...5 items"], "example": "one real corporate numeric example with steps", "viva": ["Q1", "Q2", "Q3", "Q4 including 1 Malayalam question"]}. Keep English legal terms exact (MOHRE, WPS, Article 51, PF, ESI). Malayalam must be natural Kerala style.';
+
+          const res = await fetch('https://generativelanguage.googleapis.com/v1beta/models/' + apiModel + ':generateContent?key=' + encodeURIComponent(key), {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: { temperature: 0.7, maxOutputTokens: 2000, responseMimeType: 'application/json' } })
+          });
+
+          if (res.ok) {
+            const data = await res.json();
+            const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+            const parsed = parseHrmAiJson(text);
+            if (parsed) {
+              const g = function (v) { return String(v == null ? '' : v).trim(); };
+              const viva = Array.isArray(parsed.viva) ? parsed.viva.join('\n') : g(parsed.viva);
+              const terms = Array.isArray(parsed.terms) ? parsed.terms.join('; ') : g(parsed.terms);
+              store[String(sid)] = {
+                videoUrl: '', notes: '', assignment: '',
+                publishedAt: new Date().toISOString(),
+                hrmTitleEn: g(parsed.titleEn) || sessionTitle,
+                hrmTitleMl: g(parsed.titleMl) || '',
+                hrmModule: String(MODULE_MAP[sid] || parsed.module || 1),
+                hrmDuration: '90 min',
+                hrmEn: g(parsed.en), hrmMl: g(parsed.ml),
+                hrmTerms: terms, hrmExample: g(parsed.example),
+                hrmViva: viva, hrmVideo: ''
+              };
+              setHrmStore(store);
+              log.innerHTML += '<div style="color:#10B981;">✅ Session ' + sid + ': ' + sessionTitle + '</div>';
+            } else {
+              log.innerHTML += '<div style="color:#F59E0B;">⚠️ Session ' + sid + ': AI returned unparseable JSON</div>';
+            }
+          } else {
+            log.innerHTML += '<div style="color:#EF4444;">❌ Session ' + sid + ': API error ' + res.status + '</div>';
+          }
+        } catch (e) {
+          log.innerHTML += '<div style="color:#EF4444;">❌ Session ' + sid + ': Network error</div>';
+        }
+
+        done++;
+        // Rate limit: 1.5s between requests to avoid API quota
+        if (done < total) await new Promise(r => setTimeout(r, 1500));
+        log.scrollTop = log.scrollHeight;
+      }
+
+      // Done
+      bar.style.width = '100%';
+      count.textContent = done + ' / ' + total;
+      label.textContent = '✅ Batch generation complete!';
+      btn.disabled = false;
+      btn.style.opacity = '1';
+      btnTxt.textContent = 'Generate All 32 Sessions';
+      _batchRunning = false;
+      renderHrmLibrary();
+      showToast('Batch complete: ' + done + ' sessions generated! Click Publish All to save to server.');
+    }
+
+    async function batchPublishAllGenerated() {
+      const store = getHrmStore();
+      const ids = Object.keys(store).filter(k => store[k] && (store[k].hrmEn || store[k].hrmMl));
+      if (!ids.length) { showToast('No lessons to publish. Generate first.'); return; }
+      showToast('Publishing ' + ids.length + ' sessions to server...');
+      let ok = 0;
+      for (const sid of ids) {
+        const d = store[sid];
+        try {
+          const r = await fetch(ACADEMY_API_BASE + '/api/academy/hrm-lesson', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              sessionId: sid, titleEn: d.hrmTitleEn || '', titleMl: d.hrmTitleMl || '',
+              module: d.hrmModule || '1', duration: d.hrmDuration || '90 min',
+              en: d.hrmEn || '', ml: d.hrmMl || '', terms: d.hrmTerms || '',
+              example: d.hrmExample || '', viva: d.hrmViva || '', videoUrl: d.hrmVideo || ''
+            })
+          });
+          if (r.ok) ok++;
+        } catch (e) {}
+        await new Promise(r => setTimeout(r, 300));
+      }
+      showToast(ok + '/' + ids.length + ' sessions published to server!');
+    }
+
+    // ═══════════════════════════════════════
+    //  AI TEACHING SCRIPT GENERATOR
+    // ═══════════════════════════════════════
+    let _lastTeachingScript = '';
+
+    function initTeacherToolSelectors() {
+      const scriptSel = document.getElementById('teachingScriptSession');
+      const quizSel = document.getElementById('quizBuildSession');
+      [scriptSel, quizSel].forEach(function (sel) {
+        if (!sel || sel.options.length > 0) return;
+        for (let i = 1; i <= 32; i++) {
+          const t = HRM_SESSION_TITLES[i] || ('Session ' + i);
+          const o = document.createElement('option');
+          o.value = String(i);
+          o.textContent = 'Session ' + (i < 10 ? '0' + i : i) + ': ' + t;
+          if (i === 1) o.selected = true;
+          sel.appendChild(o);
+        }
+      });
+    }
+
+    async function generateTeachingScript() {
+      const sid = document.getElementById('teachingScriptSession')?.value || '1';
+      const sessionTitle = HRM_SESSION_TITLES[sid] || ('Session ' + sid);
+      const duration = document.getElementById('teachingScriptDuration')?.value || '90';
+      const level = document.getElementById('teachingScriptLevel')?.value || 'beginner';
+      const key = (document.getElementById('byokGeminiKey')?.value || (typeof getSavedGeminiKey === 'function' ? getSavedGeminiKey() : '')).trim();
+
+      if (!key) { alert('Please add your BYOK Gemini API Key first.'); return; }
+
+      const btn = document.getElementById('btnGenScript');
+      const btnTxt = document.getElementById('scriptBtnText');
+      btn.disabled = true; btn.style.opacity = '0.6';
+      btnTxt.textContent = 'Generating Script...';
+
+      // Check if lesson content exists for context
+      const store = getHrmStore();
+      const lessonData = store[sid];
+      const contextNote = lessonData && lessonData.hrmEn ? '\n\nHere is the lesson content to base your script on: ' + lessonData.hrmEn.substring(0, 500) : '';
+
+      const levelGuide = {
+        beginner: 'The teacher is NOT an HRM expert — use very simple language, provide exact words to say, include pronunciation guides for technical terms, and give confidence-building tips.',
+        intermediate: 'The teacher has moderate HRM knowledge — focus on discussion points, real-world examples, and engagement techniques.',
+        advanced: 'The teacher is an HRM expert — focus on advanced case studies, debate points, and industry-specific deep dives.'
+      };
+
+      const prompt = 'You are a master curriculum designer. Create a DETAILED TEACHING SCRIPT for a ' + level + ' level teacher to teach HRM Session ' + sid + ': "' + sessionTitle + '" in exactly ' + duration + ' minutes. ' + levelGuide[level] + contextNote + '\n\nFormat the script with these sections using plain text (NO markdown, NO code fences):\n\n📋 LESSON OVERVIEW (2-3 lines)\n⏱️ TIME BREAKDOWN (minute-by-minute plan)\n🎯 OPENING (first 5 minutes — exact words to say to start the class, ice-breaker question)\n📖 CORE TEACHING POINTS (numbered, with exact phrases to say, board notes to write, examples to give)\n💡 REAL-WORLD EXAMPLES (2-3 corporate scenarios to narrate)\n❓ STUDENT INTERACTION PROMPTS (questions to ask students during class)\n📝 BOARD NOTES / SLIDES (key points to write on board or show on slides)\n🎙️ CLOSING & SUMMARY (last 5 minutes — how to wrap up, homework to assign)\n🆘 RESCUE TIPS (what to say if students ask questions you cannot answer)\n\nKeep it conversational and practical. Include UAE/GCC/Indian HR context where relevant.';
+
+      try {
+        const modelSel = document.getElementById('byokGeminiModel')?.value || 'gemini-3.8-flash';
+        const rawApi = String(modelSel).startsWith('models/') ? String(modelSel).replace('models/', '') : String(modelSel);
+        const apiModel = (rawApi.includes('live') || rawApi.includes('realtime')) ? 'gemini-3.8-flash' : rawApi;
+
+        const res = await fetch('https://generativelanguage.googleapis.com/v1beta/models/' + apiModel + ':generateContent?key=' + encodeURIComponent(key), {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: { temperature: 0.75, maxOutputTokens: 4000 } })
+        });
+
+        if (res.ok) {
+          const data = await res.json();
+          const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+          if (text.trim()) {
+            _lastTeachingScript = text;
+            const output = document.getElementById('teachingScriptOutput');
+            output.style.display = 'block';
+            output.innerHTML = '<div style="color:#60A5FA; font-weight:800; font-size:13px; margin-bottom:8px;">🎓 Teaching Script: Session ' + escHrm(sid) + ' — ' + escHrm(sessionTitle) + ' (' + duration + ' min)</div>' + '<div style="white-space:pre-wrap; line-height:1.7;">' + escHrm(text) + '</div>';
+            document.getElementById('teachingScriptActions').style.display = 'grid';
+            showToast('Teaching script generated! Read it before your class.');
+          } else {
+            showToast('AI returned empty response — try again.');
+          }
+        } else {
+          showToast('API error ' + res.status + ' — check your Gemini key.');
+        }
+      } catch (e) {
+        showToast('Network error generating script.');
+      } finally {
+        btn.disabled = false; btn.style.opacity = '1';
+        btnTxt.textContent = 'Generate My Teaching Script';
+      }
+    }
+
+    function copyTeachingScript() {
+      if (!_lastTeachingScript) return;
+      navigator.clipboard?.writeText(_lastTeachingScript).then(() => showToast('Teaching script copied!'));
+    }
+    function printTeachingScript() {
+      const content = document.getElementById('teachingScriptOutput')?.innerHTML || '';
+      const w = window.open('', '_blank');
+      w.document.write('<html><head><title>Teaching Script</title><style>body{font-family:Inter,sans-serif;padding:40px;line-height:1.8;color:#1E293B;}h1{font-size:18px;color:#0F172A;}</style></head><body>' + content + '</body></html>');
+      w.document.close(); w.print();
+    }
+    function speakTeachingScript() {
+      if (!_lastTeachingScript) return;
+      speakHrmText(_lastTeachingScript.substring(0, 900), 'en');
+    }
+
+    // ═══════════════════════════════════════
+    //  AI QUIZ / MCQ BUILDER
+    // ═══════════════════════════════════════
+    let _lastQuizContent = '';
+    let _lastQuizData = null;
+
+    async function generateQuizForSession() {
+      const sid = document.getElementById('quizBuildSession')?.value || '1';
+      const sessionTitle = HRM_SESSION_TITLES[sid] || ('Session ' + sid);
+      const numQ = document.getElementById('quizNumQuestions')?.value || '10';
+      const lang = document.getElementById('quizLanguage')?.value || 'en';
+      const key = (document.getElementById('byokGeminiKey')?.value || (typeof getSavedGeminiKey === 'function' ? getSavedGeminiKey() : '')).trim();
+
+      if (!key) { alert('Please add your BYOK Gemini API Key first.'); return; }
+
+      const btn = document.getElementById('btnGenQuiz');
+      const btnTxt = document.getElementById('quizBtnText');
+      btn.disabled = true; btn.style.opacity = '0.6';
+      btnTxt.textContent = 'Generating Quiz...';
+
+      // Use existing lesson content as context
+      const store = getHrmStore();
+      const lessonData = store[sid];
+      const contextNote = lessonData && lessonData.hrmEn ? '\nLesson content for context: ' + lessonData.hrmEn.substring(0, 600) : '';
+      const langNote = lang === 'both' ? ' Include a Malayalam translation of each question in parentheses after the English question.' : '';
+
+      const prompt = 'Generate a ' + numQ + '-question MULTIPLE CHOICE QUIZ for HRM Session ' + sid + ': "' + sessionTitle + '".' + langNote + contextNote + '\n\nRespond with STRICT JSON ONLY. Schema: {"quizTitle": "...", "questions": [{"q": "question text", "qMl": "Malayalam translation or empty", "options": ["A) ...", "B) ...", "C) ...", "D) ..."], "answer": "A", "explanation": "brief explanation why this is correct"}]}. Make questions practical and UAE/GCC/India HR relevant. Mix easy, medium, and hard difficulty. Include statutory articles, calculations, and scenario-based questions.';
+
+      try {
+        const modelSel = document.getElementById('byokGeminiModel')?.value || 'gemini-3.8-flash';
+        const rawApi = String(modelSel).startsWith('models/') ? String(modelSel).replace('models/', '') : String(modelSel);
+        const apiModel = (rawApi.includes('live') || rawApi.includes('realtime')) ? 'gemini-3.8-flash' : rawApi;
+
+        const res = await fetch('https://generativelanguage.googleapis.com/v1beta/models/' + apiModel + ':generateContent?key=' + encodeURIComponent(key), {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: { temperature: 0.6, maxOutputTokens: 4000, responseMimeType: 'application/json' } })
+        });
+
+        if (res.ok) {
+          const data = await res.json();
+          const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+          const parsed = parseHrmAiJson(text);
+
+          if (parsed && parsed.questions && parsed.questions.length) {
+            _lastQuizData = parsed;
+            renderQuizOutput(parsed, sid, sessionTitle);
+            showToast(parsed.questions.length + ' quiz questions generated!');
+          } else {
+            showToast('AI returned unusable quiz data — try again.');
+          }
+        } else {
+          showToast('API error ' + res.status + ' — check your Gemini key.');
+        }
+      } catch (e) {
+        showToast('Network error generating quiz.');
+      } finally {
+        btn.disabled = false; btn.style.opacity = '1';
+        btnTxt.textContent = 'Generate Quiz with Answer Key';
+      }
+    }
+
+    function renderQuizOutput(quiz, sid, sessionTitle) {
+      const output = document.getElementById('quizBuilderOutput');
+      output.style.display = 'block';
+      let html = '<div style="color:#F59E0B; font-weight:800; font-size:13px; margin-bottom:10px;">📝 ' + escHrm(quiz.quizTitle || ('Quiz: Session ' + sid)) + '</div>';
+
+      html += '<div style="font-size:11px; color:var(--text-muted); margin-bottom:12px;">Session ' + escHrm(sid) + ' — ' + escHrm(sessionTitle) + ' • ' + quiz.questions.length + ' Questions</div>';
+
+      // Student Questions (without answers)
+      html += '<div style="border:1px solid rgba(245,158,11,0.25); border-radius:10px; padding:14px; margin-bottom:12px; background:rgba(0,0,0,0.2);">';
+      html += '<div style="font-size:11px; color:#F59E0B; font-weight:700; margin-bottom:8px;">📄 STUDENT QUESTION SHEET</div>';
+      quiz.questions.forEach(function (q, i) {
+        html += '<div style="margin-bottom:12px; padding-bottom:10px; border-bottom:1px solid rgba(255,255,255,0.06);">';
+        html += '<div style="font-weight:700; color:#fff; font-size:12.5px;"><strong style="color:#F59E0B;">Q' + (i + 1) + '.</strong> ' + escHrm(q.q) + '</div>';
+        if (q.qMl) html += '<div style="font-size:11.5px; color:#A7F3D0; margin-top:2px;">🌴 ' + escHrm(q.qMl) + '</div>';
+        if (q.options && q.options.length) {
+          html += '<div style="margin-top:6px; display:grid; grid-template-columns:1fr 1fr; gap:4px;">';
+          q.options.forEach(function (opt) {
+            html += '<div style="font-size:11.5px; color:#CBD5E1; padding:4px 8px; background:rgba(255,255,255,0.03); border-radius:6px; border:1px solid rgba(255,255,255,0.08);">○ ' + escHrm(opt) + '</div>';
+          });
+          html += '</div>';
+        }
+        html += '</div>';
+      });
+      html += '</div>';
+
+      // Answer Key (for teacher)
+      html += '<div style="border:1px solid rgba(16,185,129,0.3); border-radius:10px; padding:14px; background:rgba(16,185,129,0.06);">';
+      html += '<div style="font-size:11px; color:#10B981; font-weight:700; margin-bottom:8px;">🔑 ANSWER KEY (Teacher Only)</div>';
+      quiz.questions.forEach(function (q, i) {
+        html += '<div style="margin-bottom:6px; font-size:11.5px;">';
+        html += '<span style="color:#10B981; font-weight:800;">Q' + (i + 1) + ': ' + escHrm(q.answer || '?') + '</span>';
+        if (q.explanation) html += ' — <span style="color:#94A3B8;">' + escHrm(q.explanation) + '</span>';
+        html += '</div>';
+      });
+      html += '</div>';
+
+      output.innerHTML = html;
+      document.getElementById('quizBuilderActions').style.display = 'grid';
+
+      // Store as text for copy
+      _lastQuizContent = quiz.questions.map(function (q, i) {
+        let t = 'Q' + (i + 1) + '. ' + q.q + '\n';
+        if (q.options) t += q.options.join('\n') + '\n';
+        t += 'Answer: ' + (q.answer || '?');
+        if (q.explanation) t += ' — ' + q.explanation;
+        return t;
+      }).join('\n\n');
+    }
+
+    function copyQuizContent() {
+      if (!_lastQuizContent) return;
+      navigator.clipboard?.writeText(_lastQuizContent).then(() => showToast('Quiz content copied!'));
+    }
+    function printQuizContent() {
+      const content = document.getElementById('quizBuilderOutput')?.innerHTML || '';
+      const w = window.open('', '_blank');
+      w.document.write('<html><head><title>HRM Quiz</title><style>body{font-family:Inter,sans-serif;padding:40px;line-height:1.7;color:#1E293B;} strong{color:#0F172A;}</style></head><body>' + content + '</body></html>');
+      w.document.close(); w.print();
+    }
+    function publishQuizToStudents() {
+      if (!_lastQuizData) { showToast('Generate a quiz first.'); return; }
+      const sid = document.getElementById('quizBuildSession')?.value || '1';
+      const store = getHrmStore();
+      if (!store[sid]) store[sid] = {};
+      store[sid].quiz = _lastQuizData;
+      store[sid].quizPublishedAt = new Date().toISOString();
+      setHrmStore(store);
+
+      // Also push to server
+      fetch(ACADEMY_API_BASE + '/api/academy/hrm-quiz', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId: sid, quiz: _lastQuizData })
+      }).catch(function () {});
+
+      showToast('Quiz published for Session ' + sid + '! Students can now take it.');
+    }
+
+    // Initialize teacher tool selectors when faculty tab is shown
+    (function () {
+      const origSwitch = window.switchStudioMode;
+      if (typeof origSwitch === 'function') {
+        window.switchStudioMode = function (mode) {
+          origSwitch(mode);
+          if (mode === 'faculty') { initTeacherToolSelectors(); }
+        };
+      }
+      // Also try to init on load
+      setTimeout(initTeacherToolSelectors, 500);
+    })();
 
     function sendFacultyMentorshipNote() {
       const recipient = document.getElementById('feedbackStudentSelect').value;
