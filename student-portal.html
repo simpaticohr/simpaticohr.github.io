@@ -4334,6 +4334,77 @@
       6: "https://www.youtube-nocookie.com/embed/aE1Kj_gHq_Y?rel=0"  // AI in HR & People Analytics
     };
 
+    // Server-synced faculty content cache (backend KV is source of truth).
+    // localStorage is only an offline fallback cache.
+    let serverSessionContent = {};
+    let serverHrmLessons = {};
+    async function pullServerFacultyContent() {
+      try {
+        const results = await Promise.allSettled([
+          fetch(STUDENT_API_BASE + '/api/academy/hrm-course', { method: 'GET' }),
+          fetch(STUDENT_API_BASE + '/api/academy/session-content', { method: 'GET' })
+        ]);
+        const hrmRes = results[0].status === 'fulfilled' ? results[0].value : null;
+        const sessRes = results[1].status === 'fulfilled' ? results[1].value : null;
+        if (hrmRes && hrmRes.ok) {
+          const d = await hrmRes.json().catch(function () { return {}; });
+          const lessons = (d && d.data && d.data.lessons) || {};
+          serverHrmLessons = lessons || {};
+          const cache = {};
+          Object.keys(lessons).forEach(function (sid) {
+            const l = lessons[sid] || {};
+            cache[sid] = {
+              videoUrl: l.videoUrl || '', notes: '', assignment: '',
+              hrmTitleEn: l.titleEn || '', hrmTitleMl: l.titleMl || '',
+              hrmModule: String(l.module || '1'), hrmDuration: l.duration || '90 min',
+              hrmEn: l.en || '', hrmMl: l.ml || '',
+              hrmTerms: l.terms || '', hrmExample: l.example || '', hrmViva: l.viva || '',
+              hrmVideo: l.videoUrl || ''
+            };
+          });
+          try { localStorage.setItem('simpatico_server_hrm_cache', JSON.stringify({ at: Date.now(), lessons: cache })); } catch (e) {}
+        }
+        if (sessRes && sessRes.ok) {
+          const d2 = await sessRes.json().catch(function () { return {}; });
+          serverSessionContent = (d2 && d2.data && d2.data.content) || {};
+          try { localStorage.setItem('simpatico_server_session_cache', JSON.stringify({ at: Date.now(), content: serverSessionContent })); } catch (e) {}
+        }
+      } catch (e) {}
+      if (!Object.keys(serverHrmLessons).length) {
+        try { serverHrmLessons = (JSON.parse(localStorage.getItem('simpatico_server_hrm_cache') || '{}').lessons) || {}; } catch (e) {}
+      }
+      if (!Object.keys(serverSessionContent).length) {
+        try { serverSessionContent = (JSON.parse(localStorage.getItem('simpatico_server_session_cache') || '{}').content) || {}; } catch (e) {}
+      }
+    }
+    function getServerSessionData(sessionId) {
+      const sid = String(sessionId);
+      const hrm = serverHrmLessons[sid] || null;
+      const sess = serverSessionContent[sid] || null;
+      const local = (() => { try { return JSON.parse(localStorage.getItem(studentKey('simpatico_session_customizations')) || '{}')[sid] || null; } catch (e) { return null; } })();
+      if (!hrm && !sess) return local;
+      const merged = Object.assign({}, local || {});
+      if (sess) {
+        if (sess.videoUrl) merged.videoUrl = sess.videoUrl;
+        if (sess.notes) merged.notes = sess.notes;
+        if (sess.assignment) merged.assignment = sess.assignment;
+      }
+      if (hrm) {
+        merged.hrmTitleEn = hrm.titleEn || merged.hrmTitleEn || '';
+        merged.hrmTitleMl = hrm.titleMl || merged.hrmTitleMl || '';
+        merged.hrmModule = String(hrm.module || merged.hrmModule || '1');
+        merged.hrmDuration = hrm.duration || merged.hrmDuration || '90 min';
+        merged.hrmEn = hrm.en || merged.hrmEn || '';
+        merged.hrmMl = hrm.ml || merged.hrmMl || '';
+        merged.hrmTerms = hrm.terms || merged.hrmTerms || '';
+        merged.hrmExample = hrm.example || merged.hrmExample || '';
+        merged.hrmViva = hrm.viva || merged.hrmViva || '';
+        merged.hrmVideo = hrm.videoUrl || merged.hrmVideo || '';
+        if (hrm.videoUrl && !merged.videoUrl) merged.videoUrl = hrm.videoUrl;
+      }
+      return merged;
+    }
+
     function openSessionModal(sessionId) {
       activeModalSessionId = sessionId;
       let foundSession = null;
@@ -4355,10 +4426,9 @@
       // Check Live Class broadcast from Faculty
       checkFacultyLiveMasterclass();
 
-      // Check if customized by Faculty
-      const customStore = JSON.parse(localStorage.getItem(studentKey('simpatico_session_customizations')) || '{}');
-      const customData = customStore[sessionId];
-      const vidUrl = (customData && customData.videoUrl) ? customData.videoUrl : (LECTURE_VIDEOS[parentMod.moduleNum] || "https://www.youtube-nocookie.com/embed/5qap5aO4i9A?rel=0");
+      // Faculty content: backend KV first, localStorage only as fallback cache
+      const customData = getServerSessionData(sessionId);
+      const vidUrl = (customData && (customData.videoUrl || customData.hrmVideo)) ? (customData.videoUrl || customData.hrmVideo) : (LECTURE_VIDEOS[parentMod.moduleNum] || "https://www.youtube-nocookie.com/embed/5qap5aO4i9A?rel=0");
       const iframe = document.getElementById('classroomIframe');
       if (iframe) iframe.src = vidUrl;
 
@@ -5561,9 +5631,33 @@
         `;
       }
 
-      // 3. Faculty Custom Directives (pushed from Gemini 3.8 Flash / Teaching Studio)
-      const customStore = JSON.parse(localStorage.getItem(studentKey('simpatico_session_customizations')) || '{}');
-      const customData = customStore[session.id];
+      // 3. Faculty HRM Bilingual Course Lesson (backend KV source of truth)
+      const customData = getServerSessionData(session.id);
+      if (customData && (customData.hrmEn || customData.hrmMl)) {
+        const escS = function (s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); };
+        const showEnS = (lang === 'en' || lang === 'both');
+        const showMlS = (lang === 'ml' || lang === 'both');
+        let hrmHtml = '<div class="notes-callout" style="background: rgba(212,175,55,0.08); border-left: 4px solid #D4AF37; margin-top: 16px;">';
+        hrmHtml += '<strong style="color: #FCD34D;"><i class="fas fa-book-open"></i> HRM Elaborated Lesson — Faculty Course Builder:</strong>';
+        if (customData.hrmTitleEn) hrmHtml += '<div style="margin-top:8px; font-weight:700; color:#fff;">📘 ' + escS(customData.hrmTitleEn) + '</div>';
+        if (customData.hrmTitleMl) hrmHtml += '<div style="color:#A7F3D0;">🌴 ' + escS(customData.hrmTitleMl) + '</div>';
+        if (showEnS && customData.hrmEn) hrmHtml += '<div style="margin-top:8px;"><strong style="color:#67E8F9;">🇬🇧 English Elaborated Notes:</strong><p style="margin-top:4px; color:#E2E8F0; white-space: pre-wrap;">' + escS(customData.hrmEn) + '</p></div>';
+        if (showMlS && customData.hrmMl) hrmHtml += '<div style="margin-top:8px; background: rgba(16,185,129,0.10); border-radius:6px; padding:10px;"><strong style="color:#6EE7B7;">🌴 മലയാളം വിശദീകരണം:</strong><p style="margin-top:4px; color:#F1F5F9; white-space: pre-wrap;">' + escS(customData.hrmMl) + '</p></div>';
+        if (customData.hrmTerms) hrmHtml += '<div style="margin-top:8px;"><strong>🔑 Key Terms:</strong><p style="white-space: pre-wrap;">' + escS(customData.hrmTerms) + '</p></div>';
+        if (customData.hrmExample) hrmHtml += '<div style="margin-top:8px;"><strong>🏢 Corporate Example:</strong><p style="white-space: pre-wrap;">' + escS(customData.hrmExample) + '</p></div>';
+        if (customData.hrmViva) {
+          const qs = String(customData.hrmViva).split('\n').map(function (x) { return x.trim(); }).filter(Boolean);
+          if (qs.length) hrmHtml += '<div style="margin-top:8px;"><strong>🎙️ Viva Questions:</strong><ol style="padding-left:18px;">' + qs.map(function (q) { return '<li>' + escS(q) + '</li>'; }).join('') + '</ol></div>';
+        }
+        hrmHtml += '</div>';
+        notesHtml += hrmHtml;
+        if (customData.hrmVideo) {
+          const iframe2 = document.getElementById('classroomIframe');
+          if (iframe2 && !customData.videoUrl) iframe2.src = customData.hrmVideo;
+        }
+      }
+
+      // 4. Faculty Custom Directives (pushed from Gemini 3.8 Flash / Teaching Studio)
       if (customData && (customData.notes || customData.assignment)) {
         notesHtml += `
           <div class="notes-callout" style="background: rgba(16, 185, 129, 0.08); border-left: 4px solid #10B981; margin-top: 16px;">
@@ -6199,11 +6293,19 @@
     }
 
     // Listen for storage events for real-time live sync between Faculty Admin & Student Portal
+    // Backend polling keeps separate browsers/devices in sync (localStorage events are same-browser only)
     window.addEventListener('storage', (e) => {
       if (e.key === 'simpatico_faculty_live_class' || e.key === 'simpatico_faculty_feedback' || e.key === 'simpatico_active_case_study') {
         checkFacultyLiveMasterclass();
       }
     });
+    setInterval(function () {
+      pullServerFacultyContent().then(function () {
+        if (document.getElementById('sessionModal') && document.getElementById('sessionModal').classList.contains('open') && window._currentModalSession && window._currentModalMod) {
+          renderSessionStudyNotes(window._currentModalSession, window._currentModalMod, currentNotesLang);
+        }
+      });
+    }, 45000);
 
     // ─── REAL PROFESSIONAL HR DOCUMENT DOWNLOAD GENERATORS ───
     function downloadRealHrTemplate(type) {
@@ -8615,6 +8717,7 @@
       updateStats();
       checkFacultyLiveMasterclass();
       initPayrollLab();
+      pullServerFacultyContent();
     });
   </script>
 </body>

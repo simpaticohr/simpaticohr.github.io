@@ -1526,6 +1526,12 @@ route("GET",  "/api/academy/list-students", handleListStudents);
 route("POST", "/api/academy/submit-application", handleSubmitApplication);
 route("POST", "/api/academy/save-progress", handleSaveProgress);
 route("POST", "/api/academy/reset-password", handleResetPassword);
+route("GET",  "/api/academy/hrm-course", handleHrmCourseGet);
+route("POST", "/api/academy/hrm-course", handleHrmCourseSave);
+route("POST", "/api/academy/hrm-lesson", handleHrmLessonSave);
+route("POST", "/api/academy/hrm-lesson-delete", handleHrmLessonDelete);
+route("GET",  "/api/academy/session-content", handleSessionContentGet);
+route("POST", "/api/academy/session-content", handleSessionContentSave);
 
 route("POST", "/attendance/records/upsert", handleUpsertAttendance);
 
@@ -13449,6 +13455,134 @@ async function handleSaveProgress(request, env, ctx) {
     return apiResponse({ success: true });
   } catch (err) {
     console.warn("[Academy] Save progress error:", err.message);
+    return apiResponse({ error: err.message }, 500);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// ACADEMY — HRM Bilingual Course Backend Sync (KV source of truth)
+// KV: academy_hrm_course = { sessionId: lesson }, academy_session_content = { sessionId: {...} }
+// ═══════════════════════════════════════════════════════════════
+
+function sanitizeHrmLesson(input) {
+  const s = (v) => String(v == null ? "" : v).slice(0, 20000);
+  const sessionId = String(input.sessionId || input.session || "").trim();
+  return {
+    sessionId,
+    titleEn: s(input.titleEn || input.hrmTitleEn),
+    titleMl: s(input.titleMl || input.hrmTitleMl),
+    module: String(input.module || input.hrmModule || "1").slice(0, 10),
+    duration: String(input.duration || input.hrmDuration || "90 min").slice(0, 20),
+    en: s(input.en || input.hrmEn),
+    ml: s(input.ml || input.hrmMl),
+    terms: s(input.terms || input.hrmTerms),
+    example: s(input.example || input.hrmExample),
+    viva: s(input.viva || input.hrmViva),
+    videoUrl: String(input.videoUrl || input.hrmVideo || "").slice(0, 2000),
+    updatedAt: new Date().toISOString()
+  };
+}
+
+async function readHrmCourse(env) {
+  return (await env.HR_KV.get("academy_hrm_course", { type: "json" })) || {};
+}
+
+async function handleHrmCourseGet(request, env, ctx) {
+  if (!env.HR_KV) return apiResponse({ error: "KV not available" }, 500);
+  try {
+    const lessons = await readHrmCourse(env);
+    return apiResponse({ success: true, lessons, count: Object.keys(lessons).length });
+  } catch (err) {
+    return apiResponse({ error: err.message }, 500);
+  }
+}
+
+async function handleHrmLessonSave(request, env, ctx) {
+  if (!env.HR_KV) return apiResponse({ error: "KV not available" }, 500);
+  const body = (await safeJson(request)) || {};
+  try {
+    const lesson = sanitizeHrmLesson(body);
+    if (!lesson.sessionId || !/^\d{1,3}$/.test(lesson.sessionId)) return apiResponse({ error: "valid sessionId required" }, 400);
+    if (!lesson.en && !lesson.ml) return apiResponse({ error: "EN or ML explanation required" }, 400);
+    const lessons = await readHrmCourse(env);
+    lessons[lesson.sessionId] = lesson;
+    await env.HR_KV.put("academy_hrm_course", JSON.stringify(lessons), { expirationTtl: 730 * 86400 });
+    return apiResponse({ success: true, sessionId: lesson.sessionId, count: Object.keys(lessons).length });
+  } catch (err) {
+    return apiResponse({ error: err.message }, 500);
+  }
+}
+
+async function handleHrmLessonDelete(request, env, ctx) {
+  if (!env.HR_KV) return apiResponse({ error: "KV not available" }, 500);
+  const body = (await safeJson(request)) || {};
+  try {
+    const sessionId = String(body.sessionId || "").trim();
+    if (!sessionId) return apiResponse({ error: "sessionId is required" }, 400);
+    const lessons = await readHrmCourse(env);
+    delete lessons[sessionId];
+    await env.HR_KV.put("academy_hrm_course", JSON.stringify(lessons), { expirationTtl: 730 * 86400 });
+    return apiResponse({ success: true, sessionId });
+  } catch (err) {
+    return apiResponse({ error: err.message }, 500);
+  }
+}
+
+async function handleHrmCourseSave(request, env, ctx) {
+  if (!env.HR_KV) return apiResponse({ error: "KV not available" }, 500);
+  const body = (await safeJson(request)) || {};
+  try {
+    const incoming = body.lessons && typeof body.lessons === "object" ? body.lessons : null;
+    if (!incoming) return apiResponse({ error: "lessons object required" }, 400);
+    const clean = {};
+    for (const [sid, lesson] of Object.entries(incoming).slice(0, 64)) {
+      const id = String(sid).trim();
+      if (!/^\d{1,3}$/.test(id)) continue;
+      const l = sanitizeHrmLesson({ ...(lesson || {}), sessionId: id });
+      if (!l.en && !l.ml) continue;
+      clean[id] = l;
+    }
+    await env.HR_KV.put("academy_hrm_course", JSON.stringify(clean), { expirationTtl: 730 * 86400 });
+    return apiResponse({ success: true, count: Object.keys(clean).length });
+  } catch (err) {
+    return apiResponse({ error: err.message }, 500);
+  }
+}
+
+async function readSessionContent(env) {
+  return (await env.HR_KV.get("academy_session_content", { type: "json" })) || {};
+}
+
+async function handleSessionContentGet(request, env, ctx) {
+  if (!env.HR_KV) return apiResponse({ error: "KV not available" }, 500);
+  try {
+    const url = new URL(request.url);
+    const only = (url.searchParams.get("sessionId") || "").trim();
+    const content = await readSessionContent(env);
+    if (only) return apiResponse({ success: true, sessionId: only, content: content[only] || null });
+    return apiResponse({ success: true, content, count: Object.keys(content).length });
+  } catch (err) {
+    return apiResponse({ error: err.message }, 500);
+  }
+}
+
+async function handleSessionContentSave(request, env, ctx) {
+  if (!env.HR_KV) return apiResponse({ error: "KV not available" }, 500);
+  const body = (await safeJson(request)) || {};
+  try {
+    const sessionId = String(body.sessionId || "").trim();
+    if (!sessionId) return apiResponse({ error: "sessionId is required" }, 400);
+    const content = await readSessionContent(env);
+    const prev = content[sessionId] || {};
+    content[sessionId] = {
+      videoUrl: String(body.videoUrl ?? prev.videoUrl ?? "").slice(0, 2000),
+      notes: String(body.notes ?? prev.notes ?? "").slice(0, 20000),
+      assignment: String(body.assignment ?? prev.assignment ?? "").slice(0, 10000),
+      updatedAt: new Date().toISOString()
+    };
+    await env.HR_KV.put("academy_session_content", JSON.stringify(content), { expirationTtl: 730 * 86400 });
+    return apiResponse({ success: true, sessionId });
+  } catch (err) {
     return apiResponse({ error: err.message }, 500);
   }
 }
