@@ -6548,10 +6548,31 @@
     }
     function parseHrmAiJson(raw) {
       if (!raw) return null;
-      let c = String(raw).replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
+      let c = String(raw).trim();
+      // Strip markdown code fences
+      c = c.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
+      // Extract the JSON object
       const m = c.match(/\{[\s\S]*\}/);
       if (m) c = m[0];
-      try { return JSON.parse(c); } catch (e) { return null; }
+      // Attempt 1: direct parse
+      try { return JSON.parse(c); } catch (e) {}
+      // Attempt 2: fix trailing commas before } or ]
+      try {
+        let fixed = c.replace(/,\s*([}\]])/g, '$1');
+        return JSON.parse(fixed);
+      } catch (e) {}
+      // Attempt 3: replace single quotes with double quotes (careful with apostrophes)
+      try {
+        let fixed = c.replace(/,\s*([}\]])/g, '$1');
+        fixed = fixed.replace(/'/g, '"');
+        return JSON.parse(fixed);
+      } catch (e) {}
+      // Attempt 4: strip control chars and retry
+      try {
+        let fixed = c.replace(/[\x00-\x1F\x7F]/g, ' ').replace(/,\s*([}\]])/g, '$1');
+        return JSON.parse(fixed);
+      } catch (e) {}
+      return null;
     }
     function fillHrmFormFromAI(d, sid) {
       if (!d) return false;
@@ -6809,48 +6830,78 @@
         count.textContent = done + ' / ' + total;
         bar.style.width = ((done / total) * 100) + '%';
 
-        try {
-          const prompt = 'You are Senior HR Faculty for Simpatico HR Academy (Kerala + UAE). Generate ONE elaborated HRM lesson for Session ' + sid + ': "' + sessionTitle + '". Respond with STRICT JSON ONLY, no markdown, no code fences. Schema: {"titleEn": "...", "titleMl": "...", "module": "' + (MODULE_MAP[sid] || 1) + '", "en": "5-8 sentence elaborated English explanation with concept, why it matters, steps, statute/formula, corporate tip", "ml": "same lesson in simple Malayalam, 5-8 sentences", "terms": ["Term = പദം", "...5 items"], "example": "one real corporate numeric example with steps", "viva": ["Q1", "Q2", "Q3", "Q4 including 1 Malayalam question"]}. Keep English legal terms exact (MOHRE, WPS, Article 51, PF, ESI). Malayalam must be natural Kerala style.';
+        const MAX_RETRIES = 3;
+        let success = false;
 
-          const res = await fetch('https://generativelanguage.googleapis.com/v1beta/models/' + apiModel + ':generateContent?key=' + encodeURIComponent(key), {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: { temperature: 0.7, maxOutputTokens: 2000, responseMimeType: 'application/json' } })
-          });
+        for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+          try {
+            const prompt = 'You are Senior HR Faculty for Simpatico HR Academy (Kerala + UAE). Generate ONE elaborated HRM lesson for Session ' + sid + ': "' + sessionTitle + '". Respond with STRICT JSON ONLY, no markdown, no code fences. Schema: {"titleEn": "...", "titleMl": "...", "module": "' + (MODULE_MAP[sid] || 1) + '", "en": "5-8 sentence elaborated English explanation with concept, why it matters, steps, statute/formula, corporate tip", "ml": "same lesson in simple Malayalam, 5-8 sentences", "terms": ["Term = പദം", "...5 items"], "example": "one real corporate numeric example with steps", "viva": ["Q1", "Q2", "Q3", "Q4 including 1 Malayalam question"]}. Keep English legal terms exact (MOHRE, WPS, Article 51, PF, ESI). Malayalam must be natural Kerala style.';
 
-          if (res.ok) {
-            const data = await res.json();
-            const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-            const parsed = parseHrmAiJson(text);
-            if (parsed) {
-              const g = function (v) { return String(v == null ? '' : v).trim(); };
-              const viva = Array.isArray(parsed.viva) ? parsed.viva.join('\n') : g(parsed.viva);
-              const terms = Array.isArray(parsed.terms) ? parsed.terms.join('; ') : g(parsed.terms);
-              store[String(sid)] = {
-                videoUrl: '', notes: '', assignment: '',
-                publishedAt: new Date().toISOString(),
-                hrmTitleEn: g(parsed.titleEn) || sessionTitle,
-                hrmTitleMl: g(parsed.titleMl) || '',
-                hrmModule: String(MODULE_MAP[sid] || parsed.module || 1),
-                hrmDuration: '90 min',
-                hrmEn: g(parsed.en), hrmMl: g(parsed.ml),
-                hrmTerms: terms, hrmExample: g(parsed.example),
-                hrmViva: viva, hrmVideo: ''
-              };
-              setHrmStore(store);
-              log.innerHTML += '<div style="color:#10B981;">✅ Session ' + sid + ': ' + sessionTitle + '</div>';
+            const res = await fetch('https://generativelanguage.googleapis.com/v1beta/models/' + apiModel + ':generateContent?key=' + encodeURIComponent(key), {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: { temperature: 0.7, maxOutputTokens: 2000, responseMimeType: 'application/json' } })
+            });
+
+            if (res.ok) {
+              const data = await res.json();
+              const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+              const parsed = parseHrmAiJson(text);
+              if (parsed) {
+                const g = function (v) { return String(v == null ? '' : v).trim(); };
+                const viva = Array.isArray(parsed.viva) ? parsed.viva.join('\n') : g(parsed.viva);
+                const terms = Array.isArray(parsed.terms) ? parsed.terms.join('; ') : g(parsed.terms);
+                store[String(sid)] = {
+                  videoUrl: '', notes: '', assignment: '',
+                  publishedAt: new Date().toISOString(),
+                  hrmTitleEn: g(parsed.titleEn) || sessionTitle,
+                  hrmTitleMl: g(parsed.titleMl) || '',
+                  hrmModule: String(MODULE_MAP[sid] || parsed.module || 1),
+                  hrmDuration: '90 min',
+                  hrmEn: g(parsed.en), hrmMl: g(parsed.ml),
+                  hrmTerms: terms, hrmExample: g(parsed.example),
+                  hrmViva: viva, hrmVideo: ''
+                };
+                setHrmStore(store);
+                log.innerHTML += '<div style="color:#10B981;">✅ Session ' + sid + ': ' + sessionTitle + '</div>';
+                success = true;
+                break; // exit retry loop on success
+              } else {
+                // Unparseable JSON — retry if attempts remain
+                if (attempt < MAX_RETRIES) {
+                  const retryDelay = 3000 * (attempt + 1);
+                  log.innerHTML += '<div style="color:#F59E0B;">⚠️ Session ' + sid + ': Unparseable JSON, retrying in ' + (retryDelay / 1000) + 's... (attempt ' + (attempt + 1) + '/' + MAX_RETRIES + ')</div>';
+                  await new Promise(r => setTimeout(r, retryDelay));
+                } else {
+                  log.innerHTML += '<div style="color:#F59E0B;">⚠️ Session ' + sid + ': AI returned unparseable JSON after ' + MAX_RETRIES + ' retries</div>';
+                }
+              }
+            } else if (res.status === 429 || res.status === 503) {
+              // Rate limited or service unavailable — exponential backoff retry
+              if (attempt < MAX_RETRIES) {
+                const backoff = Math.min(5000 * Math.pow(2, attempt), 60000); // 5s, 10s, 20s (max 60s)
+                log.innerHTML += '<div style="color:#F59E0B;">⏳ Session ' + sid + ': API ' + res.status + ', backing off ' + (backoff / 1000) + 's... (retry ' + (attempt + 1) + '/' + MAX_RETRIES + ')</div>';
+                await new Promise(r => setTimeout(r, backoff));
+              } else {
+                log.innerHTML += '<div style="color:#EF4444;">❌ Session ' + sid + ': API error ' + res.status + ' after ' + MAX_RETRIES + ' retries</div>';
+              }
             } else {
-              log.innerHTML += '<div style="color:#F59E0B;">⚠️ Session ' + sid + ': AI returned unparseable JSON</div>';
+              log.innerHTML += '<div style="color:#EF4444;">❌ Session ' + sid + ': API error ' + res.status + '</div>';
+              break; // non-retryable error
             }
-          } else {
-            log.innerHTML += '<div style="color:#EF4444;">❌ Session ' + sid + ': API error ' + res.status + '</div>';
+          } catch (e) {
+            if (attempt < MAX_RETRIES) {
+              const backoff = 3000 * (attempt + 1);
+              log.innerHTML += '<div style="color:#F59E0B;">⏳ Session ' + sid + ': Network error, retrying in ' + (backoff / 1000) + 's... (retry ' + (attempt + 1) + '/' + MAX_RETRIES + ')</div>';
+              await new Promise(r => setTimeout(r, backoff));
+            } else {
+              log.innerHTML += '<div style="color:#EF4444;">❌ Session ' + sid + ': Network error after ' + MAX_RETRIES + ' retries</div>';
+            }
           }
-        } catch (e) {
-          log.innerHTML += '<div style="color:#EF4444;">❌ Session ' + sid + ': Network error</div>';
-        }
+        } // end retry loop
 
         done++;
-        // Rate limit: 1.5s between requests to avoid API quota
-        if (done < total) await new Promise(r => setTimeout(r, 1500));
+        // Rate limit: 4s between requests to stay within Gemini free-tier quota (15 RPM)
+        if (done < total) await new Promise(r => setTimeout(r, 4000));
         log.scrollTop = log.scrollHeight;
       }
 
