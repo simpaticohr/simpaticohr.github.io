@@ -4123,16 +4123,21 @@ async function handleSendPayslip(request, env, ctx, [id]) {
     }
   }
 
-  const email = ps.employees?.email;
-  if (!email || !email.includes('@')) {
-    throw new ValidationError(`Cannot send payslip: Employee has no valid email address.`);
-  }
+  const body = await safeJson(request).catch(() => ({}));
+  const isMarkOnly = body && (body.mark_only === true || body.manual === true);
 
-  await sendEmail(env, {
-    to: email,
-    subject: `Your Payslip for ${ps.period}`,
-    html: payslipEmailHtml(ps),
-  });
+  if (!isMarkOnly) {
+    const email = ps.employees?.email;
+    if (!email || !email.includes('@')) {
+      throw new ValidationError(`Cannot send payslip: Employee has no valid email address.`);
+    }
+
+    await sendEmail(env, {
+      to: email,
+      subject: `Your Payslip for ${ps.period}`,
+      html: payslipEmailHtml(ps),
+    });
+  }
   // Update status — wrapped in try-catch so email success is not lost
   // if DB schema is out of sync (e.g. missing sent_at column)
   try {
@@ -7607,8 +7612,16 @@ async function sendEmail(env, { to, subject, html, replyTo, tags, attachments })
 
   if (!res.ok) {
     const errorText = await res.text();
+    let detailMsg = errorText;
+    try {
+      const parsed = JSON.parse(errorText);
+      detailMsg = parsed.message || parsed.error || errorText;
+    } catch (_) {}
     console.error(`Email send failed [${subject}]:`, errorText);
-    throw new AppError(`Email delivery failed: ${errorText}`, 500, "EMAIL_ERROR");
+    if (res.status === 401 || (detailMsg && detailMsg.toLowerCase().includes('api key is invalid'))) {
+      throw new AppError("Email delivery failed: Resend API key is invalid or expired. Please update RESEND_API_KEY in Cloudflare secrets or use manual delivery.", 401, "EMAIL_KEY_INVALID");
+    }
+    throw new AppError(`Email delivery failed: ${detailMsg}`, res.status || 500, "EMAIL_ERROR");
   }
   return res;
 }

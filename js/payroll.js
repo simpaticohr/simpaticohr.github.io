@@ -446,7 +446,10 @@ function renderPayslips(list) {
       <td>
         <div style="display:flex;gap:6px">
           <button class="hr-btn hr-btn-ghost hr-btn-sm" onclick="downloadPayslip('${p.id}')">Download</button>
-          ${p.status === 'generated' ? `<button class="hr-btn hr-btn-primary hr-btn-sm" onclick="sendPayslip('${p.id}')">Send</button>` : ''}
+          ${p.status === 'generated' ? `
+            <button class="hr-btn hr-btn-primary hr-btn-sm" onclick="sendPayslip('${p.id}')" title="Send email to employee">Send</button>
+            <button class="hr-btn hr-btn-ghost hr-btn-sm" style="color:var(--hr-text-muted);" onclick="markPayslipSent('${p.id}')" title="Mark as delivered manually without email">Mark Sent</button>
+          ` : ''}
         </div>
       </td>
     </tr>`;
@@ -1001,6 +1004,26 @@ window.downloadPayslip = async function(id) {
   }
 };
 
+function cleanErrorMessage(rawMsg) {
+  if (!rawMsg) return 'Action failed';
+  let str = String(rawMsg);
+  // Unpack JSON string like `{"message":"API key is invalid",...}`
+  if (str.includes('{') && str.includes('}')) {
+    try {
+      const start = str.indexOf('{');
+      const end = str.lastIndexOf('}') + 1;
+      const parsed = JSON.parse(str.slice(start, end));
+      if (parsed.message) {
+        str = parsed.message;
+      }
+    } catch (_) {}
+  }
+  if (str.toLowerCase().includes('api key is invalid') || str.toLowerCase().includes('resend_api_key')) {
+    return 'Email delivery failed: Resend API key is invalid or expired. You can deliver manually or update the key.';
+  }
+  return str;
+}
+
 window.sendPayslip = async function(payslipId) {
   try {
     const res = await fetch(`${PAY_CONFIG.workerUrl}/payroll/payslips/${payslipId}/send`, {
@@ -1008,17 +1031,108 @@ window.sendPayslip = async function(payslipId) {
     });
     if (!res.ok) {
       const errBody = await res.json().catch(() => ({}));
-      throw new Error(errBody.error?.message || errBody.message || 'Send failed');
+      const raw = errBody.error?.message || errBody.message || 'Send failed';
+      throw new Error(cleanErrorMessage(raw));
     }
     showToast('Payslip sent to employee', 'success');
     await loadPayslips();
-  } catch (err) { showToast(err.message, 'error'); }
+  } catch (err) {
+    showToast(err.message, 'error');
+    if (err.message.toLowerCase().includes('email') || err.message.toLowerCase().includes('api key') || err.message.toLowerCase().includes('failed')) {
+      showManualPayslipDeliveryModal(payslipId, err.message);
+    }
+  }
+};
+
+window.markPayslipSent = async function(payslipId) {
+  try {
+    showToast('Updating payslip status…', 'info');
+    // 1. Try direct Supabase update
+    const client = typeof sb === 'function' ? sb() : (window.SimpaticoDB || window._supabaseClient);
+    if (client) {
+      const { error } = await client
+        .from('payslips')
+        .update({ status: 'sent', sent_at: new Date().toISOString() })
+        .eq('id', payslipId);
+      if (!error) {
+        showToast('Payslip marked as sent (manual/offline delivery)', 'success');
+        closeManualPayslipModal();
+        await loadPayslips();
+        return;
+      }
+    }
+
+    // 2. Fallback to worker endpoint with mark_only: true
+    const res = await fetch(`${PAY_CONFIG.workerUrl}/payroll/payslips/${payslipId}/send`, {
+      method: 'POST',
+      headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mark_only: true }),
+    });
+    if (!res.ok) {
+      const errBody = await res.json().catch(() => ({}));
+      throw new Error(errBody.error?.message || errBody.message || 'Update failed');
+    }
+    showToast('Payslip marked as sent', 'success');
+    closeManualPayslipModal();
+    await loadPayslips();
+  } catch (err) {
+    showToast('Failed to mark as sent: ' + err.message, 'error');
+  }
+};
+
+window.showManualPayslipDeliveryModal = function(payslipId, reason) {
+  let modal = document.getElementById('payslip-manual-delivery-modal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'payslip-manual-delivery-modal';
+    modal.className = 'hr-modal-overlay';
+    modal.style.zIndex = '99999';
+    document.body.appendChild(modal);
+  }
+
+  modal.innerHTML = `
+    <div class="hr-modal" style="max-width:480px;background:var(--hr-bg-surface);border:1px solid var(--hr-border);border-radius:16px;padding:24px;box-shadow:0 16px 40px rgba(0,0,0,0.5);">
+      <div class="hr-modal-head" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+        <h3 style="font-family:var(--hr-font-display);font-size:18px;font-weight:700;color:var(--hr-text-primary);display:flex;align-items:center;gap:8px;">
+          <span style="color:var(--hr-warning);">&#9888;</span> Email Delivery Notice
+        </h3>
+        <button class="hr-modal-close" onclick="closeManualPayslipModal()" style="background:none;border:none;color:var(--hr-text-secondary);cursor:pointer;font-size:18px;">&times;</button>
+      </div>
+      <p style="font-size:13.5px;color:var(--hr-text-secondary);line-height:1.5;margin-bottom:18px;">
+        ${typeof escapeHtml === 'function' ? escapeHtml(reason) : String(reason).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}
+      </p>
+      <div style="background:var(--hr-bg-card);border:1px solid var(--hr-border);border-radius:10px;padding:12px 16px;margin-bottom:20px;font-size:13px;color:var(--hr-text-primary);">
+        <strong>Alternative Actions:</strong>
+        <div style="margin-top:6px;color:var(--hr-text-secondary);">You can download the official PDF to deliver directly or mark the payslip as delivered.</div>
+      </div>
+      <div style="display:flex;justify-content:flex-end;gap:10px;flex-wrap:wrap;">
+        <button class="hr-btn hr-btn-ghost" onclick="closeManualPayslipModal()">Cancel</button>
+        <button class="hr-btn hr-btn-secondary" onclick="downloadPayslip('${payslipId}'); closeManualPayslipModal();">
+          <i class="fas fa-download"></i> Download PDF
+        </button>
+        <button class="hr-btn hr-btn-primary" onclick="markPayslipSent('${payslipId}')">
+          <i class="fas fa-check"></i> Mark as Sent
+        </button>
+      </div>
+    </div>`;
+
+  modal.classList.add('open');
+  modal.classList.add('active');
+  modal.style.display = 'flex';
+};
+
+window.closeManualPayslipModal = function() {
+  const m = document.getElementById('payslip-manual-delivery-modal');
+  if (m) {
+    m.classList.remove('open');
+    m.classList.remove('active');
+    m.style.display = 'none';
+  }
 };
 
 window.sendAllPayslips = async function() {
   const unsent = allPayslips.filter(p => p.status === 'generated');
   if (unsent.length === 0) { showToast('No unsent payslips', 'info'); return; }
-  // Determine period from the first unsent payslip
   const period = unsent[0]?.period || '';
   showToast(`Sending ${unsent.length} payslips…`, 'info');
   try {
@@ -1029,11 +1143,14 @@ window.sendAllPayslips = async function() {
     });
     if (!res.ok) {
       const errBody = await res.json().catch(() => ({}));
-      throw new Error(errBody.error?.message || errBody.message || 'Bulk send failed');
+      const raw = errBody.error?.message || errBody.message || 'Bulk send failed';
+      throw new Error(cleanErrorMessage(raw));
     }
-    showToast(`${unsent.length} payslips sent`, 'success');
+    showToast(`${unsent.length} payslips processed`, 'success');
     await loadPayslips();
-  } catch (err) { showToast(err.message, 'error'); }
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
 };
 
 window.exportPayroll = function() {

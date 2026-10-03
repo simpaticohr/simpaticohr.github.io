@@ -195,7 +195,10 @@ function renderOnboardCard(r) {
 }
 
 window.openChecklist = function(recordId) {
-  location.href = `onboarding-checklist.html?id=${recordId}`;
+  const cleanId = (recordId || '').toString().trim().replace(/\s+/g, '-');
+  const isDashboard = window.location.pathname.includes('/dashboard/');
+  const target = isDashboard ? 'onboarding-checklist.html' : '/dashboard/onboarding-checklist.html';
+  location.href = `${target}?id=${cleanId}`;
 };
 
 window.startOnboarding = async function() {
