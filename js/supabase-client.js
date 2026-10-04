@@ -33,7 +33,9 @@
     window.SimpaticoDB     = client;
     console.log('[supabase-client] Initialized: SimpaticoDB (singleton)');
   } else {
-    console.warn('[supabase-client] Not configured — set SIMPATICO_CONFIG in hr-config.js');
-    window._supabaseClient = null;
+    console.warn('[supabase-client] Not configured yet — Supabase SDK may still be loading from CDN. AuthManager will retry lazily.');
+    // Do NOT set window._supabaseClient = null here.
+    // Leaving it undefined allows AuthManager's lazy db getter to retry
+    // initialization once window.supabase finishes loading from the CDN.
   }
 })();

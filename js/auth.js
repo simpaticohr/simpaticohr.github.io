@@ -3,9 +3,45 @@
 
 class AuthManager {
   constructor() {
-    this.db = window.SimpaticoDB;
+    this._db = null;
     this.currentUser = null;
     this.userProfile = null;
+  }
+
+  get db() {
+    // Try cached reference first
+    let client = this._db || window.SimpaticoDB || window._supabaseClient || null;
+
+    // If still falsy, try getSupabaseClient() helper
+    if (!client && typeof getSupabaseClient === 'function') {
+      try { client = getSupabaseClient(); } catch (_) {}
+    }
+
+    // If still no client but the Supabase CDN has now loaded, create one
+    if (!client && window.supabase && window.SIMPATICO_CONFIG) {
+      try {
+        const cfg = window.SIMPATICO_CONFIG;
+        if (cfg.supabaseUrl && cfg.supabaseAnonKey) {
+          client = window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseAnonKey);
+          console.log('[AuthManager] Lazy-initialized Supabase client');
+        }
+      } catch (e) {
+        console.error('[AuthManager] Supabase client init failed:', e);
+      }
+    }
+
+    // Cache the client globally so subsequent calls don't re-create
+    if (client && !this._db) {
+      this._db = client;
+      window.SimpaticoDB = client;
+      window._supabaseClient = client;
+    }
+
+    return client;
+  }
+
+  set db(val) {
+    this._db = val;
   }
 
   // Login with email/password
@@ -110,8 +146,13 @@ class AuthManager {
 
   // Register Candidate
   async registerCandidate(candidateData) {
+    const db = this.db;
+    if (!db || !db.auth) {
+      throw new Error('Database service is currently unavailable. Please refresh the page and try again.');
+    }
+
     try {
-      const { data: authData, error: authError } = await this.db.auth.signUp({
+      const { data: authData, error: authError } = await db.auth.signUp({
         email: candidateData.email,
         password: candidateData.password,
         options: {
@@ -124,35 +165,103 @@ class AuthManager {
       });
       if (authError) throw authError;
 
-      // Create user profile
-      const { data: user, error: userError } = await this.db.from('users').insert({
-        auth_id: authData.user.id,
-        email: candidateData.email,
-        phone: candidateData.phone,
-        full_name: candidateData.name,
-        role: 'candidate'
-      }).select().single();
-      if (userError) throw userError;
-
-      // Create candidate profile
-      const skills = candidateData.skills ? 
-        candidateData.skills.split(',').map(s => s.trim()).filter(Boolean) : [];
-
-      const { error: profileError } = await this.db.from('candidate_profiles').insert({
-        user_id: user.id,
-        skills: skills,
-        experience_years: candidateData.experience || 0,
-        location: candidateData.location || '',
-        source: 'direct_registration'
-      });
-      if (profileError) throw profileError;
-
-      // Upload resume if provided
-      if (candidateData.resume) {
-        await this.uploadResume(user.id, candidateData.resume);
+      // Handle duplicate email (Supabase returns empty identities on already registered email without throwing)
+      if (authData.user && (!authData.user.identities || authData.user.identities.length === 0)) {
+        throw new Error('This email is already registered. Please sign in instead.');
       }
 
-      return { success: true, user: authData.user };
+      const authUser = authData.user;
+      if (!authUser) throw new Error('Registration failed — unable to create auth user.');
+
+      // If session is returned, persist tokens to localStorage
+      if (authData.session) {
+        try {
+          localStorage.setItem('simpatico_token', authData.session.access_token);
+          localStorage.setItem('sh_token', authData.session.access_token);
+          localStorage.setItem('simpatico_user', JSON.stringify({
+            id: authUser.id,
+            email: candidateData.email,
+            full_name: candidateData.name,
+            role: 'candidate'
+          }));
+          localStorage.setItem('sh_user', JSON.stringify({
+            id: authUser.id,
+            email: candidateData.email,
+            full_name: candidateData.name,
+            role: 'candidate'
+          }));
+        } catch (_) {}
+      }
+
+      // Create user profile in public.users
+      let user = null;
+      try {
+        const { data: userData, error: userError } = await db.from('users').insert({
+          auth_id: authUser.id,
+          email: candidateData.email,
+          phone: candidateData.phone,
+          full_name: candidateData.name,
+          role: 'candidate',
+          experience: candidateData.experience || 0,
+          skills: candidateData.skills || '',
+          location: candidateData.location || '',
+          is_active: true
+        }).select().maybeSingle();
+
+        if (userError) {
+          console.warn('Failed to insert into users table:', userError.message);
+          const { data: existingUser } = await db.from('users')
+            .select('*')
+            .eq('auth_id', authUser.id)
+            .maybeSingle();
+          user = existingUser;
+        } else {
+          user = userData;
+        }
+      } catch (uErr) {
+        console.warn('Exception during users table insert:', uErr);
+      }
+
+      // Create candidate profile
+      const userId = user?.id;
+      if (userId) {
+        try {
+          const skills = candidateData.skills ? 
+            candidateData.skills.split(',').map(s => s.trim()).filter(Boolean) : [];
+
+          const { error: profileError } = await db.from('candidate_profiles').insert({
+            user_id: userId,
+            skills: skills,
+            experience_years: candidateData.experience || 0,
+            location: candidateData.location || '',
+            source: 'direct_registration'
+          });
+          if (profileError) console.warn('candidate_profiles insert warning:', profileError.message);
+        } catch (pErr) {
+          console.warn('candidate_profiles insert exception:', pErr);
+        }
+
+        // Upload resume if provided (non-fatal)
+        if (candidateData.resume) {
+          try {
+            await this.uploadResume(userId, candidateData.resume);
+          } catch (rErr) {
+            console.warn('Resume upload warning (non-fatal):', rErr);
+          }
+        }
+      }
+
+      // Send welcome email via Cloudflare worker (async, non-blocking)
+      try {
+        const workerUrl = window.SIMPATICO_CONFIG?.workerUrl || 'https://simpatico-hr-ats.simpaticohrconsultancy.workers.dev';
+        fetch(`${workerUrl}/email/welcome`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: candidateData.email, name: candidateData.name, type: 'candidate' })
+        }).catch(() => {});
+      } catch (_) {}
+
+      return { success: true, user: authUser, session: authData.session };
     } catch (error) {
       console.error('Candidate registration error:', error);
       throw error;
@@ -161,35 +270,49 @@ class AuthManager {
 
   // Upload Resume
   async uploadResume(userId, file) {
+    if (!file || !userId) return null;
     const fileExt = file.name.split('.').pop().toLowerCase();
     const filePath = `resumes/${userId}/${Date.now()}.${fileExt}`;
     
-    const { error } = await this.db.storage.from('documents').upload(filePath, file, {
+    let bucket = 'documents';
+    let uploadRes = await this.db.storage.from(bucket).upload(filePath, file, {
       cacheControl: '3600',
       upsert: true
     });
-    if (error) {
-      console.error('Resume storage upload failed:', error.message);
-      throw error;
+
+    if (uploadRes.error) {
+      console.warn('Upload to documents bucket failed, trying hr-documents:', uploadRes.error.message);
+      bucket = 'hr-documents';
+      uploadRes = await this.db.storage.from(bucket).upload(filePath, file, {
+        cacheControl: '3600',
+        upsert: true
+      });
     }
 
-    const { data: urlData } = this.db.storage.from('documents').getPublicUrl(filePath);
-    const resumeUrl = urlData.publicUrl;
+    if (uploadRes.error) {
+      console.warn('Resume storage upload failed on both buckets:', uploadRes.error.message);
+      return null;
+    }
+
+    const { data: urlData } = this.db.storage.from(bucket).getPublicUrl(filePath);
+    const resumeUrl = urlData?.publicUrl || '';
     
     // Update candidate_profiles table
-    const { error: cpErr } = await this.db.from('candidate_profiles')
-      .update({ resume_url: resumeUrl })
-      .eq('user_id', userId);
-    if (cpErr) console.warn('candidate_profiles resume_url update failed:', cpErr.message);
-    
-    // Also update users table directly for super-admin visibility
-    try {
-      const { error: uErr } = await this.db.from('users')
+    if (resumeUrl) {
+      const { error: cpErr } = await this.db.from('candidate_profiles')
         .update({ resume_url: resumeUrl })
-        .eq('id', userId);
-      if (uErr) console.warn('users resume_url update failed:', uErr.message);
-    } catch(e) {
-      console.warn('users resume update exception:', e);
+        .eq('user_id', userId);
+      if (cpErr) console.warn('candidate_profiles resume_url update failed:', cpErr.message);
+      
+      // Also update users table directly for super-admin visibility
+      try {
+        const { error: uErr } = await this.db.from('users')
+          .update({ resume_url: resumeUrl })
+          .eq('id', userId);
+        if (uErr) console.warn('users resume_url update failed:', uErr.message);
+      } catch(e) {
+        console.warn('users resume update exception:', e);
+      }
     }
 
     // Extract text for .txt files
@@ -214,12 +337,14 @@ class AuthManager {
     
     // Trigger AI resume parsing
     try {
-      await window.SimpaticoAPI.parseResume(file);
+      if (window.SimpaticoAPI?.parseResume) {
+        await window.SimpaticoAPI.parseResume(file);
+      }
     } catch (e) {
       console.warn('Resume parsing skipped:', e);
     }
 
-    return urlData.publicUrl;
+    return resumeUrl;
   }
 
   // Get User Profile
@@ -460,25 +585,44 @@ async function handleCandidateRegistration(e) {
   const btn = document.getElementById('candRegBtn');
   
   btn.disabled = true;
-  btn.innerHTML = '<span class="spinner" style="width:20px;height:20px;border-width:2px;"></span> Creating Account...';
+  btn.innerHTML = '<span class="spinner" style="width:18px;height:18px;border-width:2px;display:inline-block;border:2px solid rgba(255,255,255,0.3);border-top-color:#fff;border-radius:50%;animation:spin 0.8s linear infinite;"></span> Creating Account...';
   
   try {
+    const city = document.getElementById('candLocation')?.value.trim() || '';
+    const country = document.getElementById('candCountry')?.value.trim() || '';
+    const location = [city, country].filter(Boolean).join(', ');
+
     const data = {
-      name: document.getElementById('candName').value,
-      email: document.getElementById('candEmail').value,
-      phone: document.getElementById('candPhone').value,
-      password: document.getElementById('candPassword').value,
-      experience: parseFloat(document.getElementById('candExperience').value) || 0,
-      skills: document.getElementById('candSkills').value,
-      location: document.getElementById('candLocation').value,
-      resume: document.getElementById('candResume').files[0]
+      name: document.getElementById('candName')?.value.trim() || '',
+      email: document.getElementById('candEmail')?.value.trim() || '',
+      phone: document.getElementById('candPhone')?.value.trim() || '',
+      password: document.getElementById('candPassword')?.value || '',
+      experience: parseFloat(document.getElementById('candExperience')?.value) || 0,
+      skills: document.getElementById('candSkills')?.value.trim() || '',
+      location: location,
+      portfolio: document.getElementById('candPortfolio')?.value.trim() || '',
+      resume: document.getElementById('candResume')?.files?.[0] || null
     };
+
+    if (!data.name || !data.email || !data.password) {
+      throw new Error('Please fill in all required fields.');
+    }
     
-    await authManager.registerCandidate(data);
-    showToast('Registration successful! Please verify your email.', 'success');
-    setTimeout(() => window.location.href = 'login.html', 2000);
+    const result = await authManager.registerCandidate(data);
+    showToast('Registration successful! Redirecting...', 'success');
+    setTimeout(() => {
+      if (result && result.session) {
+        window.location.href = 'dashboard/candidate.html';
+      } else {
+        window.location.href = 'login.html?verify=1&role=candidate';
+      }
+    }, 1800);
   } catch (error) {
-    showToast(error.message, 'error');
+    let msg = error.message || 'Registration failed. Please try again.';
+    if (msg.toLowerCase().includes('already registered') || msg.toLowerCase().includes('already been registered')) {
+      msg = 'This email is already registered. Please sign in instead.';
+    }
+    showToast(msg, 'error');
     btn.disabled = false;
     btn.innerHTML = '<i class="fas fa-user-plus"></i> Create Account';
   }
