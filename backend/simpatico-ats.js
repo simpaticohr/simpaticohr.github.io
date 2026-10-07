@@ -3530,19 +3530,23 @@ async function handleLeaveDecision(request, env, ctx, [id]) {
 const TAX_PROFILES = {
   IN: {
     name: 'India (Old Regime)',
+    standardDeduction: 50000,
+    rebateLimit: 500000,
     slabs: [
-      { min: 0, max: 300000, rate: 0 },
-      { min: 300000, max: 500000, rate: 0.05 },
+      { min: 0, max: 250000, rate: 0 },
+      { min: 250000, max: 500000, rate: 0.05 },
       { min: 500000, max: 1000000, rate: 0.20 },
       { min: 1000000, max: Infinity, rate: 0.30 }
     ],
-    pf: { rate: 0.12, cap: 15000 },
+    pf: { rate: 0.12, wageCeiling: 15000, maxContribution: 1800 },
     esi: { rate: 0.0075, ceiling: 21000 },
     professionalTax: 200,
     cess: 0.04
   },
   IN_NEW: {
     name: 'India (New Regime)',
+    standardDeduction: 75000,
+    rebateLimit: 700000,
     slabs: [
       { min: 0, max: 300000, rate: 0 },
       { min: 300000, max: 700000, rate: 0.05 },
@@ -3551,7 +3555,7 @@ const TAX_PROFILES = {
       { min: 1200000, max: 1500000, rate: 0.20 },
       { min: 1500000, max: Infinity, rate: 0.30 }
     ],
-    pf: { rate: 0.12, cap: 15000 },
+    pf: { rate: 0.12, wageCeiling: 15000, maxContribution: 1800 },
     esi: { rate: 0.0075, ceiling: 21000 },
     professionalTax: 200,
     cess: 0.04
@@ -3583,7 +3587,7 @@ const TAX_PROFILES = {
   AE: {
     name: 'UAE',
     slabs: [{ min: 0, max: Infinity, rate: 0 }],
-    gratuity: { rate: 0.0575 }
+    gratuity: { rate: 0 } // Gratuity is an employer liability, not employee deduction
   },
   CA: {
     name: 'Canada',
@@ -3656,12 +3660,17 @@ const TAX_PROFILES = {
   }
 };
 
-function calculateTax(monthlyIncome, countryCode = 'IN', taxRegime = 'old') {
+function calculateTax(monthlyIncome, countryCode = 'IN', taxRegime = 'old', basicPay = 0) {
   let profileKey = countryCode;
   if (countryCode === 'IN' && taxRegime === 'new') profileKey = 'IN_NEW';
   const profile = TAX_PROFILES[profileKey] || TAX_PROFILES['IN'];
-  const annual = monthlyIncome * 12;
-  let remainingIncome = annual;
+  
+  // Apply standard deduction if applicable
+  const annualGross = Math.max(0, monthlyIncome * 12);
+  const stdDed = profile.standardDeduction || 0;
+  const taxableAnnual = Math.max(0, annualGross - stdDed);
+
+  let remainingIncome = taxableAnnual;
   let annualTax = 0;
   const breakdown = [];
 
@@ -3674,13 +3683,34 @@ function calculateTax(monthlyIncome, countryCode = 'IN', taxRegime = 'old') {
     remainingIncome -= taxableInSlab;
   }
 
+  // Section 87A rebate for India (tax liability is nil if within rebate limit)
+  if (profile.rebateLimit && taxableAnnual <= profile.rebateLimit) {
+    annualTax = 0;
+  }
+
   let monthlyIncomeTax = annualTax / 12;
   let socialTax = 0;
+  const itemized = [];
 
   if (countryCode === 'IN') {
-    socialTax += Math.min(monthlyIncome * profile.pf.rate, profile.pf.cap);
-    if (monthlyIncome <= profile.esi.ceiling) socialTax += monthlyIncome * profile.esi.rate;
+    // Statutory EPF is 12% of basic pay, capped at statutory wage ceiling (₹15,000 -> max ₹1,800/mo)
+    const epfBase = basicPay > 0 ? basicPay : monthlyIncome;
+    const epf = Math.min(epfBase * profile.pf.rate, profile.pf.maxContribution || 1800);
+    socialTax += epf;
+    itemized.push({ name: 'Provident Fund (EPF)', amount: epf });
+
+    // ESI applies only if monthly wage is <= ceiling
+    if (monthlyIncome <= profile.esi.ceiling) {
+      const esi = Math.round(monthlyIncome * profile.esi.rate * 100) / 100;
+      socialTax += esi;
+      itemized.push({ name: 'ESI', amount: esi });
+    }
+
+    // Professional Tax
     socialTax += profile.professionalTax;
+    itemized.push({ name: 'Professional Tax', amount: profile.professionalTax });
+
+    // 4% Health & Education Cess
     monthlyIncomeTax *= (1 + profile.cess);
   } else if (countryCode === 'US') {
     const annualSoFar = monthlyIncome * 12;
@@ -3691,7 +3721,7 @@ function calculateTax(monthlyIncome, countryCode = 'IN', taxRegime = 'old') {
     const niable = Math.max(0, monthlyIncome - profile.ni.threshold / 12);
     socialTax += niable * profile.ni.rate;
   } else if (countryCode === 'AE') {
-    socialTax += monthlyIncome * (profile.gratuity?.rate || 0);
+    // UAE: 0 employee deduction
   } else if (countryCode === 'CA') {
     socialTax += Math.min(monthlyIncome * profile.cpp.rate, profile.cpp.max / 12);
     socialTax += Math.min(monthlyIncome * profile.ei.rate, profile.ei.max / 12);
@@ -3705,10 +3735,14 @@ function calculateTax(monthlyIncome, countryCode = 'IN', taxRegime = 'old') {
     socialTax += Math.min(monthlyIncome, profile.cpf.maxWage) * profile.cpf.rate;
   }
 
+  const roundedIncomeTax = Math.max(0, Math.round(monthlyIncomeTax * 100) / 100);
+  if (roundedIncomeTax > 0) itemized.push({ name: 'Income Tax (TDS)', amount: roundedIncomeTax });
+
   return {
-    incomeTax: Math.max(0, Math.round(monthlyIncomeTax * 100) / 100),
+    incomeTax: roundedIncomeTax,
     socialTax: Math.max(0, Math.round(socialTax * 100) / 100),
-    totalTax: Math.max(0, Math.round((monthlyIncomeTax + socialTax) * 100) / 100)
+    totalTax: Math.max(0, Math.round((roundedIncomeTax + socialTax) * 100) / 100),
+    itemized
   };
 }
 
@@ -3771,30 +3805,44 @@ async function handleCalculatePayroll(request, env, ctx) {
     ),
   ]);
 
-  const salaries = (await salRes.json()).filter(
+  const allSalaries = (await salRes.json()) || [];
+  const activeSalaries = allSalaries.filter(
     (s) => s.employees?.status === "active",
   );
-  const deductions = await dedRes.json();
-  const unpaidLeave = await leaveRes.json();
-  const reviews = await perfRes.json() || [];
-  const expenses = await expRes.json() || [];
+
+  // Keep only the most recent salary record per employee (prevents duplicate payslips)
+  const salaryMap = new Map();
+  for (const s of activeSalaries) {
+    const existing = salaryMap.get(s.employee_id);
+    if (!existing || new Date(s.effective_date || s.created_at || 0) > new Date(existing.effective_date || existing.created_at || 0)) {
+      salaryMap.set(s.employee_id, s);
+    }
+  }
+  const salaries = Array.from(salaryMap.values());
+
+  const deductions = (await dedRes.json()) || [];
+  const unpaidLeave = (await leaveRes.json()) || [];
+  const reviews = (await perfRes.json()) || [];
+  const expenses = (await expRes.json()) || [];
 
   const perfMap = {};
-  reviews.sort((a, b) => b.id - a.id).forEach(r => {
-    if (!perfMap[r.employee_id] && r.score) perfMap[r.employee_id] = r.score;
+  reviews.forEach(r => {
+    if (r.employee_id && r.score && !perfMap[r.employee_id]) {
+      perfMap[r.employee_id] = Number(r.score) || 0;
+    }
   });
 
   const expenseMap = {};
   expenses.forEach(ex => {
-    expenseMap[ex.employee_id] = (expenseMap[ex.employee_id] || 0) + (ex.amount || 0);
+    expenseMap[ex.employee_id] = (expenseMap[ex.employee_id] || 0) + (Number(ex.amount) || 0);
   });
 
   const countryCode = currencyToCountry(currency || 'USD');
 
   const payslips = salaries.map((s) => {
-    let base = s.base_salary || 0;
+    let base = Number(s.base_salary) || 0;
     let allowances = s.allowances || {};
-    let totalAllowances = (allowances.hra || 0) + (allowances.special || 0);
+    let totalAllowances = (Number(allowances.hra) || 0) + (Number(allowances.special) || 0);
 
     let score = perfMap[s.employee_id] || 0;
     let bonus = 0;
@@ -3810,13 +3858,13 @@ async function handleCalculatePayroll(request, env, ctx) {
 
     const unpaidDays = unpaidLeave
       .filter((l) => l.employee_id === s.employee_id)
-      .reduce((sum, l) => sum + l.days, 0);
+      .reduce((sum, l) => sum + (Number(l.days) || 0), 0);
 
     const dailyRate = (base + totalAllowances) / 22;
     const unpaidAdj = dailyRate * unpaidDays;
 
     let taxableIncome = base + totalAllowances + bonus - unpaidAdj;
-    const taxResult = calculateTax(taxableIncome, countryCode, s.tax_regime || 'old');
+    const taxResult = calculateTax(taxableIncome, countryCode, s.tax_regime || 'old', base);
 
     let reimbursements = expenseMap[s.employee_id] || 0;
 
@@ -3824,11 +3872,21 @@ async function handleCalculatePayroll(request, env, ctx) {
     const totalDeductionsAgg = empDeds + unpaidAdj + taxResult.totalTax;
     const net = Math.max(0, gross - totalDeductionsAgg);
 
+    const itemizedDeds = [...(taxResult.itemized || [])];
+    if (unpaidAdj > 0) itemizedDeds.push({ name: 'Unpaid Leave Proration', amount: Math.round(unpaidAdj * 100) / 100 });
+    deductions.filter(d => d.employee_id === s.employee_id).forEach(d => {
+      itemizedDeds.push({ name: d.type || 'Deduction', amount: Number(d.amount) || 0 });
+    });
+
     return {
       employee_id: s.employee_id,
-      gross_pay: gross,
-      deductions_total: totalDeductionsAgg,
-      net_pay: net,
+      gross_pay: Math.round(gross * 100) / 100,
+      deductions_total: Math.round(totalDeductionsAgg * 100) / 100,
+      net_pay: Math.round(net * 100) / 100,
+      allowances_total: Math.round(totalAllowances * 100) / 100,
+      reimbursements_total: Math.round(reimbursements * 100) / 100,
+      bonus_pay: Math.round(bonus * 100) / 100,
+      deductions: itemizedDeds,
       currency: s.currency || currency || 'USD',
     };
   });
@@ -4010,16 +4068,23 @@ async function handleRunPayroll(request, env, ctx) {
   const body = await safeJson(request);
   validate(body, "payroll_run");
 
+  const runPayload = {
+    period: body.period,
+    pay_date: body.pay_date || new Date().toISOString().slice(0, 10),
+    type: body.type || "monthly",
+    notes: body.notes || null,
+    status: "processing",
+    initiated_by: ctx.actorId,
+    run_by_id: ctx.actorId,
+    currency: body.currency || "USD",
+    tenant_id: ctx.tenantId,
+  };
+
   const runRes = await sbFetch(
     env,
     "POST",
     "/rest/v1/payroll_runs",
-    {
-      ...body,
-      status: "processing",
-      initiated_by: ctx.actorId,
-      tenant_id: ctx.tenantId,
-    },
+    runPayload,
     false,
     ctx.tenantId,
   );
@@ -4051,6 +4116,23 @@ async function handleRunPayroll(request, env, ctx) {
     false,
     ctx.tenantId,
   );
+
+  // Update reimbursed expenses to paid
+  try {
+    const empIdsWithExp = payslips.filter((p) => (p.reimbursements_total || 0) > 0).map((p) => p.employee_id);
+    if (empIdsWithExp.length > 0) {
+      for (const eid of empIdsWithExp) {
+        await sbFetch(
+          env,
+          "PATCH",
+          `/rest/v1/expenses?status=eq.approved&employee_id=eq.${eid}`,
+          { status: "paid" },
+          false,
+          ctx.tenantId,
+        );
+      }
+    }
+  } catch (_) {}
 
   await sbFetch(
     env,
@@ -4102,6 +4184,26 @@ async function handleListPayrollRuns(request, env, ctx) {
 
 async function handleGetPayslips(request, env, ctx, [employeeId]) {
   requireAuth(ctx);
+  const isHR = ["hr", "hr_manager", "company_admin", "payroll", "admin", "superadmin"].includes(ctx.userRole);
+  if (!isHR && ctx.actorId !== employeeId) {
+    try {
+      const empRes = await sbFetch(
+        env,
+        "GET",
+        `/rest/v1/employees?id=eq.${employeeId}&select=auth_id,user_id&limit=1`,
+        null,
+        false,
+        ctx.tenantId,
+      );
+      const [emp] = await empRes.json();
+      if (!emp || (emp.auth_id !== ctx.actorId && emp.user_id !== ctx.actorId)) {
+        throw new ForbiddenError("Cannot access payslips of other employees");
+      }
+    } catch (e) {
+      if (e instanceof AppError) throw e;
+      throw new ForbiddenError("Cannot access payslips of other employees");
+    }
+  }
   const res = await sbFetch(
     env,
     "GET",
@@ -7375,9 +7477,9 @@ async function sbFetch(
   // Inject tenant filter for GET, PATCH, and DELETE to prevent cross-tenant access.
   // Some tables predate the tenant_id convention — jobs stores the same company
   // UUID in company_id instead, so filter those by their real column.
-  const _isUuid = (s) => typeof s === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
+  const _isValidTenant = (s) => typeof s === "string" && s.length >= 2 && /^[0-9a-zA-Z_-]{2,64}$/.test(s);
   const TENANT_COLUMN_OVERRIDES = { jobs: "company_id" };
-  if (["GET", "PATCH", "DELETE"].includes(method) && tenantId && tenantId !== "default" && _isUuid(tenantId)) {
+  if (["GET", "PATCH", "DELETE"].includes(method) && tenantId && tenantId !== "default" && _isValidTenant(tenantId)) {
     const tableName = (path.match(/\/rest\/v1\/([a-z_]+)/) || [])[1];
     if (tableName && TENANT_AWARE_TABLES.includes(tableName)) {
       const col = TENANT_COLUMN_OVERRIDES[tableName] || "tenant_id";
@@ -7387,7 +7489,7 @@ async function sbFetch(
   }
 
   // Auto-inject tenant key for POST on tenant-aware tables
-  if (method === 'POST' && tenantId && tenantId !== 'default' && _isUuid(tenantId)) {
+  if (method === 'POST' && tenantId && tenantId !== 'default' && _isValidTenant(tenantId)) {
     const table = (path.match(/\/rest\/v1\/([a-z_]+)/) || [])[1];
     if (table && TENANT_AWARE_TABLES.includes(table)) {
       const col = TENANT_COLUMN_OVERRIDES[table] || "tenant_id";

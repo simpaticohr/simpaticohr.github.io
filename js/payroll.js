@@ -17,6 +17,16 @@ function sb() {
   return null;
 }
 
+function escapeHtml(str) {
+  if (!str) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
 let allPayslips   = [];
 let allSalaries   = [];
 let allRuns       = [];
@@ -142,19 +152,23 @@ async function loadUser() {
 const TAX_PROFILES = {
   IN: {
     name: 'India (Old Regime)',
+    standardDeduction: 50000,
+    rebateLimit: 500000,
     slabs: [
-      { min: 0, max: 300000, rate: 0 },
-      { min: 300000, max: 500000, rate: 0.05 },
+      { min: 0, max: 250000, rate: 0 },
+      { min: 250000, max: 500000, rate: 0.05 },
       { min: 500000, max: 1000000, rate: 0.20 },
       { min: 1000000, max: Infinity, rate: 0.30 }
     ],
-    pf: { rate: 0.12, cap: 15000 },        // EPF: 12% of basic, capped at ₹15K
-    esi: { rate: 0.0075, ceiling: 21000 },  // ESI: 0.75% if salary ≤ ₹21K
-    professionalTax: 200,                   // Monthly PT (varies by state)
-    cess: 0.04                              // 4% Health & Education Cess on tax
+    pf: { rate: 0.12, wageCeiling: 15000, maxContribution: 1800 },
+    esi: { rate: 0.0075, ceiling: 21000 },
+    professionalTax: 200,
+    cess: 0.04
   },
   IN_NEW: {
     name: 'India (New Regime)',
+    standardDeduction: 75000,
+    rebateLimit: 700000,
     slabs: [
       { min: 0, max: 300000, rate: 0 },
       { min: 300000, max: 700000, rate: 0.05 },
@@ -163,10 +177,10 @@ const TAX_PROFILES = {
       { min: 1200000, max: 1500000, rate: 0.20 },
       { min: 1500000, max: Infinity, rate: 0.30 }
     ],
-    pf: { rate: 0.12, cap: 15000 },        // EPF: 12% of basic, capped at ₹15K
-    esi: { rate: 0.0075, ceiling: 21000 },  // ESI: 0.75% if salary ≤ ₹21K
-    professionalTax: 200,                   // Monthly PT (varies by state)
-    cess: 0.04                              // 4% Health & Education Cess on tax
+    pf: { rate: 0.12, wageCeiling: 15000, maxContribution: 1800 },
+    esi: { rate: 0.0075, ceiling: 21000 },
+    professionalTax: 200,
+    cess: 0.04
   },
   US: {
     name: 'United States',
@@ -195,7 +209,7 @@ const TAX_PROFILES = {
   AE: {
     name: 'UAE',
     slabs: [{ min: 0, max: Infinity, rate: 0 }],  // No income tax
-    gratuity: { rate: 0.0575 }  // EOSB provision ~21 days/year
+    gratuity: { rate: 0 }  // Employer provision, not employee deduction
   },
   CA: {
     name: 'Canada',
@@ -206,8 +220,8 @@ const TAX_PROFILES = {
       { min: 165430, max: 235675, rate: 0.29 },
       { min: 235675, max: Infinity, rate: 0.33 }
     ],
-    cpp: { rate: 0.0595, max: 3867.50 }, // Canada Pension Plan
-    ei: { rate: 0.0166, max: 1049.12 }   // Employment Insurance
+    cpp: { rate: 0.0595, max: 3867.50 },
+    ei: { rate: 0.0166, max: 1049.12 }
   },
   AU: {
     name: 'Australia',
@@ -218,14 +232,14 @@ const TAX_PROFILES = {
       { min: 120000, max: 180000, rate: 0.37 },
       { min: 180000, max: Infinity, rate: 0.45 }
     ],
-    medicare: 0.02, // Medicare levy
-    super: 0.11     // Superannuation guarantee (employer paid, but tracked)
+    medicare: 0.02,
+    super: 0.11
   },
   DE: {
     name: 'Germany (EU)',
     slabs: [
       { min: 0, max: 10908, rate: 0 },
-      { min: 10908, max: 62809, rate: 0.24 }, // simplified progressive band
+      { min: 10908, max: 62809, rate: 0.24 },
       { min: 62809, max: 277825, rate: 0.42 },
       { min: 277825, max: Infinity, rate: 0.45 }
     ],
@@ -245,7 +259,7 @@ const TAX_PROFILES = {
       { min: 70000, max: 180000, rate: 0.33 },
       { min: 180000, max: Infinity, rate: 0.39 }
     ],
-    acc: 0.0139 // ACC levy
+    acc: 0.0139
   },
   SG: {
     name: 'Singapore',
@@ -264,7 +278,7 @@ const TAX_PROFILES = {
       { min: 500000, max: 1000000, rate: 0.23 },
       { min: 1000000, max: Infinity, rate: 0.24 }
     ],
-    cpf: { rate: 0.20, maxWage: 6800 } // employee portion of CPF
+    cpf: { rate: 0.20, maxWage: 6800 }
   }
 };
 
@@ -272,14 +286,20 @@ const TAX_PROFILES = {
  * Calculate slab-based annual tax, then return monthly equivalent.
  * @param {number} monthlyIncome - Monthly taxable income
  * @param {string} countryCode - 'IN', 'US', 'UK', 'AE'
- * @returns {{ incomeTax, socialTax, totalTax, breakdown }}
+ * @param {string} taxRegime - 'old' or 'new'
+ * @param {number} basicPay - Basic salary for statutory ceiling calculations
+ * @returns {{ incomeTax, socialTax, totalTax, breakdown, country }}
  */
-function calculateTax(monthlyIncome, countryCode = 'IN', taxRegime = 'old') {
+function calculateTax(monthlyIncome, countryCode = 'IN', taxRegime = 'old', basicPay = 0) {
   let profileKey = countryCode;
   if (countryCode === 'IN' && taxRegime === 'new') profileKey = 'IN_NEW';
   const profile = TAX_PROFILES[profileKey] || TAX_PROFILES['IN'];
-  const annual = monthlyIncome * 12;
-  let remainingIncome = annual;
+  
+  const annualGross = Math.max(0, monthlyIncome * 12);
+  const stdDed = profile.standardDeduction || 0;
+  const taxableAnnual = Math.max(0, annualGross - stdDed);
+
+  let remainingIncome = taxableAnnual;
   let annualTax = 0;
   const breakdown = [];
 
@@ -293,48 +313,45 @@ function calculateTax(monthlyIncome, countryCode = 'IN', taxRegime = 'old') {
     remainingIncome -= taxableInSlab;
   }
 
+  // Section 87A rebate for India
+  if (profile.rebateLimit && taxableAnnual <= profile.rebateLimit) {
+    annualTax = 0;
+  }
+
   let monthlyIncomeTax = annualTax / 12;
   let socialTax = 0;
 
   // Country-specific social contributions
   if (countryCode === 'IN') {
-    // EPF (capped)
-    socialTax += Math.min(monthlyIncome * profile.pf.rate, profile.pf.cap);
-    // ESI (if below ceiling)
+    // Statutory EPF: 12% of basic wage capped at ₹15,000 ceiling -> max ₹1,800/mo
+    const epfBase = basicPay > 0 ? basicPay : monthlyIncome;
+    socialTax += Math.min(epfBase * profile.pf.rate, profile.pf.maxContribution || 1800);
+    // ESI (if wage <= ceiling)
     if (monthlyIncome <= profile.esi.ceiling) socialTax += monthlyIncome * profile.esi.rate;
     // Professional Tax
     socialTax += profile.professionalTax;
     // Cess on income tax
     monthlyIncomeTax *= (1 + profile.cess);
   } else if (countryCode === 'US') {
-    // FICA: Social Security (capped) + Medicare
     const annualSoFar = monthlyIncome * 12;
     if (annualSoFar <= profile.fica.ssWageCap) socialTax += monthlyIncome * profile.fica.ss;
     socialTax += monthlyIncome * profile.fica.medicare;
-    // State tax (simplified)
     socialTax += monthlyIncome * profile.state;
   } else if (countryCode === 'UK') {
-    // National Insurance
     const niable = Math.max(0, monthlyIncome - profile.ni.threshold / 12);
     socialTax += niable * profile.ni.rate;
   } else if (countryCode === 'AE') {
-    // End-of-service gratuity provision
-    socialTax += monthlyIncome * (profile.gratuity?.rate || 0);
+    // UAE: 0 employee deduction
   } else if (countryCode === 'CA') {
-    // CPP & EI (capped annually, approximated monthly)
     socialTax += Math.min(monthlyIncome * profile.cpp.rate, profile.cpp.max / 12);
     socialTax += Math.min(monthlyIncome * profile.ei.rate, profile.ei.max / 12);
   } else if (countryCode === 'AU') {
-    // Medicare levy
     socialTax += monthlyIncome * profile.medicare;
   } else if (countryCode === 'DE') {
-    // German Social Security contributions
     socialTax += monthlyIncome * (profile.social.health + profile.social.pension + profile.social.unemployment + profile.social.care);
   } else if (countryCode === 'NZ') {
-    // ACC Levy
     socialTax += monthlyIncome * profile.acc;
   } else if (countryCode === 'SG') {
-    // CPF
     socialTax += Math.min(monthlyIncome, profile.cpf.maxWage) * profile.cpf.rate;
   }
 
@@ -427,14 +444,15 @@ function renderPayslips(list) {
   }
   tbody.innerHTML = list.map(p => {
     const emp = p.employees;
-    const name = emp ? `${emp.first_name} ${emp.last_name}` : '—';
+    const rawName = emp ? `${emp.first_name || ''} ${emp.last_name || ''}`.trim() : '—';
+    const name = escapeHtml(rawName || '—');
     const badgeClass = { generated:'hr-badge-info', sent:'hr-badge-active', paid:'hr-badge-active' }[p.status] || 'hr-badge-inactive';
     const empSalary = typeof allSalaries !== 'undefined' ? allSalaries.find(s => s.employee_id === (emp?.id || p.employee_id)) : null;
     const currency = p.currency || empSalary?.currency || window._lastPayslipsCurrency || 'USD';
     return `<tr>
       <td>
         <div style="display:flex;align-items:center;gap:10px">
-          <div class="hr-emp-avatar" style="background:${avatarColor(emp?.id||p.id)};color:#fff;width:32px;height:32px;font-size:11px">${emp?`${emp.first_name?.[0]||''}${emp.last_name?.[0]||''}`:'?'}</div>
+          <div class="hr-emp-avatar" style="background:${avatarColor(emp?.id||p.id)};color:#fff;width:32px;height:32px;font-size:11px">${escapeHtml(emp?`${emp.first_name?.[0]||''}${emp.last_name?.[0]||''}`:'?')}</div>
           <span class="primary-text">${name}</span>
         </div>
       </td>
@@ -496,12 +514,15 @@ function renderSalaryRegister(list) {
   }
   tbody.innerHTML = list.map(s => {
     const emp = s.employees;
-    const name = emp ? `${emp.first_name} ${emp.last_name}` : '—';
+    const rawName = emp ? `${emp.first_name || ''} ${emp.last_name || ''}`.trim() : '—';
+    const name = escapeHtml(rawName || '—');
+    const dept = escapeHtml(emp?.departments?.name || '—');
+    const title = escapeHtml(emp?.job_title || '—');
     return `<tr>
       <td><span class="primary-text">${name}</span></td>
-      <td>${emp?.departments?.name || '—'}</td>
-      <td>${emp?.job_title || '—'}</td>
-      <td>${formatEnum(s.employment_type)}</td>
+      <td>${dept}</td>
+      <td>${title}</td>
+      <td>${escapeHtml(formatEnum(s.employment_type))}</td>
       <td class="hr-font-mono" style="font-weight:600">${formatCurrency(s.base_salary, s.currency)}</td>
       <td>${s.currency || 'USD'}</td>
       <td>${s.effective_date ? new Date(s.effective_date).toLocaleDateString() : '—'}</td>
@@ -603,7 +624,8 @@ function renderDeductions(list) {
   }
   tbody.innerHTML = list.map(d => {
     const emp = d.employees;
-    const name = emp ? `${emp.first_name} ${emp.last_name}` : '—';
+    const rawName = emp ? `${emp.first_name || ''} ${emp.last_name || ''}`.trim() : '—';
+    const name = escapeHtml(rawName || '—');
     const badgeClass = d.status === 'active' ? 'hr-badge-active' : 'hr-badge-inactive';
     
     // Find the employee's assigned currency to correctly format deductions
@@ -612,9 +634,9 @@ function renderDeductions(list) {
 
     return `<tr>
       <td><span class="primary-text">${name}</span></td>
-      <td>${formatEnum(d.type)}</td>
+      <td>${escapeHtml(formatEnum(d.type))}</td>
       <td class="hr-font-mono">${formatCurrency(d.amount, currency)}</td>
-      <td>${formatEnum(d.frequency)}</td>
+      <td>${escapeHtml(formatEnum(d.frequency))}</td>
       <td>${d.start_date || '—'}</td>
       <td>${d.end_date || 'Ongoing'}</td>
       <td><span class="hr-badge ${badgeClass}">${d.status}</span></td>
@@ -733,7 +755,7 @@ window.calculatePayroll = async function() {
 
       // ★ Country-aware slab-based tax calculation
       let taxableIncome = base + totalAllowances + bonus - prorationAdj;
-      const taxResult = calculateTax(taxableIncome, countryCode, s.tax_regime || 'old');
+      const taxResult = calculateTax(taxableIncome, countryCode, s.tax_regime || 'old', base);
 
       let reimbursements = expenseMap[s.employee_id] || 0;
 
