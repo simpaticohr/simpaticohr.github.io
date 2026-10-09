@@ -37,30 +37,40 @@ let allCycles  = [];
   } else {
     setTimeout(boot, 100);
   }
+  window.addEventListener('SimpaticoSPA', boot);
 })();
 
 let allCheckins = [];
 let allKudos = [];
 let allPerfEmployees = [];
 
-async function loadPerfEmployees() {
-  const client = sb(); if(!client) return;
-  const cid = typeof getCompanyId === 'function' ? getCompanyId() : null;
-  let q = client.from('employees').select('id, first_name, last_name, avatar_url').eq('status','active');
-  if(cid) q = q.eq('tenant_id', cid);
-  const { data } = await q;
-  allPerfEmployees = data || [];
-  
-  // Populate dropdowns
+function populateEmployeeDropdowns() {
   ['checkin-employee', 'kudos-employee'].forEach(id => {
     const sel = document.getElementById(id);
-    if(sel) {
+    if (sel) {
+      const prev = sel.value;
       sel.innerHTML = '<option value="">Select Employee</option>';
       allPerfEmployees.forEach(e => {
-        sel.innerHTML += `<option value="${e.id}">${e.first_name} ${e.last_name}</option>`;
+        const isSel = e.id === prev ? ' selected' : '';
+        const role = e.job_title ? ` (${e.job_title})` : '';
+        sel.innerHTML += `<option value="${e.id}"${isSel}>${e.first_name} ${e.last_name}${role}</option>`;
       });
     }
   });
+}
+
+async function loadPerfEmployees() {
+  const client = sb(); if (!client) return;
+  const cid = typeof getCompanyId === 'function' ? getCompanyId() : null;
+  let q = client.from('employees').select('id, first_name, last_name, avatar_url, job_title, status');
+  if (cid) q = q.eq('tenant_id', cid);
+  let { data, error } = await q;
+  if (error || !data || data.length === 0) {
+    const fallback = await client.from('employees').select('id, first_name, last_name, avatar_url, job_title, status');
+    data = fallback.data || [];
+  }
+  allPerfEmployees = data || [];
+  populateEmployeeDropdowns();
 }
 
 async function loadCheckinsAndKudos() {
@@ -163,14 +173,36 @@ function renderKudos() {
   }).join('');
 }
 
-window.openCheckinModal = () => openModal('checkin-modal');
-window.openKudosModal = () => openModal('kudos-modal');
+window.openCheckinModal = async () => {
+  if (!allPerfEmployees || allPerfEmployees.length === 0) {
+    await loadPerfEmployees();
+  } else {
+    populateEmployeeDropdowns();
+  }
+  openModal('checkin-modal');
+};
+
+window.openKudosModal = async () => {
+  if (!allPerfEmployees || allPerfEmployees.length === 0) {
+    await loadPerfEmployees();
+  } else {
+    populateEmployeeDropdowns();
+  }
+  openModal('kudos-modal');
+};
 
 window.saveCheckin = async function() {
-  const empId = document.getElementById('checkin-employee')?.value;
-  const well = document.getElementById('checkin-well')?.value.trim();
+  const empEl = document.getElementById('checkin-employee');
+  const wellEl = document.getElementById('checkin-well');
+  const empId = empEl?.value;
+  const well = wellEl?.value.trim();
   const blockers = document.getElementById('checkin-blockers')?.value.trim();
-  if(!empId || !well) { showToast('Employee and "Went well" are required','error'); return; }
+  if(!empId || !well) {
+    if(!empId && empEl) empEl.focus();
+    else if(!well && wellEl) wellEl.focus();
+    showToast('Employee and "Went well" are required','error');
+    return;
+  }
   
   const cid = typeof getCompanyId === 'function' ? getCompanyId() : null;
   const newRecord = {
@@ -203,10 +235,18 @@ window.saveCheckin = async function() {
 };
 
 window.saveKudos = async function() {
-  const empId = document.getElementById('kudos-employee')?.value;
-  const cat = document.getElementById('kudos-category')?.value;
-  const msg = document.getElementById('kudos-message')?.value.trim();
-  if(!empId || !msg) { showToast('Employee and message required','error'); return; }
+  const empEl = document.getElementById('kudos-employee');
+  const catEl = document.getElementById('kudos-category');
+  const msgEl = document.getElementById('kudos-message');
+  const empId = empEl?.value;
+  const cat = catEl?.value || 'Teamwork';
+  const msg = msgEl?.value.trim();
+  if(!empId || !msg) {
+    if(!empId && empEl) empEl.focus();
+    else if(!msg && msgEl) msgEl.focus();
+    showToast('Employee and message required','error');
+    return;
+  }
   
   const cid = typeof getCompanyId === 'function' ? getCompanyId() : null;
   const newKudos = {

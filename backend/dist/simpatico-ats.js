@@ -2931,14 +2931,31 @@ async function handleStartOnboarding(request, env, ctx) {
     tenant_id: ctx.tenantId,
   }));
 
-  await sbFetch(
-    env,
-    "POST",
-    "/rest/v1/onboarding_tasks",
-    tasks,
-    false,
-    ctx.tenantId,
-  );
+  try {
+    await sbFetch(
+      env,
+      "POST",
+      "/rest/v1/onboarding_tasks",
+      tasks,
+      false,
+      ctx.tenantId,
+    );
+  } catch (taskErr) {
+    if (taskErr?.message && (taskErr.message.includes("tenant_id") || taskErr.message.includes("PGRST204"))) {
+      console.warn("[onboarding] Retrying task creation without explicit tenant_id column:", taskErr.message);
+      const fallbackTasks = tasks.map(({ tenant_id, ...rest }) => rest);
+      await sbFetch(
+        env,
+        "POST",
+        "/rest/v1/onboarding_tasks",
+        fallbackTasks,
+        false,
+        "default",
+      );
+    } else {
+      throw taskErr;
+    }
+  }
   await sbFetch(
     env,
     "PATCH",
