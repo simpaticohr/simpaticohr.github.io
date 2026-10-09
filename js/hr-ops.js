@@ -77,10 +77,10 @@ async function loadExpenses() {
     .eq('tenant_id', cid)
     .order('created_at', { ascending: false });
 
-  if (error && (error.code === '42P01' || error.message?.includes('does not exist'))) {
+  if (error && (error.code === '42P01' || error.code === 'PGRST205' || error.message?.includes('does not exist') || error.message?.includes('schema cache'))) {
     allExpenses = []; renderExpenses([]); return;
   }
-  if (error) { console.error('[expenses] Load error:', error); return; }
+  if (error) { console.error('[expenses] Load error:', error); allExpenses = []; renderExpenses([]); return; }
   
   allExpenses = data || [];
   renderExpenses(allExpenses);
@@ -211,10 +211,10 @@ async function loadOffboarding() {
     .eq('tenant_id', cid)
     .order('created_at', { ascending: false });
 
-  if (error && (error.code === '42P01' || error.message?.includes('does not exist'))) {
+  if (error && (error.code === '42P01' || error.code === 'PGRST205' || error.message?.includes('does not exist') || error.message?.includes('schema cache'))) {
     allOffboarding = []; renderOffboarding([]); return;
   }
-  if (error) { console.error('[offboarding] Load error:', error); return; }
+  if (error) { console.error('[offboarding] Load error:', error); allOffboarding = []; renderOffboarding([]); return; }
   
   allOffboarding = data || [];
   renderOffboarding(allOffboarding);
@@ -645,6 +645,14 @@ window.switchOpsTab = function(btn, tabId) {
     const el = document.getElementById(id);
     if (el) el.style.display = id === tabId ? 'block' : 'none';
   });
+  if (tabId === 'tab-expenses') {
+    if (!allExpenses || allExpenses.length === 0) loadExpenses();
+    else renderExpenses(allExpenses);
+  }
+  if (tabId === 'tab-offboarding') {
+    if (!allOffboarding || allOffboarding.length === 0) loadOffboarding();
+    else renderOffboarding(allOffboarding);
+  }
   if (tabId === 'tab-org') loadOrgChart();
 };
 
