@@ -1300,6 +1300,8 @@ function matchRoute(method, path) {
 route("GET", "/health", handleHealth);
 route("GET", "/version", handleVersion);
 route("GET", "/sitemap-jobs.xml", handleJobsSitemap);
+route("GET", "/seo/jobs.json", handleSeoJobsJson);
+route("GET", "/seo/job/:slug", handleSeoJobPage);
 route("GET", "/api/fix-rls", handleFixRLS);
 route("POST", "/users/ensure-profile", handleEnsureProfile);
 route("POST", "/webhooks/register", handleRegisterWebhook);
@@ -12443,6 +12445,371 @@ async function handleJobsSitemap(request, env) {
   const xml = `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls.join("\n")}\n</urlset>`;
   return new Response(xml, {
     headers: { "Content-Type": "application/xml; charset=utf-8", "Cache-Control": "public, max-age=3600" },
+  });
+}
+
+/**
+ * GET /seo/jobs.json — Public JSON feed of all active jobs with JobPosting schema.
+ * Used by: static build scripts, GitHub Actions cron, edge SSR injection.
+ * Returns an array of jobs with full schema.org JobPosting markup for each.
+ * Cached for 1 hour. No auth required.
+ */
+async function handleSeoJobsJson(request, env) {
+  if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_KEY)
+    return new Response(JSON.stringify({ error: "Service unavailable" }), { status: 503, headers: { "Content-Type": "application/json" } });
+
+  const sbHeaders = { apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}` };
+  const base = env.SITE_URL || "https://simpaticohr.in";
+  const slugify = (t) => (t || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "job";
+
+  const jobsRes = await fetch(
+    `${env.SUPABASE_URL}/rest/v1/jobs?status=eq.open&select=id,title,company_id,company_name,department,location,employment_type,level,description,skills,skills_required,salary_min,salary_max,created_at&order=created_at.desc&limit=200`,
+    { headers: sbHeaders },
+  );
+  if (!jobsRes.ok) return new Response(JSON.stringify({ error: "Failed to fetch jobs" }), { status: 502, headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" } });
+  const jobs = await jobsRes.json();
+
+  // Map employment_type to schema.org enum
+  const typeMap = {
+    "full-time": "FULL_TIME", "part-time": "PART_TIME", "contract": "CONTRACTOR",
+    "temporary": "TEMPORARY", "remote": "FULL_TIME", "hybrid": "FULL_TIME",
+    "intern": "INTERN", "internship": "INTERN", "volunteer": "VOLUNTEER"
+  };
+
+  const jobPostings = (jobs || []).map(job => {
+    const company = job.company_name || job.department || "Simpatico HR Consultancy";
+    const location = job.location || "Remote";
+    const empType = typeMap[(job.employment_type || "full-time").toLowerCase()] || "FULL_TIME";
+    const slug = slugify(job.title);
+    const validThrough = job.valid_through || new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+
+    // Parse location into structured address
+    const locationParts = location.split(",").map(s => s.trim());
+    const addressLocality = locationParts[0] || location;
+    const addressRegion = locationParts[1] || "";
+    const addressCountry = location.toLowerCase().includes("india") || location.toLowerCase().includes("kerala") ? "IN" :
+      location.toLowerCase().includes("uae") || location.toLowerCase().includes("dubai") ? "AE" : "IN";
+
+    const posting = {
+      "@context": "https://schema.org/",
+      "@type": "JobPosting",
+      "title": job.title || "Untitled Position",
+      "description": job.description || `${job.title} position at ${company}. Apply via Simpatico HR.`,
+      "datePosted": (job.created_at || new Date().toISOString()).slice(0, 10),
+      "validThrough": validThrough,
+      "employmentType": empType,
+      "hiringOrganization": {
+        "@type": "Organization",
+        "name": company,
+        "sameAs": `${base}/company/${slugify(company)}-${job.company_id || ""}`,
+        "logo": `${base}/favicon-96x96.png`
+      },
+      "jobLocation": {
+        "@type": "Place",
+        "address": {
+          "@type": "PostalAddress",
+          "addressLocality": addressLocality,
+          ...(addressRegion && { "addressRegion": addressRegion }),
+          "addressCountry": addressCountry
+        }
+      },
+      "url": `${base}/job/${slug}-${job.id}`,
+      "directApply": true,
+      "applicationContact": {
+        "@type": "ContactPoint",
+        "url": `${base}/job-apply.html?job_id=${job.id}&role=${encodeURIComponent(job.title || "")}`
+      }
+    };
+
+    // Optional salary
+    if (job.salary_min || job.salary_max) {
+      posting.baseSalary = {
+        "@type": "MonetaryAmount",
+        "currency": "INR",
+        "value": {
+          "@type": "QuantitativeValue",
+          ...(job.salary_min && { "minValue": job.salary_min }),
+          ...(job.salary_max && { "maxValue": job.salary_max }),
+          "unitText": "YEAR"
+        }
+      };
+    }
+
+    // Optional skills
+    const rawSkills = job.skills || job.skills_required;
+    if (rawSkills) {
+      const skills = Array.isArray(rawSkills) ? rawSkills : String(rawSkills).split(",").map(s => s.trim()).filter(Boolean);
+      if (skills.length) posting.skills = skills.join(", ");
+    }
+
+    // Optional level
+    if (job.level) posting.experienceRequirements = job.level;
+
+    return {
+      ...job,
+      slug: `${slug}-${job.id}`,
+      url: `${base}/job/${slug}-${job.id}`,
+      applyUrl: `${base}/job-apply.html?job_id=${job.id}&role=${encodeURIComponent(job.title || "")}`,
+      jsonLd: posting
+    };
+  });
+
+  return new Response(JSON.stringify({ jobs: jobPostings, count: jobPostings.length, generated: new Date().toISOString() }, null, 2), {
+    headers: {
+      "Content-Type": "application/json; charset=utf-8",
+      "Cache-Control": "public, max-age=3600",
+      "Access-Control-Allow-Origin": "*",
+    },
+  });
+}
+
+/**
+ * GET /seo/job/:slug — Fully server-rendered job detail page with JobPosting JSON-LD.
+ * This is the primary SEO endpoint: Googlebot, GPTBot, ClaudeBot, and all crawlers
+ * get a complete HTML page with:
+ *  - Full job description rendered in semantic HTML
+ *  - schema.org/JobPosting JSON-LD (required for Google for Jobs rich results)
+ *  - Open Graph tags for social sharing
+ *  - Direct apply link
+ * Cached at the edge for 1 hour. No auth required.
+ */
+async function handleSeoJobPage(request, env, ctx, params) {
+  if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_KEY)
+    return new Response("Service unavailable", { status: 503 });
+
+  const slug = params?.[0] || "";
+  // Extract UUID from slug (last 36 chars)
+  const uuidMatch = slug.match(/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i);
+  if (!uuidMatch) return new Response("Job not found", { status: 404 });
+  const jobId = uuidMatch[1];
+
+  const sbHeaders = { apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}` };
+  const base = env.SITE_URL || "https://simpaticohr.in";
+  const slugify = (t) => (t || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "job";
+
+  const jobRes = await fetch(
+    `${env.SUPABASE_URL}/rest/v1/jobs?id=eq.${jobId}&status=eq.open&select=id,title,company_id,company_name,department,location,employment_type,level,description,skills,skills_required,salary_min,salary_max,created_at&limit=1`,
+    { headers: sbHeaders },
+  );
+  if (!jobRes.ok) return new Response("Error fetching job", { status: 502 });
+  const jobs = await jobRes.json();
+  const job = jobs?.[0];
+  if (!job) return new Response("Job not found", { status: 404 });
+
+  const company = job.company_name || job.department || "Simpatico HR Consultancy";
+  const location = job.location || "Remote";
+  const empType = job.employment_type || "full-time";
+  const level = job.level || "Mid-Level";
+  const desc = (job.description || "").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const descClean = desc.replace(/[*#_]/g, "").trim();
+  const descPlain = descClean.replace(/\s+/g, " ");
+  const validThrough = job.valid_through || new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const datePosted = (job.created_at || new Date().toISOString()).slice(0, 10);
+  const jobSlug = `${slugify(job.title)}-${job.id}`;
+  const jobUrl = `${base}/job/${jobSlug}`;
+  const applyUrl = `${base}/job-apply.html?job_id=${job.id}&role=${encodeURIComponent(job.title || "")}`;
+
+  // Skills
+  const rawSkills = job.skills || job.skills_required;
+  let skills = [];
+  if (Array.isArray(rawSkills)) skills = rawSkills;
+  else if (rawSkills) skills = String(rawSkills).replace(/^\[\"?|\"?\]$/g, "").replace(/","/g, ",").split(",").map(s => s.trim()).filter(Boolean);
+  const skillTags = skills.map(s => `<span style="background:rgba(99,102,241,.12);color:#a5b4fc;padding:4px 14px;border-radius:8px;font-size:.82rem;font-weight:600;display:inline-block;margin:3px 4px;">${s}</span>`).join("");
+
+  // Salary
+  let salaryText = "";
+  if (job.salary_max) {
+    salaryText = job.salary_min
+      ? `₹${(job.salary_min/100000).toFixed(0)}–${(job.salary_max/100000).toFixed(0)} LPA`
+      : `Up to ₹${(job.salary_max/100000).toFixed(0)} LPA`;
+  }
+
+  // Location parsing
+  const locationParts = location.split(",").map(s => s.trim());
+  const addressLocality = locationParts[0] || location;
+  const addressRegion = locationParts[1] || "";
+  const addressCountry = location.toLowerCase().includes("india") || location.toLowerCase().includes("kerala") ? "IN" :
+    location.toLowerCase().includes("uae") || location.toLowerCase().includes("dubai") ? "AE" : "IN";
+
+  const typeMap = {
+    "full-time": "FULL_TIME", "part-time": "PART_TIME", "contract": "CONTRACTOR",
+    "remote": "FULL_TIME", "hybrid": "FULL_TIME", "intern": "INTERN", "internship": "INTERN"
+  };
+  const schemaEmpType = typeMap[empType.toLowerCase()] || "FULL_TIME";
+
+  // Build JobPosting JSON-LD
+  const jsonLd = {
+    "@context": "https://schema.org/",
+    "@type": "JobPosting",
+    "title": job.title,
+    "description": descPlain || `${job.title} at ${company}`,
+    "datePosted": datePosted,
+    "validThrough": validThrough,
+    "employmentType": schemaEmpType,
+    "hiringOrganization": {
+      "@type": "Organization",
+      "name": company,
+      "sameAs": base,
+      "logo": `${base}/favicon-96x96.png`
+    },
+    "jobLocation": {
+      "@type": "Place",
+      "address": {
+        "@type": "PostalAddress",
+        "addressLocality": addressLocality,
+        ...(addressRegion && { "addressRegion": addressRegion }),
+        "addressCountry": addressCountry
+      }
+    },
+    "url": jobUrl,
+    "directApply": true,
+    "applicationContact": {
+      "@type": "ContactPoint",
+      "url": applyUrl
+    }
+  };
+
+  if (job.salary_min || job.salary_max) {
+    jsonLd.baseSalary = {
+      "@type": "MonetaryAmount",
+      "currency": "INR",
+      "value": {
+        "@type": "QuantitativeValue",
+        ...(job.salary_min && { "minValue": job.salary_min }),
+        ...(job.salary_max && { "maxValue": job.salary_max }),
+        "unitText": "YEAR"
+      }
+    };
+  }
+  if (skills.length) jsonLd.skills = skills.join(", ");
+  if (level) jsonLd.experienceRequirements = level;
+
+  // Render description with paragraph breaks
+  const descHtml = descClean.split(/\r?\n+/).map(p => p.trim()).filter(Boolean).map(p => `<p style="margin-bottom:12px;">${p}</p>`).join("") || `<p>${descClean}</p>`;
+
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>${job.title} at ${company} | Simpatico HR Jobs</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="${job.title} — ${empType.replace("-", " ")} role at ${company}. Location: ${location}. ${salaryText ? "Salary: " + salaryText + ". " : ""}Apply now via Simpatico HR AI-powered ATS.">
+  <meta name="robots" content="index, follow">
+  <link rel="canonical" href="${jobUrl}">
+
+  <!-- Open Graph -->
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="${job.title} at ${company} — Apply Now">
+  <meta property="og:description" content="${empType.replace("-", " ")} · ${location}${salaryText ? " · " + salaryText : ""}. Apply via Simpatico HR.">
+  <meta property="og:url" content="${jobUrl}">
+  <meta property="og:image" content="${base}/simpatico_hr_banner.png">
+  <meta property="og:site_name" content="Simpatico HR">
+
+  <!-- Twitter Card -->
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="${job.title} at ${company}">
+  <meta name="twitter:description" content="${empType.replace("-", " ")} · ${location}. Apply now.">
+
+  <!-- JobPosting Structured Data -->
+  <script type="application/ld+json">${JSON.stringify(jsonLd)}</script>
+
+  <!-- BreadcrumbList -->
+  <script type="application/ld+json">${JSON.stringify({
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    "itemListElement": [
+      { "@type": "ListItem", "position": 1, "name": "Home", "item": base },
+      { "@type": "ListItem", "position": 2, "name": "Jobs", "item": `${base}/jobs.html` },
+      { "@type": "ListItem", "position": 3, "name": job.title, "item": jobUrl }
+    ]
+  })}</script>
+
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" rel="stylesheet">
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:'Plus Jakarta Sans',system-ui,sans-serif;background:#0a0f1e;color:#e2e8f0;min-height:100vh}
+    .nav{backdrop-filter:blur(16px);background:rgba(10,15,30,.9);padding:1.2rem 6%;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid rgba(255,255,255,.06)}
+    .logo{font-weight:800;font-size:1.1rem;color:#fff;text-decoration:none}.logo span{color:#6366f1}
+    .nav-links{display:flex;gap:16px;align-items:center}
+    .nav-link{color:#94a3b8;text-decoration:none;font-size:13px;font-weight:500;padding:6px 14px;border-radius:8px;transition:all .2s}
+    .nav-link:hover{color:#fff;background:rgba(255,255,255,.05)}
+    .container{max-width:800px;margin:0 auto;padding:50px 20px}
+    .breadcrumb{color:#64748b;font-size:.85rem;margin-bottom:24px}
+    .breadcrumb a{color:#6366f1;text-decoration:none}
+    .job-card{background:rgba(15,23,42,.8);border:1px solid rgba(255,255,255,.06);border-radius:24px;overflow:hidden}
+    .job-header{background:linear-gradient(135deg,rgba(99,102,241,.15),rgba(139,92,246,.1));padding:32px;border-bottom:1px solid rgba(255,255,255,.04)}
+    .job-header small{font-size:.72rem;color:#6366f1;font-weight:700;letter-spacing:1.5px;text-transform:uppercase}
+    .job-header h1{font-size:1.8rem;font-weight:800;margin-top:8px;color:#f1f5f9}
+    .job-meta{display:flex;gap:18px;flex-wrap:wrap;margin-top:16px}
+    .job-meta-item{display:flex;align-items:center;gap:6px;font-size:.85rem;color:#94a3b8}
+    .job-meta-item i{color:#6366f1}
+    .job-body{padding:32px}
+    .job-desc{color:#cbd5e1;font-size:.95rem;line-height:1.8;margin-bottom:24px}
+    .job-skills{margin-bottom:24px}
+    .job-skills-title{color:#94a3b8;font-size:.85rem;font-weight:600;margin-bottom:10px}
+    .apply-section{display:flex;gap:12px;flex-wrap:wrap;margin-top:24px;padding-top:24px;border-top:1px solid rgba(255,255,255,.06)}
+    .apply-btn{display:inline-flex;align-items:center;gap:8px;background:#6366f1;color:#fff;padding:14px 28px;border-radius:14px;text-decoration:none;font-weight:700;font-size:.95rem;transition:all .2s}
+    .apply-btn:hover{background:#4f46e5;transform:scale(1.02)}
+    .back-btn{display:inline-flex;align-items:center;gap:8px;background:rgba(255,255,255,.06);color:#94a3b8;padding:14px 28px;border-radius:14px;text-decoration:none;font-weight:600;font-size:.95rem;border:1px solid rgba(255,255,255,.08)}
+    .back-btn:hover{color:#fff;border-color:rgba(255,255,255,.15)}
+    .footer{text-align:center;padding:40px 0;margin-top:60px;border-top:1px solid rgba(255,255,255,.04);font-size:12px;color:#475569}
+    .footer a{color:#6366f1;text-decoration:none}
+  </style>
+</head>
+<body>
+
+<nav class="nav">
+  <a class="logo" href="${base}"><img src="${base}/favicon-96x96.png" style="width:28px;height:28px;border-radius:6px;margin-right:8px;vertical-align:middle;">SIMPATICO <span>HR</span></a>
+  <div class="nav-links">
+    <a class="nav-link" href="${base}/jobs.html">💼 Jobs</a>
+    <a class="nav-link" href="${base}/career-lab.html">🚀 Career Lab</a>
+    <a class="nav-link" href="${base}">Home</a>
+  </div>
+</nav>
+
+<main class="container">
+  <nav class="breadcrumb" aria-label="Breadcrumb">
+    <a href="${base}">Home</a> › <a href="${base}/jobs.html">Jobs</a> › <strong>${job.title}</strong>
+  </nav>
+
+  <article class="job-card" itemscope itemtype="https://schema.org/JobPosting">
+    <div class="job-header">
+      <small>${company.toUpperCase()} · NOW HIRING</small>
+      <h1 itemprop="title">${job.title}</h1>
+      <div class="job-meta">
+        <div class="job-meta-item"><i class="fa fa-building"></i><span itemprop="hiringOrganization" itemscope itemtype="https://schema.org/Organization"><span itemprop="name">${company}</span></span></div>
+        <div class="job-meta-item"><i class="fa fa-briefcase"></i><span itemprop="employmentType">${empType.replace("-", " ")}</span></div>
+        <div class="job-meta-item"><i class="fa fa-location-dot"></i><span itemprop="jobLocation" itemscope itemtype="https://schema.org/Place"><span itemprop="address">${location}</span></span></div>
+        <div class="job-meta-item"><i class="fa fa-layer-group"></i>${level}</div>
+        ${salaryText ? `<div class="job-meta-item"><i class="fa fa-indian-rupee-sign"></i>${salaryText}</div>` : ""}
+        <div class="job-meta-item"><i class="fa fa-calendar"></i>Posted <time itemprop="datePosted" datetime="${datePosted}">${datePosted}</time></div>
+      </div>
+    </div>
+    <div class="job-body">
+      <div class="job-desc" itemprop="description">${descHtml}</div>
+      ${skills.length ? `<div class="job-skills"><div class="job-skills-title">Required Skills</div>${skillTags}</div>` : ""}
+      <div class="apply-section">
+        <a class="apply-btn" href="${applyUrl}">Apply Now <i class="fa fa-arrow-right"></i></a>
+        <a class="apply-btn" style="background:#0077b5;" href="https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(jobUrl)}" target="_blank" rel="noopener">Share on LinkedIn <i class="fab fa-linkedin-in"></i></a>
+        <a class="back-btn" href="${base}/jobs.html"><i class="fa fa-arrow-left"></i> All Jobs</a>
+      </div>
+    </div>
+  </article>
+</main>
+
+<footer class="footer">
+  © ${new Date().getFullYear()} <a href="${base}">Simpatico HR Consultancy</a> · AI-Powered Recruitment Platform
+</footer>
+
+</body>
+</html>`;
+
+  return new Response(html, {
+    headers: {
+      "Content-Type": "text/html; charset=utf-8",
+      "Cache-Control": "public, max-age=3600, s-maxage=3600",
+    },
   });
 }
 
