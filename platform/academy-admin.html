@@ -12,6 +12,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;600;700;800;900&family=Cinzel+Decorative:wght@700&family=Great+Vibes&family=Alex+Brush&family=Playfair+Display:ital,wght@0,500;0,600;0,700;1,400;1,600&family=Montserrat:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700;800&family=Cormorant+Garamond:ital,wght@0,600;0,700;1,400;1,600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
 
   <style>
     :root {
@@ -2013,8 +2014,11 @@
       <button class="btn-action btn-outline" id="btnTopByok" onclick="openByokModal()" style="border-color: rgba(96, 165, 250, 0.4); color: #93C5FD; background: rgba(59, 130, 246, 0.08);" title="Configure Google Gemini API Key for Full-Duplex AI Voice">
         <i class="fas fa-bolt" style="color: #60A5FA;"></i> <span id="topByokBtnText">BYOK Gemini</span>
       </button>
-      <button class="btn-action btn-outline" onclick="printCurrentDoc()">
-        <i class="fas fa-print"></i> Print / Save PDF
+      <button class="btn-action btn-gold" id="btnTopDownloadPdf" onclick="downloadCurrentDocPdf()" title="Download PDF directly to your device">
+        <i class="fas fa-file-pdf"></i> Download PDF
+      </button>
+      <button class="btn-action btn-outline" onclick="printCurrentDoc()" title="Open System Print Dialog">
+        <i class="fas fa-print"></i> Print
       </button>
       <button class="btn-action btn-green" id="btnWhatsApp" onclick="shareWhatsApp()">
         <i class="fab fa-whatsapp"></i> Share on WhatsApp
@@ -2232,6 +2236,21 @@
             <div class="sig-pad-preview" id="sigPadPreview">
               <img id="sigPadPreviewImg" src="" alt="Saved signature">
               <div class="sig-pad-preview-label"><i class="fas fa-check-circle"></i> Signature saved — applied to all receipts & certificates</div>
+            </div>
+          </div>
+
+          <!-- Quick Action Buttons for Fee Receipt -->
+          <div style="margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--border-dark); display: flex; flex-direction: column; gap: 9px;">
+            <button type="button" class="btn-action btn-gold" id="btnSidebarDownloadPdf" onclick="downloadReceiptPDF()" style="width: 100%; justify-content: center; padding: 11px 16px; font-weight: 700; font-size: 13px; box-shadow: 0 4px 15px rgba(212, 175, 55, 0.25);">
+              <i class="fas fa-file-pdf" style="margin-right: 7px; font-size: 15px;"></i> Download Fee Receipt PDF
+            </button>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+              <button type="button" class="btn-action btn-green" onclick="shareWhatsApp()" style="justify-content: center; padding: 8px 10px; font-size: 11.5px;">
+                <i class="fab fa-whatsapp"></i> WhatsApp
+              </button>
+              <button type="button" class="btn-action btn-outline" onclick="printCurrentDoc()" style="justify-content: center; padding: 8px 10px; font-size: 11.5px;">
+                <i class="fas fa-print"></i> Print
+              </button>
             </div>
           </div>
 
@@ -3044,11 +3063,16 @@
         <div class="stage-label" id="stageLabel">
           <i class="fas fa-eye"></i> Live Interactive Preview
         </div>
-        <div class="zoom-controls">
-          <button class="zoom-btn" onclick="adjustZoom(-0.05)" title="Zoom Out"><i class="fas fa-minus"></i></button>
-          <span class="zoom-val" id="zoomText">100%</span>
-          <button class="zoom-btn" onclick="adjustZoom(0.05)" title="Zoom In"><i class="fas fa-plus"></i></button>
-          <button class="zoom-btn" onclick="resetZoom()" title="Fit 100%"><i class="fas fa-expand"></i></button>
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <button class="btn-action btn-gold" id="btnStageDownloadPdf" onclick="downloadCurrentDocPdf()" style="padding: 4px 12px; font-size: 11.5px; font-weight: 700;" title="Download PDF document">
+            <i class="fas fa-download"></i> Download PDF
+          </button>
+          <div class="zoom-controls">
+            <button class="zoom-btn" onclick="adjustZoom(-0.05)" title="Zoom Out"><i class="fas fa-minus"></i></button>
+            <span class="zoom-val" id="zoomText">100%</span>
+            <button class="zoom-btn" onclick="adjustZoom(0.05)" title="Zoom In"><i class="fas fa-plus"></i></button>
+            <button class="zoom-btn" onclick="resetZoom()" title="Fit 100%"><i class="fas fa-expand"></i></button>
+          </div>
         </div>
       </div>
 
@@ -5218,10 +5242,134 @@
     }
 
     // ═══════════════════════════════════════
-    // ACTIONS: PRINT, WHATSAPP & SAVE
+    // ACTIONS: PRINT, PDF DOWNLOAD, WHATSAPP & SAVE
     // ═══════════════════════════════════════
     function printCurrentDoc() {
       window.print();
+    }
+
+    async function downloadCurrentDocPdf() {
+      if (currentMode === 'receipt') {
+        await downloadReceiptPDF();
+      } else if (currentMode && currentMode.includes('cert')) {
+        await downloadCertPDF();
+      } else {
+        window.print();
+      }
+    }
+
+    async function downloadReceiptPDF() {
+      const sheet = document.getElementById('receiptSheet');
+      if (!sheet) return;
+
+      const recNo = document.getElementById('recNo')?.value || 'Official';
+      const studentName = document.getElementById('studentName')?.value || 'Student';
+      const safeRecNo = recNo.replace(/[^a-zA-Z0-9_-]/g, '_');
+      const safeName = studentName.replace(/[^a-zA-Z0-9_-]/g, '_');
+      const fileName = `Fee_Receipt_${safeRecNo}_${safeName}.pdf`;
+
+      showToast('⏳ Generating high-resolution Fee Receipt PDF...');
+
+      const wrap = document.getElementById('previewScaleWrap');
+      const prevTransform = wrap ? wrap.style.transform : '';
+      if (wrap) wrap.style.transform = 'none';
+
+      const btns = [
+        document.getElementById('btnTopDownloadPdf'),
+        document.getElementById('btnSidebarDownloadPdf'),
+        document.getElementById('btnStageDownloadPdf')
+      ].filter(Boolean);
+
+      btns.forEach(b => {
+        b.dataset.origHtml = b.innerHTML;
+        b.disabled = true;
+        b.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Generating PDF...';
+      });
+
+      const opt = {
+        margin: [6, 6, 6, 6],
+        filename: fileName,
+        image: { type: 'jpeg', quality: 0.98 },
+        html2canvas: {
+          scale: 2,
+          useCORS: true,
+          backgroundColor: '#FFFFFF',
+          scrollY: 0,
+          scrollX: 0
+        },
+        jsPDF: {
+          unit: 'mm',
+          format: 'a4',
+          orientation: 'portrait'
+        }
+      };
+
+      try {
+        if (typeof html2pdf !== 'undefined') {
+          await html2pdf().set(opt).from(sheet).save();
+          showToast(`✅ Downloaded: ${fileName}`);
+        } else {
+          showToast('⚠️ Opening print dialog...');
+          window.print();
+        }
+      } catch (err) {
+        console.error('PDF export error, falling back to print:', err);
+        window.print();
+      } finally {
+        if (wrap) wrap.style.transform = prevTransform;
+        btns.forEach(b => {
+          b.disabled = false;
+          if (b.dataset.origHtml) b.innerHTML = b.dataset.origHtml;
+        });
+      }
+    }
+
+    async function downloadCertPDF() {
+      const cert = document.getElementById('certificateContainer');
+      if (!cert) return;
+
+      const name = document.getElementById('certCandidateName')?.value || 'Student';
+      const credId = document.getElementById('certCandidateId')?.value || 'Credential';
+      const safeName = name.replace(/[^a-zA-Z0-9_-]/g, '_');
+      const safeCred = credId.replace(/[^a-zA-Z0-9_-]/g, '_');
+      const fileName = `Certificate_${safeCred}_${safeName}.pdf`;
+
+      showToast('⏳ Generating certificate PDF...');
+
+      const wrap = document.getElementById('previewScaleWrap');
+      const prevTransform = wrap ? wrap.style.transform : '';
+      if (wrap) wrap.style.transform = 'none';
+
+      const opt = {
+        margin: [4, 4, 4, 4],
+        filename: fileName,
+        image: { type: 'jpeg', quality: 0.98 },
+        html2canvas: {
+          scale: 2,
+          useCORS: true,
+          scrollY: 0,
+          scrollX: 0
+        },
+        jsPDF: {
+          unit: 'mm',
+          format: 'a4',
+          orientation: 'landscape'
+        }
+      };
+
+      try {
+        if (typeof html2pdf !== 'undefined') {
+          await html2pdf().set(opt).from(cert).save();
+          showToast(`✅ Downloaded: ${fileName}`);
+        } else {
+          window.print();
+        }
+      } catch (err) {
+        console.error('Certificate PDF export error:', err);
+        window.print();
+      } finally {
+        if (wrap) wrap.style.transform = prevTransform;
+      }
     }
 
     function shareWhatsApp() {
