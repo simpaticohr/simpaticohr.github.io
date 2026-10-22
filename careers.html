@@ -888,20 +888,57 @@
             return (str || '').replace(/<[^>]*>/g, '').replace(/<!--[\s\S]*?-->/g, '').trim();
         }
 
-        // Helper to infer country code for Google Jobs Schema based on location text
-        function detectCountryCode(locStr) {
-            if (!locStr) return 'IN';
-            const loc = locStr.toLowerCase();
-            if (loc.includes('united states') || loc.includes('usa') || loc.includes('us')) return 'US';
-            if (loc.includes('united kingdom') || loc.includes('uk') || loc.includes('london')) return 'GB';
-            if (loc.includes('united arab emirates') || loc.includes('uae') || loc.includes('dubai') || loc.includes('abu dhabi')) return 'AE';
-            if (loc.includes('saudi') || loc.includes('riyadh')) return 'SA';
-            if (loc.includes('qatar') || loc.includes('doha')) return 'QA';
-            if (loc.includes('singapore')) return 'SG';
-            if (loc.includes('canada')) return 'CA';
-            if (loc.includes('australia')) return 'AU';
-            if (loc.includes('germany') || loc.includes('berlin')) return 'DE';
-            return 'IN'; // Default to India
+        // Helper to parse location text into structured data (locality, region, country, isRemote)
+        function parseJobLocation(locStr) {
+            const raw = (locStr || '').trim();
+            const loc = raw.toLowerCase();
+
+            const isRemote = loc.includes('remote') || loc.includes('telecommute') || loc.includes('wfh') || loc.includes('work from home');
+
+            // 1. Detect Country
+            let countryCode = 'IN';
+            if (loc.includes('united states') || loc.includes('usa') || loc.includes('us')) countryCode = 'US';
+            else if (loc.includes('united kingdom') || loc.includes('uk') || loc.includes('london')) countryCode = 'GB';
+            else if (loc.includes('united arab emirates') || loc.includes('uae') || loc.includes('dubai') || loc.includes('abu dhabi') || loc.includes('sharjah')) countryCode = 'AE';
+            else if (loc.includes('saudi') || loc.includes('riyadh')) countryCode = 'SA';
+            else if (loc.includes('qatar') || loc.includes('doha')) countryCode = 'QA';
+            else if (loc.includes('singapore')) countryCode = 'SG';
+            else if (loc.includes('canada')) countryCode = 'CA';
+            else if (loc.includes('australia')) countryCode = 'AU';
+            else if (loc.includes('germany') || loc.includes('berlin')) countryCode = 'DE';
+
+            // 2. Parse locality & region from comma-separated format if provided
+            const parts = raw.split(',').map(s => s.trim()).filter(Boolean);
+            let locality = parts[0] || (isRemote ? 'Remote' : 'Perinthalmanna');
+            let region = parts[1] || '';
+
+            // 3. Normalize region to first-level administrative division (State / Province / Emirate)
+            const keralaKeywords = [
+                'kerala', 'perinthalmanna', 'perintalmanna', 'malappuram', 'kochi', 'cochin', 'ernakulam',
+                'calicut', 'kozhikode', 'trivandrum', 'thiruvananthapuram', 'thrissur', 'kannur',
+                'palakkad', 'kottayam', 'kollam', 'alappuzha', 'wayanad', 'kasaragod',
+                'kasargod', 'idukki', 'pathanamthitta', 'angadippuram', 'manjeri', 'tirur'
+            ];
+
+            if (keralaKeywords.some(k => loc.includes(k))) {
+                region = 'Kerala';
+            } else if (loc.includes('bangalore') || loc.includes('bengaluru') || loc.includes('karnataka') || loc.includes('mysore')) {
+                region = 'Karnataka';
+            } else if (loc.includes('chennai') || loc.includes('tamil nadu') || loc.includes('coimbatore')) {
+                region = 'Tamil Nadu';
+            } else if (loc.includes('mumbai') || loc.includes('pune') || loc.includes('maharashtra')) {
+                region = 'Maharashtra';
+            } else if (loc.includes('hyderabad') || loc.includes('telangana')) {
+                region = 'Telangana';
+            } else if (loc.includes('delhi') || loc.includes('noida') || loc.includes('gurgaon') || loc.includes('gurugram')) {
+                region = 'Delhi';
+            } else if (countryCode === 'AE') {
+                region = loc.includes('abu dhabi') ? 'Abu Dhabi' : loc.includes('sharjah') ? 'Sharjah' : 'Dubai';
+            } else if (!region) {
+                region = countryCode === 'IN' ? 'Kerala' : locality;
+            }
+
+            return { locality, region, countryCode, isRemote };
         }
 
         // ── Google Jobs JSON-LD Structured Data ──────────
@@ -926,12 +963,12 @@
 
             jobs.forEach(job => {
                 const desc = stripHtml(job.description || job.title);
-                const loc = job.location || 'Remote';
-                const isRemote = loc.toLowerCase().includes('remote');
-                const countryCode = detectCountryCode(loc);
+                const locInfo = parseJobLocation(job.location);
                 const posted = job.created_at ? new Date(job.created_at).toISOString().split('T')[0] : new Date().toISOString().split('T')[0];
                 const validThrough = new Date(Date.now() + 60 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
                 const empType = employmentTypeMap[(job.employment_type || '').toLowerCase()] || 'FULL_TIME';
+                const slug = (job.title || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+                const jobUrl = `${BASE_URL}/job/${slug}-${job.id}`;
 
                 const jsonLd = {
                     '@context': 'https://schema.org/',
@@ -946,22 +983,29 @@
                         'name': companyName || 'Simpatico HR Client',
                         'sameAs': canonicalUrl
                     },
-                    'applicantLocationRequirements': {
-                        '@type': 'Country',
-                        'name': countryCode
+                    'identifier': {
+                        '@type': 'PropertyValue',
+                        'name': companyName || 'Simpatico HR',
+                        'value': String(job.id || slug)
                     },
+                    'url': jobUrl,
                     'directApply': true
                 };
 
-                if (isRemote) {
+                if (locInfo.isRemote) {
                     jsonLd.jobLocationType = 'TELECOMMUTE';
+                    jsonLd.applicantLocationRequirements = {
+                        '@type': 'Country',
+                        'name': locInfo.countryCode
+                    };
                 } else {
                     jsonLd.jobLocation = {
                         '@type': 'Place',
                         'address': {
                             '@type': 'PostalAddress',
-                            'addressLocality': loc.split(',')[0]?.trim() || loc,
-                            'addressCountry': countryCode
+                            'addressLocality': locInfo.locality,
+                            'addressRegion': locInfo.region,
+                            'addressCountry': locInfo.countryCode
                         }
                     };
                 }
@@ -969,7 +1013,7 @@
                 if (job.salary_min) {
                     jsonLd.baseSalary = {
                         '@type': 'MonetaryAmount',
-                        'currency': countryCode === 'US' ? 'USD' : countryCode === 'GB' ? 'GBP' : countryCode === 'AE' ? 'AED' : 'INR',
+                        'currency': locInfo.countryCode === 'US' ? 'USD' : locInfo.countryCode === 'GB' ? 'GBP' : locInfo.countryCode === 'AE' ? 'AED' : 'INR',
                         'value': {
                             '@type': 'QuantitativeValue',
                             'value': job.salary_min,

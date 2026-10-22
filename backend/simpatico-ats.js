@@ -12488,8 +12488,15 @@ async function handleSeoJobsJson(request, env) {
 
     // Parse location into structured address
     const locationParts = location.split(",").map(s => s.trim());
+    const locLower = location.toLowerCase();
     const addressLocality = locationParts[0] || location;
-    const addressRegion = locationParts[1] || "";
+    const addressRegion = locationParts[1] || (
+      locLower.includes("bangalore") || locLower.includes("karnataka") ? "Karnataka" :
+      locLower.includes("chennai") || locLower.includes("tamil nadu") ? "Tamil Nadu" :
+      locLower.includes("mumbai") || locLower.includes("maharashtra") ? "Maharashtra" :
+      locLower.includes("delhi") ? "Delhi" :
+      locLower.includes("uae") || locLower.includes("dubai") ? "Dubai" : "Kerala"
+    );
     const addressCountry = location.toLowerCase().includes("india") || location.toLowerCase().includes("kerala") ? "IN" :
       location.toLowerCase().includes("uae") || location.toLowerCase().includes("dubai") ? "AE" : "IN";
 
@@ -12512,7 +12519,7 @@ async function handleSeoJobsJson(request, env) {
         "address": {
           "@type": "PostalAddress",
           "addressLocality": addressLocality,
-          ...(addressRegion && { "addressRegion": addressRegion }),
+          "addressRegion": addressRegion,
           "addressCountry": addressCountry
         }
       },
@@ -12652,8 +12659,15 @@ async function handleSeoJobPage(request, env, ctx, params, url) {
   } else if (locLower.includes("kerala")) {
     addressRegion = "Kerala";
     addressCountry = "IN";
+  } else if (locLower.includes("bangalore") || locLower.includes("karnataka")) {
+    addressRegion = "Karnataka";
+    addressCountry = "IN";
   } else if (locLower.includes("uae") || locLower.includes("dubai")) {
     addressCountry = "AE";
+    addressRegion = "Dubai";
+  }
+  if (!addressRegion) {
+    addressRegion = "Kerala";
   }
 
   const typeMap = {
@@ -12682,7 +12696,7 @@ async function handleSeoJobPage(request, env, ctx, params, url) {
       "address": {
         "@type": "PostalAddress",
         "addressLocality": addressLocality,
-        ...(addressRegion && { "addressRegion": addressRegion }),
+        "addressRegion": addressRegion,
         "addressCountry": addressCountry
       }
     },
