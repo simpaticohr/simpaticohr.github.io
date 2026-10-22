@@ -1302,6 +1302,9 @@ route("GET", "/version", handleVersion);
 route("GET", "/sitemap-jobs.xml", handleJobsSitemap);
 route("GET", "/seo/jobs.json", handleSeoJobsJson);
 route("GET", "/seo/job/:slug", handleSeoJobPage);
+route("GET", "/job/:slug", handleSeoJobPage);
+route("GET", "/job", handleSeoJobPage);
+route("GET", "/job/", handleSeoJobPage);
 route("GET", "/api/fix-rls", handleFixRLS);
 route("POST", "/users/ensure-profile", handleEnsureProfile);
 route("POST", "/webhooks/register", handleRegisterWebhook);
@@ -12573,28 +12576,35 @@ async function handleSeoJobsJson(request, env) {
  *  - Direct apply link
  * Cached at the edge for 1 hour. No auth required.
  */
-async function handleSeoJobPage(request, env, ctx, params) {
+async function handleSeoJobPage(request, env, ctx, params, url) {
   if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_KEY)
     return new Response("Service unavailable", { status: 503 });
 
+  const reqUrl = url || new URL(request.url);
+  const base = env.SITE_URL || "https://simpaticohr.in";
   const slug = params?.[0] || "";
-  // Extract UUID from slug (last 36 chars)
+  // Extract UUID from slug (last 36 chars) or from ?id= query param
   const uuidMatch = slug.match(/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i);
-  if (!uuidMatch) return new Response("Job not found", { status: 404 });
-  const jobId = uuidMatch[1];
+  const jobId = uuidMatch ? uuidMatch[1] : reqUrl.searchParams.get("id");
+
+  if (!jobId) {
+    return Response.redirect(`${base}/jobs.html`, 302);
+  }
 
   const sbHeaders = { apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}` };
-  const base = env.SITE_URL || "https://simpaticohr.in";
   const slugify = (t) => (t || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "job";
 
   const jobRes = await fetch(
-    `${env.SUPABASE_URL}/rest/v1/jobs?id=eq.${jobId}&status=eq.open&select=id,title,company_id,company_name,department,location,employment_type,level,description,skills,skills_required,salary_min,salary_max,created_at&limit=1`,
+    `${env.SUPABASE_URL}/rest/v1/jobs?id=eq.${jobId}&status=in.(open,active)&select=id,title,company_id,company_name,department,location,employment_type,level,description,skills,skills_required,salary_min,salary_max,created_at&limit=1`,
     { headers: sbHeaders },
   );
   if (!jobRes.ok) return new Response("Error fetching job", { status: 502 });
   const jobs = await jobRes.json();
   const job = jobs?.[0];
-  if (!job) return new Response("Job not found", { status: 404 });
+  if (!job) {
+    const notFoundHtml = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><title>Position Closed | Simpatico HR</title><meta name="viewport" content="width=device-width, initial-scale=1"><link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;700&display=swap" rel="stylesheet"><style>body{font-family:'Plus Jakarta Sans',sans-serif;background:#0a0f1e;color:#e2e8f0;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;padding:20px;text-align:center}.box{max-width:480px;background:#0f172a;border:1px solid rgba(255,255,255,.08);padding:40px;border-radius:20px}h1{font-size:1.5rem;margin-bottom:12px;color:#fff}p{color:#94a3b8;font-size:.95rem;line-height:1.6;margin-bottom:24px}a{display:inline-block;background:#6366f1;color:#fff;padding:12px 24px;border-radius:12px;text-decoration:none;font-weight:700}</style></head><body><div class="box"><h1>Job Opening Closed</h1><p>This position is no longer accepting applications or has been filled. Explore all current openings on our job portal.</p><a href="${base}/jobs.html">Browse Active Jobs →</a></div></body></html>`;
+    return new Response(notFoundHtml, { status: 404, headers: { "Content-Type": "text/html; charset=utf-8" } });
+  }
 
   const company = job.company_name || job.department || "Simpatico HR Consultancy";
   const location = job.location || "Remote";
@@ -12624,12 +12634,27 @@ async function handleSeoJobPage(request, env, ctx, params) {
       : `Up to ₹${(job.salary_max/100000).toFixed(0)} LPA`;
   }
 
-  // Location parsing
+  // Location parsing & GEO-targeting
   const locationParts = location.split(",").map(s => s.trim());
-  const addressLocality = locationParts[0] || location;
-  const addressRegion = locationParts[1] || "";
-  const addressCountry = location.toLowerCase().includes("india") || location.toLowerCase().includes("kerala") ? "IN" :
-    location.toLowerCase().includes("uae") || location.toLowerCase().includes("dubai") ? "AE" : "IN";
+  let addressLocality = locationParts[0] || location;
+  let addressRegion = locationParts[1] || "";
+  let addressCountry = "IN";
+
+  const locLower = location.toLowerCase();
+  if (locLower.includes("perinthalmanna")) {
+    addressLocality = "Perinthalmanna";
+    addressRegion = "Kerala";
+    addressCountry = "IN";
+  } else if (locLower.includes("kochi") || locLower.includes("cochin")) {
+    addressLocality = "Kochi";
+    addressRegion = "Kerala";
+    addressCountry = "IN";
+  } else if (locLower.includes("kerala")) {
+    addressRegion = "Kerala";
+    addressCountry = "IN";
+  } else if (locLower.includes("uae") || locLower.includes("dubai")) {
+    addressCountry = "AE";
+  }
 
   const typeMap = {
     "full-time": "FULL_TIME", "part-time": "PART_TIME", "contract": "CONTRACTOR",
