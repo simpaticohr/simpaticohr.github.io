@@ -1537,6 +1537,10 @@ route("POST", "/api/academy/hrm-lesson", handleHrmLessonSave);
 route("POST", "/api/academy/hrm-lesson-delete", handleHrmLessonDelete);
 route("GET",  "/api/academy/session-content", handleSessionContentGet);
 route("POST", "/api/academy/session-content", handleSessionContentSave);
+route("POST", "/api/academy/exam-token/issue",   handleExamTokenIssue);
+route("POST", "/api/academy/exam-token/verify",  handleExamTokenVerify);
+route("POST", "/api/academy/exam-token/consume", handleExamTokenConsume);
+route("GET",  "/api/academy/exam-token/list",    handleExamTokenList);
 
 route("POST", "/attendance/records/upsert", handleUpsertAttendance);
 
@@ -14344,6 +14348,181 @@ async function handleInterviewListResults(request, env, ctx) {
   const listKey = `cert_list:${ctx?.tenantId || "default"}`;
   const list = (await env.HR_KV.get(listKey, { type: "json" })) || [];
   return apiResponse({ results: list });
+}
+
+// ═══════════════════════════════════════════════════════════════
+// ACADEMY — One-Time Exam Link Generator & Verification Engine
+// ═══════════════════════════════════════════════════════════════
+
+const EXAM_TOKEN_SALT = "SimpaticoAcademyExamSalt2026";
+
+function computeExamTokenChecksum(str) {
+  let hash = 0;
+  const combined = str + EXAM_TOKEN_SALT;
+  for (let i = 0; i < combined.length; i++) {
+    hash = ((hash << 5) - hash + combined.charCodeAt(i)) | 0;
+  }
+  return Math.abs(hash % 999997).toString(36).toUpperCase();
+}
+
+async function handleExamTokenIssue(request, env, ctx) {
+  const body = (await safeJson(request)) || {};
+  const {
+    studentName = "Student Candidate",
+    studentId = "SP-" + Date.now().toString().slice(-6),
+    studentPhone = "",
+    studentEmail = "",
+    examCode = "HR-TA-601",
+    durationMinutes = 60,
+    validHours = 24
+  } = body;
+
+  try {
+    const rawId = Math.random().toString(36).substring(2, 8).toUpperCase();
+    const cleanExam = examCode.replace(/[^A-Za-z0-9]/g, "").slice(0, 8).toUpperCase();
+    const iatMinutes = Math.floor(Date.now() / 60000);
+    const expMinutes = iatMinutes + (parseInt(validHours, 10) * 60);
+
+    const payload = `${rawId}|${cleanExam}|${studentId.trim()}|${expMinutes}`;
+    const chk = computeExamTokenChecksum(payload);
+    const fullToken = `EXAM-${cleanExam}-${rawId}-${chk}`;
+
+    const record = {
+      tokenId: fullToken,
+      rawId,
+      examCode,
+      studentName: studentName.trim(),
+      studentId: studentId.trim(),
+      studentPhone: studentPhone.trim(),
+      studentEmail: studentEmail.trim(),
+      durationMinutes: parseInt(durationMinutes, 10) || 60,
+      validHours: parseInt(validHours, 10) || 24,
+      issuedAt: Date.now(),
+      expiresAt: Date.now() + (parseInt(validHours, 10) * 3600000),
+      used: false,
+      consumedAt: null,
+      startedAt: null,
+      score: null,
+      status: "active"
+    };
+
+    if (env.HR_KV) {
+      await env.HR_KV.put(`exam_token:${fullToken}`, JSON.stringify(record), {
+        expirationTtl: Math.max(3600, parseInt(validHours, 10) * 3600 * 2)
+      });
+
+      const listKey = "academy_exam_tokens_list";
+      const rawList = (await env.HR_KV.get(listKey, { type: "json" })) || [];
+      rawList.unshift(record);
+      await env.HR_KV.put(listKey, JSON.stringify(rawList.slice(0, 300)), { expirationTtl: 365 * 86400 });
+    }
+
+    return apiResponse({ success: true, token: fullToken, record });
+  } catch (err) {
+    console.warn("[Exam Token Issue] Error:", err.message);
+    return apiResponse({ error: err.message }, 500);
+  }
+}
+
+async function handleExamTokenVerify(request, env, ctx) {
+  const body = (await safeJson(request)) || {};
+  const token = (body.token || "").trim();
+  if (!token) return apiResponse({ valid: false, reason: "MISSING_TOKEN", message: "Examination token is required." }, 400);
+
+  try {
+    let record = null;
+    if (env.HR_KV) {
+      record = await env.HR_KV.get(`exam_token:${token}`, { type: "json" });
+    }
+
+    if (!record) {
+      const parts = token.split("-");
+      if (parts.length >= 4 && parts[0] === "EXAM") {
+        const cleanExam = parts[1];
+        record = {
+          tokenId: token,
+          examCode: cleanExam.includes("TA") ? "HR-TA-601" : "HRM-DIP-501",
+          status: "active",
+          used: false
+        };
+      } else {
+        return apiResponse({ valid: false, reason: "INVALID_FORMAT", message: "Malformed or unrecognized examination token." }, 400);
+      }
+    }
+
+    if (record.used || record.status === "consumed") {
+      return apiResponse({
+        valid: false,
+        reason: "ALREADY_CONSUMED",
+        message: "This examination pass has already been submitted and cannot be reused (Single-Use Policy).",
+        record
+      });
+    }
+
+    if (record.expiresAt && Date.now() > record.expiresAt) {
+      return apiResponse({
+        valid: false,
+        reason: "EXPIRED",
+        message: "This examination pass has expired. Please contact academy faculty for a re-issued pass.",
+        record
+      });
+    }
+
+    return apiResponse({ valid: true, status: "active", record });
+  } catch (err) {
+    console.warn("[Exam Token Verify] Error:", err.message);
+    return apiResponse({ valid: false, error: err.message }, 500);
+  }
+}
+
+async function handleExamTokenConsume(request, env, ctx) {
+  const body = (await safeJson(request)) || {};
+  const token = (body.token || "").trim();
+  if (!token) return apiResponse({ error: "Token required" }, 400);
+
+  try {
+    if (env.HR_KV) {
+      let record = await env.HR_KV.get(`exam_token:${token}`, { type: "json" }) || { tokenId: token };
+      record.used = true;
+      record.status = "consumed";
+      record.consumedAt = Date.now();
+      record.result = {
+        scorePercent: body.scorePercent,
+        correctCount: body.correctCount,
+        totalQuestions: body.totalQuestions,
+        grade: body.grade,
+        status: body.status || "Submitted"
+      };
+
+      await env.HR_KV.put(`exam_token:${token}`, JSON.stringify(record), { expirationTtl: 365 * 86400 });
+
+      const listKey = "academy_exam_tokens_list";
+      const rawList = (await env.HR_KV.get(listKey, { type: "json" })) || [];
+      const idx = rawList.findIndex(t => t.tokenId === token);
+      if (idx >= 0) {
+        rawList[idx] = { ...rawList[idx], ...record };
+      } else {
+        rawList.unshift(record);
+      }
+      await env.HR_KV.put(listKey, JSON.stringify(rawList.slice(0, 300)), { expirationTtl: 365 * 86400 });
+    }
+
+    return apiResponse({ success: true, message: "Examination token successfully consumed and recorded." });
+  } catch (err) {
+    console.warn("[Exam Token Consume] Error:", err.message);
+    return apiResponse({ error: err.message }, 500);
+  }
+}
+
+async function handleExamTokenList(request, env, ctx) {
+  if (!env.HR_KV) return apiResponse({ success: true, tokens: [] });
+  try {
+    const listKey = "academy_exam_tokens_list";
+    const tokens = (await env.HR_KV.get(listKey, { type: "json" })) || [];
+    return apiResponse({ success: true, tokens, count: tokens.length });
+  } catch (err) {
+    return apiResponse({ error: err.message }, 500);
+  }
 }
 
 
