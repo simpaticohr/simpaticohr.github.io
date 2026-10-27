@@ -165,6 +165,20 @@ async function loadCourses() {
     allCourses = data || [];
   }
 
+  // Ensure HR-TA-601 is present as a flagship professional recruitment course
+  if (!allCourses.some(c => c.title && c.title.includes('HR-TA-601'))) {
+    allCourses.unshift({
+      id: 'course-hr-ta-601',
+      title: 'Talent Acquisition & Recruitment Mastery (HR-TA-601)',
+      description: 'A 6-Week End-to-End Professional Syllabus: Workforce Planning, Boolean Sourcing, Structured Interviewing & AI Analytics.',
+      category: 'technical',
+      duration_hours: 36,
+      content_url: '/platform/academy-admin.html',
+      is_required: false,
+      created_at: new Date().toISOString()
+    });
+  }
+
   setText('stat-courses', allCourses.length);
   setText('stat-courses-sub', `${allCourses.filter(c => c.is_required).length} compliance required`);
 
@@ -610,6 +624,10 @@ window.sendReminder = async function (enrollmentId) {
 };
 
 window.openCourse = function (id) {
+  if (id === 'course-hr-ta-601') {
+    location.href = '/platform/academy-admin.html';
+    return;
+  }
   location.href = `course-viewer.html?id=${id}`;
 };
 window.editCourse = function (id) {

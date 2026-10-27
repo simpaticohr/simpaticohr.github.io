@@ -14021,15 +14021,26 @@ function sanitizeHrmLesson(input) {
   };
 }
 
-async function readHrmCourse(env) {
-  return (await env.HR_KV.get("academy_hrm_course", { type: "json" })) || {};
+function getCourseKvKey(courseKey) {
+  const c = String(courseKey || "").toLowerCase();
+  if (c.includes("ta") || c.includes("601") || c.includes("recruitment") || c.includes("acquisition")) {
+    return "academy_course_hr_ta_601";
+  }
+  return "academy_hrm_course";
+}
+
+async function readHrmCourse(env, courseKey = "hrm") {
+  const k = getCourseKvKey(courseKey);
+  return (await env.HR_KV.get(k, { type: "json" })) || {};
 }
 
 async function handleHrmCourseGet(request, env, ctx) {
   if (!env.HR_KV) return apiResponse({ error: "KV not available" }, 500);
   try {
-    const lessons = await readHrmCourse(env);
-    return apiResponse({ success: true, lessons, count: Object.keys(lessons).length });
+    const url = new URL(request.url);
+    const courseKey = url.searchParams.get("course") || url.searchParams.get("courseId") || "hrm";
+    const lessons = await readHrmCourse(env, courseKey);
+    return apiResponse({ success: true, course: courseKey, lessons, count: Object.keys(lessons).length });
   } catch (err) {
     return apiResponse({ error: err.message }, 500);
   }
@@ -14039,13 +14050,16 @@ async function handleHrmLessonSave(request, env, ctx) {
   if (!env.HR_KV) return apiResponse({ error: "KV not available" }, 500);
   const body = (await safeJson(request)) || {};
   try {
+    const url = new URL(request.url);
+    const courseKey = url.searchParams.get("course") || url.searchParams.get("courseId") || body.courseId || "hrm";
+    const k = getCourseKvKey(courseKey);
     const lesson = sanitizeHrmLesson(body);
-    if (!lesson.sessionId || !/^\d{1,3}$/.test(lesson.sessionId)) return apiResponse({ error: "valid sessionId required" }, 400);
+    if (!lesson.sessionId) return apiResponse({ error: "valid sessionId required" }, 400);
     if (!lesson.en && !lesson.ml) return apiResponse({ error: "EN or ML explanation required" }, 400);
-    const lessons = await readHrmCourse(env);
+    const lessons = await readHrmCourse(env, courseKey);
     lessons[lesson.sessionId] = lesson;
-    await env.HR_KV.put("academy_hrm_course", JSON.stringify(lessons), { expirationTtl: 730 * 86400 });
-    return apiResponse({ success: true, sessionId: lesson.sessionId, count: Object.keys(lessons).length });
+    await env.HR_KV.put(k, JSON.stringify(lessons), { expirationTtl: 730 * 86400 });
+    return apiResponse({ success: true, course: courseKey, sessionId: lesson.sessionId, count: Object.keys(lessons).length });
   } catch (err) {
     return apiResponse({ error: err.message }, 500);
   }
@@ -14055,12 +14069,15 @@ async function handleHrmLessonDelete(request, env, ctx) {
   if (!env.HR_KV) return apiResponse({ error: "KV not available" }, 500);
   const body = (await safeJson(request)) || {};
   try {
+    const url = new URL(request.url);
+    const courseKey = url.searchParams.get("course") || url.searchParams.get("courseId") || body.courseId || "hrm";
+    const k = getCourseKvKey(courseKey);
     const sessionId = String(body.sessionId || "").trim();
     if (!sessionId) return apiResponse({ error: "sessionId is required" }, 400);
-    const lessons = await readHrmCourse(env);
+    const lessons = await readHrmCourse(env, courseKey);
     delete lessons[sessionId];
-    await env.HR_KV.put("academy_hrm_course", JSON.stringify(lessons), { expirationTtl: 730 * 86400 });
-    return apiResponse({ success: true, sessionId });
+    await env.HR_KV.put(k, JSON.stringify(lessons), { expirationTtl: 730 * 86400 });
+    return apiResponse({ success: true, course: courseKey, sessionId });
   } catch (err) {
     return apiResponse({ error: err.message }, 500);
   }
@@ -14070,18 +14087,21 @@ async function handleHrmCourseSave(request, env, ctx) {
   if (!env.HR_KV) return apiResponse({ error: "KV not available" }, 500);
   const body = (await safeJson(request)) || {};
   try {
+    const url = new URL(request.url);
+    const courseKey = url.searchParams.get("course") || url.searchParams.get("courseId") || body.courseId || "hrm";
+    const k = getCourseKvKey(courseKey);
     const incoming = body.lessons && typeof body.lessons === "object" ? body.lessons : null;
     if (!incoming) return apiResponse({ error: "lessons object required" }, 400);
     const clean = {};
     for (const [sid, lesson] of Object.entries(incoming).slice(0, 64)) {
       const id = String(sid).trim();
-      if (!/^\d{1,3}$/.test(id)) continue;
+      if (!id) continue;
       const l = sanitizeHrmLesson({ ...(lesson || {}), sessionId: id });
       if (!l.en && !l.ml) continue;
       clean[id] = l;
     }
-    await env.HR_KV.put("academy_hrm_course", JSON.stringify(clean), { expirationTtl: 730 * 86400 });
-    return apiResponse({ success: true, count: Object.keys(clean).length });
+    await env.HR_KV.put(k, JSON.stringify(clean), { expirationTtl: 730 * 86400 });
+    return apiResponse({ success: true, course: courseKey, count: Object.keys(clean).length });
   } catch (err) {
     return apiResponse({ error: err.message }, 500);
   }
