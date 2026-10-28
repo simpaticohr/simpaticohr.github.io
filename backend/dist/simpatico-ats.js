@@ -1514,6 +1514,7 @@ route("GET",  "/api/interview/slots", handleListSlots);
 route("POST", "/api/interview/book-slot", handleBookSlot);
 route("POST", "/api/interview/save-result", handleInterviewSaveResult);
 route("GET",  "/api/interview/results", handleInterviewListResults);
+route("POST", "/api/interview/results", handleInterviewListResults);
 
 // ── Academy Sequential ID Generators ──
 route("POST", "/api/academy/generate-student-id", handleGenerateStudentId);
