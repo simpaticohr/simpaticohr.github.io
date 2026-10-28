@@ -5368,8 +5368,8 @@ GUIDELINES:
                         sessionId: state.sessionId || crypto.randomUUID(),
                         role: state.role, level: state.level,
                         transcript: state.liveTranscript,
-                        candidate_name: _b2bCandidateName || null,
-                        candidate_email: _b2bCandidateEmail || null,
+                        candidate_name: state.candidateName || _b2bCandidateName || null,
+                        candidate_email: state.candidateEmail || _b2bCandidateEmail || null,
                         mode: 'voice',
                         proctoring_violations: (_enableProctoring || _enableWebcamProctoring) ? state.proctoringViolations : null,
                         resume_matching_report: _resumeAnalysis
@@ -6304,8 +6304,19 @@ GUIDELINES:
                 reportsPanel.style.display = 'block';
                 reportsPanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
                 renderAdminReportsDashboard();
+                if (window._reportsPollTimer) clearInterval(window._reportsPollTimer);
+                window._reportsPollTimer = setInterval(() => {
+                    const rp = document.getElementById('admin-reports-panel');
+                    if (rp && rp.style.display !== 'none') {
+                        renderAdminReportsDashboard();
+                    }
+                }, 15000);
             }
         } else {
+            if (window._reportsPollTimer) {
+                clearInterval(window._reportsPollTimer);
+                window._reportsPollTimer = null;
+            }
             if (btnCand) {
                 btnCand.style.background = 'var(--gradient-primary)';
                 btnCand.style.color = '#fff';
@@ -6357,7 +6368,7 @@ GUIDELINES:
 
         // Fetch cloud synced results from backend API to merge any candidate tests
         try {
-            const apiRes = await apiCall('/api/interview/results', null, 5000);
+            const apiRes = await apiCall('/api/interview/results', null, 5000, 'GET');
             if (apiRes && Array.isArray(apiRes.results) && apiRes.results.length > 0) {
                 let mergedCount = 0;
                 apiRes.results.forEach(cloudCert => {
@@ -6986,7 +6997,8 @@ GUIDELINES:
     }
 
     // ── API Calls ──
-    async function apiCall(endpoint, body, timeoutMs) {
+    async function apiCall(endpoint, body, timeoutMs, method) {
+        const httpMethod = method || (body !== null && body !== undefined ? 'POST' : 'GET');
         const headers = { 'Content-Type': 'application/json' };
         
         // Pass B2B API Key if available
@@ -7003,12 +7015,15 @@ GUIDELINES:
         const timer = setTimeout(() => controller.abort(), timeoutMs || 30000);
 
         try {
-            const response = await fetch(`${API_BASE}${endpoint}`, {
-                method: 'POST',
+            const fetchOpts = {
+                method: httpMethod,
                 headers: headers,
-                body: JSON.stringify(body),
                 signal: controller.signal
-            });
+            };
+            if (httpMethod !== 'GET' && httpMethod !== 'HEAD' && body !== undefined && body !== null) {
+                fetchOpts.body = JSON.stringify(body);
+            }
+            const response = await fetch(`${API_BASE}${endpoint}`, fetchOpts);
             clearTimeout(timer);
             if (!response.ok) {
                 const err = await response.json().catch(() => ({}));
