@@ -2801,6 +2801,14 @@ function loadCandidateAgreements() {
                     </label>
                 </div>
 
+                                <div style="margin-bottom:14px;">
+                    <label style="display:block;font-size:12px;color:#94a3b8;margin-bottom:4px;">Agreement Language (Optional)</label>
+                    <select id="newAgrLang" style="width:100%;padding:10px;background:#0f172a;border:1px solid rgba(255,255,255,0.15);border-radius:8px;color:#fff;font-size:13px;">
+                        <option value="en" selected>English (Default)</option>
+                        <option value="ml">മലയാളം (Malayalam)</option>
+                    </select>
+                </div>
+
                 <div style="margin-bottom:14px;">
                     <label style="display:block;font-size:12px;color:#94a3b8;margin-bottom:4px;">Payment Schedule Term (Admin Choice)</label>
                     <select id="newAgrSchedule" onchange="toggleScheduleOptions()" style="width:100%;padding:10px;background:#0f172a;border:1px solid rgba(255,255,255,0.15);border-radius:8px;color:#fff;font-size:13px;">
@@ -2904,7 +2912,7 @@ function toggleScheduleOptions() {
 
 function getAgreementUrl(agr) {
     const baseUrl = window.location.origin + window.location.pathname.replace('/platform/super-admin.html', '').replace('/super-admin.html', '') + '/candidate-agreement.html';
-    return `${baseUrl}?id=${encodeURIComponent(agr.id)}&name=${encodeURIComponent(agr.name)}&phone=${encodeURIComponent(agr.phone)}&company=${encodeURIComponent(agr.company)}&role=${encodeURIComponent(agr.role)}&salary=${encodeURIComponent(agr.salary || 0)}&fee=${encodeURIComponent(agr.fee || '')}&schedule=${encodeURIComponent(agr.schedule || 'after_salary')}&advance=${encodeURIComponent(agr.advance || 0)}`;
+    return `${baseUrl}?id=${encodeURIComponent(agr.id)}&name=${encodeURIComponent(agr.name)}&phone=${encodeURIComponent(agr.phone)}&company=${encodeURIComponent(agr.company)}&role=${encodeURIComponent(agr.role)}&salary=${encodeURIComponent(agr.salary || 0)}&fee=${encodeURIComponent(agr.fee || '')}&schedule=${encodeURIComponent(agr.schedule || 'after_salary')}&advance=${encodeURIComponent(agr.advance || 0)}&lang=${encodeURIComponent(agr.lang || "en")}`;
 }
 
 function saveAndSendAgreement() {
@@ -2917,6 +2925,7 @@ function saveAndSendAgreement() {
     const fee = isOpenSalary ? '50% of 1st Month Salary' : Math.round(salary * 0.5);
     const schedule = document.getElementById('newAgrSchedule') ? document.getElementById('newAgrSchedule').value : 'after_salary';
     const advance = document.getElementById('newAgrAdvance') ? (parseFloat(document.getElementById('newAgrAdvance').value) || 0) : 0;
+    const lang = document.getElementById('newAgrLang') ? document.getElementById('newAgrLang').value : 'en';
 
     if (!name || !phone) {
         alert('Please fill candidate name and phone number.');
@@ -2937,6 +2946,7 @@ function saveAndSendAgreement() {
         fee,
         schedule,
         advance,
+        lang,
         status: 'PENDING',
         createdAt: new Date().toISOString()
     };
@@ -2952,6 +2962,35 @@ function saveAndSendAgreement() {
 }
 
 function dispatchAgreementWhatsApp(agrId) {
+    const agrs = getStoredAgreements();
+    const a = agrs.find(x => x.id === agrId);
+    if (!a) return;
+
+    const link = getAgreementUrl(a);
+    const cleanPhone = a.phone.replace(/[^0-9]/g, '');
+    let scheduleText = a.schedule === 'within_5_days_joining' 
+        ? 'Within 5 days of joining date (plus balance after 1st month salary)' 
+        : 'Payable within 7 days of receiving first month salary';
+    if (a.advance > 0) scheduleText = 'Initial \u20b9' + (parseFloat(a.advance)||0).toLocaleString('en-IN') + ' within 5 days of joining date + balance after 1st salary';
+
+    let message = '';
+    if (a.lang === 'ml') {
+        let mlSched = a.schedule === 'within_5_days_joining' 
+            ? 'ജോലിയിൽ പ്രവേശിച്ച് 5 ദിവസത്തിനകം' + (a.advance > 0 ? (' (\u20b9' + parseFloat(a.advance).toLocaleString('en-IN') + ')') : '') + ' + ബാക്കി തുക ആദ്യ ശമ്പളത്തിന് ശേഷം'
+            : 'ആദ്യ മാസ ശമ്പളം ലഭിച്ച് 7 ദിവസത്തിനകം';
+        message = 'പ്രിയ *' + a.name + '*,\n\nസിംപാറ്റിക്കോ എച്ച്.ആർ (Simpatico HR) പ്ലേസ്‌മെന്റ് നെറ്റ്‍വർക്കിലേക്ക് സ്വാഗതം!\n\n*പ്ലേസ്‌മെന്റ് സർവീസ് കരാർ വ്യവസ്ഥകൾ:*\n\u2022 സർവീസ് ഫീ: *ആദ്യ മാസ ശമ്പളത്തിന്റെ 50%* (ജോലി ലഭിക്കുമ്പോൾ ലഭിക്കുന്ന ശമ്പളം എന്തുതന്നെയായാലും)\n\u2022 അടയ്‌ക്കേണ്ട കാലാവധി: *' + mlSched + '*\n\u2022 തുടർച്ചയായ സാധുത: *ഈ കരാർ രജിസ്ട്രേഷൻ സമയത്ത് ഒപ്പിടുന്നതും, ഒരു ഇന്റർവ്യൂ പരാജയപ്പെട്ടാലും ജോലി ലഭിക്കുന്നത് വരെ തുടരുന്നതുമാണ്.*\n\nതാഴെ കാണുന്ന ഔദ്യോഗിക ലിങ്ക് വഴി കരാർ വായിച്ച് ഡിജിറ്റലായി ഒപ്പിടുക:\n\ud83d\udc49 ' + link + '\n\nആശംസകളോടെ,\n*സിംപാറ്റിക്കോ എച്ച്.ആർ ടീം*';
+    } else if (!a.salary || a.salary === 0 || String(a.fee).includes('50%')) {
+        message = 'Hello *' + a.name + '*,\n\nWelcome to *Simpatico HR*! We have registered your profile for career placements and interview connections.\n\n*Placement Service Agreement Terms:*\n\u2022 Service Charge: *50% of your first month\'s gross salary* (whatever salary is finalized upon job offer)\n\u2022 Payment Timeline: *' + scheduleText + '*\n\u2022 Continuous Coverage: *This agreement is signed during registration and remains valid across all interviews arranged by Simpatico HR until you secure a job (if one interview fails, the agreement applies to the next).*\n\nPlease review and electronically sign your agreement here:\n\ud83d\udc49 ' + link + '\n\nBest regards,\n*Simpatico HR Team*';
+    } else {
+        message = 'Hello *' + a.name + '*,\n\nCongratulations on your job offer with *' + a.company + '* for the position of *' + a.role + '* through Simpatico HR! \ud83c\udf89\n\nAs agreed, our placement service charge is *50% of your first month\'s salary* (Amount: *\u20b9' + (parseFloat(a.fee)||0).toLocaleString('en-IN') + '*).\n\u2022 Payment Schedule: *' + scheduleText + '*\n\nPlease review and electronically sign your service charge agreement below:\n\ud83d\udc49 ' + link + '\n\nBest regards,\n*Simpatico HR Team*';
+    }
+
+    const waUrl = 'https://wa.me/' + cleanPhone + '?text=' + encodeURIComponent(message);
+    window.open(waUrl, '_blank');
+}
+/* old dispatchAgreementWhatsApp */
+function _old_wa_dispatch(agrId) {
+
     const agrs = getStoredAgreements();
     const a = agrs.find(x => x.id === agrId);
     if (!a) return;
