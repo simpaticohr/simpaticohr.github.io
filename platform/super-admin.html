@@ -2744,8 +2744,8 @@ function loadCandidateAgreements() {
                                     <div style="color:#cbd5e1;font-weight:500;">${escapeHtml(a.company)}</div>
                                     <div style="font-size:11px;color:#94a3b8;">${escapeHtml(a.role)}</div>
                                 </td>
-                                <td style="padding:14px 18px;color:#cbd5e1;">₹${(parseFloat(a.salary)||0).toLocaleString('en-IN')}</td>
-                                <td style="padding:14px 18px;color:#10b981;font-weight:700;">₹${(parseFloat(a.fee)||0).toLocaleString('en-IN')}</td>
+                                <td style="padding:14px 18px;color:#cbd5e1;">${parseFloat(a.salary) > 0 ? ('₹' + parseFloat(a.salary).toLocaleString('en-IN')) : '<span style="color:#38bdf8;font-size:11px;font-weight:600;"><i class="fas fa-arrows-rotate"></i> Open (Offer Pending)</span>'}</td>
+                                <td style="padding:14px 18px;color:#10b981;font-weight:700;">${parseFloat(a.fee) > 0 ? ('₹' + parseFloat(a.fee).toLocaleString('en-IN')) : '50% 1st Month Salary'}<div style="font-size:10px;font-weight:400;color:#94a3b8;margin-top:2px;">${a.schedule === 'within_5_days_joining' ? '<span style="color:#f59e0b;"><i class="fas fa-clock"></i> 5d from Joining</span>' : '<span style="color:#10b981;"><i class="fas fa-calendar-check"></i> Post-Salary</span>'}</div></td>
                                 <td style="padding:14px 18px;">
                                     ${a.status === 'SIGNED' ? `
                                         <span style="background:rgba(16,185,129,0.15);color:#10b981;border:1px solid rgba(16,185,129,0.3);padding:4px 8px;border-radius:6px;font-size:11px;font-weight:700;">
@@ -2794,6 +2794,25 @@ function loadCandidateAgreements() {
                     <button onclick="closeCreateAgreementModal()" style="background:none;border:none;color:#94a3b8;font-size:18px;cursor:pointer;">&times;</button>
                 </div>
                 
+                                <div style="margin-bottom:14px;background:rgba(59,130,246,0.1);padding:10px 14px;border-radius:8px;border:1px solid rgba(59,130,246,0.25);">
+                    <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#93c5fd;cursor:pointer;font-weight:600;">
+                        <input type="checkbox" id="newAgrOpenSalary" onchange="toggleOpenSalaryMode()" style="accent-color:#3b82f6;">
+                        Salary Not Yet Disclosed / Registration Agreement (50% of 1st Month Salary, whatever it is)
+                    </label>
+                </div>
+
+                <div style="margin-bottom:14px;">
+                    <label style="display:block;font-size:12px;color:#94a3b8;margin-bottom:4px;">Payment Schedule Term (Admin Choice)</label>
+                    <select id="newAgrSchedule" onchange="toggleScheduleOptions()" style="width:100%;padding:10px;background:#0f172a;border:1px solid rgba(255,255,255,0.15);border-radius:8px;color:#fff;font-size:13px;">
+                        <option value="after_salary" selected>Option A: Remit after 1st month salary (within 7 days of salary receipt)</option>
+                        <option value="within_5_days_joining">Option B: Pay within 5 days of joining date + balance after 1st month salary</option>
+                    </select>
+                </div>
+                <div id="advanceWrap" style="display:none;margin-bottom:14px;">
+                    <label style="display:block;font-size:12px;color:#f59e0b;margin-bottom:4px;">Joining Milestone Amount (₹, payable within 5 days of joining - optional)</label>
+                    <input id="newAgrAdvance" type="number" placeholder="e.g. 5000 (optional)" style="width:100%;padding:10px;background:#0f172a;border:1px solid rgba(245,158,11,0.3);border-radius:8px;color:#fff;font-size:13px;">
+                </div>
+
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px;">
                     <div style="grid-column:1/-1;">
                         <label style="display:block;font-size:12px;color:#94a3b8;margin-bottom:4px;">Candidate Full Name *</label>
@@ -2862,21 +2881,49 @@ function recalcModalFee() {
     document.getElementById('newAgrFeeDisp').textContent = '₹ ' + fee.toLocaleString('en-IN');
 }
 
+function toggleOpenSalaryMode() {
+    const isOpen = document.getElementById('newAgrOpenSalary').checked;
+    const salInput = document.getElementById('newAgrSalary');
+    if (isOpen) {
+        salInput.value = '';
+        salInput.disabled = true;
+        salInput.placeholder = '50% of 1st Month Salary (Open)';
+        document.getElementById('newAgrFeeDisp').textContent = '50% of 1st Mo. Salary';
+    } else {
+        salInput.disabled = false;
+        salInput.placeholder = '50000';
+        recalcModalFee();
+    }
+}
+
+function toggleScheduleOptions() {
+    const sched = document.getElementById('newAgrSchedule').value;
+    const advWrap = document.getElementById('advanceWrap');
+    if (advWrap) advWrap.style.display = sched === 'within_5_days_joining' ? 'block' : 'none';
+}
+
 function getAgreementUrl(agr) {
     const baseUrl = window.location.origin + window.location.pathname.replace('/platform/super-admin.html', '').replace('/super-admin.html', '') + '/candidate-agreement.html';
-    return `${baseUrl}?id=${encodeURIComponent(agr.id)}&name=${encodeURIComponent(agr.name)}&phone=${encodeURIComponent(agr.phone)}&company=${encodeURIComponent(agr.company)}&role=${encodeURIComponent(agr.role)}&salary=${encodeURIComponent(agr.salary)}&fee=${encodeURIComponent(agr.fee)}`;
+    return `${baseUrl}?id=${encodeURIComponent(agr.id)}&name=${encodeURIComponent(agr.name)}&phone=${encodeURIComponent(agr.phone)}&company=${encodeURIComponent(agr.company)}&role=${encodeURIComponent(agr.role)}&salary=${encodeURIComponent(agr.salary || 0)}&fee=${encodeURIComponent(agr.fee || '')}&schedule=${encodeURIComponent(agr.schedule || 'after_salary')}&advance=${encodeURIComponent(agr.advance || 0)}`;
 }
 
 function saveAndSendAgreement() {
     const name = document.getElementById('newAgrName').value.trim();
     const phone = document.getElementById('newAgrPhone').value.trim();
-    const company = document.getElementById('newAgrCompany').value.trim();
-    const role = document.getElementById('newAgrRole').value.trim();
-    const salary = parseFloat(document.getElementById('newAgrSalary').value) || 0;
-    const fee = Math.round(salary * 0.5);
+    const company = document.getElementById('newAgrCompany').value.trim() || 'Simpatico HR Placement Network';
+    const role = document.getElementById('newAgrRole').value.trim() || 'Candidate Placement';
+    const isOpenSalary = document.getElementById('newAgrOpenSalary') ? document.getElementById('newAgrOpenSalary').checked : false;
+    const salary = isOpenSalary ? 0 : (parseFloat(document.getElementById('newAgrSalary').value) || 0);
+    const fee = isOpenSalary ? '50% of 1st Month Salary' : Math.round(salary * 0.5);
+    const schedule = document.getElementById('newAgrSchedule') ? document.getElementById('newAgrSchedule').value : 'after_salary';
+    const advance = document.getElementById('newAgrAdvance') ? (parseFloat(document.getElementById('newAgrAdvance').value) || 0) : 0;
 
-    if (!name || !phone || !company || !role || !salary) {
-        alert('Please fill all fields.');
+    if (!name || !phone) {
+        alert('Please fill candidate name and phone number.');
+        return;
+    }
+    if (!isOpenSalary && !salary) {
+        alert('Please enter a monthly salary or check "Salary Not Yet Disclosed / Registration Agreement".');
         return;
     }
 
@@ -2888,6 +2935,8 @@ function saveAndSendAgreement() {
         role,
         salary,
         fee,
+        schedule,
+        advance,
         status: 'PENDING',
         createdAt: new Date().toISOString()
     };
@@ -2909,9 +2958,19 @@ function dispatchAgreementWhatsApp(agrId) {
 
     const link = getAgreementUrl(a);
     const cleanPhone = a.phone.replace(/[^0-9]/g, '');
-    const message = "Hello *" + a.name + "*,\n\nCongratulations on your job offer with *" + a.company + "* for the position of *" + a.role + "* through Simpatico HR! 🎉\n\nAs discussed, our placement service charge is *50% of your first month's salary* (Amount: *₹" + (parseFloat(a.fee)||0).toLocaleString('en-IN') + "*), payable within 7 days of receiving your first salary.\n\nPlease review and electronically sign your service charge agreement below:\n👉 " + link + "\n\nBest regards,\n*Simpatico HR Team*";
+    let scheduleText = a.schedule === 'within_5_days_joining' 
+        ? 'Within 5 days of joining date (plus balance after 1st month salary)' 
+        : 'Payable within 7 days of receiving first month salary';
+    if (a.advance > 0) scheduleText = 'Initial \u20b9' + (parseFloat(a.advance)||0).toLocaleString('en-IN') + ' within 5 days of joining date + balance after 1st salary';
 
-    const waUrl = "https://wa.me/" + cleanPhone + "?text=" + encodeURIComponent(message);
+    let message = '';
+    if (!a.salary || a.salary === 0 || String(a.fee).includes('50%')) {
+        message = 'Hello *' + a.name + '*,\n\nWelcome to *Simpatico HR*! We have registered your profile for career placements and interview connections.\n\n*Placement Service Agreement Terms:*\n\u2022 Service Charge: *50% of your first month\'s gross salary* (whatever salary is finalized upon job offer)\n\u2022 Payment Timeline: *' + scheduleText + '*\n\u2022 Continuous Coverage: *This agreement is signed during registration and remains valid across all interviews arranged by Simpatico HR until you secure a job (if one interview fails, the agreement applies to the next).*\n\nPlease review and electronically sign your agreement here:\n\ud83d\udc49 ' + link + '\n\nBest regards,\n*Simpatico HR Team*';
+    } else {
+        message = 'Hello *' + a.name + '*,\n\nCongratulations on your job offer with *' + a.company + '* for the position of *' + a.role + '* through Simpatico HR! \ud83c\udf89\n\nAs agreed, our placement service charge is *50% of your first month\'s salary* (Amount: *\u20b9' + (parseFloat(a.fee)||0).toLocaleString('en-IN') + '*).\n\u2022 Payment Schedule: *' + scheduleText + '*\n\nPlease review and electronically sign your service charge agreement below:\n\ud83d\udc49 ' + link + '\n\nBest regards,\n*Simpatico HR Team*';
+    }
+
+    const waUrl = 'https://wa.me/' + cleanPhone + '?text=' + encodeURIComponent(message);
     window.open(waUrl, '_blank');
 }
 
