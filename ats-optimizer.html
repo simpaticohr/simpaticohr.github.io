@@ -331,7 +331,7 @@
       <div class="grid-2">
         <div>
           <label>Target Job Title / Role *</label>
-          <input type="text" id="roleInput" placeholder="e.g. Senior Full Stack Engineer, HR Manager, Data Scientist">
+          <input type="text" id="roleInput" placeholder="e.g. Senior Full Stack Engineer, Driver, HR Manager">
         </div>
         <div>
           <label>Target Seniority Level</label>
@@ -437,7 +437,8 @@
 </div>
 
 <script>
-  const WORKER_ENDPOINT = "https://evalis-ai.simpaticohrconsultancy.workers.dev";
+  const PRIMARY_WORKER = "https://simpatico-hr-ats.simpaticohrconsultancy.workers.dev";
+  const FALLBACK_WORKER = "https://evalis-ai.simpaticohrconsultancy.workers.dev";
   let extractedCvText = "";
   let currentCandidateName = "Candidate";
 
@@ -503,7 +504,7 @@
     const level = document.getElementById('levelInput').value;
 
     if (!role) {
-      toast('⚠️ Please enter a Target Job Title first (e.g. Full Stack Engineer)');
+      toast('⚠️ Please enter a Target Job Title first (e.g. Driver, Full Stack Engineer)');
       document.getElementById('roleInput').focus();
       return;
     }
@@ -514,34 +515,45 @@
     btn.textContent = '⏳ Generating JD...';
 
     try {
-      const prompt = `You are a Principal Technical Recruiter and ATS Specialist.
-Generate an industry-standard, keyword-dense Job Description for the following position:
-Role: ${role}
-Seniority Level: ${level}
+      let jdText = '';
+      try {
+        const response = await fetch(`${PRIMARY_WORKER}/ai/generate-jd`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            title: role,
+            experience: level,
+            skills: "Safety standards, operational excellence, reliability, customer service, teamwork"
+          })
+        });
+        const data = await response.json();
+        jdText = data?.data?.jd || data?.jd || '';
+      } catch (errPrimary) {
+        console.warn('Primary worker error, trying chat endpoint...', errPrimary);
+        try {
+          const resFallback = await fetch(`${PRIMARY_WORKER}/ai/chat`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              messages: [
+                { role: "system", content: "You are an expert HR recruiter. Generate a concise, high-impact job description for the given role. Return markdown." },
+                { role: "user", content: `Generate a Job Description for: Role: ${role}, Level: ${level}` }
+              ]
+            })
+          });
+          const d2 = await resFallback.json();
+          jdText = d2?.data?.response || d2?.response || '';
+        } catch (e2) {
+          console.warn('Chat fallback failed, using structured template...', e2);
+        }
+      }
 
-Include:
-1. Role Summary (2-3 sentences)
-2. Core Responsibilities (5 bullet points with high-impact action verbs)
-3. Required Hard & Technical Skills (comma separated or clear list)
-4. Preferred Qualifications & Methodologies (Agile, CI/CD, Tools, etc.)
+      // High-quality resilient fallback if network drops
+      if (!jdText || jdText.length < 50) {
+        jdText = `### About the Role\nWe are looking for a dedicated and skilled **${role}** to join our team. In this position, you will be responsible for day-to-day operations, ensuring high quality, timeliness, and adhering to strict industry standards.\n\n### Key Responsibilities\n• Perform core duties and operations related to ${role} with high attention to detail.\n• Adhere strictly to safety regulations, legal requirements, and company guidelines.\n• Maintain clear communication with supervisors, team members, and clients.\n• Conduct regular checks and routine maintenance on work tools/equipment.\n• Optimize daily tasks, routes, or workflows to maximize efficiency.\n• Resolve operational issues promptly and report any incidents.\n\n### Requirements & Qualifications\n• Proven experience (${level}) in a ${role} or similar position.\n• Relevant licenses, certifications, or educational background required for ${role}.\n• Strong sense of responsibility, punctuality, and clean professional record.\n• Excellent problem-solving, situational awareness, and communication skills.\n• Ability to work independently and adapt to changing schedules or demands.`;
+      }
 
-Format cleanly with clear headings. Return ONLY the job description text, no conversational filler.`;
-
-      const response = await fetch(WORKER_ENDPOINT, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          messages: [
-            { role: "system", content: "You are an expert HR recruiter and ATS specialist." },
-            { role: "user", content: prompt }
-          ]
-        })
-      });
-
-      const data = await response.json();
-      if (!data.response) throw new Error("Empty response from AI worker");
-
-      document.getElementById('jdInput').value = data.response.trim();
+      document.getElementById('jdInput').value = jdText.trim();
       toast('⚡ Target Job Description generated!');
     } catch (err) {
       console.error(err);
@@ -616,22 +628,39 @@ ${cvText.substring(0, 4500)}
 
 Please optimize this resume for MAXIMUM ATS score (95%+) against this JD. Return ONLY JSON.`;
 
-      const res = await fetch(WORKER_ENDPOINT, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: model,
-          messages: [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: userContent }
-          ]
-        })
-      });
+      let rawResponse = '';
+      try {
+        const res = await fetch(`${PRIMARY_WORKER}/ai/chat`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            messages: [
+              { role: "system", content: systemPrompt },
+              { role: "user", content: userContent }
+            ]
+          })
+        });
+        const data = await res.json();
+        rawResponse = data?.data?.response || data?.response || '';
+      } catch (errPrimary) {
+        console.warn('Primary AI chat failed, attempting fallback...', errPrimary);
+        const resFallback = await fetch(FALLBACK_WORKER, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            messages: [
+              { role: "system", content: systemPrompt },
+              { role: "user", content: userContent }
+            ]
+          })
+        });
+        const data2 = await resFallback.json();
+        rawResponse = data2?.data?.response || data2?.response || '';
+      }
 
-      const data = await res.json();
-      if (!data.response) throw new Error("Empty response received from AI engine");
+      if (!rawResponse) throw new Error("Empty response received from AI engine");
 
-      const result = parseAIResponse(data.response);
+      const result = parseAIResponse(rawResponse);
       displayResults(result);
       toast('✅ ATS CV successfully optimized with maximum score!');
     } catch (err) {
