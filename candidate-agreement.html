@@ -903,6 +903,53 @@
             console.error('Failed to store agreement:', e);
         }
 
+        // Real-time Cloud Sync to Supabase so mobile / WhatsApp signatures instantly reach Super Admin
+        (async () => {
+            try {
+                const SB_URL = 'https://cvkxtsvgnynxexmemfuy.supabase.co/rest/v1';
+                const SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN2a3h0c3ZnbnlueGV4bWVtZnV5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc0MjE2NTEsImV4cCI6MjA4Mjk5NzY1MX0.2mys8Cc-ucJ1uLThEGJubeDEg1TvfIAkW-xFsR4ecq4';
+                const chk = await fetch(SB_URL + '/interviews?token=eq.' + encodeURIComponent(agreementData.id) + '&select=id', {
+                    headers: { apikey: SB_KEY, Authorization: 'Bearer ' + SB_KEY }
+                });
+                const existing = await chk.json();
+                const notePayload = JSON.stringify({
+                    signed: true,
+                    agreementId: agreementData.id,
+                    name: agreementData.name,
+                    phone: agreementData.phone,
+                    company: agreementData.company,
+                    role: agreementData.role,
+                    salary: numSalary,
+                    fee: numFee,
+                    signature: sigDataUrl,
+                    signedAt: now.toISOString()
+                });
+                if (existing && existing.length > 0) {
+                    await fetch(SB_URL + '/interviews?id=eq.' + existing[0].id, {
+                        method: 'PATCH',
+                        headers: { apikey: SB_KEY, Authorization: 'Bearer ' + SB_KEY, 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ notes: notePayload, attempts_used: 1 })
+                    });
+                } else {
+                    await fetch(SB_URL + '/interviews', {
+                        method: 'POST',
+                        headers: { apikey: SB_KEY, Authorization: 'Bearer ' + SB_KEY, 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            token: agreementData.id,
+                            status: 'pending',
+                            candidate_name: agreementData.name,
+                            candidate_phone: agreementData.phone,
+                            interview_role: agreementData.role,
+                            notes: notePayload,
+                            attempts_used: 1
+                        })
+                    });
+                }
+            } catch (err) {
+                console.warn('[Agreement Cloud Sync]', err);
+            }
+        })();
+
         setTimeout(() => {
             document.getElementById('agreementFormWrap').style.display = 'none';
             document.getElementById('sigPreviewImg').src = sigDataUrl;

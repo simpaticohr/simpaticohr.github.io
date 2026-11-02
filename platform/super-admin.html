@@ -2659,7 +2659,61 @@ function saveStoredAgreements(agrs) {
     localStorage.setItem('simpatico_candidate_agreements', JSON.stringify(agrs));
 }
 
-function loadCandidateAgreements() {
+async function syncAgreementsFromCloud() {
+    try {
+        const SB_URL = 'https://cvkxtsvgnynxexmemfuy.supabase.co/rest/v1';
+        const SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN2a3h0c3ZnbnlueGV4bWVtZnV5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc0MjE2NTEsImV4cCI6MjA4Mjk5NzY1MX0.2mys8Cc-ucJ1uLThEGJubeDEg1TvfIAkW-xFsR4ecq4';
+        const res = await fetch(SB_URL + '/interviews?token=like.AGR-*&select=token,notes', {
+            headers: { apikey: SB_KEY, Authorization: 'Bearer ' + SB_KEY }
+        });
+        const rows = await res.json();
+        if (Array.isArray(rows) && rows.length > 0) {
+            const agrs = getStoredAgreements();
+            let changed = false;
+            for (const r of rows) {
+                let d = null;
+                try { d = JSON.parse(r.notes); } catch(e){}
+                if (d && d.signed) {
+                    const idx = agrs.findIndex(a => a.id === r.token);
+                    if (idx >= 0) {
+                        if (agrs[idx].status !== 'SIGNED') {
+                            agrs[idx].status = 'SIGNED';
+                            agrs[idx].signedAt = d.signedAt || new Date().toISOString();
+                            if (d.signature) agrs[idx].signature = d.signature;
+                            changed = true;
+                        }
+                    } else {
+                        agrs.unshift({
+                            id: r.token,
+                            name: d.name || 'Candidate',
+                            phone: d.phone || '-',
+                            company: d.company || 'Simpatico HR Placement Network',
+                            role: d.role || 'Candidate Placement',
+                            salary: d.salary || 0,
+                            fee: d.fee || '50% 1st Month Salary',
+                            status: 'SIGNED',
+                            signature: d.signature || '',
+                            signedAt: d.signedAt || new Date().toISOString(),
+                            createdAt: d.signedAt || new Date().toISOString()
+                        });
+                        changed = true;
+                    }
+                }
+            }
+            if (changed) {
+                saveStoredAgreements(agrs);
+                if (document.getElementById('agreementRows')) {
+                    loadCandidateAgreements(false);
+                }
+            }
+        }
+    } catch(err) {
+        console.warn('[Sync Cloud Agreements]', err);
+    }
+}
+
+function loadCandidateAgreements(triggerSync = true) {
+    if (triggerSync) syncAgreementsFromCloud();
     document.getElementById('pageTitle').textContent = 'Candidate Service Charge Agreements';
     const mc = document.getElementById('mainContent');
     const agrs = getStoredAgreements();
@@ -3061,18 +3115,19 @@ window.addEventListener('storage', (e) => {
     }
 });
 
-// Periodic background sync while viewing candidate agreements table
+// Periodic background cloud & local sync while viewing candidate agreements table
 setInterval(() => {
     const rows = document.getElementById('agreementRows');
     if (rows && document.visibilityState === 'visible') {
+        syncAgreementsFromCloud();
         const agrs = getStoredAgreements();
         const currentSigned = agrs.filter(a => a.status === 'SIGNED').length;
         const renderedSigned = rows.querySelectorAll('.fa-check-circle').length;
         if (currentSigned !== renderedSigned) {
-            loadCandidateAgreements();
+            loadCandidateAgreements(false);
         }
     }
-}, 2500);
+}, 3000);
 
 loadDashboard();
 </script>
