@@ -4654,6 +4654,11 @@ async function handleCreateJob(request, env, ctx) {
 }
 
 async function handleListJobs(request, env, ctx, _, url) {
+  requireAuth(ctx);
+  // STRICT TENANT ISOLATION: unassigned tenants never receive all jobs
+  if (!ctx.tenantId || ctx.tenantId === "default") {
+    return apiResponse({ jobs: [] });
+  }
   // Authenticated read — tenant isolation enforced by sbFetch tenant_id filter
   requireAuth(ctx);
   const status = url.searchParams.get("status") || "open";
@@ -5979,6 +5984,10 @@ async function handleListTalentMatches(request, env, ctx, [jobId]) {
  */
 async function handleTalentPool(request, env, ctx, _, url) {
   requireAuth(ctx);
+  // STRICT TENANT ISOLATION: unassigned tenants never receive all pool candidates
+  if (!ctx.tenantId || ctx.tenantId === "default") {
+    return apiResponse({ candidates: [], total: 0 });
+  }
   const sanitizeTerm = (s) => (s || "").replace(/[(),.*"\\%_]/g, " ").trim();
   const q = sanitizeTerm(url.searchParams.get("q"));
   const skills = sanitizeTerm(url.searchParams.get("skills"));
@@ -7509,18 +7518,17 @@ async function sbFetch(
   // Some tables predate the tenant_id convention — jobs stores the same company
   // UUID in company_id instead, so filter those by their real column.
   const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-  const _isValidTenant = (s) => typeof s === "string" && s.length >= 2 && s !== "default" && s !== "SIMP_PRO_MAIN" && /^[0-9a-zA-Z_-]{2,64}$/.test(s);
-  const TENANT_COLUMN_OVERRIDES = { jobs: "company_id" };
+  const _isValidTenant = (s) => typeof s === "string" && s.length >= 2 && s !== "default" && /^[0-9a-zA-Z_-]{2,64}$/.test(s);
+  const TENANT_COLUMN_OVERRIDES = { jobs: "company_id", job_applications: "company_id" };
   if (["GET", "PATCH", "DELETE"].includes(method) && tenantId && tenantId !== "default" && _isValidTenant(tenantId)) {
     const tableName = (path.match(/\/rest\/v1\/([a-z_]+)/) || [])[1];
     if (tableName && TENANT_AWARE_TABLES.includes(tableName)) {
       const col = TENANT_COLUMN_OVERRIDES[tableName] || "tenant_id";
-      if (col === "company_id" && !UUID_REGEX.test(tenantId)) {
-        // Skip invalid UUID for company_id column to prevent Postgres 22P02 error
-      } else {
-        const separator = finalPath.includes("?") ? "&" : "?";
-        finalPath += `${separator}${col}=eq.${tenantId}`;
-      }
+      // If column is company_id (UUID type in Postgres) but tenantId is not a UUID (e.g. SIMP_PRO_MAIN),
+      // seamlessly fall back to tenant_id column so tenant isolation is STILL ENFORCED without 22P02 error!
+      const effectiveCol = (col === "company_id" && !UUID_REGEX.test(tenantId)) ? "tenant_id" : col;
+      const separator = finalPath.includes("?") ? "&" : "?";
+      finalPath += `${separator}${effectiveCol}=eq.${tenantId}`;
     }
   }
 

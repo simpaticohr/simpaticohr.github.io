@@ -272,6 +272,15 @@
     // ── Panel A: jobs + matching ──
     async function tiLoadJobs() {
       try {
+        const cid = typeof getCompanyId === 'function' ? getCompanyId() : (window.SIMPATICO_CONFIG?.tenantId || null);
+        if (!cid) {
+          console.warn('[TalentIntel] No tenant ID found in session — strict isolation active');
+          tiJobsCache = [];
+          tiSetStats(0);
+          ti$('ti-jobSelect').innerHTML = '<option value="">No company tenant assigned</option>';
+          return;
+        }
+
         let jobs = [];
         try {
           const d = await workerFetch('/recruitment/jobs?status=open');
@@ -280,10 +289,12 @@
           console.warn('[TalentIntel] workerFetch failed, trying direct Supabase query:', workerErr);
           const db = (typeof getSupabaseClient === 'function' ? getSupabaseClient() : null) || window.SimpaticoDB || window._supabaseClient;
           if (db) {
+            const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
             let q = db.from('jobs').select('*').in('status', ['open', 'active', 'published']).order('created_at', { ascending: false });
-            const cid = typeof getCompanyId === 'function' ? getCompanyId() : null;
-            if (cid && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(cid)) {
-              q = q.eq('company_id', cid);
+            if (UUID_REGEX.test(cid)) {
+              q = q.or('company_id.eq.' + cid + ',tenant_id.eq.' + cid);
+            } else {
+              q = q.eq('tenant_id', cid);
             }
             const { data, error } = await q;
             if (!error && Array.isArray(data)) {
@@ -415,6 +426,16 @@
     }
 
     async function tiLoadPool() {
+      const cid = typeof getCompanyId === 'function' ? getCompanyId() : (window.SIMPATICO_CONFIG?.tenantId || null);
+      if (!cid) {
+        console.warn('[TalentIntel] No tenant ID found in session — pool empty (strict isolation)');
+        tiSetStats(0);
+        ti$('ti-poolResults').innerHTML = `<div class="ti-empty">
+          <div class="ti-empty-icon"><i class="fas fa-building-shield"></i></div>
+          No company tenant associated with this session.<br>Log in with your company account to view your talent pool.</div>`;
+        return;
+      }
+
       const q = ti$('ti-poolSearch').value.trim();
       const skills = ti$('ti-poolSkills').value.trim();
       const params = new URLSearchParams();
@@ -422,13 +443,54 @@
       if (skills) params.set('skills', skills);
       const qs = params.toString();
       try {
-        const d = await workerFetch('/talent-pool' + (qs ? '?' + qs : ''));
-        const rows = d.data?.candidates || [];
-        if (!q && !skills) tiSetStats(d.data?.total ?? rows.length);
+        let rows = [];
+        let total = 0;
+        try {
+          const d = await workerFetch('/talent-pool' + (qs ? '?' + qs : ''));
+          rows = d.data?.candidates || [];
+          total = d.data?.total ?? rows.length;
+        } catch (workerErr) {
+          console.warn('[TalentIntel] workerFetch /talent-pool failed, trying direct Supabase query:', workerErr);
+          const db = (typeof getSupabaseClient === 'function' ? getSupabaseClient() : null) || window.SimpaticoDB || window._supabaseClient;
+          if (db) {
+            const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+            let query = db.from('job_applications').select('*, jobs(title)').order('created_at', { ascending: false });
+            if (UUID_REGEX.test(cid)) {
+              query = query.or('company_id.eq.' + cid + ',tenant_id.eq.' + cid);
+            } else {
+              query = query.eq('tenant_id', cid);
+            }
+            if (q) query = query.or('candidate_name.ilike.%' + q + '%,candidate_email.ilike.%' + q + '%');
+            const { data, error } = await query;
+            if (!error && Array.isArray(data)) {
+              const byEmail = new Map();
+              data.forEach(r => {
+                const email = (r.candidate_email || r.email || '').toLowerCase().trim();
+                if (!email) return;
+                const score = r.match_score || r.score || 0;
+                if (!byEmail.has(email) || (byEmail.get(email).best_score || 0) < score) {
+                  byEmail.set(email, {
+                    application_id: r.id,
+                    name: r.candidate_name || r.name || 'Candidate',
+                    email: email,
+                    skills: r.candidate_skills || r.skills || '',
+                    best_score: score,
+                    last_status: r.status,
+                    last_job_title: r.jobs?.title || '',
+                    applied_at: r.created_at || r.applied_at
+                  });
+                }
+              });
+              rows = Array.from(byEmail.values());
+              total = rows.length;
+            }
+          }
+        }
+        if (!q && !skills) tiSetStats(total);
         if (!rows.length) {
           ti$('ti-poolResults').innerHTML = `<div class="ti-empty">
             <div class="ti-empty-icon"><i class="fas fa-user-slash"></i></div>
-            No candidates found.</div>`;
+            No candidates found in your company's talent pool.</div>`;
           return;
         }
         ti$('ti-poolResults').innerHTML = `<table class="ti-table">
