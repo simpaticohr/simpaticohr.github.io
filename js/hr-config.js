@@ -22,9 +22,11 @@ window.SIMPATICO_CONFIG = {
   get tenantId() {
     try {
       const user = JSON.parse(localStorage.getItem('simpatico_user'));
-      return user?.company_id || 'SIMP_PRO_MAIN';
+      const id = user?.company_id || user?.tenant_id;
+      const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      return (id && UUID_REGEX.test(id)) ? id : null;
     } catch(e) {
-      return 'SIMP_PRO_MAIN';
+      return null;
     }
   },
   appVersion: '5.0.0-Industrial',

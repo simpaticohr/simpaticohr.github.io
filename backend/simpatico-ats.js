@@ -537,7 +537,7 @@ const AI_CONFIG_TTL_MS = 5 * 60 * 1000;
  * Returns { provider, apiKey, baseUrl, model } or null if using platform default.
  */
 async function getCompanyAIConfig(env, tenantId) {
-  if (!tenantId || tenantId === "default") return null;
+  if (!tenantId || tenantId === "default" || tenantId === "SIMP_PRO_MAIN" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(tenantId)) return null;
   if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_KEY) return null;
 
   // Check in-memory cache first
@@ -1064,7 +1064,11 @@ async function dispatchSlack(env, tenantId, message, channel) {
 async function buildContext(request, env) {
   const url = new URL(request.url);
   const requestId = request.headers.get("X-Request-ID") || crypto.randomUUID();
-  const headerTenantId = request.headers.get("X-Tenant-ID") || "default";
+  let rawHeaderTenant = request.headers.get("X-Tenant-ID") || "default";
+  if (rawHeaderTenant === "SIMP_PRO_MAIN" || rawHeaderTenant === "null" || rawHeaderTenant === "undefined") {
+    rawHeaderTenant = "default";
+  }
+  const headerTenantId = rawHeaderTenant;
   const ip = request.headers.get("CF-Connecting-IP") || "unknown";
   const authHeader = request.headers.get("Authorization") || "";
 
@@ -7504,14 +7508,19 @@ async function sbFetch(
   // Inject tenant filter for GET, PATCH, and DELETE to prevent cross-tenant access.
   // Some tables predate the tenant_id convention — jobs stores the same company
   // UUID in company_id instead, so filter those by their real column.
-  const _isValidTenant = (s) => typeof s === "string" && s.length >= 2 && /^[0-9a-zA-Z_-]{2,64}$/.test(s);
+  const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  const _isValidTenant = (s) => typeof s === "string" && s.length >= 2 && s !== "default" && s !== "SIMP_PRO_MAIN" && /^[0-9a-zA-Z_-]{2,64}$/.test(s);
   const TENANT_COLUMN_OVERRIDES = { jobs: "company_id" };
   if (["GET", "PATCH", "DELETE"].includes(method) && tenantId && tenantId !== "default" && _isValidTenant(tenantId)) {
     const tableName = (path.match(/\/rest\/v1\/([a-z_]+)/) || [])[1];
     if (tableName && TENANT_AWARE_TABLES.includes(tableName)) {
       const col = TENANT_COLUMN_OVERRIDES[tableName] || "tenant_id";
-      const separator = finalPath.includes("?") ? "&" : "?";
-      finalPath += `${separator}${col}=eq.${tenantId}`;
+      if (col === "company_id" && !UUID_REGEX.test(tenantId)) {
+        // Skip invalid UUID for company_id column to prevent Postgres 22P02 error
+      } else {
+        const separator = finalPath.includes("?") ? "&" : "?";
+        finalPath += `${separator}${col}=eq.${tenantId}`;
+      }
     }
   }
 

@@ -74,8 +74,9 @@
     if (token) {
       headers['Authorization'] = 'Bearer ' + token;
     }
-    const tenantId = CONFIG.tenantId || (typeof getCompanyId === 'function' ? getCompanyId() : null);
-    if (tenantId) {
+    const tenantId = (typeof getCompanyId === 'function' ? getCompanyId() : null) || CONFIG.tenantId;
+    const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (tenantId && UUID_REGEX.test(tenantId)) {
       headers['X-Tenant-ID'] = tenantId;
     }
     return headers;
@@ -89,7 +90,9 @@
   function getCompanyId() {
     try {
       var u = JSON.parse(localStorage.getItem('simpatico_user') || '{}');
-      return u.company_id || u.tenant_id || null;
+      var id = u.company_id || u.tenant_id || null;
+      var UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      return (id && UUID_REGEX.test(id)) ? id : null;
     } catch(e) { return null; }
   }
 

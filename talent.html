@@ -272,8 +272,30 @@
     // ── Panel A: jobs + matching ──
     async function tiLoadJobs() {
       try {
-        const d = await workerFetch('/recruitment/jobs?status=open');
-        tiJobsCache = d.data?.jobs || [];
+        let jobs = [];
+        try {
+          const d = await workerFetch('/recruitment/jobs?status=open');
+          jobs = d.data?.jobs || [];
+        } catch (workerErr) {
+          console.warn('[TalentIntel] workerFetch failed, trying direct Supabase query:', workerErr);
+          const db = (typeof getSupabaseClient === 'function' ? getSupabaseClient() : null) || window.SimpaticoDB || window._supabaseClient;
+          if (db) {
+            let q = db.from('jobs').select('*').in('status', ['open', 'active', 'published']).order('created_at', { ascending: false });
+            const cid = typeof getCompanyId === 'function' ? getCompanyId() : null;
+            if (cid && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(cid)) {
+              q = q.eq('company_id', cid);
+            }
+            const { data, error } = await q;
+            if (!error && Array.isArray(data)) {
+              jobs = data;
+            } else {
+              throw error || workerErr;
+            }
+          } else {
+            throw workerErr;
+          }
+        }
+        tiJobsCache = jobs;
         tiSetStats(null);
         const sel = ti$('ti-jobSelect');
         if (!tiJobsCache.length) {
@@ -291,7 +313,7 @@
         };
       } catch (e) {
         ti$('ti-jobSelect').innerHTML = '<option value="">Failed to load roles</option>';
-        showToast('Could not load jobs: ' + e.message, 'error');
+        showToast('Could not load jobs: ' + (e.message || 'Error fetching roles'), 'error');
       }
     }
 
