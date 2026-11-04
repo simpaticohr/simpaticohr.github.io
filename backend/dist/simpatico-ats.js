@@ -1522,6 +1522,9 @@ route("POST", "/api/academy/generate-cert-id", handleGenerateCertId);
 
 // ── Academy Student Enrollment & Verification ──
 route("POST", "/api/academy/enroll-student", handleEnrollStudent);
+route("GET",  "/api/academy/student-metrics", handleStudentMetricsGet);
+route("POST", "/api/academy/student-metrics", handleStudentMetricsSave);
+
 route("POST", "/api/academy/verify-student", handleVerifyStudent);
 route("GET",  "/api/academy/list-students", handleListStudents);
 route("POST", "/api/academy/submit-application", handleSubmitApplication);
@@ -14555,4 +14558,51 @@ async function handleAgentStats(request, env, ctx) {
     runs_today: todayRuns.length,
     total_duration_ms: totalMs,
   }}, { headers: corsHdrs });
+}
+
+
+// ═══════════════════════════════════════════════════════════════
+// ACADEMY — Student Dashboard Customizable Metrics
+// ═══════════════════════════════════════════════════════════════
+async function handleStudentMetricsGet(request, env, ctx) {
+  if (!env.HR_KV) return apiResponse({ error: "KV not available" }, 500);
+  try {
+    const url = new URL(request.url);
+    const studentId = (url.searchParams.get("studentId") || "").trim().toUpperCase();
+    if (!studentId) return apiResponse({ error: "studentId is required" }, 400);
+
+    const metrics = (await env.HR_KV.get(`student_metrics:${studentId}`, { type: "json" })) || null;
+    return apiResponse({ success: true, studentId, metrics });
+  } catch (err) {
+    return apiResponse({ error: err.message }, 500);
+  }
+}
+
+async function handleStudentMetricsSave(request, env, ctx) {
+  if (!env.HR_KV) return apiResponse({ error: "KV not available" }, 500);
+  try {
+    const body = (await safeJson(request)) || {};
+    const studentId = (body.studentId || "").trim().toUpperCase();
+    if (!studentId) return apiResponse({ error: "studentId is required" }, 400);
+
+    const metrics = {
+      completedSessions: Number(body.completedSessions ?? 0),
+      totalSessions: Number(body.totalSessions || 32),
+      attendanceRate: Number(body.attendanceRate ?? 94),
+      attendanceDesc: body.attendanceDesc || "Regular Attendance",
+      voiceScore: Number(body.voiceScore ?? 88),
+      voiceDesc: body.voiceDesc || "Advanced HR Fluency Rating",
+      feeTotal: Number(body.feeTotal || 0),
+      feePaid: Number(body.feePaid || 0),
+      feeBalance: Number(body.feeBalance ?? ((Number(body.feeTotal || 0)) - (Number(body.feePaid || 0)))),
+      feeDueDate: body.feeDueDate || "",
+      notice: body.notice || "",
+      updatedAt: new Date().toISOString()
+    };
+
+    await env.HR_KV.put(`student_metrics:${studentId}`, JSON.stringify(metrics), { expirationTtl: 730 * 86400 });
+    return apiResponse({ success: true, studentId, metrics });
+  } catch (err) {
+    return apiResponse({ error: err.message }, 500);
+  }
 }

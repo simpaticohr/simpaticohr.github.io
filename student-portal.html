@@ -2288,6 +2288,12 @@
         </div>
       </div>
 
+      <!-- Faculty Notice / Custom Announcement Banner from Admin Studio -->
+      <div id="studentFacultyNoticeBanner" style="display:none; background:linear-gradient(135deg, rgba(245,158,11,0.15), rgba(245,158,11,0.05)); border:1px solid rgba(245,158,11,0.35); border-radius:14px; padding:12px 18px; margin-bottom:18px; align-items:center; gap:12px; color:#FDE68A; font-size:13px;">
+        <i class="fas fa-bullhorn" style="font-size:16px; color:#F59E0B;"></i>
+        <span id="studentFacultyNoticeText" style="font-weight:600;"></span>
+      </div>
+
       <!-- 4 Quick Metric Tiles -->
       <div class="stats-row">
         <div class="stat-tile">
@@ -2307,10 +2313,10 @@
             <span class="stat-label">Live Attendance</span>
             <span class="stat-icon-wrap" style="color: var(--emerald);"><i class="fas fa-user-check"></i></span>
           </div>
-          <div class="stat-val" style="color: #34D399;">94%</div>
-          <div class="stat-desc">8 of 8 past sessions attended</div>
+          <div class="stat-val" id="statAttendanceVal" style="color: #34D399;">94%</div>
+          <div class="stat-desc" id="statAttendanceDesc">8 of 8 past sessions attended</div>
           <div class="progress-track">
-            <div class="progress-fill" style="width: 94%; background: #10B981;"></div>
+            <div class="progress-fill" id="statAttendanceFill" style="width: 94%; background: #10B981;"></div>
           </div>
         </div>
 
@@ -2319,10 +2325,10 @@
             <span class="stat-label">AI Voice Drills</span>
             <span class="stat-icon-wrap" style="color: var(--gold);"><i class="fas fa-microphone-lines"></i></span>
           </div>
-          <div class="stat-val" style="color: var(--gold-light);">88/100</div>
-          <div class="stat-desc">Advanced HR Fluency Rating</div>
+          <div class="stat-val" id="statVoiceDrillsVal" style="color: var(--gold-light);">88/100</div>
+          <div class="stat-desc" id="statVoiceDrillsDesc">Advanced HR Fluency Rating</div>
           <div class="progress-track">
-            <div class="progress-fill" style="width: 88%; background: var(--gold);"></div>
+            <div class="progress-fill" id="statVoiceDrillsFill" style="width: 88%; background: var(--gold);"></div>
           </div>
         </div>
 
@@ -6805,10 +6811,67 @@
     }
 
     function updateStats() {
-      const count = activeStudent.completedSessions.length;
-      document.getElementById('statCompletedSessions').textContent = `${count} / 32`;
-      const pct = Math.round((count / 32) * 100);
-      document.getElementById('statProgressFill').style.width = `${pct}%`;
+      const studentId = (activeStudent.id || '').toUpperCase();
+      const currentName = (activeStudent.name || '').toLowerCase();
+      const isMalavika = currentName.includes('malavika') || studentId === 'SIMP-HR-2026-127';
+      const isMishhab = currentName.includes('mishhab') || studentId === 'SIMP-HR-2026-108';
+
+      // 1. Check custom metrics configured from Academy Admin Studio
+      let custom = null;
+      try {
+        const stored = localStorage.getItem(`simpatico_student_metrics_${studentId}`) || 
+                             localStorage.getItem(`simpatico_student_metrics_${studentId.toLowerCase()}`);
+        if (stored) custom = JSON.parse(stored);
+      } catch(e) {}
+
+      // 2. Syllabus progress
+      const completedSessions = (custom && custom.completedSessions !== undefined)
+        ? custom.completedSessions
+        : (activeStudent.completedSessions && activeStudent.completedSessions.length > 0 ? activeStudent.completedSessions.length : (isMalavika ? 6 : (isMishhab ? 8 : 0)));
+      const totalSessions = (custom && custom.totalSessions) || (isMalavika ? 24 : 32);
+      const sylPct = Math.min(100, Math.round((completedSessions / totalSessions) * 100));
+
+      const sylValEl = document.getElementById('statCompletedSessions');
+      if (sylValEl) sylValEl.textContent = `${completedSessions} / ${totalSessions}`;
+      const sylDescEl = document.getElementById('statProgressDesc') || document.querySelector('.stat-tile:nth-child(1) .stat-desc');
+      if (sylDescEl) sylDescEl.textContent = `Sessions Completed (${sylPct}%)`;
+      const sylFillEl = document.getElementById('statProgressFill');
+      if (sylFillEl) sylFillEl.style.width = `${sylPct}%`;
+
+      // 3. Live Attendance
+      const attRate = (custom && custom.attendanceRate !== undefined) ? custom.attendanceRate : (isMalavika ? 96 : 94);
+      const attDesc = (custom && custom.attendanceDesc) ? custom.attendanceDesc : (isMalavika ? '6 of 6 past sessions attended' : '8 of 8 past sessions attended');
+      const attValEl = document.getElementById('statAttendanceVal');
+      if (attValEl) attValEl.textContent = `${attRate}%`;
+      const attDescEl = document.getElementById('statAttendanceDesc');
+      if (attDescEl) attDescEl.textContent = attDesc;
+      const attFillEl = document.getElementById('statAttendanceFill');
+      if (attFillEl) attFillEl.style.width = `${attRate}%`;
+
+      // 4. AI Voice Drills
+      const voiceScore = (custom && custom.voiceScore !== undefined) ? custom.voiceScore : 88;
+      const voiceDesc = (custom && custom.voiceDesc) ? custom.voiceDesc : 'Advanced HR Fluency Rating';
+      const voiceValEl = document.getElementById('statVoiceDrillsVal');
+      if (voiceValEl) voiceValEl.textContent = `${voiceScore}/100`;
+      const voiceDescEl = document.getElementById('statVoiceDrillsDesc');
+      if (voiceDescEl) voiceDescEl.textContent = voiceDesc;
+      const voiceFillEl = document.getElementById('statVoiceDrillsFill');
+      if (voiceFillEl) voiceFillEl.style.width = `${voiceScore}%`;
+
+      // 5. Faculty Notice
+      const noticeBanner = document.getElementById('studentFacultyNoticeBanner');
+      const noticeText = document.getElementById('studentFacultyNoticeText');
+      if (noticeBanner && noticeText) {
+        if (custom && custom.notice) {
+          noticeText.textContent = custom.notice;
+          noticeBanner.style.display = 'flex';
+        } else {
+          noticeBanner.style.display = 'none';
+        }
+      }
+
+      // 6. Fee Status
+      loadStudentFeeReceipts();
     }
 
     function switchToAiLabFromModal() {
