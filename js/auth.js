@@ -268,6 +268,230 @@ class AuthManager {
     }
   }
 
+  // Register Influencer
+  async registerInfluencer(influencerData) {
+    const db = this.db;
+    if (!db || !db.auth) {
+      throw new Error('Database service is currently unavailable. Please refresh the page and try again.');
+    }
+
+    try {
+      // 1. Sign up user
+      const { data: authData, error: authError } = await db.auth.signUp({
+        email: influencerData.email,
+        password: influencerData.password,
+        options: {
+          data: {
+            full_name: influencerData.name,
+            phone: influencerData.phone,
+            role: 'influencer'
+          }
+        }
+      });
+      if (authError) throw authError;
+
+      // Handle duplicate email
+      if (authData.user && (!authData.user.identities || authData.user.identities.length === 0)) {
+        throw new Error('This email is already registered. Please sign in instead.');
+      }
+
+      const authUser = authData.user;
+      if (!authUser) throw new Error('Registration failed — unable to create auth user.');
+
+      // If session is returned, persist tokens to localStorage
+      if (authData.session) {
+        try {
+          localStorage.setItem('simpatico_token', authData.session.access_token);
+          localStorage.setItem('sh_token', authData.session.access_token);
+          localStorage.setItem('simpatico_user', JSON.stringify({
+            id: authUser.id,
+            email: influencerData.email,
+            full_name: influencerData.name,
+            role: 'influencer'
+          }));
+        } catch (_) {}
+      }
+
+      // 2. Create user profile in public.users
+      let user = null;
+      try {
+        const { data: userData, error: userError } = await db.from('users').insert({
+          auth_id: authUser.id,
+          email: influencerData.email,
+          phone: influencerData.phone,
+          full_name: influencerData.name,
+          role: 'influencer',
+          location: influencerData.location || '',
+          is_active: true
+        }).select().maybeSingle();
+
+        if (userError) {
+          console.warn('Failed to insert into users table:', userError.message);
+          const { data: existingUser } = await db.from('users')
+            .select('*')
+            .eq('auth_id', authUser.id)
+            .maybeSingle();
+          user = existingUser;
+        } else {
+          user = userData;
+        }
+      } catch (uErr) {
+        console.warn('Exception during users table insert:', uErr);
+      }
+
+      // 3. Create influencer profile
+      const userId = user?.id;
+      if (userId) {
+        try {
+          const toArray = (val) => {
+            if (Array.isArray(val)) return val;
+            if (typeof val === 'string') {
+              return val.includes('\n')
+                ? val.split('\n').map(s => s.trim()).filter(Boolean)
+                : val.split(',').map(s => s.trim()).filter(Boolean);
+            }
+            return [];
+          };
+
+          const primaryPlatform = (influencerData.primary_platform || influencerData.primaryPlatform || 'other').toLowerCase();
+          const primaryHandle = influencerData.primary_handle || influencerData.primaryHandle || '';
+          const secondaryPlatform = influencerData.secondary_platform || influencerData.secondaryPlatform || null;
+          const secondaryHandle = influencerData.secondary_handle || influencerData.secondaryHandle || null;
+          const followerRange = influencerData.follower_range || influencerData.followerRange || null;
+          const contentNiches = toArray(influencerData.content_niches ?? influencerData.contentNiches);
+          const contentTypes = toArray(influencerData.content_types ?? influencerData.contentTypes);
+          const languages = toArray(influencerData.languages);
+          const bio = influencerData.bio || '';
+          const portfolioLinks = toArray(influencerData.portfolio_links ?? influencerData.portfolioLinks);
+          const availableFor = toArray(influencerData.available_for ?? influencerData.availableFor);
+          const rateCard = influencerData.rate_card || influencerData.rateCard || '';
+
+          const { error: profileError } = await db.from('influencer_profiles').insert({
+            user_id: userId,
+            primary_platform: primaryPlatform,
+            primary_handle: primaryHandle,
+            secondary_platform: secondaryPlatform,
+            secondary_handle: secondaryHandle,
+            follower_range: followerRange,
+            content_niches: contentNiches,
+            content_types: contentTypes,
+            languages: languages,
+            bio: bio,
+            portfolio_links: portfolioLinks,
+            available_for: availableFor,
+            rate_card: rateCard,
+            status: 'pending'
+          });
+          if (profileError) console.warn('influencer_profiles insert warning:', profileError.message);
+        } catch (pErr) {
+          console.warn('influencer_profiles insert exception:', pErr);
+        }
+
+        // Upload media kit if provided (non-fatal)
+        const mediaKitFile = influencerData.media_kit || influencerData.mediaKit;
+        if (mediaKitFile) {
+          try {
+            await this.uploadMediaKit(userId, mediaKitFile);
+          } catch (mErr) {
+            console.warn('Media kit upload warning (non-fatal):', mErr);
+          }
+        }
+      }
+
+      // 4. Send welcome email and admin notification via Cloudflare worker (async, non-blocking)
+      try {
+        const workerUrl = window.SIMPATICO_CONFIG?.workerUrl || 'https://simpatico-hr-ats.simpaticohrconsultancy.workers.dev';
+        
+        // Welcome email to the influencer
+        fetch(`${workerUrl}/email/welcome`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: influencerData.email, name: influencerData.name, type: 'influencer' })
+        }).catch(() => {});
+
+        // Admin alert email to Simpatico HR management
+        const pPlatform = influencerData.primary_platform || influencerData.primaryPlatform || 'Creator';
+        const pHandle = influencerData.primary_handle || influencerData.primaryHandle || 'N/A';
+        const fRange = influencerData.follower_range || influencerData.followerRange || 'N/A';
+        const nList = Array.isArray(influencerData.content_niches || influencerData.contentNiches) 
+          ? (influencerData.content_niches || influencerData.contentNiches).join(', ') 
+          : (influencerData.content_niches || influencerData.contentNiches || 'General');
+
+        fetch(`${workerUrl}/email/send`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            to: 'simpaticohrconsultancy@gmail.com',
+            subject: `🚀 New Influencer Registered: ${influencerData.name} (${pPlatform})`,
+            html: `<div style="font-family:sans-serif;max-width:600px;margin:auto;padding:24px;border:1px solid #e2e8f0;border-radius:12px;background:#f8fafc;">
+              <h2 style="color:#d97706;margin-top:0;">🚀 New Influencer Registered</h2>
+              <p>A new content creator has joined the SimpaticoHR Influencer Network:</p>
+              <table style="width:100%;border-collapse:collapse;margin:16px 0;background:#ffffff;border-radius:8px;overflow:hidden;">
+                <tr style="border-bottom:1px solid #e2e8f0;"><td style="padding:10px 14px;font-weight:700;color:#475569;width:140px;">Name:</td><td style="padding:10px 14px;">${influencerData.name}</td></tr>
+                <tr style="border-bottom:1px solid #e2e8f0;"><td style="padding:10px 14px;font-weight:700;color:#475569;">Email:</td><td style="padding:10px 14px;"><a href="mailto:${influencerData.email}">${influencerData.email}</a></td></tr>
+                <tr style="border-bottom:1px solid #e2e8f0;"><td style="padding:10px 14px;font-weight:700;color:#475569;">Phone:</td><td style="padding:10px 14px;">${influencerData.phone || 'N/A'}</td></tr>
+                <tr style="border-bottom:1px solid #e2e8f0;"><td style="padding:10px 14px;font-weight:700;color:#475569;">Location:</td><td style="padding:10px 14px;">${influencerData.location || 'N/A'}</td></tr>
+                <tr style="border-bottom:1px solid #e2e8f0;"><td style="padding:10px 14px;font-weight:700;color:#475569;">Primary Platform:</td><td style="padding:10px 14px;"><strong>${pPlatform}</strong> (${pHandle})</td></tr>
+                <tr style="border-bottom:1px solid #e2e8f0;"><td style="padding:10px 14px;font-weight:700;color:#475569;">Follower Tier:</td><td style="padding:10px 14px;">${fRange}</td></tr>
+                <tr style="border-bottom:1px solid #e2e8f0;"><td style="padding:10px 14px;font-weight:700;color:#475569;">Content Niches:</td><td style="padding:10px 14px;">${nList}</td></tr>
+                <tr><td style="padding:10px 14px;font-weight:700;color:#475569;">Rate Card:</td><td style="padding:10px 14px;">${influencerData.rate_card || influencerData.rateCard || 'Open for discussion'}</td></tr>
+              </table>
+              <div style="margin-top:20px;">
+                <a href="https://simpaticohr.in/platform/super-admin.html" style="display:inline-block;padding:10px 20px;background:#d97706;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:700;font-size:14px;">View in Super Admin Portal →</a>
+              </div>
+            </div>`,
+            type: 'admin_notification'
+          })
+        }).catch(() => {});
+      } catch (_) {}
+
+      return { success: true, user: authUser, session: authData.session };
+    } catch (error) {
+      console.error('Influencer registration error:', error);
+      throw error;
+    }
+  }
+
+  // Upload Media Kit
+  async uploadMediaKit(userId, file) {
+    if (!file || !userId) return null;
+    const fileExt = file.name.split('.').pop().toLowerCase();
+    const filePath = `media-kits/${userId}/${Date.now()}.${fileExt}`;
+    
+    let bucket = 'documents';
+    let uploadRes = await this.db.storage.from(bucket).upload(filePath, file, {
+      cacheControl: '3600',
+      upsert: true
+    });
+
+    if (uploadRes.error) {
+      console.warn('Upload to documents bucket failed, trying hr-documents:', uploadRes.error.message);
+      bucket = 'hr-documents';
+      uploadRes = await this.db.storage.from(bucket).upload(filePath, file, {
+        cacheControl: '3600',
+        upsert: true
+      });
+    }
+
+    if (uploadRes.error) {
+      console.warn('Media kit storage upload failed on both buckets:', uploadRes.error.message);
+      return null;
+    }
+
+    const { data: urlData } = this.db.storage.from(bucket).getPublicUrl(filePath);
+    const mediaKitUrl = urlData?.publicUrl || '';
+    
+    // Update influencer_profiles table
+    if (mediaKitUrl) {
+      const { error: ipErr } = await this.db.from('influencer_profiles')
+        .update({ media_kit_url: mediaKitUrl })
+        .eq('user_id', userId);
+      if (ipErr) console.warn('influencer_profiles media_kit_url update failed:', ipErr.message);
+    }
+
+    return mediaKitUrl;
+  }
+
   // Upload Resume
   async uploadResume(userId, file) {
     if (!file || !userId) return null;
@@ -381,7 +605,8 @@ class AuthManager {
       'consulting_admin': '/dashboard/consulting.html',
       'consulting_user': '/dashboard/consulting.html',
       'interviewer': '/dashboard/interviewer.html',
-      'candidate': '/dashboard/candidate.html'
+      'candidate': '/dashboard/candidate.html',
+      'influencer': '/dashboard/influencer.html'
     };
     window.location.href = routes[role] || '/dashboard/candidate.html';
   }
@@ -627,6 +852,91 @@ async function handleCandidateRegistration(e) {
     btn.innerHTML = '<i class="fas fa-user-plus"></i> Create Account';
   }
 }
+
+// Influencer Registration Handler
+async function handleInfluencerRegistration(e) {
+  if (e && e.preventDefault) e.preventDefault();
+  const btn = document.getElementById('infRegBtn') || document.getElementById('influencerRegBtn') || document.querySelector('#influencerRegForm button[type="submit"]');
+  
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner" style="width:18px;height:18px;border-width:2px;display:inline-block;border:2px solid rgba(255,255,255,0.3);border-top-color:#fff;border-radius:50%;animation:spin 0.8s linear infinite;"></span> Creating Account...';
+  }
+  
+  try {
+    const city = document.getElementById('infLocation')?.value.trim() || document.getElementById('infCity')?.value.trim() || '';
+    const country = document.getElementById('infCountry')?.value.trim() || '';
+    const location = [city, country].filter(Boolean).join(', ');
+
+    // Collect multi-select checkboxes for niches, content types, and availability
+    const getNiches = () => {
+      const checked = document.querySelectorAll('input[name="content_niches"]:checked, input[name="contentNiches"]:checked, input.niche-checkbox:checked');
+      return Array.from(checked).map(cb => cb.value);
+    };
+
+    const getContentTypes = () => {
+      const checked = document.querySelectorAll('input[name="content_types"]:checked, input[name="contentTypes"]:checked, input.content-type-checkbox:checked');
+      return Array.from(checked).map(cb => cb.value);
+    };
+
+    const getAvailableFor = () => {
+      const checked = document.querySelectorAll('input[name="available_for"]:checked, input[name="availableFor"]:checked, input.available-checkbox:checked');
+      return Array.from(checked).map(cb => cb.value);
+    };
+
+    const languagesInput = document.getElementById('infLanguages')?.value.trim() || '';
+    const languages = languagesInput ? languagesInput.split(',').map(s => s.trim()).filter(Boolean) : [];
+
+    const portfolioInput = document.getElementById('infPortfolio')?.value.trim() || '';
+    const portfolioLinks = portfolioInput ? portfolioInput.split('\n').map(s => s.trim()).filter(Boolean) : [];
+
+    const data = {
+      name: document.getElementById('infName')?.value.trim() || '',
+      email: document.getElementById('infEmail')?.value.trim() || '',
+      phone: document.getElementById('infPhone')?.value.trim() || '',
+      password: document.getElementById('infPassword')?.value || '',
+      location: location,
+      primary_platform: document.getElementById('infPrimaryPlatform')?.value || '',
+      primary_handle: document.getElementById('infPrimaryHandle')?.value.trim() || '',
+      secondary_platform: document.getElementById('infSecondaryPlatform')?.value || '',
+      secondary_handle: document.getElementById('infSecondaryHandle')?.value.trim() || '',
+      follower_range: document.getElementById('infFollowerRange')?.value || '',
+      content_niches: getNiches(),
+      content_types: getContentTypes(),
+      languages: languages,
+      bio: document.getElementById('infBio')?.value.trim() || '',
+      portfolio_links: portfolioLinks,
+      available_for: getAvailableFor(),
+      rate_card: document.getElementById('infRateCard')?.value.trim() || '',
+      media_kit: document.getElementById('infMediaKit')?.files?.[0] || null
+    };
+
+    if (!data.name || !data.email || !data.password) {
+      throw new Error('Please fill in all required fields.');
+    }
+    
+    const result = await authManager.registerInfluencer(data);
+    showToast('Registration successful! Redirecting...', 'success');
+    setTimeout(() => {
+      if (result && result.session) {
+        window.location.href = 'dashboard/influencer.html';
+      } else {
+        window.location.href = 'login.html?verify=1&role=influencer';
+      }
+    }, 1800);
+  } catch (error) {
+    let msg = error.message || 'Registration failed. Please try again.';
+    if (msg.toLowerCase().includes('already registered') || msg.toLowerCase().includes('already been registered')) {
+      msg = 'This email is already registered. Please sign in instead.';
+    }
+    showToast(msg, 'error');
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = '<i class="fas fa-rocket"></i> Join the Network';
+    }
+  }
+}
+window.handleInfluencerRegistration = handleInfluencerRegistration;
 
 // doLogout: prefer shared-utils version if loaded; else define locally
 if (typeof window.doLogout === 'undefined') {
