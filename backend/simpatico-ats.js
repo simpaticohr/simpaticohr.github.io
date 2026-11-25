@@ -5850,7 +5850,7 @@ async function handleTalentMatch(request, env, ctx) {
   if (!job) throw new NotFoundError("Job");
 
   // 2. Rediscovery pool: this tenant's applications to OTHER jobs
-  const poolRes = await sbFetch(
+  let poolRes = await sbFetch(
     env,
     "GET",
     `/rest/v1/job_applications?job_id=neq.${jobId}&select=${APP_SELECT}&order=applied_at.desc&limit=200`,
@@ -5858,6 +5858,25 @@ async function handleTalentMatch(request, env, ctx) {
     false,
     ctx.tenantId,
   );
+  if (!poolRes.ok) {
+    poolRes = await sbFetch(
+      env,
+      "GET",
+      `/rest/v1/job_applications?job_id=neq.${jobId}&select=*&order=created_at.desc&limit=200`,
+      null,
+      false,
+      ctx.tenantId,
+    );
+  }
+  if (!poolRes.ok) {
+    const errText = await poolRes.text();
+    throw new AppError(
+      `Failed to query talent match pool (${poolRes.status})`,
+      HTTP.SERVER_ERROR,
+      "TALENT_MATCH_POOL_ERROR",
+      errText.slice(0, 300),
+    );
+  }
   const rows = await poolRes.json();
 
   // Dedupe by email — keep the newest application per candidate
@@ -6026,18 +6045,46 @@ async function handleTalentPool(request, env, ctx, _, url) {
   const q = sanitizeTerm(url.searchParams.get("q"));
   const skills = sanitizeTerm(url.searchParams.get("skills"));
 
-  let qp = `select=${APP_SELECT}&order=applied_at.desc&limit=300`;
+  let filterQp = "";
   if (q) {
     const e = encodeURIComponent(q);
-    qp += `&or=(candidate_name.ilike.*${e}*,candidate_email.ilike.*${e}*)`;
+    filterQp += `&or=(candidate_name.ilike.*${e}*,candidate_email.ilike.*${e}*)`;
   }
-  if (skills) qp += `&candidate_skills=ilike.*${encodeURIComponent(skills)}*`;
+  if (skills) filterQp += `&candidate_skills=ilike.*${encodeURIComponent(skills)}*`;
 
-  const res = await sbFetch(env, "GET", `/rest/v1/job_applications?${qp}`, null, false, ctx.tenantId);
+  let res = await sbFetch(
+    env,
+    "GET",
+    `/rest/v1/job_applications?select=${APP_SELECT}&order=applied_at.desc&limit=300${filterQp}`,
+    null,
+    false,
+    ctx.tenantId,
+  );
+  if (!res.ok) {
+    // Fallback in case older schemas lack applied_at or specific optional columns in APP_SELECT
+    res = await sbFetch(
+      env,
+      "GET",
+      `/rest/v1/job_applications?select=*&order=created_at.desc&limit=300${filterQp}`,
+      null,
+      false,
+      ctx.tenantId,
+    );
+  }
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new AppError(
+      `Failed to query talent pool (${res.status})`,
+      HTTP.SERVER_ERROR,
+      "TALENT_POOL_QUERY_ERROR",
+      errText.slice(0, 300),
+    );
+  }
   const rows = await res.json();
 
   // Safely resolve job titles without requiring PostgREST schema embedded relationship
-  const jobIds = [...new Set((Array.isArray(rows) ? rows : []).map(r => r.job_id).filter(Boolean))];
+  const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  const jobIds = [...new Set((Array.isArray(rows) ? rows : []).map(r => String(r.job_id || "").trim()).filter(id => UUID_REGEX.test(id)))];
   const jobTitleMap = {};
   if (jobIds.length > 0) {
     try {
