@@ -7585,7 +7585,12 @@ async function sbFetch(
     if (tableName && TENANT_AWARE_TABLES.includes(tableName)) {
       const separator = finalPath.includes("?") ? "&" : "?";
       if (tableName === "job_applications") {
-        finalPath += `${separator}or=(company_id.eq.${tenantId},tenant_id.eq.${tenantId})`;
+        // Avoid 22P02 when company_id is UUID and tenantId is a non-UUID text key like SIMP_PRO_MAIN
+        if (UUID_REGEX.test(tenantId)) {
+          finalPath += `${separator}or=(company_id.eq.${tenantId},tenant_id.eq.${tenantId})`;
+        } else {
+          finalPath += `${separator}tenant_id=eq.${tenantId}`;
+        }
       } else {
         const col = TENANT_COLUMN_OVERRIDES[tableName] || "tenant_id";
         // If column is company_id (UUID type in Postgres) but tenantId is not a UUID (e.g. SIMP_PRO_MAIN),
@@ -7607,7 +7612,7 @@ async function sbFetch(
           // Bulk insert - inject into each record
           parsedBody.forEach(record => {
             if (table === 'job_applications') {
-              if (!record.company_id) record.company_id = tenantId;
+              if (!record.company_id && UUID_REGEX.test(tenantId)) record.company_id = tenantId;
               if (!record.tenant_id) record.tenant_id = tenantId;
             } else if (!record[col]) {
               record[col] = tenantId;
@@ -7615,7 +7620,7 @@ async function sbFetch(
           });
         } else {
           if (table === 'job_applications') {
-            if (!parsedBody.company_id) parsedBody.company_id = tenantId;
+            if (!parsedBody.company_id && UUID_REGEX.test(tenantId)) parsedBody.company_id = tenantId;
             if (!parsedBody.tenant_id) parsedBody.tenant_id = tenantId;
           } else if (!parsedBody[col]) {
             parsedBody[col] = tenantId;
