@@ -1455,6 +1455,7 @@
 <body>
     <div class="bg-mesh"></div>
     <div class="bg-grid"></div>
+    <script src="js/hr-config.js"></script>
     <script src="js/avatar-engine.js"></script>
     <script src="js/simli-adapter.js"></script>
     <script src="js/duix-renderer.js"></script>
@@ -1473,7 +1474,7 @@
             <div class="nav-links">
                 <a href="index.html">Home</a>
                 <a href="services.html">Services</a>
-                <a href="projects.html">Projects</a>
+                <a href="career-lab.html">Career Lab</a>
                 <a href="evalis-interview.html" class="active">Interview</a>
                 <a href="about.html">About</a>
                 <a href="contact.html" class="nav-cta">Contact →</a>
@@ -2399,6 +2400,30 @@
        ═══════════════════════════════════════════ */
 
     const API_BASE = 'https://evalis-api.simpaticohrconsultancy.workers.dev';
+    const RESULTS_API_BASE = (window.SIMPATICO_CONFIG && window.SIMPATICO_CONFIG.workerUrl) || 'https://simpatico-hr-ats.simpaticohrconsultancy.workers.dev';
+
+    function getResultsAuthContext() {
+        const headers = { 'Content-Type': 'application/json' };
+        let token = null;
+        let companyId = null;
+        try {
+            token = localStorage.getItem('simpatico_token') || localStorage.getItem('sh_token') || localStorage.getItem('sb_token') || null;
+            if (!token) {
+                for (let i = 0; i < localStorage.length; i++) {
+                    const k = localStorage.key(i);
+                    if (k && k.startsWith('sb-') && k.endsWith('-auth-token')) {
+                        const parsed = JSON.parse(localStorage.getItem(k) || '{}');
+                        if (parsed && parsed.access_token) { token = parsed.access_token; break; }
+                    }
+                }
+            }
+            const user = JSON.parse(localStorage.getItem('simpatico_user') || '{}');
+            companyId = user.company_id || user.tenant_id || _urlParams.get('company_id') || null;
+        } catch (e) {}
+        if (token) headers['Authorization'] = 'Bearer ' + token;
+        if (companyId && companyId !== 'default') headers['X-Tenant-ID'] = companyId;
+        return { headers, token, companyId };
+    }
 
     // ── DuiX Avatar Configuration (no vendor keys required) ──
     const DUIX_CONFIG = {
@@ -6357,6 +6382,44 @@ GUIDELINES:
         }
     }
 
+    function _reportSortTimestamp(r) {
+        const raw = r.savedAt || r.completedAt || r.created_at || r.date;
+        const ts = raw ? Date.parse(raw) : NaN;
+        return Number.isFinite(ts) ? ts : 0;
+    }
+
+    function _mapSupabaseInterviewToReport(iv) {
+        let fb = iv.feedback;
+        if (typeof fb === 'string') {
+            try { fb = JSON.parse(fb); } catch { fb = {}; }
+        }
+        fb = (fb && typeof fb === 'object') ? fb : {};
+        const score = Math.round(Number(iv.overall_score ?? iv.score ?? fb.overallScore ?? fb.overall_score ?? 0));
+        const trust = Math.round(Number(iv.trust_score ?? fb.integrity ?? 100));
+        const dt = iv.completed_at || iv.created_at || new Date().toISOString();
+        return {
+            certId: fb.certId || iv.cert_id || ('IV-' + String(iv.id || '').slice(0, 8).toUpperCase()),
+            interviewId: iv.id || null,
+            token: iv.token || null,
+            name: iv.candidate_name || fb.name || 'Candidate',
+            email: iv.candidate_email || fb.email || '',
+            role: iv.interview_role || iv.role || fb.role || 'Professional',
+            level: iv.interview_level || iv.level || fb.level || 'Mid-Level',
+            date: new Date(dt).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }),
+            savedAt: dt,
+            overall: score,
+            integrity: trust,
+            summary: fb.summary || fb.ai_summary || 'Completed AI assessment interview.',
+            topStrengths: Array.isArray(fb.topStrengths) ? fb.topStrengths : (Array.isArray(fb.strengths) ? fb.strengths : []),
+            focusAreas: Array.isArray(fb.focusAreas) ? fb.focusAreas : (Array.isArray(fb.improvements) ? fb.improvements : []),
+            answers: Array.isArray(fb.answers) ? fb.answers : [],
+            communicationScores: fb.communicationScores || null,
+            proctoringViolations: fb.proctoringViolations || { totalViolations: iv.violation_count || 0 },
+            passed: score >= CERT_PASS_THRESHOLD,
+            source: 'supabase'
+        };
+    }
+
     async function renderAdminReportsDashboard() {
         let reports = getStoredCandidateReports();
         console.log('[AdminReportsDashboard] Total reports in storage:', reports.length);
@@ -6366,24 +6429,77 @@ GUIDELINES:
         // Render current local reports immediately
         _drawReportsTable(reports);
 
-        // Fetch cloud synced results from backend API to merge any candidate tests
-        try {
-            const apiRes = await apiCall('/api/interview/results', null, 5000, 'GET');
-            if (apiRes && Array.isArray(apiRes.results) && apiRes.results.length > 0) {
-                let mergedCount = 0;
-                apiRes.results.forEach(cloudCert => {
-                    if (cloudCert && cloudCert.certId && !reports.some(r => r.certId === cloudCert.certId)) {
-                        reports.push(cloudCert);
-                        mergedCount++;
-                    }
-                });
-                if (mergedCount > 0) {
-                    localStorage.setItem('simpatico_certifications', JSON.stringify(reports));
-                    _drawReportsTable(reports);
+        const { headers, token, companyId } = getResultsAuthContext();
+        const mergeList = (incoming) => {
+            let added = 0;
+            for (const item of incoming || []) {
+                if (!item || !item.certId) continue;
+                const dup = reports.some(r =>
+                    r.certId === item.certId ||
+                    (item.token && r.token === item.token) ||
+                    (item.interviewId && r.interviewId === item.interviewId)
+                );
+                if (!dup) {
+                    reports.push(item);
+                    added++;
                 }
             }
-        } catch(apiErr) {
-            console.warn('[AdminReportsDashboard] Cloud sync note:', apiErr.message);
+            return added;
+        };
+
+        let mergedCount = 0;
+        const fetches = [];
+
+        // 1. Primary ATS Worker (/api/interview/results returns { success, data: { results } })
+        fetches.push(
+            fetch(`${RESULTS_API_BASE}/api/interview/results`, { method: 'GET', headers })
+                .then(r => r.ok ? r.json() : null)
+                .then(json => {
+                    const list = json?.data?.results || json?.results || [];
+                    if (Array.isArray(list)) mergedCount += mergeList(list);
+                })
+                .catch(e => console.warn('[AdminReportsDashboard] Primary worker sync note:', e.message))
+        );
+
+        // 2. Legacy Evalis Worker fallback if distinct
+        if (API_BASE && API_BASE !== RESULTS_API_BASE) {
+            fetches.push(
+                fetch(`${API_BASE}/api/interview/results`, { method: 'GET', headers })
+                    .then(r => r.ok ? r.json() : null)
+                    .then(json => {
+                        const list = json?.data?.results || json?.results || [];
+                        if (Array.isArray(list)) mergedCount += mergeList(list);
+                    })
+                    .catch(() => {})
+            );
+        }
+
+        // 3. Direct RLS-scoped Supabase fallback for logged-in company admins
+        const sbUrl = window.SIMPATICO_CONFIG?.supabaseUrl;
+        const sbKey = window.SIMPATICO_CONFIG?.supabaseAnonKey;
+        if (token && companyId && sbUrl && sbKey) {
+            const qp = `company_id=eq.${encodeURIComponent(companyId)}&or=(status.eq.completed,overall_score.not.is.null)&select=*&order=created_at.desc&limit=100`;
+            fetches.push(
+                fetch(`${sbUrl}/rest/v1/interviews?${qp}`, {
+                    headers: { apikey: sbKey, Authorization: 'Bearer ' + token }
+                })
+                    .then(r => r.ok ? r.json() : null)
+                    .then(rows => {
+                        if (Array.isArray(rows)) {
+                            mergedCount += mergeList(rows.map(_mapSupabaseInterviewToReport));
+                        }
+                    })
+                    .catch(e => console.warn('[AdminReportsDashboard] Supabase sync note:', e.message))
+            );
+        }
+
+        await Promise.allSettled(fetches);
+        if (mergedCount > 0) {
+            reports.sort((a, b) => _reportSortTimestamp(b) - _reportSortTimestamp(a));
+            try {
+                localStorage.setItem('simpatico_certifications', JSON.stringify(reports.slice(0, 200)));
+            } catch (e) {}
+            _drawReportsTable(reports);
         }
     }
 
@@ -6444,7 +6560,8 @@ GUIDELINES:
             return;
         }
 
-        tbody.innerHTML = filtered.slice().reverse().map(r => {
+        const sorted = filtered.slice().sort((a, b) => _reportSortTimestamp(b) - _reportSortTimestamp(a));
+        tbody.innerHTML = sorted.map(r => {
             const isPass = (r.overall || 0) >= CERT_PASS_THRESHOLD;
             const scoreBadgeCls = isPass ? 'color:#34d399;background:rgba(16,185,129,0.12);border:1px solid rgba(16,185,129,0.3)' : 'color:#f87171;background:rgba(239,68,68,0.12);border:1px solid rgba(239,68,68,0.3)';
             const trustCls = (r.integrity || 100) >= 80 ? '#34d399' : '#fbbf24';
@@ -6484,8 +6601,7 @@ GUIDELINES:
 
     function viewCandidateCert(certId) {
         state._lastCertId = certId;
-        showScreen('screen-cert');
-        renderCertificate();
+        downloadAdminCert(certId);
     }
 
     function viewReportFromThankYou() {
@@ -8268,36 +8384,6 @@ Evaluate this full assessment and output a comprehensive certification report in
 
         // ── CERTIFICATION RECORD & VISIBILITY GATE ──
         if (!state.isPracticeMode && score < CERT_PASS_THRESHOLD) {
-            // Save failed assessment cert data to localStorage so it appears in Reports & Analytics
-            if (!state._viewingStoredReport) {
-                try {
-                    const v = state.proctoringViolations || {};
-                    const failTrustScore = Math.max(60, 100 - (v.totalViolations || 0) * 5);
-                    const failCertId = 'SIMP-' + Date.now().toString(36).toUpperCase().substring(0, 6);
-                    const failCertData = {
-                        certId: failCertId,
-                        name: state.candidateName || _b2bCandidateName || localStorage.getItem('cand_name') || 'Candidate',
-                        email: state.candidateEmail || _b2bCandidateEmail || '',
-                        role: state.role || 'Professional',
-                        level: state.level || 'Mid-Level',
-                        date: new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }),
-                        overall: score,
-                        integrity: failTrustScore,
-                        summary: report.summary || '',
-                        topStrengths: report.topStrengths || [],
-                        focusAreas: report.focusAreas || [],
-                        answers: state.answers || [],
-                        communicationScores: report.communicationScores || state.communicationScores || null,
-                        proctoringViolations: { ...v },
-                        passed: false
-                    };
-                    const certs = JSON.parse(localStorage.getItem('simpatico_certifications') || '[]');
-                    certs.push(failCertData);
-                    localStorage.setItem('simpatico_certifications', JSON.stringify(certs));
-                    state._lastCertId = failCertId;
-                } catch(e) { console.warn('Failed cert save note:', e); }
-            }
-
             // If recruiter explicitly hid reports from candidates, show thank-you screen
             if (_b2bShowReport === 0 && !state._viewingStoredReport) {
                 showScreen('screen-thank-you');
@@ -8491,24 +8577,35 @@ Evaluate this full assessment and output a comprehensive certification report in
                 console.log('[renderReport] Saved certification to storage:', certIdVal, certData.name, certData.overall);
 
                 // Also sync to cloud API for admin dashboard & multi-device verification
-                apiCall('/api/interview/save-result', certData).then(res => {
-                    if (res && res.registrationNumber) {
-                        // Update local cert with server-assigned sequential registration number
-                        certData.registrationNumber = res.registrationNumber;
-                        if (res.certId && res.certId !== certIdVal) {
-                            certData.certId = res.certId;
-                            state._lastCertId = res.certId;
+                const { headers: resHeaders, companyId: resCid } = getResultsAuthContext();
+                if (_b2bToken && !certData.token) certData.token = _b2bToken;
+                if (resCid && !certData.company_id) certData.company_id = resCid;
+                certData.savedAt = new Date().toISOString();
+                fetch(`${RESULTS_API_BASE}/api/interview/save-result`, {
+                    method: 'POST',
+                    headers: resHeaders,
+                    body: JSON.stringify(certData)
+                })
+                    .then(r => r.ok ? r.json() : null)
+                    .then(res => {
+                        const resData = res?.data || res;
+                        if (resData && resData.registrationNumber) {
+                            // Update local cert with server-assigned sequential registration number
+                            certData.registrationNumber = resData.registrationNumber;
+                            if (resData.certId && resData.certId !== certIdVal) {
+                                certData.certId = resData.certId;
+                                state._lastCertId = resData.certId;
+                            }
+                            // Re-save with registration number
+                            try {
+                                const updatedCerts = JSON.parse(localStorage.getItem('simpatico_certifications') || '[]');
+                                const idx = updatedCerts.findIndex(c => c.certId === certIdVal || c.certId === resData.certId);
+                                if (idx >= 0) updatedCerts[idx] = certData;
+                                localStorage.setItem('simpatico_certifications', JSON.stringify(updatedCerts));
+                            } catch(e) {}
+                            console.log('[renderReport] Registration number assigned:', resData.registrationNumber);
                         }
-                        // Re-save with registration number
-                        try {
-                            const updatedCerts = JSON.parse(localStorage.getItem('simpatico_certifications') || '[]');
-                            const idx = updatedCerts.findIndex(c => c.certId === certIdVal || c.certId === res.certId);
-                            if (idx >= 0) updatedCerts[idx] = certData;
-                            localStorage.setItem('simpatico_certifications', JSON.stringify(updatedCerts));
-                        } catch(e) {}
-                        console.log('[renderReport] Registration number assigned:', res.registrationNumber);
-                    }
-                }).catch(e => console.warn('Cloud sync note:', e));
+                    }).catch(e => console.warn('Cloud sync note:', e));
             } catch(e) { console.warn('Cert save note:', e); }
         }
 
@@ -8775,7 +8872,7 @@ Evaluate this full assessment and output a comprehensive certification report in
                     <div style="font-size:0.72rem;color:#64748b;line-height:1.6;margin-top:8px;">Verify: <strong style="color:#f59e0b;">https://simpaticohr.in/verify</strong></div>
                 </div>
                 <div style="text-align:center;">
-                    <img src="https://api.qrserver.com/v1/create-qr-code/?size=160x160&margin=2&ecc=M&data=${encodeURIComponent('https://simpaticohr.in/verify.html?certId=' + certId + '&name=' + encodeURIComponent(name) + '&role=' + encodeURIComponent(role) + '&score=' + overallScore)}" style="width:72px;height:72px;background:#fff;padding:4px;border-radius:8px;display:block;margin:0 auto;" alt="Verify QR">
+                    <img src="https://api.qrserver.com/v1/create-qr-code/?size=160x160&margin=2&ecc=M&data=${encodeURIComponent('https://simpaticohr.in/verify.html?certId=' + certId + '&name=' + encodeURIComponent(name) + '&role=' + encodeURIComponent(role) + '&score=' + overall)}" style="width:72px;height:72px;background:#fff;padding:4px;border-radius:8px;display:block;margin:0 auto;" alt="Verify QR">
                     <div style="font-size:0.62rem;color:#94a3b8;font-weight:700;margin-top:4px;text-transform:uppercase;letter-spacing:0.5px;">Scan to Verify</div>
                 </div>
                 <div style="text-align:center;">
@@ -8884,9 +8981,13 @@ Evaluate this full assessment and output a comprehensive certification report in
             console.log('[saveCertDataSilently] Successfully saved cert:', certData.certId, certData.name, certData.overall);
 
             // Sync to API for admin dashboard access
-            fetch(`${API_BASE}/api/interview/save-result`, {
+            const { headers: silentHeaders, companyId: silentCid } = getResultsAuthContext();
+            if (_b2bToken && !certData.token) certData.token = _b2bToken;
+            if (silentCid && !certData.company_id) certData.company_id = silentCid;
+            certData.savedAt = new Date().toISOString();
+            fetch(`${RESULTS_API_BASE}/api/interview/save-result`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: silentHeaders,
                 body: JSON.stringify(certData)
             }).catch(e => console.warn('Silent cert API sync note:', e));
 

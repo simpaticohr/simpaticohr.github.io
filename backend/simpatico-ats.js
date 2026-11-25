@@ -4675,7 +4675,37 @@ async function handleListJobs(request, env, ctx, _, url) {
     false,
     ctx.tenantId,
   );
-  return apiResponse({ jobs: await res.json() });
+  const jobsData = await res.json();
+  const jobs = Array.isArray(jobsData) ? jobsData : [];
+
+  // Guarantee company_name matches current company profile name
+  if (jobs.length > 0 && ctx.tenantId) {
+    try {
+      const compRes = await sbFetch(
+        env,
+        "GET",
+        `/rest/v1/companies?id=eq.${ctx.tenantId}&select=name`,
+        null,
+        false,
+        ctx.tenantId
+      );
+      if (compRes.ok) {
+        const comps = await compRes.json();
+        if (comps && comps[0]?.name) {
+          const freshName = comps[0].name;
+          jobs.forEach(j => {
+            if (!j.company_name || j.company_name !== freshName) {
+              j.company_name = freshName;
+            }
+          });
+        }
+      }
+    } catch (e) {
+      console.warn("[handleListJobs] Error fetching tenant company name:", e.message);
+    }
+  }
+
+  return apiResponse({ jobs });
 }
 
 /**
@@ -4687,7 +4717,7 @@ async function handleUpdateJob(request, env, ctx, [jobId]) {
 
   // Only allow safe fields to be updated
   const allowed = ["title", "description", "department", "location", "job_type", "employment_type",
-    "skills", "salary_min", "salary_max", "status", "level", "experience_required"];
+    "skills", "salary_min", "salary_max", "status", "level", "experience_required", "company_name"];
   const update = {};
   for (const key of allowed) {
     if (body[key] !== undefined) update[key] = body[key];
@@ -5012,6 +5042,7 @@ Return ONLY valid JSON in format: {"match_score": 85, "reason": "Brief 1-sentenc
 
   if (_isUuid(realCompanyId)) {
     insertPayload.tenant_id = realCompanyId;
+    insertPayload.company_id = realCompanyId;
   }
 
   const res = await sbFetch(
@@ -5789,7 +5820,7 @@ function normalizeApplication(r) {
 }
 
 const APP_SELECT =
-  "id,candidate_name,candidate_email,candidate_skills,match_score,ai_summary,status,resume_text,applied_at,created_at,name,email,ats_score,ats_matched_skills,ats_summary";
+  "id,job_id,company_id,tenant_id,candidate_name,candidate_email,candidate_skills,match_score,ai_summary,status,resume_text,applied_at,created_at";
 
 /**
  * POST /ai/talent-match — Score the tenant's EXISTING applicant pool against a
@@ -5992,15 +6023,39 @@ async function handleTalentPool(request, env, ctx, _, url) {
   const q = sanitizeTerm(url.searchParams.get("q"));
   const skills = sanitizeTerm(url.searchParams.get("skills"));
 
-  let qp = `select=${APP_SELECT},jobs(title)&order=applied_at.desc&limit=300`;
+  let qp = `select=${APP_SELECT}&order=applied_at.desc&limit=300`;
   if (q) {
     const e = encodeURIComponent(q);
-    qp += `&or=(candidate_name.ilike.*${e}*,candidate_email.ilike.*${e}*,name.ilike.*${e}*,email.ilike.*${e}*)`;
+    qp += `&or=(candidate_name.ilike.*${e}*,candidate_email.ilike.*${e}*)`;
   }
   if (skills) qp += `&candidate_skills=ilike.*${encodeURIComponent(skills)}*`;
 
   const res = await sbFetch(env, "GET", `/rest/v1/job_applications?${qp}`, null, false, ctx.tenantId);
   const rows = await res.json();
+
+  // Safely resolve job titles without requiring PostgREST schema embedded relationship
+  const jobIds = [...new Set((Array.isArray(rows) ? rows : []).map(r => r.job_id).filter(Boolean))];
+  const jobTitleMap = {};
+  if (jobIds.length > 0) {
+    try {
+      const jobsRes = await sbFetch(
+        env,
+        "GET",
+        `/rest/v1/jobs?id=in.(${jobIds.join(",")})&select=id,title`,
+        null,
+        false,
+        ctx.tenantId
+      );
+      if (jobsRes.ok) {
+        const jobsData = await jobsRes.json();
+        if (Array.isArray(jobsData)) {
+          jobsData.forEach(j => { if (j.id) jobTitleMap[j.id] = j.title; });
+        }
+      }
+    } catch (e) {
+      console.warn("[handleTalentPool] Failed to resolve job titles:", e.message);
+    }
+  }
 
   // Dedupe by email — keep the row with the best score
   const byEmail = new Map();
@@ -6009,7 +6064,9 @@ async function handleTalentPool(request, env, ctx, _, url) {
     const key = (r.email || "").toLowerCase().trim();
     if (!key) continue;
     const cur = byEmail.get(key);
-    if (!cur || (r.score || 0) > (cur.score || 0)) byEmail.set(key, { ...r, last_job_title: raw.jobs?.title || null });
+    if (!cur || (r.score || 0) > (cur.score || 0)) {
+      byEmail.set(key, { ...r, last_job_title: jobTitleMap[raw.job_id] || raw.jobs?.title || null });
+    }
   }
 
   const candidates = [...byEmail.values()]
@@ -7519,16 +7576,20 @@ async function sbFetch(
   // UUID in company_id instead, so filter those by their real column.
   const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   const _isValidTenant = (s) => typeof s === "string" && s.length >= 2 && s !== "default" && /^[0-9a-zA-Z_-]{2,64}$/.test(s);
-  const TENANT_COLUMN_OVERRIDES = { jobs: "company_id", job_applications: "company_id" };
+  const TENANT_COLUMN_OVERRIDES = { jobs: "company_id" };
   if (["GET", "PATCH", "DELETE"].includes(method) && tenantId && tenantId !== "default" && _isValidTenant(tenantId)) {
     const tableName = (path.match(/\/rest\/v1\/([a-z_]+)/) || [])[1];
     if (tableName && TENANT_AWARE_TABLES.includes(tableName)) {
-      const col = TENANT_COLUMN_OVERRIDES[tableName] || "tenant_id";
-      // If column is company_id (UUID type in Postgres) but tenantId is not a UUID (e.g. SIMP_PRO_MAIN),
-      // seamlessly fall back to tenant_id column so tenant isolation is STILL ENFORCED without 22P02 error!
-      const effectiveCol = (col === "company_id" && !UUID_REGEX.test(tenantId)) ? "tenant_id" : col;
       const separator = finalPath.includes("?") ? "&" : "?";
-      finalPath += `${separator}${effectiveCol}=eq.${tenantId}`;
+      if (tableName === "job_applications") {
+        finalPath += `${separator}or=(company_id.eq.${tenantId},tenant_id.eq.${tenantId})`;
+      } else {
+        const col = TENANT_COLUMN_OVERRIDES[tableName] || "tenant_id";
+        // If column is company_id (UUID type in Postgres) but tenantId is not a UUID (e.g. SIMP_PRO_MAIN),
+        // seamlessly fall back to tenant_id column so tenant isolation is STILL ENFORCED without 22P02 error!
+        const effectiveCol = (col === "company_id" && !UUID_REGEX.test(tenantId)) ? "tenant_id" : col;
+        finalPath += `${separator}${effectiveCol}=eq.${tenantId}`;
+      }
     }
   }
 
@@ -7541,9 +7602,21 @@ async function sbFetch(
         const parsedBody = body || {};
         if (Array.isArray(parsedBody)) {
           // Bulk insert - inject into each record
-          parsedBody.forEach(record => { if (!record[col]) record[col] = tenantId; });
+          parsedBody.forEach(record => {
+            if (table === 'job_applications') {
+              if (!record.company_id) record.company_id = tenantId;
+              if (!record.tenant_id) record.tenant_id = tenantId;
+            } else if (!record[col]) {
+              record[col] = tenantId;
+            }
+          });
         } else {
-          if (!parsedBody[col]) parsedBody[col] = tenantId;
+          if (table === 'job_applications') {
+            if (!parsedBody.company_id) parsedBody.company_id = tenantId;
+            if (!parsedBody.tenant_id) parsedBody.tenant_id = tenantId;
+          } else if (!parsedBody[col]) {
+            parsedBody[col] = tenantId;
+          }
         }
         body = parsedBody;
       } catch (e) { /* body isn't valid, skip */ }
@@ -10353,7 +10426,6 @@ const CAREERLAB_TOOL_PRICING = {
   coverLetter:       { name: "AI Cover Letter",         inr: 99,  usd: 2,  gbp: 2,  eur: 2,  aud: 3,  aed: 7,  cad: 3 },
   careerRoadmap:     { name: "AI Career Roadmap",       inr: 249, usd: 5,  gbp: 4,  eur: 5,  aud: 8,  aed: 18, cad: 7 },
   linkedinOptimizer: { name: "AI LinkedIn Optimizer",   inr: 149, usd: 3,  gbp: 3,  eur: 3,  aud: 5,  aed: 11, cad: 4 },
-  livePractice:      { name: "AI Live Interview Practice", inr: 199, usd: 4, gbp: 3, eur: 4, aud: 6, aed: 15, cad: 5 },
 };
 
 /**
@@ -14298,8 +14370,69 @@ async function handleSubmitApplication(request, env, ctx) {
   }
 }
 
+function mapInterviewRowToCertReport(iv) {
+  let fb = iv.feedback;
+  if (typeof fb === "string") {
+    try { fb = JSON.parse(fb); } catch { fb = {}; }
+  }
+  fb = (fb && typeof fb === "object") ? fb : {};
+
+  const score = Math.round(Number(iv.overall_score ?? iv.score ?? fb.overallScore ?? fb.overall_score ?? 0));
+  const trust = Math.round(Number(iv.trust_score ?? fb.integrity ?? 100));
+  const dt = iv.completed_at || iv.created_at || new Date().toISOString();
+  const formattedDate = new Date(dt).toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
+  const certId = fb.certId || iv.cert_id || `IV-${String(iv.id || "").slice(0, 8).toUpperCase()}`;
+
+  return {
+    certId,
+    interviewId: iv.id || null,
+    token: iv.token || null,
+    name: iv.candidate_name || fb.name || "Candidate",
+    email: iv.candidate_email || fb.email || "",
+    role: iv.interview_role || iv.role || fb.role || "Professional",
+    level: iv.interview_level || iv.level || fb.level || "Mid-Level",
+    date: formattedDate,
+    savedAt: dt,
+    overall: score,
+    integrity: trust,
+    summary: fb.summary || fb.ai_summary || "Completed AI assessment interview.",
+    topStrengths: Array.isArray(fb.topStrengths) ? fb.topStrengths : (Array.isArray(fb.strengths) ? fb.strengths : []),
+    focusAreas: Array.isArray(fb.focusAreas) ? fb.focusAreas : (Array.isArray(fb.improvements) ? fb.improvements : []),
+    answers: Array.isArray(fb.answers) ? fb.answers : [],
+    communicationScores: fb.communicationScores || null,
+    proctoringViolations: fb.proctoringViolations || { totalViolations: iv.violation_count || 0 },
+    passed: score >= 75,
+    source: "supabase",
+  };
+}
+
+async function resolveResultTenantId(env, ctx, body) {
+  if (ctx?.tenantId && ctx.tenantId !== "default") return ctx.tenantId;
+  const bodyTenant = body?.company_id || body?.tenant_id;
+  if (typeof bodyTenant === "string" && bodyTenant && bodyTenant !== "default" && bodyTenant !== "SIMP_PRO_MAIN") {
+    return bodyTenant;
+  }
+  if (body?.token && env.SUPABASE_URL && env.SUPABASE_SERVICE_KEY) {
+    try {
+      const ivRes = await fetch(
+        `${env.SUPABASE_URL}/rest/v1/interviews?token=eq.${encodeURIComponent(body.token)}&select=id,company_id,tenant_id&limit=1`,
+        { headers: { apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}` } },
+      );
+      if (ivRes.ok) {
+        const rows = await ivRes.json();
+        const cid = rows?.[0]?.company_id || rows?.[0]?.tenant_id;
+        if (cid && cid !== "default" && cid !== "SIMP_PRO_MAIN") return String(cid);
+      }
+    } catch (e) {
+      console.warn("[Interview Save Result] Token tenant lookup note:", e.message);
+    }
+  }
+  return "default";
+}
+
 async function handleInterviewSaveResult(request, env, ctx) {
   const body = (await safeJson(request)) || {};
+  const targetTenantId = await resolveResultTenantId(env, ctx, body);
 
   // Generate a proper sequential registration number if not provided or client-generated
   let certId = body.certId;
@@ -14319,7 +14452,7 @@ async function handleInterviewSaveResult(request, env, ctx) {
 
       // Keep the original certId for backward compatibility, add registrationNumber
       body.registrationNumber = registrationNumber;
-      if (!certId || certId.startsWith("SIMP-") && certId.length <= 12) {
+      if (!certId || (certId.startsWith("SIMP-") && certId.length <= 12)) {
         // Replace short client-generated IDs with the proper registration number
         certId = registrationNumber;
       }
@@ -14335,6 +14468,7 @@ async function handleInterviewSaveResult(request, env, ctx) {
 
   body.certId = certId;
   body.savedAt = new Date().toISOString();
+  if (targetTenantId !== "default" && !body.company_id) body.company_id = targetTenantId;
 
   if (env.HR_KV) {
     try {
@@ -14343,7 +14477,7 @@ async function handleInterviewSaveResult(request, env, ctx) {
       if (body.registrationNumber && body.registrationNumber !== certId) {
         await env.HR_KV.put(`cert:${body.registrationNumber}`, JSON.stringify(body), { expirationTtl: 365 * 86400 });
       }
-      const listKey = `cert_list:${ctx?.tenantId || "default"}`;
+      const listKey = `cert_list:${targetTenantId}`;
       const rawList = (await env.HR_KV.get(listKey, { type: "json" })) || [];
       const existingIdx = rawList.findIndex(c => c.certId === certId);
       if (existingIdx >= 0) {
@@ -14357,15 +14491,98 @@ async function handleInterviewSaveResult(request, env, ctx) {
     }
   }
 
+  // Persist onto matching Supabase interview record when token is provided
+  if (body.token && env.SUPABASE_URL && env.SUPABASE_SERVICE_KEY) {
+    try {
+      const ivPatch = {
+        status: "completed",
+        overall_score: body.overall != null ? clampScore(body.overall) : undefined,
+        trust_score: body.integrity != null ? clampScore(body.integrity) : undefined,
+        completed_at: body.savedAt,
+        feedback: {
+          certId,
+          registrationNumber: body.registrationNumber || certId,
+          summary: body.summary || "",
+          topStrengths: body.topStrengths || [],
+          focusAreas: body.focusAreas || [],
+          answers: Array.isArray(body.answers) ? body.answers.slice(0, 20) : [],
+          communicationScores: body.communicationScores || null,
+          proctoringViolations: body.proctoringViolations || null,
+        },
+      };
+      await fetch(`${env.SUPABASE_URL}/rest/v1/interviews?token=eq.${encodeURIComponent(body.token)}`, {
+        method: "PATCH",
+        headers: {
+          apikey: env.SUPABASE_SERVICE_KEY,
+          Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
+          "Content-Type": "application/json",
+          Prefer: "return=minimal",
+        },
+        body: JSON.stringify(ivPatch),
+      });
+    } catch (sbErr) {
+      console.warn("[Interview Save Result] Supabase sync note:", sbErr.message);
+    }
+  }
+
   return apiResponse({ success: true, certId, registrationNumber: body.registrationNumber || certId });
 }
 
 
 async function handleInterviewListResults(request, env, ctx) {
-  if (!env.HR_KV) return apiResponse({ results: [] });
-  const listKey = `cert_list:${ctx?.tenantId || "default"}`;
-  const list = (await env.HR_KV.get(listKey, { type: "json" })) || [];
-  return apiResponse({ results: list });
+  const tenantId = ctx?.tenantId || "default";
+  const actorRole = (ctx?.actorRole || "").toLowerCase().replace(/_/g, "");
+  const isSuperAdmin = actorRole === "superadmin";
+
+  const merged = [];
+  const seenIds = new Set();
+  const seenTokens = new Set();
+  const pushItem = (item) => {
+    if (!item) return;
+    if (item.certId && seenIds.has(item.certId)) return;
+    if (item.token && seenTokens.has(item.token)) return;
+    if (item.certId) seenIds.add(item.certId);
+    if (item.token) seenTokens.add(item.token);
+    merged.push(item);
+  };
+
+  if (env.HR_KV) {
+    const listKey = `cert_list:${tenantId}`;
+    const list = (await env.HR_KV.get(listKey, { type: "json" })) || [];
+    for (const item of Array.isArray(list) ? list : []) pushItem(item);
+
+    // Superadmins viewing with default header also see direct/unscoped cert-interview runs
+    if (isSuperAdmin && tenantId !== "default") {
+      const defList = (await env.HR_KV.get("cert_list:default", { type: "json" })) || [];
+      for (const item of Array.isArray(defList) ? defList : []) pushItem(item);
+    }
+  }
+
+  // Merge completed interviews from Supabase for authenticated tenant admins
+  if (ctx?.actorId && (tenantId !== "default" || isSuperAdmin) && env.SUPABASE_URL && env.SUPABASE_SERVICE_KEY) {
+    try {
+      let qp = "or=(status.eq.completed,overall_score.not.is.null)&select=*&order=created_at.desc&limit=100";
+      if (tenantId !== "default") {
+        qp += `&company_id=eq.${encodeURIComponent(tenantId)}`;
+      }
+      const sbRes = await fetch(`${env.SUPABASE_URL}/rest/v1/interviews?${qp}`, {
+        headers: {
+          apikey: env.SUPABASE_SERVICE_KEY,
+          Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
+        },
+      });
+      if (sbRes.ok) {
+        const rows = await sbRes.json();
+        for (const iv of Array.isArray(rows) ? rows : []) {
+          pushItem(mapInterviewRowToCertReport(iv));
+        }
+      }
+    } catch (sbErr) {
+      console.warn("[Interview List Results] Supabase merge note:", sbErr.message);
+    }
+  }
+
+  return apiResponse({ results: merged });
 }
 
 // ═══════════════════════════════════════════════════════════════

@@ -791,6 +791,9 @@ async function loadJobs() {
     const companyId = getCurrentCompanyId();
     let jobs = [];
 
+    const SB_URL = window.SIMPATICO_CONFIG?.supabaseUrl || 'https://cvkxtsvgnynxexmemfuy.supabase.co';
+    const SB_KEY = window.SIMPATICO_CONFIG?.supabaseAnonKey;
+
     if (isAdmin && HR_TOKEN && companyId) {
       // ADMIN MODE: Fetch only this company's jobs via authenticated Worker endpoint
       const statusParam = (currentFilter && currentFilter !== 'all') ? currentFilter : 'open';
@@ -798,8 +801,6 @@ async function loadJobs() {
       jobs = data.jobs || data || [];
     } else {
       // PUBLIC JOB BOARD: Fetch ALL jobs from ALL companies (aggregator mode)
-      const SB_URL = window.SIMPATICO_CONFIG?.supabaseUrl || 'https://cvkxtsvgnynxexmemfuy.supabase.co';
-      const SB_KEY = window.SIMPATICO_CONFIG?.supabaseAnonKey;
       const res = await fetch(
         `${SB_URL}/rest/v1/jobs?is_active=eq.true&status=in.(open,active)&select=id,title,company_id,company_name,department,location,employment_type,level,description,skills,skills_required,salary_min,salary_max,created_at&order=created_at.desc&limit=100`,
         { headers: { 'apikey': SB_KEY, 'Authorization': 'Bearer ' + SB_KEY } }
@@ -807,6 +808,45 @@ async function loadJobs() {
       if (!res.ok) throw new Error('Failed to load jobs');
       jobs = await res.json();
     }
+
+    // ── Live Company Name Resolution ──
+    // Ensure any company name edited in employer profile reflects immediately on jobs board
+    const cids = [...new Set(jobs.map(j => j.company_id).filter(Boolean))];
+    if (cids.length > 0 && SB_KEY) {
+      try {
+        const compRes = await fetch(
+          `${SB_URL}/rest/v1/companies?id=in.(${cids.join(',')})&select=id,name`,
+          { headers: { 'apikey': SB_KEY, 'Authorization': 'Bearer ' + SB_KEY } }
+        );
+        if (compRes.ok) {
+          const comps = await compRes.json();
+          const compMap = {};
+          comps.forEach(c => { if (c.id && c.name) compMap[c.id] = c.name; });
+          jobs.forEach(j => {
+            if (j.company_id && compMap[j.company_id]) {
+              j.company_name = compMap[j.company_id];
+            }
+          });
+        }
+      } catch (cErr) {
+        console.warn('[Jobs] Live company name sync failed:', cErr);
+      }
+    }
+
+    // Local profile override fallback: immediate reflection for the editing user in the same browser
+    try {
+      const storedComp = JSON.parse(localStorage.getItem('simpatico_company') || '{}');
+      const storedUser = JSON.parse(localStorage.getItem('simpatico_user') || '{}');
+      const activeCid = storedComp.id || storedUser.company_id || storedUser.tenant_id;
+      const activeName = storedComp.name || storedUser.company_name || storedUser.company;
+      if (activeCid && activeName) {
+        jobs.forEach(j => {
+          if (j.company_id === activeCid) {
+            j.company_name = activeName;
+          }
+        });
+      }
+    } catch (_) {}
 
     // Client-side search filter
     if (search) {
