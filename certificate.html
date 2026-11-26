@@ -388,7 +388,7 @@ function generateQR(canvas, text) {
 // ══════════════════════════════════════════
 //  POPULATE CERTIFICATE DATA
 // ══════════════════════════════════════════
-window.addEventListener('DOMContentLoaded', () => {
+window.addEventListener('DOMContentLoaded', async () => {
   const params = new URLSearchParams(window.location.search);
   const certId = (params.get('certId') || params.get('id') || '').trim();
   const isB2BInvite = params.get('b2b') === '1' && !!(params.get('token') || '').trim();
@@ -412,6 +412,33 @@ window.addEventListener('DOMContentLoaded', () => {
       ((c.certId || '').toUpperCase() === certId.toUpperCase()) ||
       ((c.registrationNumber || '').toUpperCase() === certId.toUpperCase())
     );
+  }
+
+  // Cross-tab / admin browser lookup from Worker results when logged in via Career Lab
+  if (!cert && !isB2BInvite && certId && certId.toUpperCase() !== 'SIMP-VERIFIED') {
+    try {
+      const token = localStorage.getItem('simpatico_token') || localStorage.getItem('sh_token') || localStorage.getItem('sb_token');
+      if (token) {
+        const user = JSON.parse(localStorage.getItem('simpatico_user') || '{}');
+        const headers = { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token };
+        const cid = user.company_id || user.tenant_id;
+        if (cid && cid !== 'default') headers['X-Tenant-ID'] = cid;
+        const workerBase = (window.SIMPATICO_CONFIG && window.SIMPATICO_CONFIG.workerUrl) || 'https://simpatico-hr-ats.simpaticohrconsultancy.workers.dev';
+        const res = await fetch(`${workerBase}/api/interview/results`, { method: 'GET', headers });
+        if (res.ok) {
+          const json = await res.json();
+          const list = json?.data?.results || json?.results || [];
+          if (Array.isArray(list)) {
+            cert = list.find(c =>
+              c && (
+                ((c.certId || '').toUpperCase() === certId.toUpperCase()) ||
+                ((c.registrationNumber || '').toUpperCase() === certId.toUpperCase())
+              )
+            ) || null;
+          }
+        }
+      }
+    } catch (e) {}
   }
 
   // Allow report-launched preview within an authenticated Career Lab / valid B2B flow
@@ -439,7 +466,8 @@ window.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  if (!cert) {
+  if (!cert || cert.scoringMethod === 'heuristic' || cert.passed === false) {
+    const isBlockedHeuristic = cert && (cert.scoringMethod === 'heuristic' || cert.passed === false);
     const frame = document.getElementById('certFrame');
     const actionsBar = document.getElementById('actionsBar');
     if (actionsBar) {
@@ -453,11 +481,13 @@ window.addEventListener('DOMContentLoaded', () => {
           <img src="favicon-96x96.png" alt="Simpatico HR Logo" class="cert-logo">
           <div class="brand-logo" style="margin-bottom:14px;">SIMPATICO <span>HR</span></div>
           <div style="display:inline-flex;align-items:center;gap:8px;background:rgba(245,158,11,0.12);border:1px solid rgba(245,158,11,0.35);color:#fbbf24;padding:8px 18px;border-radius:100px;font-size:0.85rem;font-weight:700;margin-bottom:18px;">
-            <i class="fas fa-lock"></i> Assessment Certificate Not Available Directly
+            <i class="fas fa-lock"></i> ${isBlockedHeuristic ? 'Certificate Not Earned (Estimated / Below Threshold)' : 'Assessment Certificate Not Available Directly'}
           </div>
-          <h2 style="font-family:'Playfair Display',serif;font-size:1.8rem;color:#fff;margin-bottom:10px;">Open From Cert Interview Report &amp; Analysis</h2>
+          <h2 style="font-family:'Playfair Display',serif;font-size:1.8rem;color:#fff;margin-bottom:10px;">${isBlockedHeuristic ? 'AI Evaluation & Passing Score Required' : 'Open From Cert Interview Report & Analysis'}</h2>
           <p style="color:#94a3b8;max-width:540px;margin:0 auto 24px;line-height:1.7;font-size:0.95rem;">
-            Pre-assessment certificates are generated exclusively from completed assessments inside <strong>Career Lab &rarr; Cert Interview &rarr; Report &amp; Analysis</strong>. Select a verified candidate report there to view or download their certificate.
+            ${isBlockedHeuristic
+              ? 'This assessment record used a fallback estimate or did not meet the passing AI certification threshold of 65%.'
+              : 'Pre-assessment certificates are generated exclusively from completed assessments inside <strong>Career Lab &rarr; Cert Interview &rarr; Report &amp; Analysis</strong>. Select a verified candidate report there to view or download their certificate.'}
           </p>
         </div>`;
     }
@@ -495,15 +525,22 @@ window.addEventListener('DOMContentLoaded', () => {
   document.getElementById('cExpiry').textContent = expiryText;
 
   // Scores
-  document.getElementById('sCog').textContent = (cert.cognitive||70)+'%';
-  document.getElementById('sSit').textContent = (cert.situational||70)+'%';
-  document.getElementById('sAtt').textContent = (cert.attitude||70)+'%';
-  document.getElementById('sJob').textContent = (cert.jobScore||65)+'%';
-  const comm = cert.communication || 57;
-  document.getElementById('sComm').textContent = comm+'%';
-  document.getElementById('sInteg').textContent = (cert.integrity||60)+'%';
+  const baseScore = typeof cert.overall === 'number' ? cert.overall : 0;
+  const cog = cert.cognitive ?? baseScore;
+  const sit = cert.situational ?? baseScore;
+  const att = cert.attitude ?? baseScore;
+  const job = cert.jobScore ?? baseScore;
+  const comm = cert.communication ?? baseScore;
+  const integ = cert.integrity ?? 100;
 
-  const overall = cert.overall || Math.round(((cert.cognitive||70)+(cert.situational||70)+(cert.attitude||70)+(cert.jobScore||65)+comm+(cert.integrity||60))/6);
+  document.getElementById('sCog').textContent = cog + '%';
+  document.getElementById('sSit').textContent = sit + '%';
+  document.getElementById('sAtt').textContent = att + '%';
+  document.getElementById('sJob').textContent = job + '%';
+  document.getElementById('sComm').textContent = comm + '%';
+  document.getElementById('sInteg').textContent = integ + '%';
+
+  const overall = (typeof cert.overall === 'number' && cert.overall > 0) ? cert.overall : Math.round((cog + sit + att + job + comm + integ) / 6);
   document.getElementById('overallScore').textContent = overall;
   document.getElementById('overallGrade').textContent = overall>=85?'EXCELLENT':overall>=75?'VERY GOOD':overall>=65?'GOOD':'SATISFACTORY';
 
@@ -513,7 +550,7 @@ window.addEventListener('DOMContentLoaded', () => {
   const fluency = Math.min(100, Math.max(40, comm + 2));
   document.getElementById('fluencyBar').style.width = fluency+'%';
   document.getElementById('fluencyPct').textContent = fluency+'%';
-  const conf = Math.min(100, Math.max(50, (cert.attitude || 70)));
+  const conf = Math.min(100, Math.max(50, att));
   document.getElementById('confBar').style.width = conf+'%';
   document.getElementById('confPct').textContent = conf+'%';
 

@@ -2000,8 +2000,8 @@
                         <input type="text" id="admin-reports-search" class="form-input" placeholder="🔍 Search by Candidate Name, Email, or Role..." oninput="filterAdminReports()" style="flex:2;min-width:220px;">
                         <select id="admin-reports-filter-status" class="form-select" onchange="filterAdminReports()" style="flex:1;min-width:150px;">
                             <option value="all" selected>All Statuses</option>
-                            <option value="passed">🏆 Passed (>= 75%)</option>
-                            <option value="failed">⚠️ Failed (< 75%)</option>
+                            <option value="passed">🏆 Passed (>= 65%)</option>
+                            <option value="failed">⚠️ Failed / Unverified (< 65%)</option>
                         </select>
                     </div>
 
@@ -6372,12 +6372,17 @@ GUIDELINES:
         }
     }
 
+    function isReportCertifiedPass(r) {
+        return !!r && r.scoringMethod !== 'heuristic' && (r.overall || 0) >= CERT_PASS_THRESHOLD;
+    }
+
     function getStoredCandidateReports() {
         try {
             const certs = JSON.parse(localStorage.getItem('simpatico_certifications') || '[]');
             // If empty, restore from active session if available
             if (certs.length === 0 && state._lastGeneratedReport) {
                 const rep = state._lastGeneratedReport;
+                const repHeuristic = rep.scoringMethod === 'heuristic';
                 const activeCert = {
                     certId: state._lastCertId || ('SIMP-' + Date.now().toString(36).toUpperCase().substring(0, 6)),
                     name: state.candidateName || _b2bCandidateName || localStorage.getItem('cand_name') || 'Candidate',
@@ -6391,7 +6396,8 @@ GUIDELINES:
                     topStrengths: rep.topStrengths || [],
                     focusAreas: rep.focusAreas || [],
                     answers: state.answers || [],
-                    passed: (rep.overallScore || 0) >= CERT_PASS_THRESHOLD
+                    scoringMethod: repHeuristic ? 'heuristic' : 'ai',
+                    passed: !repHeuristic && (rep.overallScore || 0) >= CERT_PASS_THRESHOLD
                 };
                 certs.push(activeCert);
                 localStorage.setItem('simpatico_certifications', JSON.stringify(certs));
@@ -6417,8 +6423,10 @@ GUIDELINES:
         const score = Math.round(Number(iv.overall_score ?? iv.score ?? fb.overallScore ?? fb.overall_score ?? 0));
         const trust = Math.round(Number(iv.trust_score ?? fb.integrity ?? 100));
         const dt = iv.completed_at || iv.created_at || new Date().toISOString();
+        const scoringMethod = fb.scoringMethod || 'ai';
         return {
             certId: fb.certId || iv.cert_id || ('IV-' + String(iv.id || '').slice(0, 8).toUpperCase()),
+            registrationNumber: fb.registrationNumber || iv.cert_id || null,
             interviewId: iv.id || null,
             token: iv.token || null,
             name: iv.candidate_name || fb.name || 'Candidate',
@@ -6428,6 +6436,11 @@ GUIDELINES:
             date: new Date(dt).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }),
             savedAt: dt,
             overall: score,
+            cognitive: fb.cognitive ?? null,
+            situational: fb.situational ?? null,
+            attitude: fb.attitude ?? null,
+            jobScore: fb.jobScore ?? null,
+            communication: fb.communication ?? null,
             integrity: trust,
             summary: fb.summary || fb.ai_summary || 'Completed AI assessment interview.',
             topStrengths: Array.isArray(fb.topStrengths) ? fb.topStrengths : (Array.isArray(fb.strengths) ? fb.strengths : []),
@@ -6435,7 +6448,8 @@ GUIDELINES:
             answers: Array.isArray(fb.answers) ? fb.answers : [],
             communicationScores: fb.communicationScores || null,
             proctoringViolations: fb.proctoringViolations || { totalViolations: iv.violation_count || 0 },
-            passed: score >= CERT_PASS_THRESHOLD,
+            scoringMethod,
+            passed: scoringMethod !== 'heuristic' && score >= CERT_PASS_THRESHOLD,
             source: 'supabase'
         };
     }
@@ -6529,7 +6543,7 @@ GUIDELINES:
         if (!tbody) return;
 
         const total = reports.length;
-        const passed = reports.filter(r => (r.overall || 0) >= CERT_PASS_THRESHOLD).length;
+        const passed = reports.filter(isReportCertifiedPass).length;
         const avgScore = total > 0 ? Math.round(reports.reduce((acc, r) => acc + (r.overall || 0), 0) / total) : 0;
         const avgIntegrity = total > 0 ? Math.round(reports.reduce((acc, r) => acc + (r.integrity || 100), 0) / total) : 100;
 
@@ -6567,7 +6581,7 @@ GUIDELINES:
                 (r.email || '').toLowerCase().includes(query) ||
                 (r.certId || '').toLowerCase().includes(query);
 
-            const isPassed = (r.overall || 0) >= CERT_PASS_THRESHOLD;
+            const isPassed = isReportCertifiedPass(r);
             const matchStatus = statusFilter === 'all' ||
                 (statusFilter === 'passed' && isPassed) ||
                 (statusFilter === 'failed' && !isPassed);
@@ -6582,8 +6596,9 @@ GUIDELINES:
 
         const sorted = filtered.slice().sort((a, b) => _reportSortTimestamp(b) - _reportSortTimestamp(a));
         tbody.innerHTML = sorted.map(r => {
-            const isPass = (r.overall || 0) >= CERT_PASS_THRESHOLD;
-            const scoreBadgeCls = isPass ? 'color:#34d399;background:rgba(16,185,129,0.12);border:1px solid rgba(16,185,129,0.3)' : 'color:#f87171;background:rgba(239,68,68,0.12);border:1px solid rgba(239,68,68,0.3)';
+            const isHeuristic = r.scoringMethod === 'heuristic';
+            const isPass = isReportCertifiedPass(r);
+            const scoreBadgeCls = isPass ? 'color:#34d399;background:rgba(16,185,129,0.12);border:1px solid rgba(16,185,129,0.3)' : (isHeuristic ? 'color:#fbbf24;background:rgba(245,158,11,0.12);border:1px solid rgba(245,158,11,0.3)' : 'color:#f87171;background:rgba(239,68,68,0.12);border:1px solid rgba(239,68,68,0.3)');
             const trustCls = (r.integrity || 100) >= 80 ? '#34d399' : '#fbbf24';
 
             return `
@@ -6598,7 +6613,7 @@ GUIDELINES:
                     </td>
                     <td style="padding:12px;">
                         <span style="display:inline-block;padding:3px 8px;border-radius:12px;font-weight:800;font-size:0.82rem;${scoreBadgeCls}">
-                            ${r.overall || 0}% ${isPass ? '🏆 PASS' : '⚠️ FAIL'}
+                            ${r.overall || 0}% ${isPass ? '🏆 PASS' : (isHeuristic ? '⚠️ ESTIMATE' : '⚠️ FAIL')}
                         </span>
                     </td>
                     <td style="padding:12px;">
@@ -7699,6 +7714,28 @@ Evaluate this full assessment and output a comprehensive certification report in
         }
     }
 
+    function computeHeuristicAnswerEstimate(answerText, isVoice) {
+        const text = String(answerText || '');
+        const words = text.split(/\s+/).filter(w => w.length > 0);
+        const sentences = text.split(/[.!?]+/).filter(s => s.trim().length > 0);
+        // Strictly capped below CERT_PASS_THRESHOLD so un-evaluated responses never earn a certificate
+        let est = 30;
+        if (words.length >= 5) est += 8;
+        if (words.length >= 15) est += 8;
+        if (words.length >= 30) est += 6;
+        if (words.length >= 60) est += 4;
+        if (sentences.length >= 2) est += 4;
+        est = Math.min(60, Math.max(25, est));
+        return {
+            score: est,
+            verdict: 'weak',
+            strengths: words.length >= 15
+                ? [isVoice ? 'Provided a detailed spoken response' : 'Provided a detailed response']
+                : [isVoice ? 'Spoken response was recorded' : 'Attempted a response'],
+            improvements: ['⚠️ AI evaluation was unavailable — score is a heuristic estimate based on response depth only and cannot qualify for certification']
+        };
+    }
+
     // ══════════════════════════════════════════
     //  SUBMIT ANSWER
     // ══════════════════════════════════════════
@@ -7763,37 +7800,25 @@ Evaluate this full assessment and output a comprehensive certification report in
                 return;
             }
 
-            // Fallback: heuristic scoring from answer text when API is unreachable
-            const fbWords = answer.split(/\s+/).filter(w => w.length > 0);
-            const fbSentences = answer.split(/[.!?]+/).filter(s => s.trim().length > 0);
-            let fbScore = 30;
-            if (fbWords.length >= 5) fbScore += 10;
-            if (fbWords.length >= 15) fbScore += 10;
-            if (fbWords.length >= 30) fbScore += 10;
-            if (fbWords.length >= 60) fbScore += 8;
-            if (fbSentences.length >= 2) fbScore += 7;
-            if (fbSentences.length >= 4) fbScore += 5;
-            fbScore = Math.min(75, fbScore); // Cap — can't earn top marks without real AI eval
-            const fbVerdict = fbScore >= 65 ? 'good' : 'weak';
-            const fbStrengths = fbWords.length >= 15 ? ['Provided a detailed response'] : ['Attempted a response'];
-            const fbImprovements = ['⚠️ AI evaluation was unavailable — score is a heuristic estimate based on response depth'];
+            // Fallback: length-based estimate capped strictly below CERT_PASS_THRESHOLD
+            const fb = computeHeuristicAnswerEstimate(answer, false);
             state.answers.push({
                 questionId: q.id,
                 question: q.question,
                 type: q.type,
                 difficulty: q.difficulty,
                 answer,
-                score: fbScore,
-                verdict: fbVerdict,
-                strengths: fbStrengths,
-                improvements: fbImprovements,
+                score: fb.score,
+                verdict: fb.verdict,
+                strengths: fb.strengths,
+                improvements: fb.improvements,
                 followUp: '',
                 scoringMethod: 'heuristic'
             });
             showFeedback({
-                score: fbScore, verdict: fbVerdict,
-                strengths: fbStrengths,
-                improvements: fbImprovements,
+                score: fb.score, verdict: fb.verdict,
+                strengths: fb.strengths,
+                improvements: fb.improvements,
                 followUp: '',
             });
         } finally {
@@ -7950,29 +7975,16 @@ Evaluate this full assessment and output a comprehensive certification report in
                 return;
             }
 
-            // Heuristic scoring from spoken answer text when API is unreachable
-            const vfbText = finalAnswer || '';
-            const vfbWords = vfbText.split(/\s+/).filter(w => w.length > 0);
-            const vfbSentences = vfbText.split(/[.!?]+/).filter(s => s.trim().length > 0);
-            let vfbScore = 30;
-            if (vfbWords.length >= 5) vfbScore += 10;
-            if (vfbWords.length >= 15) vfbScore += 10;
-            if (vfbWords.length >= 30) vfbScore += 10;
-            if (vfbWords.length >= 60) vfbScore += 8;
-            if (vfbSentences.length >= 2) vfbScore += 7;
-            if (vfbSentences.length >= 4) vfbScore += 5;
-            vfbScore = Math.min(75, vfbScore);
-            const vfbVerdict = vfbScore >= 65 ? 'good' : 'weak';
-            const vfbStrengths = vfbWords.length >= 15 ? ['Provided a detailed spoken response'] : ['Spoken response was recorded'];
-            const vfbImprovements = ['⚠️ AI evaluation was unavailable — score is a heuristic estimate based on response depth'];
+            // Fallback: heuristic scoring from spoken answer text capped below CERT_PASS_THRESHOLD
+            const vfb = computeHeuristicAnswerEstimate(finalAnswer, true);
             if (state.inFollowUp) {
                 const lastIndex = state.answers.length - 1;
                 if (lastIndex >= 0) {
                     state.answers[lastIndex].answer = combinedAnswer;
-                    state.answers[lastIndex].score = vfbScore;
-                    state.answers[lastIndex].verdict = vfbVerdict;
-                    state.answers[lastIndex].strengths = vfbStrengths;
-                    state.answers[lastIndex].improvements = vfbImprovements;
+                    state.answers[lastIndex].score = vfb.score;
+                    state.answers[lastIndex].verdict = vfb.verdict;
+                    state.answers[lastIndex].strengths = vfb.strengths;
+                    state.answers[lastIndex].improvements = vfb.improvements;
                     state.answers[lastIndex].scoringMethod = 'heuristic';
                 }
             } else {
@@ -7982,18 +7994,18 @@ Evaluate this full assessment and output a comprehensive certification report in
                     type: q.type,
                     difficulty: q.difficulty,
                     answer: finalAnswer,
-                    score: vfbScore,
-                    verdict: vfbVerdict,
-                    strengths: vfbStrengths,
-                    improvements: vfbImprovements,
+                    score: vfb.score,
+                    verdict: vfb.verdict,
+                    strengths: vfb.strengths,
+                    improvements: vfb.improvements,
                     followUp: '',
                     scoringMethod: 'heuristic'
                 });
             }
             showFeedback({
-                score: vfbScore, verdict: vfbVerdict,
-                strengths: vfbStrengths,
-                improvements: vfbImprovements,
+                score: vfb.score, verdict: vfb.verdict,
+                strengths: vfb.strengths,
+                improvements: vfb.improvements,
                 followUp: '',
             });
         }
@@ -8328,10 +8340,12 @@ Evaluate this full assessment and output a comprehensive certification report in
                 console.warn('Direct Gemini report error:', dErr.message);
             }
 
-            // Fallback: derive genuine assessment dynamically from evaluated answer history
-            const avgScore = Math.round(
+            // Fallback: derive score from evaluated answer history; mark heuristic if no real AI evaluation occurred
+            const hasAiEval = state.answers.some(a => a && a.scoringMethod !== 'heuristic' && a.answer !== '(skipped)');
+            const rawAvgScore = Math.round(
                 state.answers.reduce((s, a) => s + (a.score || 0), 0) / Math.max(1, state.answers.length)
             );
+            const avgScore = hasAiEval ? rawAvgScore : Math.min(60, rawAvgScore);
             const collectedStrengths = state.answers.flatMap(a => a.strengths || []).filter(Boolean);
             const collectedImprovements = state.answers.flatMap(a => a.improvements || []).filter(Boolean);
             const topStr = collectedStrengths.length ? [...new Set(collectedStrengths)].slice(0, 4) : [
@@ -8344,8 +8358,11 @@ Evaluate this full assessment and output a comprehensive certification report in
             ];
             renderReport({
                 overallScore: avgScore,
-                recommendation: avgScore >= 82 ? 'strong-hire' : avgScore >= 70 ? 'hire' : avgScore >= 50 ? 'lean-hire' : 'no-hire',
-                summary: `Candidate completed ${state.answers.length} targeted assessment questions for ${state.role} (${state.level}) with an average performance rating of ${avgScore}/100. Evaluated responses demonstrate practical familiarity with core role competencies.`,
+                scoringMethod: hasAiEval ? 'ai' : 'heuristic',
+                recommendation: hasAiEval ? (avgScore >= 82 ? 'strong-hire' : avgScore >= 70 ? 'hire' : avgScore >= 50 ? 'lean-hire' : 'no-hire') : 'lean-hire',
+                summary: hasAiEval
+                    ? `Candidate completed ${state.answers.length} targeted assessment questions for ${state.role} (${state.level}) with an average performance rating of ${avgScore}/100. Evaluated responses demonstrate practical familiarity with core role competencies.`
+                    : `Candidate completed ${state.answers.length} assessment questions for ${state.role} (${state.level}), but AI evaluation was unavailable. Score (${avgScore}/100) is a heuristic estimate only and does not qualify for certification.`,
                 topStrengths: topStr,
                 focusAreas: topFocus,
                 nextSteps: [
@@ -8937,7 +8954,8 @@ Evaluate this full assessment and output a comprehensive certification report in
         try {
             if (!report) report = {};
             const answers = (state.answers && state.answers.length > 0) ? state.answers : (report.answers || []);
-            const finalScore = (typeof score === 'number' && score > 0) ? score : (report.overallScore || 70);
+            const isHeuristic = report.scoringMethod === 'heuristic';
+            const finalScore = (typeof score === 'number' && score >= 0) ? score : (report.overallScore || 0);
 
             const typeScores = {};
             answers.forEach(a => {
@@ -8983,7 +9001,8 @@ Evaluate this full assessment and output a comprehensive certification report in
                 focusAreas: report.focusAreas || ['Review domain interview evaluation'],
                 communicationScores: commScores || null,
                 reportHidden: true,
-                passed: finalScore >= CERT_PASS_THRESHOLD,
+                scoringMethod: isHeuristic ? 'heuristic' : 'ai',
+                passed: !isHeuristic && finalScore >= CERT_PASS_THRESHOLD,
                 answers: answers,
                 proctoringViolations: { ...(state.proctoringViolations || {}) }
             };
@@ -9105,6 +9124,12 @@ Evaluate this full assessment and output a comprehensive certification report in
 
         params.set('token', token);
         params.set('b2b', '1');
+        try {
+            const { companyId: adminCompanyId } = getResultsAuthContext();
+            if (adminCompanyId && adminCompanyId !== 'default' && adminCompanyId !== 'SIMP_PRO_MAIN') {
+                params.set('company_id', adminCompanyId);
+            }
+        } catch (e) {}
 
         // Ensure newly generated token is clean and fresh in ALL storage locations
         try {

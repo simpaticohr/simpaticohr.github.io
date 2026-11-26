@@ -14596,6 +14596,7 @@ function mapInterviewRowToCertReport(iv) {
 
   return {
     certId,
+    registrationNumber: fb.registrationNumber || iv.cert_id || certId,
     interviewId: iv.id || null,
     token: iv.token || null,
     name: iv.candidate_name || fb.name || "Candidate",
@@ -14605,6 +14606,11 @@ function mapInterviewRowToCertReport(iv) {
     date: formattedDate,
     savedAt: dt,
     overall: score,
+    cognitive: fb.cognitive ?? null,
+    situational: fb.situational ?? null,
+    attitude: fb.attitude ?? null,
+    jobScore: fb.jobScore ?? null,
+    communication: fb.communication ?? null,
     integrity: trust,
     summary: fb.summary || fb.ai_summary || "Completed AI assessment interview.",
     topStrengths: Array.isArray(fb.topStrengths) ? fb.topStrengths : (Array.isArray(fb.strengths) ? fb.strengths : []),
@@ -14612,7 +14618,8 @@ function mapInterviewRowToCertReport(iv) {
     answers: Array.isArray(fb.answers) ? fb.answers : [],
     communicationScores: fb.communicationScores || null,
     proctoringViolations: fb.proctoringViolations || { totalViolations: iv.violation_count || 0 },
-    passed: score >= 75,
+    scoringMethod: fb.scoringMethod || "ai",
+    passed: fb.scoringMethod !== "heuristic" && score >= 65,
     source: "supabase",
   };
 }
@@ -14713,6 +14720,12 @@ async function handleInterviewSaveResult(request, env, ctx) {
         feedback: {
           certId,
           registrationNumber: body.registrationNumber || certId,
+          cognitive: body.cognitive ?? null,
+          situational: body.situational ?? null,
+          attitude: body.attitude ?? null,
+          jobScore: body.jobScore ?? null,
+          communication: body.communication ?? null,
+          scoringMethod: body.scoringMethod || "ai",
           summary: body.summary || "",
           topStrengths: body.topStrengths || [],
           focusAreas: body.focusAreas || [],
