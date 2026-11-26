@@ -1,8 +1,32 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+  <!-- 🔒 ACCESS GUARD — Career Lab internal report certificate (exempts active B2B candidate invite with certId) -->
+  <script>
+  (function () {
+    try {
+      var p = new URLSearchParams(window.location.search);
+      var isB2BInvite = p.get('b2b') === '1' && !!(p.get('token') || '').trim();
+      if (isB2BInvite) return;
+      var t = localStorage.getItem('simpatico_token');
+      var u = JSON.parse(localStorage.getItem('simpatico_user') || '{}');
+      if (!t || (!u.id && !u.email)) {
+        window.location.replace('career-lab-gate.html');
+        return;
+      }
+      if (u.expiresAt && Date.now() > u.expiresAt) {
+        localStorage.removeItem('simpatico_token');
+        localStorage.removeItem('simpatico_user');
+        window.location.replace('career-lab-gate.html');
+      }
+    } catch (e) {
+      window.location.replace('career-lab-gate.html');
+    }
+  })();
+  </script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="robots" content="noindex, nofollow">
   <title>Pre-Assessment Certificate & Competency Report | Simpatico HR</title>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Playfair+Display:ital,wght@0,700;1,600&family=Great+Vibes&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
@@ -303,12 +327,13 @@
   </div>
 </div>
 
-<div class="actions-bar">
+<div class="actions-bar" id="actionsBar">
   <button class="btn btn-download" onclick="downloadPDF()"><i class="fas fa-file-pdf"></i> Download PDF</button>
   <button class="btn btn-print" onclick="window.print()"><i class="fas fa-print"></i> Print</button>
   <button class="btn btn-png" onclick="downloadPNG()"><i class="fas fa-image"></i> Save as PNG</button>
   <button class="btn btn-linkedin" onclick="shareLinkedIn()"><i class="fab fa-linkedin"></i> Add to LinkedIn</button>
-  <a class="btn btn-back" href="career-lab.html">← Back to Career Lab</a>
+  <a class="btn btn-back" id="btnBackReport" href="cert-interview.html?tab=reports">← Back to Cert Interview Report</a>
+  <a class="btn btn-back" id="btnBackCareerLab" href="career-lab.html">Career Lab</a>
 </div>
 
 <!-- Libraries -->
@@ -365,50 +390,78 @@ function generateQR(canvas, text) {
 // ══════════════════════════════════════════
 window.addEventListener('DOMContentLoaded', () => {
   const params = new URLSearchParams(window.location.search);
-  const certId = params.get('certId') || params.get('id');
+  const certId = (params.get('certId') || params.get('id') || '').trim();
+  const isB2BInvite = params.get('b2b') === '1' && !!(params.get('token') || '').trim();
 
-  const stored = JSON.parse(localStorage.getItem('simpatico_certifications') || '[]');
-  let cert = null;
-  if (certId) {
-    cert = stored.find(c => (c.certId || '').toUpperCase() === certId.toUpperCase());
+  if (isB2BInvite) {
+    const backRep = document.getElementById('btnBackReport');
+    const backLab = document.getElementById('btnBackCareerLab');
+    if (backRep) backRep.style.display = 'none';
+    if (backLab) backLab.style.display = 'none';
   }
 
-  // Cross-device fallback: if opened on a phone or recruiter computer without localStorage
-  if (!cert) {
-    const urlName = params.get('name');
-    const urlRole = params.get('role');
-    const urlScore = parseInt(params.get('overall') || params.get('score') || '0');
-    const urlDate = params.get('date');
-    const urlIntegrity = parseInt(params.get('integrity') || '100');
+  let stored = [];
+  try {
+    stored = JSON.parse(localStorage.getItem('simpatico_certifications') || '[]');
+    if (!Array.isArray(stored)) stored = [];
+  } catch(e) { stored = []; }
 
-    if (urlName || certId) {
+  let cert = null;
+  if (certId && certId.toUpperCase() !== 'SIMP-VERIFIED') {
+    cert = stored.find(c =>
+      ((c.certId || '').toUpperCase() === certId.toUpperCase()) ||
+      ((c.registrationNumber || '').toUpperCase() === certId.toUpperCase())
+    );
+  }
+
+  // Allow report-launched preview within an authenticated Career Lab / valid B2B flow
+  if (!cert && certId && certId.toUpperCase() !== 'SIMP-VERIFIED') {
+    const urlName = (params.get('name') || '').trim();
+    const urlRole = (params.get('role') || '').trim();
+    const urlScore = parseInt(params.get('overall') || params.get('score') || '0', 10);
+    const urlDate = (params.get('date') || '').trim();
+    const urlIntegrity = parseInt(params.get('integrity') || '100', 10);
+
+    if (urlName && urlName !== 'Candidate') {
       cert = {
-        certId: certId || 'SIMP-VERIFIED',
-        name: urlName || 'Candidate',
+        certId: certId,
+        name: urlName,
         role: urlRole || 'Professional',
         overall: urlScore || 70,
         date: urlDate || new Date().toLocaleDateString('en-US', { year:'numeric', month:'long', day:'numeric' }),
-        cognitive: parseInt(params.get('cog') || urlScore || '70'),
-        situational: parseInt(params.get('sit') || urlScore || '70'),
-        attitude: parseInt(params.get('att') || urlScore || '70'),
-        jobScore: parseInt(params.get('job') || urlScore || '65'),
-        communication: parseInt(params.get('comm') || urlScore || '60'),
+        cognitive: parseInt(params.get('cog') || urlScore || '70', 10),
+        situational: parseInt(params.get('sit') || urlScore || '70', 10),
+        attitude: parseInt(params.get('att') || urlScore || '70', 10),
+        jobScore: parseInt(params.get('job') || urlScore || '65', 10),
+        communication: parseInt(params.get('comm') || urlScore || '60', 10),
         integrity: urlIntegrity
       };
-      try {
-        stored.push(cert);
-        localStorage.setItem('simpatico_certifications', JSON.stringify(stored));
-      } catch(e) {}
     }
   }
 
-  // Fallback to last stored certificate or active candidate
   if (!cert) {
-    cert = stored[stored.length - 1] || {
-      name: "Faisalkvn", role: "HR Executive", certId: certId || "SIMP-MTACOR",
-      date: new Date().toLocaleDateString('en-US', { year:'numeric', month:'long', day:'numeric' }),
-      cognitive: 70, situational: 70, attitude: 70, jobScore: 65, communication: 57, integrity: 60, overall: 70
-    };
+    const frame = document.getElementById('certFrame');
+    const actionsBar = document.getElementById('actionsBar');
+    if (actionsBar) {
+      actionsBar.innerHTML = isB2BInvite
+        ? ''
+        : '<a class="btn btn-back" href="cert-interview.html?tab=reports">← Open Cert Interview Reports</a><a class="btn btn-back" href="career-lab.html">Career Lab</a>';
+    }
+    if (frame) {
+      frame.innerHTML = `
+        <div style="text-align:center; padding:40px 20px; position:relative; z-index:1;">
+          <img src="favicon-96x96.png" alt="Simpatico HR Logo" class="cert-logo">
+          <div class="brand-logo" style="margin-bottom:14px;">SIMPATICO <span>HR</span></div>
+          <div style="display:inline-flex;align-items:center;gap:8px;background:rgba(245,158,11,0.12);border:1px solid rgba(245,158,11,0.35);color:#fbbf24;padding:8px 18px;border-radius:100px;font-size:0.85rem;font-weight:700;margin-bottom:18px;">
+            <i class="fas fa-lock"></i> Assessment Certificate Not Available Directly
+          </div>
+          <h2 style="font-family:'Playfair Display',serif;font-size:1.8rem;color:#fff;margin-bottom:10px;">Open From Cert Interview Report &amp; Analysis</h2>
+          <p style="color:#94a3b8;max-width:540px;margin:0 auto 24px;line-height:1.7;font-size:0.95rem;">
+            Pre-assessment certificates are generated exclusively from completed assessments inside <strong>Career Lab &rarr; Cert Interview &rarr; Report &amp; Analysis</strong>. Select a verified candidate report there to view or download their certificate.
+          </p>
+        </div>`;
+    }
+    return;
   }
 
   document.getElementById('cName').textContent = cert.name || 'Candidate';

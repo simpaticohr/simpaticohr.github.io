@@ -1,13 +1,30 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+    <!-- 🔒 ACCESS GUARD — Requires Career Lab auth (exempts B2B/token invites) -->
+    <script>
+    (function(){
+      try {
+        var p = new URLSearchParams(window.location.search);
+        if (p.get('b2b') === '1' || p.has('token') || p.has('api_key')) return;
+        var t = localStorage.getItem('simpatico_token');
+        var u = JSON.parse(localStorage.getItem('simpatico_user') || '{}');
+        if (!t || (!u.id && !u.email)) { window.location.replace('career-lab-gate.html'); return; }
+        if (u.expiresAt && Date.now() > u.expiresAt) {
+          localStorage.removeItem('simpatico_token');
+          localStorage.removeItem('simpatico_user');
+          window.location.replace('career-lab-gate.html');
+        }
+      } catch(e) { window.location.replace('career-lab-gate.html'); }
+    })();
+    </script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AI Certification & Voice Assessment Platform | Simpatico HR</title>
     <meta name="description" content="Simpatico HR AI Certification & Voice Assessment Platform. Take hands-free AI voice interviews, earn tamper-proof cryptographic skill certificates, and get verified for top employers.">
     <meta name="keywords" content="AI interview platform, candidate evaluation, technical interview, hiring tool, AI scoring, interview assessment, AI certification">
     <link rel="canonical" href="https://simpaticohr.in/cert-interview.html">
-    <meta name="robots" content="index, follow">
+    <meta name="robots" content="noindex, nofollow">
     <meta name="author" content="Simpatico HR">
     <meta name="theme-color" content="#0a0a0f">
 
@@ -2585,8 +2602,11 @@
             if (inviteBanner) inviteBanner.style.display = 'none';
             if (candRoleSummary) candRoleSummary.style.display = 'flex';
 
+            const reqTab = (_urlParams.get('tab') || '').toLowerCase();
             if (_urlParams.get('admin') === '1' || _urlParams.get('admin') === 'true') {
                 switchPortalTab('admin');
+            } else if (reqTab === 'reports' || window.location.hash === '#reports') {
+                switchPortalTab('reports');
             } else {
                 switchPortalTab('candidate');
             }
@@ -6360,7 +6380,7 @@ GUIDELINES:
                 const rep = state._lastGeneratedReport;
                 const activeCert = {
                     certId: state._lastCertId || ('SIMP-' + Date.now().toString(36).toUpperCase().substring(0, 6)),
-                    name: state.candidateName || _b2bCandidateName || localStorage.getItem('cand_name') || 'Faisalkvn',
+                    name: state.candidateName || _b2bCandidateName || localStorage.getItem('cand_name') || 'Candidate',
                     email: state.candidateEmail || _b2bCandidateEmail || '',
                     role: state.role || 'HR Executive',
                     level: state.level || 'Mid-Level',
@@ -8774,7 +8794,8 @@ Evaluate this full assessment and output a comprehensive certification report in
         const name = state.candidateName || _b2bCandidateName || localStorage.getItem('cand_name') || 'Candidate';
         const role = state.role || 'Professional';
         const score = state._lastGeneratedReport?.overallScore || 70;
-        const certUrl = `certificate.html?certId=${encodeURIComponent(certId)}&name=${encodeURIComponent(name)}&role=${encodeURIComponent(role)}&score=${encodeURIComponent(score)}`;
+        const b2bQs = (_isB2B && _b2bToken && _b2bCertDownload) ? `&b2b=1&token=${encodeURIComponent(_b2bToken)}` : '';
+        const certUrl = `certificate.html?certId=${encodeURIComponent(certId)}&name=${encodeURIComponent(name)}&role=${encodeURIComponent(role)}&score=${encodeURIComponent(score)}${b2bQs}`;
         window.open(certUrl, '_blank');
     }
 
