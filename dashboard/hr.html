@@ -2428,6 +2428,16 @@
                                 }).eq('id', companyId);
 
                                 if (error) console.warn('[CompanyProfile] DB update error:', error.message);
+
+                                // Cascade updated company name to all existing jobs for this company
+                                try {
+                                    const { error: jobErr } = await db.from('jobs').update({
+                                        company_name: name
+                                    }).eq('company_id', companyId);
+                                    if (jobErr) console.warn('[CompanyProfile] Jobs table company_name update warning:', jobErr.message);
+                                } catch (jEx) {
+                                    console.warn('[CompanyProfile] Jobs table update exception:', jEx);
+                                }
                             }
                         }
 
@@ -2442,6 +2452,19 @@
                         compData.primary_color = color;
                         compData.description = desc;
                         localStorage.setItem('simpatico_company', JSON.stringify(compData));
+
+                        // Immediately sync in-memory DataStore jobs
+                        if (window.DataStore && typeof DataStore.update === 'function') {
+                            DataStore.update(state => {
+                                if (Array.isArray(state.jobs)) {
+                                    state.jobs.forEach(j => {
+                                        if (j.company_id === companyId) {
+                                            j.company_name = name;
+                                        }
+                                    });
+                                }
+                            });
+                        }
 
                         showToast('✨ Company Profile & Brand Logo saved successfully!', 'success');
                     } catch(err) {
@@ -3772,10 +3795,19 @@ async function syncWithSupabase() {
 
     // 3. Fetch Applications — STRICTLY FILTERED by tenant_id
     try {
-        const appRes = await db.from('job_applications').select('*, jobs(title, department)')
-            .eq('company_id', companyId)
+        const appRes = await db.from('job_applications').select('*')
+            .or(`company_id.eq.${companyId},tenant_id.eq.${companyId}`)
             .order('created_at', { ascending: false });
         if (!appRes.error && appRes.data) {
+            // Safely map job title & department from already synchronized jobs without broken DB join
+            const jobsList = DataStore.get().jobs || [];
+            const jobMap = {};
+            jobsList.forEach(j => { jobMap[j.id] = j; });
+            appRes.data.forEach(a => {
+                if (!a.jobs && a.job_id && jobMap[a.job_id]) {
+                    a.jobs = { title: jobMap[a.job_id].title, department: jobMap[a.job_id].department };
+                }
+            });
             DataStore.update(data => {
                 data.job_applications = appRes.data;
                 data.jobs.forEach(job => {

@@ -1,13 +1,30 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+    <!-- 🔒 ACCESS GUARD — Requires Career Lab auth (exempts B2B/token invites) -->
+    <script>
+    (function(){
+      try {
+        var p = new URLSearchParams(window.location.search);
+        if (p.get('b2b') === '1' || p.has('token') || p.has('api_key')) return;
+        var t = localStorage.getItem('simpatico_token');
+        var u = JSON.parse(localStorage.getItem('simpatico_user') || '{}');
+        if (!t || (!u.id && !u.email)) { window.location.replace('career-lab-gate.html'); return; }
+        if (u.expiresAt && Date.now() > u.expiresAt) {
+          localStorage.removeItem('simpatico_token');
+          localStorage.removeItem('simpatico_user');
+          window.location.replace('career-lab-gate.html');
+        }
+      } catch(e) { window.location.replace('career-lab-gate.html'); }
+    })();
+    </script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AI Certification & Voice Assessment Platform | Simpatico HR</title>
     <meta name="description" content="Simpatico HR AI Certification & Voice Assessment Platform. Take hands-free AI voice interviews, earn tamper-proof cryptographic skill certificates, and get verified for top employers.">
     <meta name="keywords" content="AI interview platform, candidate evaluation, technical interview, hiring tool, AI scoring, interview assessment, AI certification">
     <link rel="canonical" href="https://simpaticohr.in/cert-interview.html">
-    <meta name="robots" content="index, follow">
+    <meta name="robots" content="noindex, nofollow">
     <meta name="author" content="Simpatico HR">
     <meta name="theme-color" content="#0a0a0f">
 
@@ -1455,6 +1472,7 @@
 <body>
     <div class="bg-mesh"></div>
     <div class="bg-grid"></div>
+    <script src="js/hr-config.js"></script>
     <script src="js/avatar-engine.js"></script>
     <script src="js/simli-adapter.js"></script>
     <script src="js/duix-renderer.js"></script>
@@ -1473,7 +1491,7 @@
             <div class="nav-links">
                 <a href="index.html">Home</a>
                 <a href="services.html">Services</a>
-                <a href="projects.html">Projects</a>
+                <a href="career-lab.html">Career Lab</a>
                 <a href="evalis-interview.html" class="active">Interview</a>
                 <a href="about.html">About</a>
                 <a href="contact.html" class="nav-cta">Contact →</a>
@@ -1982,8 +2000,8 @@
                         <input type="text" id="admin-reports-search" class="form-input" placeholder="🔍 Search by Candidate Name, Email, or Role..." oninput="filterAdminReports()" style="flex:2;min-width:220px;">
                         <select id="admin-reports-filter-status" class="form-select" onchange="filterAdminReports()" style="flex:1;min-width:150px;">
                             <option value="all" selected>All Statuses</option>
-                            <option value="passed">🏆 Passed (>= 75%)</option>
-                            <option value="failed">⚠️ Failed (< 75%)</option>
+                            <option value="passed">🏆 Passed (>= 65%)</option>
+                            <option value="failed">⚠️ Failed / Unverified (< 65%)</option>
                         </select>
                     </div>
 
@@ -2399,6 +2417,30 @@
        ═══════════════════════════════════════════ */
 
     const API_BASE = 'https://evalis-api.simpaticohrconsultancy.workers.dev';
+    const RESULTS_API_BASE = (window.SIMPATICO_CONFIG && window.SIMPATICO_CONFIG.workerUrl) || 'https://simpatico-hr-ats.simpaticohrconsultancy.workers.dev';
+
+    function getResultsAuthContext() {
+        const headers = { 'Content-Type': 'application/json' };
+        let token = null;
+        let companyId = null;
+        try {
+            token = localStorage.getItem('simpatico_token') || localStorage.getItem('sh_token') || localStorage.getItem('sb_token') || null;
+            if (!token) {
+                for (let i = 0; i < localStorage.length; i++) {
+                    const k = localStorage.key(i);
+                    if (k && k.startsWith('sb-') && k.endsWith('-auth-token')) {
+                        const parsed = JSON.parse(localStorage.getItem(k) || '{}');
+                        if (parsed && parsed.access_token) { token = parsed.access_token; break; }
+                    }
+                }
+            }
+            const user = JSON.parse(localStorage.getItem('simpatico_user') || '{}');
+            companyId = user.company_id || user.tenant_id || _urlParams.get('company_id') || null;
+        } catch (e) {}
+        if (token) headers['Authorization'] = 'Bearer ' + token;
+        if (companyId && companyId !== 'default') headers['X-Tenant-ID'] = companyId;
+        return { headers, token, companyId };
+    }
 
     // ── DuiX Avatar Configuration (no vendor keys required) ──
     const DUIX_CONFIG = {
@@ -2560,8 +2602,11 @@
             if (inviteBanner) inviteBanner.style.display = 'none';
             if (candRoleSummary) candRoleSummary.style.display = 'flex';
 
+            const reqTab = (_urlParams.get('tab') || '').toLowerCase();
             if (_urlParams.get('admin') === '1' || _urlParams.get('admin') === 'true') {
                 switchPortalTab('admin');
+            } else if (reqTab === 'reports' || window.location.hash === '#reports') {
+                switchPortalTab('reports');
             } else {
                 switchPortalTab('candidate');
             }
@@ -4546,6 +4591,51 @@
         return float32Array;
     }
 
+    function isAiAudioPlaying() {
+        try {
+            if (audioQueue.length > 0) return true;
+            if (audioCtx && nextPlayTime > audioCtx.currentTime + 0.12) return true;
+        } catch (e) {}
+        return false;
+    }
+
+    function _enterLiveListeningState() {
+        if (!state.liveWs || state._isFinishingVoiceSession) return;
+        state.aiSpeakingActive = false;
+        state._pendingTurnListen = false;
+        if (state._audioDrainTimer) {
+            clearTimeout(state._audioDrainTimer);
+            state._audioDrainTimer = null;
+        }
+        const avatarStage = document.getElementById('avatar-stage');
+        if (avatarStage) avatarStage.className = 'avatar-stage listening';
+        if (window.aiAvatar) {
+            window.aiAvatar.setState('listening');
+            window.aiAvatar.setAmplitude(0);
+        }
+        if (_duixActive && typeof DuixRenderer !== 'undefined') {
+            DuixRenderer.onState('listening');
+            duixPreRenderLikelyLines();
+        }
+        const dot = document.getElementById('voice-status-dot');
+        if (dot) dot.className = 'status-dot pulse-green';
+        const statusTxt = document.getElementById('voice-status-text');
+        if (statusTxt) statusTxt.textContent = 'LISTENING TO YOU';
+        const instr = document.getElementById('voice-instruction');
+        if (instr) instr.textContent = 'Speak your response. Speak naturally.';
+        const subs = document.getElementById('subtitles-text');
+        if (subs && (!subs.textContent || subs.textContent === 'Connecting to AI Interviewer...')) {
+            subs.textContent = 'Listening...';
+        }
+        const finishBtn = document.getElementById('btn-voice-finish');
+        if (finishBtn) finishBtn.disabled = false;
+
+        playChime('listening');
+        startSpeakingTimer();
+        startTimer();
+        startWaveform();
+    }
+
     function playPcmChunk(base64Pcm) {
         const ctx = getAudioContext();
         if (ctx.state === 'suspended') ctx.resume();
@@ -4580,6 +4670,13 @@
             if (index > -1) {
                 audioQueue.splice(index, 1);
             }
+            if (audioQueue.length === 0 && state._pendingTurnListen && state.liveWs && !state._isFinishingVoiceSession) {
+                setTimeout(() => {
+                    if (!isAiAudioPlaying() && state._pendingTurnListen) {
+                        _enterLiveListeningState();
+                    }
+                }, 150);
+            }
         };
     }
 
@@ -4591,6 +4688,10 @@
         });
         audioQueue.length = 0;
         nextPlayTime = 0;
+        if (state._audioDrainTimer) {
+            clearTimeout(state._audioDrainTimer);
+            state._audioDrainTimer = null;
+        }
         // Clear Simli lip-sync buffer on interrupt
         if (_simliAdapter && _simliAdapter.isActive()) {
             _simliAdapter.clearBuffer();
@@ -4598,6 +4699,7 @@
     }
 
     async function startStreamingMicToWs(ws) {
+        stopMicStreaming();
         try {
             micAudioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
             const source = micAudioContext.createMediaStreamSource(micStream);
@@ -4607,8 +4709,8 @@
             micProcessor.connect(micAudioContext.destination);
 
             micProcessor.onaudioprocess = function(e) {
-                // Only stream microphone to Gemini if the AI is NOT speaking
-                if (state.aiSpeakingActive) return;
+                // Only stream microphone to Gemini after setup handshake AND after speaker audio finishes playing
+                if (!state._wsSetupComplete || state.aiSpeakingActive || isAiAudioPlaying()) return;
 
                 const inputData = e.inputBuffer.getChannelData(0); // Float32Array
                 
@@ -4694,28 +4796,38 @@
         return definitiveConcludingPhrases.some(phrase => aiTextLower.includes(phrase));
     }
 
-    async function startLiveVoiceInterview() {
+    async function startLiveVoiceInterview(isReconnect = false) {
         if (state.liveWs) {
+            state._intentionalWsClose = true;
             try { state.liveWs.close(); } catch(e) {}
             state.liveWs = null;
         }
+        if (state._wsHandshakeTimer) {
+            clearTimeout(state._wsHandshakeTimer);
+            state._wsHandshakeTimer = null;
+        }
 
-        // Reset state for websocket session
-        state.liveTranscript = [];
-        state.answers = [];
-        state.currentIndex = 0;
+        if (!isReconnect) {
+            // Reset state for fresh websocket session
+            state.liveTranscript = [];
+            state.answers = [];
+            state.currentIndex = 0;
+            state._modelTurnCount = 0;
+            state._liveReconnectAttempts = 0;
+        }
+        state._intentionalWsClose = false;
         state.aiSpeakingActive = false;
+        state._pendingTurnListen = false;
         state.aiSpokenTextBuffer = '';
         state.userSpeechTranscript = '';
         state._wsSetupComplete = false;
-        state._modelTurnCount = 0;
         state._concludingWindowTimer = null;
         nextPlayTime = 0;
         audioQueue = [];
 
         // Connect UI state
-        document.getElementById('q-number').textContent = 'LIVE';
-        document.getElementById('q-text').textContent = 'Connecting to AI Interviewer...';
+        document.getElementById('q-number').textContent = isReconnect ? `Q${state.currentIndex + 1}` : 'LIVE';
+        document.getElementById('q-text').textContent = isReconnect ? 'Reconnecting to AI Interviewer...' : 'Connecting to AI Interviewer...';
         document.getElementById('btn-voice-finish').disabled = false;
         document.getElementById('btn-voice-finish').textContent = '⏹ End Interview';
         
@@ -4728,19 +4840,29 @@
         }
         window.aiAvatar.setState('processing');
 
-        // Initialize selected avatar renderer (HyperReal / Simli / DuiX / Orb)
-        initSelectedAvatar().then(() => {
-            console.log('[Voice] Selected avatar renderer initialized.');
-        });
+        if (!isReconnect) {
+            // Initialize selected avatar renderer (HyperReal / Simli / DuiX / Orb)
+            initSelectedAvatar().then(() => {
+                console.log('[Voice] Selected avatar renderer initialized.');
+            });
+        }
         document.getElementById('voice-status-dot').className = 'status-dot pulse-blue';
-        document.getElementById('voice-status-text').textContent = 'CONNECTING';
-        document.getElementById('voice-instruction').textContent = 'Establishing secure session with AI Interviewer...';
-        document.getElementById('subtitles-text').textContent = 'Connecting to AI Interviewer...';
+        document.getElementById('voice-status-text').textContent = isReconnect ? 'RECONNECTING' : 'CONNECTING';
+        document.getElementById('voice-instruction').textContent = isReconnect
+            ? 'Connection briefly interrupted — resuming your session...'
+            : 'Establishing secure session with AI Interviewer...';
+        document.getElementById('subtitles-text').textContent = isReconnect ? 'Reconnecting...' : 'Connecting to AI Interviewer...';
 
-        // Secure mic access
+        // Secure mic access with hardware echo cancellation when supported
         try {
             if (!micStream) {
-                micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                try {
+                    micStream = await navigator.mediaDevices.getUserMedia({
+                        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
+                    });
+                } catch (aecErr) {
+                    micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                }
             }
         } catch (err) {
             const btn = document.getElementById('btn-start');
@@ -4866,54 +4988,65 @@ GUIDELINES:
             };
             ws.send(JSON.stringify(setupMsg));
 
-            // Trigger the initial turn
-            const startTurn = {
-                clientContent: {
-                    turns: [{
-                        role: "user",
-                        parts: [{ text: "Hello! I am ready to start the interview." }]
-                    }],
-                    turnComplete: true
+            const beginLiveConversation = () => {
+                if (!state.liveWs || state.liveWs !== ws || ws.readyState !== WebSocket.OPEN || state._wsStartedConversation) return;
+                state._wsStartedConversation = true;
+                state._wsSetupComplete = true;
+                if (state._wsHandshakeTimer) {
+                    clearTimeout(state._wsHandshakeTimer);
+                    state._wsHandshakeTimer = null;
                 }
+
+                const resumeSummary = isReconnect && state.liveTranscript.length > 0
+                    ? `We were disconnected briefly. Continue smoothly from Question ${Math.min(targetQuestions, Math.max(1, state._modelTurnCount))} of ${targetQuestions}. Prior exchange summary: ` +
+                      state.liveTranscript.slice(-4).map(t => `${t.role === 'user' ? 'Candidate' : 'Interviewer'}: ${(t.parts?.[0]?.text || '').substring(0, 140)}`).join(' | ')
+                    : "Hello! I am ready to start the interview.";
+
+                ws.send(JSON.stringify({
+                    clientContent: {
+                        turns: [{
+                            role: "user",
+                            parts: [{ text: resumeSummary }]
+                        }],
+                        turnComplete: true
+                    }
+                }));
+
+                avatarStage.className = 'avatar-stage speaking';
+                if (window.aiAvatar) window.aiAvatar.setState('speaking');
+                document.getElementById('voice-status-dot').className = 'status-dot pulse-blue';
+                document.getElementById('voice-status-text').textContent = 'AI INTERVIEWER ACTIVE';
+                document.getElementById('voice-instruction').textContent = 'AI Interviewer is speaking. Listen carefully.';
+                document.getElementById('subtitles-text').textContent = isReconnect ? 'Resumed interview...' : 'Connected. Starting interview...';
+
+                startStreamingMicToWs(ws);
             };
-            ws.send(JSON.stringify(startTurn));
 
-            avatarStage.className = 'avatar-stage speaking';
-            if (window.aiAvatar) window.aiAvatar.setState('speaking');
-            document.getElementById('voice-status-dot').className = 'status-dot pulse-blue';
-            document.getElementById('voice-status-text').textContent = 'AI INTERVIEWER ACTIVE';
-            document.getElementById('voice-instruction').textContent = 'AI Interviewer is speaking. Listen carefully.';
-            document.getElementById('subtitles-text').textContent = 'Connected. Starting interview...';
-
-            // Set up mic streaming listener
-            startStreamingMicToWs(ws);
-
-            // Also start Web Speech Recognition in parallel so the candidate's spoken responses
-            // are captured into text transcript for authentic AI report evaluation
-            if (!state.recognition) {
-                state.recognition = initSpeechRecognition();
-            }
-            if (state.recognition && !state.recognitionActive) {
-                try {
-                    state.recognition.start();
-                    console.log('[Live Voice] Speech recognition active for candidate transcription.');
-                } catch(e) {
-                    console.warn('[Live Voice] Speech recognition start note:', e.message);
+            state._wsStartedConversation = false;
+            state._beginLiveConversation = beginLiveConversation;
+            // Fallback in case proxy skips emitting setupComplete event
+            state._wsHandshakeTimer = setTimeout(() => {
+                if (!state._wsSetupComplete) {
+                    console.warn('[Gemini Live] setupComplete timeout — starting turn safely.');
+                    beginLiveConversation();
                 }
-            }
+            }, 3500);
 
-            // ── HARD INTERVIEW TIME LIMIT ──
-            // Absolute safety net: force-end the interview after max duration.
-            // Cannot be reset by any activity. Ensures interview ALWAYS ends.
-            const maxMinutes = (targetQuestions * 3) + 5; // 3 min per Q + 5 min buffer
-            state._hardInterviewTimeout = setTimeout(() => {
-                console.log(`[HARD TIMEOUT] Interview exceeded ${maxMinutes} minute limit. Force-ending.`);
-                if (state.liveWs) {
-                    state._isFinishingVoiceSession = false; // Reset guard
-                    finishLiveVoiceInterview();
-                }
-            }, maxMinutes * 60 * 1000);
-            console.log(`[Interview] Hard timeout set: ${maxMinutes} minutes`);
+            if (!isReconnect) {
+                // ── HARD INTERVIEW TIME LIMIT ──
+                // Absolute safety net: force-end the interview after max duration.
+                // Cannot be reset by any activity. Ensures interview ALWAYS ends.
+                const maxMinutes = (targetQuestions * 3) + 5; // 3 min per Q + 5 min buffer
+                if (state._hardInterviewTimeout) clearTimeout(state._hardInterviewTimeout);
+                state._hardInterviewTimeout = setTimeout(() => {
+                    console.log(`[HARD TIMEOUT] Interview exceeded ${maxMinutes} minute limit. Force-ending.`);
+                    if (state.liveWs) {
+                        state._isFinishingVoiceSession = false; // Reset guard
+                        finishLiveVoiceInterview();
+                    }
+                }, maxMinutes * 60 * 1000);
+                console.log(`[Interview] Hard timeout set: ${maxMinutes} minutes`);
+            }
         };
 
         ws.onmessage = async (event) => {
@@ -4933,12 +5066,19 @@ GUIDELINES:
             if (msg.setupComplete) {
                 console.log('[Gemini Live] Handshake complete! setupComplete received.');
                 state._wsSetupComplete = true;
+                if (typeof state._beginLiveConversation === 'function') {
+                    state._beginLiveConversation();
+                }
                 return;
             }
 
             // Handle server-side error messages (e.g. failed Gemini connection)
             if (msg.error) {
                 console.error("Server WebSocket error:", msg.error);
+                if (state._wsHandshakeTimer) {
+                    clearTimeout(state._wsHandshakeTimer);
+                    state._wsHandshakeTimer = null;
+                }
                 showError('setup-error', msg.error);
                 state.liveWs = null; // Prevent finishLiveVoiceInterview from running
                 stopMicStreaming();
@@ -4955,7 +5095,9 @@ GUIDELINES:
                     console.log("AI was interrupted by speech");
                     stopPlayback();
                     state.aiSpeakingActive = false;
+                    state._pendingTurnListen = false;
                     state.aiSpokenTextBuffer = '';
+                    _enterLiveListeningState();
                     return;
                 }
 
@@ -5047,7 +5189,6 @@ GUIDELINES:
                     const isAIConcluding = _checkConcludingPhrases(aiText, effectiveTurns, targetQuestions);
 
                     state.aiSpokenTextBuffer = '';
-                    state.aiSpeakingActive = false;
 
                     // Clear any previous inactivity timeout
                     if (state._liveInactivityTimer) {
@@ -5055,15 +5196,15 @@ GUIDELINES:
                         state._liveInactivityTimer = null;
                     }
 
-                    // Auto-end conditions:
-                    // Only auto-end when all target questions are genuinely completed and AI concluded
+                    // Auto-end only when all target questions are completed and AI concluded
                     const shouldAutoEnd = (isAIConcluding && effectiveTurns >= targetQuestions) ||
-                                          (userTurnsCount >= targetQuestions && isAIConcluding) ||
-                                          (userTurnsCount >= targetQuestions && state.timerSeconds <= 0);
+                                          (userTurnsCount >= targetQuestions && isAIConcluding);
 
                     if (shouldAutoEnd) {
                         if (state._autoEnding) return;
                         state._autoEnding = true;
+                        state.aiSpeakingActive = false;
+                        state._pendingTurnListen = false;
                         console.log(`Interview auto-end: all ${targetQuestions} questions completed successfully.`);
                         stopMicStreaming();
                         cleanupMicStream();
@@ -5074,54 +5215,59 @@ GUIDELINES:
                             finishBtn.textContent = '⌛ Finalizing Report...';
                         }
                         
-                        // Clean timeout to allow farewell audio to finish cleanly
-                        setTimeout(() => {
-                            console.log("Auto-end timer fired. Finalizing voice interview...");
-                            finishLiveVoiceInterview();
-                        }, 2500);
+                        // Wait cleanly for queued farewell audio to finish playing before finalizing report
+                        const waitFarewell = () => {
+                            if (!isAiAudioPlaying()) {
+                                console.log("Farewell audio drained. Finalizing voice interview...");
+                                finishLiveVoiceInterview();
+                            } else {
+                                setTimeout(waitFarewell, 250);
+                            }
+                        };
+                        setTimeout(waitFarewell, 1200);
                         return;
                     }
 
-                    avatarStage.className = 'avatar-stage listening';
-                    if (window.aiAvatar) {
-                        window.aiAvatar.setState('listening');
-                        window.aiAvatar.setAmplitude(0);
+                    // Only enter listening & unmute mic AFTER all queued Web Audio buffers finish playing
+                    if (!isAiAudioPlaying()) {
+                        _enterLiveListeningState();
+                    } else {
+                        state._pendingTurnListen = true;
+                        const remainMs = audioCtx ? Math.max(250, Math.round((nextPlayTime - audioCtx.currentTime) * 1000) + 200) : 1500;
+                        if (state._audioDrainTimer) clearTimeout(state._audioDrainTimer);
+                        state._audioDrainTimer = setTimeout(() => {
+                            if (state._pendingTurnListen) _enterLiveListeningState();
+                        }, Math.min(12000, remainMs));
                     }
-                    if (_duixActive && typeof DuixRenderer !== 'undefined') {
-                        DuixRenderer.onState('listening');
-                        duixPreRenderLikelyLines();
-                    }
-                    document.getElementById('voice-status-dot').className = 'status-dot pulse-green';
-                    document.getElementById('voice-status-text').textContent = 'LISTENING TO YOU';
-                    document.getElementById('voice-instruction').textContent = 'Speak your response. Speak naturally.';
-                    document.getElementById('subtitles-text').textContent = 'Listening...';
-                    document.getElementById('btn-voice-finish').disabled = false;
-
-                    playChime('listening');
-                    startSpeakingTimer();
-                    startTimer();
-                    startWaveform();
                 }
             }
 
-            // Handle user's speech transcription from Gemini Live
-            if (msg.inputTranscription && msg.inputTranscription.text) {
-                const text = msg.inputTranscription.text;
-                console.log("User transcript:", text);
-                document.getElementById('subtitles-text').textContent = text;
-                // Accumulate user speech (each inputTranscription is a complete utterance)
-                state.userSpeechTranscript = text;
-                // Barge-in: if AI is speaking and user starts talking, stop playback
-                if (state.aiSpeakingActive) {
-                    stopPlayback();
-                    state.aiSpeakingActive = false;
+            // Handle user's speech transcription from Gemini Live (supports top-level & serverContent envelopes)
+            const inTrans = msg.serverContent?.inputTranscription || msg.inputTranscription;
+            if (inTrans && inTrans.text) {
+                const text = inTrans.text.trim();
+                if (text) {
+                    console.log("User transcript:", text);
+                    document.getElementById('subtitles-text').textContent = text;
+                    if (!state.userSpeechTranscript) {
+                        state.userSpeechTranscript = text;
+                    } else if (text.startsWith(state.userSpeechTranscript)) {
+                        state.userSpeechTranscript = text;
+                    } else {
+                        state.userSpeechTranscript = (state.userSpeechTranscript + ' ' + text).replace(/\s+/g, ' ').trim();
+                    }
+                    // Barge-in only when speaker audio isn't actively trailing from AI
+                    if (state.aiSpeakingActive && !isAiAudioPlaying()) {
+                        stopPlayback();
+                        state.aiSpeakingActive = false;
+                    }
                 }
             }
 
             // Handle AI's speech transcription for subtitles
-            // In AUDIO-only mode, this is the PRIMARY source of text — arrives AFTER turnComplete
-            if (msg.outputTranscription && msg.outputTranscription.text) {
-                state.aiSpokenTextBuffer += msg.outputTranscription.text;
+            const outTrans = msg.serverContent?.outputTranscription || msg.outputTranscription;
+            if (outTrans && outTrans.text) {
+                state.aiSpokenTextBuffer += outTrans.text;
                 document.getElementById('subtitles-text').textContent = state.aiSpokenTextBuffer;
                 document.getElementById('q-text').textContent = state.aiSpokenTextBuffer;
 
@@ -5161,6 +5307,10 @@ GUIDELINES:
 
         ws.onclose = (event) => {
             console.log(`WebSocket closed: code=${event.code}, reason=${event.reason || 'none'}`);
+            if (state._wsHandshakeTimer) {
+                clearTimeout(state._wsHandshakeTimer);
+                state._wsHandshakeTimer = null;
+            }
             stopPlayback();
             stopWaveform();
             stopSpeakingTimer();
@@ -5169,6 +5319,10 @@ GUIDELINES:
             if (state._liveInactivityTimer) {
                 clearTimeout(state._liveInactivityTimer);
                 state._liveInactivityTimer = null;
+            }
+
+            if (state._intentionalWsClose || ws !== state.liveWs) {
+                return;
             }
 
             // Flush any pending user transcript before counting
@@ -5205,6 +5359,17 @@ GUIDELINES:
                 showScreen('screen-interview');
                 loadQuestion(0);
                 return;
+            } else if (state.liveWs && closedModelTurns >= 1 && (state._liveReconnectAttempts || 0) < 2 && !state._isFinishingVoiceSession) {
+                state._liveReconnectAttempts = (state._liveReconnectAttempts || 0) + 1;
+                state.liveWs = null;
+                stopMicStreaming();
+                console.warn(`[Gemini Live] Mid-interview drop at turn ${closedModelTurns} — attempting reconnect #${state._liveReconnectAttempts}...`);
+                setTimeout(() => {
+                    if (!state._isFinishingVoiceSession) {
+                        startLiveVoiceInterview(true);
+                    }
+                }, 1200);
+                return;
             } else if (state.liveWs) {
                 state.liveWs = null;
                 showPrematureCloseWarning(closedUserTurns, closedTargetQ);
@@ -5213,8 +5378,34 @@ GUIDELINES:
 
         ws.onerror = (err) => {
             console.error("WebSocket error:", err);
-            showError('setup-error', 'Lost connection to AI server.');
+            const vInstr = document.getElementById('voice-instruction');
+            if (vInstr) vInstr.textContent = '⚠️ Temporary connection issue — attempting recovery...';
         };
+    }
+
+    /**
+     * Normalize live transcript turns for backend/Gemini evaluation:
+     * strips client-only metadata flags, merges consecutive same-role turns,
+     * and optionally caps per-turn text length for condensed retries.
+     */
+    function normalizeTranscriptForEval(transcript, maxPerTurnChars) {
+        const cleaned = [];
+        for (const item of (transcript || [])) {
+            if (!item || (item.role !== 'user' && item.role !== 'model' && item.role !== 'assistant')) continue;
+            const role = item.role === 'assistant' ? 'model' : item.role;
+            let text = (item.parts?.map(p => p?.text || '').join(' ') || '').replace(/\s+/g, ' ').trim();
+            if (!text) continue;
+            if (maxPerTurnChars && text.length > maxPerTurnChars) {
+                text = text.substring(0, maxPerTurnChars) + '...';
+            }
+            const prev = cleaned[cleaned.length - 1];
+            if (prev && prev.role === role) {
+                prev.parts[0].text += ' ' + text;
+            } else {
+                cleaned.push({ role, parts: [{ text }] });
+            }
+        }
+        return cleaned;
     }
 
     async function finishLiveVoiceInterview() {
@@ -5251,8 +5442,13 @@ GUIDELINES:
         console.log(`[finishLive] Final transcript: ${state.liveTranscript.length} entries, _modelTurnCount: ${state._modelTurnCount}`);
 
         if (state.liveWs) {
+            state._intentionalWsClose = true;
             try { state.liveWs.close(); } catch(e) {}
             state.liveWs = null;
+        }
+        if (state._wsHandshakeTimer) {
+            clearTimeout(state._wsHandshakeTimer);
+            state._wsHandshakeTimer = null;
         }
 
         stopMicStreaming();
@@ -5335,15 +5531,17 @@ GUIDELINES:
             _dbg('Pipeline start. Transcript entries: ' + state.liveTranscript.length + ', _modelTurnCount: ' + state._modelTurnCount);
             _dbg('Transcript roles: ' + state.liveTranscript.map(t => t.role).join(', '));
 
-            // Step 1: Try Direct Gemini Report with 25-second timeout
+            const evalTranscript = normalizeTranscriptForEval(state.liveTranscript);
+
+            // Step 1: Try Direct Gemini Report with 45-second timeout (full reports with 10+ Qs need >25s)
             const geminiKey = getActiveGeminiKey();
-            if (!reportGenerated && geminiKey && state.liveTranscript.length >= 1) {
+            if (!reportGenerated && geminiKey && evalTranscript.length >= 1) {
                 try {
                     _dbg('Step 1: Direct Gemini...');
                     document.getElementById('report-loading').querySelector('.loading-text').textContent = 'Evaluating assessment with AI...';
                     const directReport = await Promise.race([
-                        generateDirectGeminiReport(state.liveTranscript, state.role, state.level, state.candidateName || _b2bCandidateName),
-                        new Promise((_, reject) => setTimeout(() => reject(new Error('Direct Gemini timeout')), 25000))
+                        generateDirectGeminiReport(evalTranscript, state.role, state.level, state.candidateName || _b2bCandidateName),
+                        new Promise((_, reject) => setTimeout(() => reject(new Error('Direct Gemini timeout')), 45000))
                     ]);
                     _dbg('Step 1 response: ' + JSON.stringify(directReport ? { score: directReport.overallScore, answers: (directReport.answers||[]).length } : null));
                     if (directReport && (directReport.overallScore != null || directReport.overall_score != null)) {
@@ -5356,32 +5554,58 @@ GUIDELINES:
                     }
                 } catch (e) { _dbg('Step 1 FAILED or timed out: ' + e.message); }
             } else {
-                _dbg('Step 1 SKIPPED. Key: ' + !!geminiKey + ', transcriptLen: ' + state.liveTranscript.length);
+                _dbg('Step 1 SKIPPED. Key: ' + !!geminiKey + ', transcriptLen: ' + evalTranscript.length);
             }
 
-            // Step 2: Try Backend API with 45s timeout for deep LLM evaluation
-            if (!reportGenerated) {
+            // Step 2: Try Backend API with 90s timeout for multi-question transcripts (+ condensed retry)
+            if (!reportGenerated && evalTranscript.length >= 1) {
+                const buildReportPayload = (transcriptSlice) => ({
+                    sessionId: state.sessionId || crypto.randomUUID(),
+                    role: state.role, level: state.level,
+                    transcript: transcriptSlice,
+                    candidate_name: state.candidateName || _b2bCandidateName || null,
+                    candidate_email: state.candidateEmail || _b2bCandidateEmail || null,
+                    mode: 'voice',
+                    proctoring_violations: (_enableProctoring || _enableWebcamProctoring) ? state.proctoringViolations : null,
+                    resume_matching_report: _resumeAnalysis
+                });
+                const applyBackendReport = (report) => {
+                    if (!report) return false;
+                    if (report.overall_score != null && report.overallScore == null) report.overallScore = report.overall_score;
+                    if (report.overallScore == null && !(Array.isArray(report.answers) && report.answers.length > 0)) return false;
+                    state.answers = report.answers || [];
+                    if (report.communicationScores) state.communicationScores = report.communicationScores;
+                    renderReport(report);
+                    return true;
+                };
+
                 try {
                     _dbg('Step 2: Backend API...');
                     document.getElementById('report-loading').querySelector('.loading-text').textContent = 'AI is evaluating your responses and calibrating competencies...';
-                    const report = await apiCall('/api/interview/report-from-transcript', {
-                        sessionId: state.sessionId || crypto.randomUUID(),
-                        role: state.role, level: state.level,
-                        transcript: state.liveTranscript,
-                        candidate_name: state.candidateName || _b2bCandidateName || null,
-                        candidate_email: state.candidateEmail || _b2bCandidateEmail || null,
-                        mode: 'voice',
-                        proctoring_violations: (_enableProctoring || _enableWebcamProctoring) ? state.proctoringViolations : null,
-                        resume_matching_report: _resumeAnalysis
-                    }, 45000);
+                    const report = await apiCall('/api/interview/report-from-transcript', buildReportPayload(evalTranscript), 90000);
                     _dbg('Step 2 response: ' + JSON.stringify(report ? { score: report.overallScore, answers: (report.answers||[]).length } : null));
-                    if (report && (report.overallScore != null || report.answers)) {
-                        state.answers = report.answers || [];
-                        renderReport(report);
+                    if (applyBackendReport(report)) {
                         reportGenerated = true;
                         _dbg('Step 2 SUCCESS.');
                     }
-                } catch (e) { _dbg('Step 2 FAILED: ' + e.message); }
+                } catch (e) {
+                    _dbg('Step 2 FAILED: ' + e.message);
+                    // Condensed retry for very long multi-turn transcripts
+                    const condensedTranscript = normalizeTranscriptForEval(state.liveTranscript, 450).slice(-28);
+                    if (condensedTranscript.length >= 1) {
+                        try {
+                            _dbg('Step 2b: Condensed transcript retry...');
+                            document.getElementById('report-loading').querySelector('.loading-text').textContent = 'Retrying AI evaluation with condensed transcript...';
+                            const retryReport = await apiCall('/api/interview/report-from-transcript', buildReportPayload(condensedTranscript), 60000);
+                            if (applyBackendReport(retryReport)) {
+                                reportGenerated = true;
+                                _dbg('Step 2b SUCCESS.');
+                            }
+                        } catch (retryErr) {
+                            _dbg('Step 2b FAILED: ' + retryErr.message);
+                        }
+                    }
+                }
             }
 
             // Step 3: Client-side fallback
@@ -5768,18 +5992,19 @@ GUIDELINES:
             if (callback) callback();
         };
         
+        const maxDurationMs = Math.min(45000, Math.max(12000, String(text || '').length * 110));
+        const startedAt = Date.now();
         synthWatchdog = setInterval(() => {
-            if (!synth.speaking) {
+            const elapsed = Date.now() - startedAt;
+            if ((elapsed > 1500 && !synth.speaking) || elapsed >= maxDurationMs) {
                 clearInterval(synthWatchdog);
-                if (!isEnded && callback) {
+                if (!isEnded) {
                     isEnded = true;
-                    callback();
+                    try { if (synth.speaking) synth.cancel(); } catch (e) {}
+                    if (callback) callback();
                 }
-            } else {
-                synth.pause();
-                synth.resume();
             }
-        }, 5000);
+        }, 1000);
         
         synth.speak(utterance);
     }
@@ -5993,7 +6218,7 @@ GUIDELINES:
             vadText.textContent = 'Active speech detected';
         }
         
-        // Set a timer to trigger a silence warning after 8 seconds of no speech
+        // Wait 14 seconds of quiet pause before showing a 5-second finish countdown (19s total grace)
         state.vadTimer = setTimeout(() => {
             const currentText = document.getElementById('subtitles-text').textContent.trim();
             if (!currentText || currentText === 'Listening...' || currentText === 'Waiting for AI to finish speaking...' || currentText === 'Listening for speech...') {
@@ -6003,11 +6228,11 @@ GUIDELINES:
                 return;
             }
             
-            // User did speak but is now silent for 8 seconds, show warning countdown
+            // User did speak but is now silent for 14 seconds, show 5s countdown
             if (vadIndicator && vadText) {
                 vadIndicator.className = 'vad-indicator silence-warning';
-                state.vadCountdown = 4;
-                vadText.textContent = `Silence detected. Submitting in ${state.vadCountdown}s...`;
+                state.vadCountdown = 5;
+                vadText.textContent = `Pause detected. Auto-submitting in ${state.vadCountdown}s (keep speaking to continue)...`;
                 playChime('warning');
                 
                 state.vadInterval = setInterval(() => {
@@ -6018,11 +6243,11 @@ GUIDELINES:
                         if (vadIndicator) vadIndicator.style.display = 'none';
                         finishVoiceSpeaking();
                     } else {
-                        vadText.textContent = `Silence detected. Submitting in ${state.vadCountdown}s...`;
+                        vadText.textContent = `Pause detected. Auto-submitting in ${state.vadCountdown}s (keep speaking to continue)...`;
                     }
                 }, 1000);
             }
-        }, 8000);
+        }, 14000);
     }
 
     function initSpeechRecognition() {
@@ -6327,15 +6552,20 @@ GUIDELINES:
         }
     }
 
+    function isReportCertifiedPass(r) {
+        return !!r && r.scoringMethod !== 'heuristic' && (r.overall || 0) >= CERT_PASS_THRESHOLD;
+    }
+
     function getStoredCandidateReports() {
         try {
             const certs = JSON.parse(localStorage.getItem('simpatico_certifications') || '[]');
             // If empty, restore from active session if available
             if (certs.length === 0 && state._lastGeneratedReport) {
                 const rep = state._lastGeneratedReport;
+                const repHeuristic = rep.scoringMethod === 'heuristic';
                 const activeCert = {
                     certId: state._lastCertId || ('SIMP-' + Date.now().toString(36).toUpperCase().substring(0, 6)),
-                    name: state.candidateName || _b2bCandidateName || localStorage.getItem('cand_name') || 'Faisalkvn',
+                    name: state.candidateName || _b2bCandidateName || localStorage.getItem('cand_name') || 'Candidate',
                     email: state.candidateEmail || _b2bCandidateEmail || '',
                     role: state.role || 'HR Executive',
                     level: state.level || 'Mid-Level',
@@ -6346,7 +6576,8 @@ GUIDELINES:
                     topStrengths: rep.topStrengths || [],
                     focusAreas: rep.focusAreas || [],
                     answers: state.answers || [],
-                    passed: (rep.overallScore || 0) >= CERT_PASS_THRESHOLD
+                    scoringMethod: repHeuristic ? 'heuristic' : 'ai',
+                    passed: !repHeuristic && (rep.overallScore || 0) >= CERT_PASS_THRESHOLD
                 };
                 certs.push(activeCert);
                 localStorage.setItem('simpatico_certifications', JSON.stringify(certs));
@@ -6355,6 +6586,52 @@ GUIDELINES:
         } catch(e) {
             return [];
         }
+    }
+
+    function _reportSortTimestamp(r) {
+        const raw = r.savedAt || r.completedAt || r.created_at || r.date;
+        const ts = raw ? Date.parse(raw) : NaN;
+        return Number.isFinite(ts) ? ts : 0;
+    }
+
+    function _mapSupabaseInterviewToReport(iv) {
+        let fb = iv.feedback;
+        if (typeof fb === 'string') {
+            try { fb = JSON.parse(fb); } catch { fb = {}; }
+        }
+        fb = (fb && typeof fb === 'object') ? fb : {};
+        const score = Math.round(Number(iv.overall_score ?? iv.score ?? fb.overallScore ?? fb.overall_score ?? 0));
+        const trust = Math.round(Number(iv.trust_score ?? fb.integrity ?? 100));
+        const dt = iv.completed_at || iv.created_at || new Date().toISOString();
+        const scoringMethod = fb.scoringMethod || 'ai';
+        return {
+            certId: fb.certId || iv.cert_id || ('IV-' + String(iv.id || '').slice(0, 8).toUpperCase()),
+            registrationNumber: fb.registrationNumber || iv.cert_id || null,
+            interviewId: iv.id || null,
+            token: iv.token || null,
+            name: iv.candidate_name || fb.name || 'Candidate',
+            email: iv.candidate_email || fb.email || '',
+            role: iv.interview_role || iv.role || fb.role || 'Professional',
+            level: iv.interview_level || iv.level || fb.level || 'Mid-Level',
+            date: new Date(dt).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }),
+            savedAt: dt,
+            overall: score,
+            cognitive: fb.cognitive ?? null,
+            situational: fb.situational ?? null,
+            attitude: fb.attitude ?? null,
+            jobScore: fb.jobScore ?? null,
+            communication: fb.communication ?? null,
+            integrity: trust,
+            summary: fb.summary || fb.ai_summary || 'Completed AI assessment interview.',
+            topStrengths: Array.isArray(fb.topStrengths) ? fb.topStrengths : (Array.isArray(fb.strengths) ? fb.strengths : []),
+            focusAreas: Array.isArray(fb.focusAreas) ? fb.focusAreas : (Array.isArray(fb.improvements) ? fb.improvements : []),
+            answers: Array.isArray(fb.answers) ? fb.answers : [],
+            communicationScores: fb.communicationScores || null,
+            proctoringViolations: fb.proctoringViolations || { totalViolations: iv.violation_count || 0 },
+            scoringMethod,
+            passed: scoringMethod !== 'heuristic' && score >= CERT_PASS_THRESHOLD,
+            source: 'supabase'
+        };
     }
 
     async function renderAdminReportsDashboard() {
@@ -6366,24 +6643,77 @@ GUIDELINES:
         // Render current local reports immediately
         _drawReportsTable(reports);
 
-        // Fetch cloud synced results from backend API to merge any candidate tests
-        try {
-            const apiRes = await apiCall('/api/interview/results', null, 5000, 'GET');
-            if (apiRes && Array.isArray(apiRes.results) && apiRes.results.length > 0) {
-                let mergedCount = 0;
-                apiRes.results.forEach(cloudCert => {
-                    if (cloudCert && cloudCert.certId && !reports.some(r => r.certId === cloudCert.certId)) {
-                        reports.push(cloudCert);
-                        mergedCount++;
-                    }
-                });
-                if (mergedCount > 0) {
-                    localStorage.setItem('simpatico_certifications', JSON.stringify(reports));
-                    _drawReportsTable(reports);
+        const { headers, token, companyId } = getResultsAuthContext();
+        const mergeList = (incoming) => {
+            let added = 0;
+            for (const item of incoming || []) {
+                if (!item || !item.certId) continue;
+                const dup = reports.some(r =>
+                    r.certId === item.certId ||
+                    (item.token && r.token === item.token) ||
+                    (item.interviewId && r.interviewId === item.interviewId)
+                );
+                if (!dup) {
+                    reports.push(item);
+                    added++;
                 }
             }
-        } catch(apiErr) {
-            console.warn('[AdminReportsDashboard] Cloud sync note:', apiErr.message);
+            return added;
+        };
+
+        let mergedCount = 0;
+        const fetches = [];
+
+        // 1. Primary ATS Worker (/api/interview/results returns { success, data: { results } })
+        fetches.push(
+            fetch(`${RESULTS_API_BASE}/api/interview/results`, { method: 'GET', headers })
+                .then(r => r.ok ? r.json() : null)
+                .then(json => {
+                    const list = json?.data?.results || json?.results || [];
+                    if (Array.isArray(list)) mergedCount += mergeList(list);
+                })
+                .catch(e => console.warn('[AdminReportsDashboard] Primary worker sync note:', e.message))
+        );
+
+        // 2. Legacy Evalis Worker fallback if distinct
+        if (API_BASE && API_BASE !== RESULTS_API_BASE) {
+            fetches.push(
+                fetch(`${API_BASE}/api/interview/results`, { method: 'GET', headers })
+                    .then(r => r.ok ? r.json() : null)
+                    .then(json => {
+                        const list = json?.data?.results || json?.results || [];
+                        if (Array.isArray(list)) mergedCount += mergeList(list);
+                    })
+                    .catch(() => {})
+            );
+        }
+
+        // 3. Direct RLS-scoped Supabase fallback for logged-in company admins
+        const sbUrl = window.SIMPATICO_CONFIG?.supabaseUrl;
+        const sbKey = window.SIMPATICO_CONFIG?.supabaseAnonKey;
+        if (token && companyId && sbUrl && sbKey) {
+            const qp = `company_id=eq.${encodeURIComponent(companyId)}&or=(status.eq.completed,overall_score.not.is.null)&select=*&order=created_at.desc&limit=100`;
+            fetches.push(
+                fetch(`${sbUrl}/rest/v1/interviews?${qp}`, {
+                    headers: { apikey: sbKey, Authorization: 'Bearer ' + token }
+                })
+                    .then(r => r.ok ? r.json() : null)
+                    .then(rows => {
+                        if (Array.isArray(rows)) {
+                            mergedCount += mergeList(rows.map(_mapSupabaseInterviewToReport));
+                        }
+                    })
+                    .catch(e => console.warn('[AdminReportsDashboard] Supabase sync note:', e.message))
+            );
+        }
+
+        await Promise.allSettled(fetches);
+        if (mergedCount > 0) {
+            reports.sort((a, b) => _reportSortTimestamp(b) - _reportSortTimestamp(a));
+            try {
+                localStorage.setItem('simpatico_certifications', JSON.stringify(reports.slice(0, 200)));
+            } catch (e) {}
+            _drawReportsTable(reports);
         }
     }
 
@@ -6393,7 +6723,7 @@ GUIDELINES:
         if (!tbody) return;
 
         const total = reports.length;
-        const passed = reports.filter(r => (r.overall || 0) >= CERT_PASS_THRESHOLD).length;
+        const passed = reports.filter(isReportCertifiedPass).length;
         const avgScore = total > 0 ? Math.round(reports.reduce((acc, r) => acc + (r.overall || 0), 0) / total) : 0;
         const avgIntegrity = total > 0 ? Math.round(reports.reduce((acc, r) => acc + (r.integrity || 100), 0) / total) : 100;
 
@@ -6431,7 +6761,7 @@ GUIDELINES:
                 (r.email || '').toLowerCase().includes(query) ||
                 (r.certId || '').toLowerCase().includes(query);
 
-            const isPassed = (r.overall || 0) >= CERT_PASS_THRESHOLD;
+            const isPassed = isReportCertifiedPass(r);
             const matchStatus = statusFilter === 'all' ||
                 (statusFilter === 'passed' && isPassed) ||
                 (statusFilter === 'failed' && !isPassed);
@@ -6444,9 +6774,11 @@ GUIDELINES:
             return;
         }
 
-        tbody.innerHTML = filtered.slice().reverse().map(r => {
-            const isPass = (r.overall || 0) >= CERT_PASS_THRESHOLD;
-            const scoreBadgeCls = isPass ? 'color:#34d399;background:rgba(16,185,129,0.12);border:1px solid rgba(16,185,129,0.3)' : 'color:#f87171;background:rgba(239,68,68,0.12);border:1px solid rgba(239,68,68,0.3)';
+        const sorted = filtered.slice().sort((a, b) => _reportSortTimestamp(b) - _reportSortTimestamp(a));
+        tbody.innerHTML = sorted.map(r => {
+            const isHeuristic = r.scoringMethod === 'heuristic';
+            const isPass = isReportCertifiedPass(r);
+            const scoreBadgeCls = isPass ? 'color:#34d399;background:rgba(16,185,129,0.12);border:1px solid rgba(16,185,129,0.3)' : (isHeuristic ? 'color:#fbbf24;background:rgba(245,158,11,0.12);border:1px solid rgba(245,158,11,0.3)' : 'color:#f87171;background:rgba(239,68,68,0.12);border:1px solid rgba(239,68,68,0.3)');
             const trustCls = (r.integrity || 100) >= 80 ? '#34d399' : '#fbbf24';
 
             return `
@@ -6461,7 +6793,7 @@ GUIDELINES:
                     </td>
                     <td style="padding:12px;">
                         <span style="display:inline-block;padding:3px 8px;border-radius:12px;font-weight:800;font-size:0.82rem;${scoreBadgeCls}">
-                            ${r.overall || 0}% ${isPass ? '🏆 PASS' : '⚠️ FAIL'}
+                            ${r.overall || 0}% ${isPass ? '🏆 PASS' : (isHeuristic ? '⚠️ ESTIMATE' : '⚠️ FAIL')}
                         </span>
                     </td>
                     <td style="padding:12px;">
@@ -6484,8 +6816,7 @@ GUIDELINES:
 
     function viewCandidateCert(certId) {
         state._lastCertId = certId;
-        showScreen('screen-cert');
-        renderCertificate();
+        downloadAdminCert(certId);
     }
 
     function viewReportFromThankYou() {
@@ -6532,6 +6863,7 @@ GUIDELINES:
         showScreen('screen-report');
         renderReport({
             overallScore: recScore,
+            scoringMethod: record.scoringMethod || 'ai',
             recommendation: recScore >= 85 ? 'strong-hire' : recScore >= CERT_PASS_THRESHOLD ? 'hire' : recScore >= 50 ? 'lean-hire' : 'no-hire',
             summary: record.summary || 'Candidate completed professional certification assessment.',
             topStrengths: record.topStrengths || ['Demonstrated relevant domain problem solving.'],
@@ -6855,11 +7187,26 @@ GUIDELINES:
             updateTimerDisplay();
             if (state.timerSeconds <= 0) {
                 stopTimer();
-                // Auto-submit/auto-end when timer expires
-                console.log('[Timer] Time expired. Auto-ending current turn...');
+                // Auto-submit/auto-advance when turn timer expires
+                console.log('[Timer] Turn time expired.');
                 if (state.liveWs) {
-                    // WebSocket live mode: end the entire interview
-                    finishLiveVoiceInterview();
+                    const userTurnsCount = (state.liveTranscript || []).filter(t => t.role === 'user' && (t.parts?.[0]?.text || '').trim().length > 5).length;
+                    const effectiveTurns = Math.max(userTurnsCount, Math.max(0, (state._modelTurnCount || 0) - 1));
+                    const targetQ = state.questionsCount || 5;
+                    if (effectiveTurns >= targetQ) {
+                        finishLiveVoiceInterview();
+                    } else if (state.liveWs.readyState === WebSocket.OPEN) {
+                        // Advance smoothly to the next question instead of aborting the whole live interview
+                        try {
+                            state.liveWs.send(JSON.stringify({
+                                clientContent: {
+                                    turns: [{ role: 'user', parts: [{ text: '[Time for this question elapsed. Please acknowledge briefly and proceed to the next numbered question.]' }] }],
+                                    turnComplete: true
+                                }
+                            }));
+                        } catch (e) {}
+                        startTimer();
+                    }
                 } else if (state.voiceMode) {
                     // Non-WS voice mode: submit current answer
                     finishVoiceSpeaking();
@@ -7006,9 +7353,15 @@ GUIDELINES:
             headers['X-API-Key'] = _b2bApiKey;
         }
 
-        // Pass BYOK headers if available
+        // Forward only CORS-whitelisted BYOK headers so preflight never blocks evalis-api
+        // (evalis-api allows: Content-Type, X-NIM-API-Key, X-HF-Token, X-API-Key, Authorization;
+        //  Gemini keys are used directly via callGeminiDirectApi fallback).
         const byokH = getByokHeaders();
-        Object.assign(headers, byokH);
+        if (byokH['X-AI-Provider'] === 'nvidia' && byokH['X-AI-Key']) {
+            headers['X-NIM-API-Key'] = byokH['X-AI-Key'];
+        } else if (byokH['X-AI-Provider'] === 'huggingface' && byokH['X-AI-Key']) {
+            headers['X-HF-Token'] = byokH['X-AI-Key'];
+        }
 
         // Use AbortController for timeout (default 30s, configurable)
         const controller = new AbortController();
@@ -7054,22 +7407,34 @@ GUIDELINES:
                '';
     }
 
-    async function callGeminiDirectApi(prompt, systemInstruction = '', jsonMode = false) {
+    async function callGeminiDirectApi(prompt, systemInstruction = '', jsonMode = false, timeoutMs = 15000) {
         const geminiKey = getActiveGeminiKey();
         if (!geminiKey) return null;
 
-        const cfg = JSON.parse(localStorage.getItem('adminConfig') || '{}');
-        // Primary deep reasoning evaluation model with high-reliability fallback chain
-        const candidateModels = [cfg.geminiModel, 'gemini-1.5-pro', 'gemini-2.0-flash', 'gemini-1.5-flash']
-            .filter(Boolean)
-            .filter(m => m !== 'gemini-3.1-pro' && m !== 'gemini-3.1-flash' && m !== 'gemini-2.5-flash');
-        const modelsToTry = [...new Set(candidateModels.length ? candidateModels : ['gemini-1.5-pro', 'gemini-2.0-flash'])];
+        let cfg = {};
+        try { cfg = JSON.parse(localStorage.getItem('adminConfig') || '{}'); } catch (e) {}
+        const preferredModel = cfg.geminiModel && !String(cfg.geminiModel).includes('1.5') ? cfg.geminiModel : null;
+        // Primary reasoning evaluation models with active v1beta fallback chain
+        const candidateModels = [preferredModel, 'gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-2.5-pro']
+            .filter(Boolean);
+        const modelsToTry = [...new Set(candidateModels)];
+
+        const reqBody = {
+            contents: [{ role: 'user', parts: [{ text: prompt }] }],
+            generationConfig: {
+                temperature: 0.4,
+                ...(jsonMode ? { responseMimeType: 'application/json', maxOutputTokens: 4096 } : {})
+            }
+        };
+        if (systemInstruction) {
+            reqBody.systemInstruction = { parts: [{ text: systemInstruction }] };
+        }
 
         for (const model of modelsToTry) {
             try {
                 const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(geminiKey)}`;
                 const controller = new AbortController();
-                const timer = setTimeout(() => controller.abort(), 9000);
+                const timer = setTimeout(() => controller.abort(), timeoutMs);
                 const res = await fetch(url, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -7158,7 +7523,7 @@ Output STRICTLY valid JSON with this format:
             const prompt = `Role: ${role} (${level})
 Candidate Name: ${candidateName || 'Candidate'}
 Assessment Transcript:
-${conversationText.substring(0, 10000)}
+${conversationText.substring(0, 18000)}
 
 Evaluate this full assessment and output a comprehensive certification report in STRICT JSON:
 {
@@ -7187,7 +7552,7 @@ Evaluate this full assessment and output a comprehensive certification report in
   ]
 }`;
             const sys = "You are the Simpatico HR Chief Assessment Evaluator finalizing an official certification report. Output pure JSON.";
-            const rawJson = await callGeminiDirectApi(prompt, sys, true);
+            const rawJson = await callGeminiDirectApi(prompt, sys, true, 35000);
             if (!rawJson) return null;
             const cleaned = rawJson.replace(/```json|```/g, '').trim();
             const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
@@ -7331,11 +7696,6 @@ Evaluate this full assessment and output a comprehensive certification report in
             state.subtitlesMode = subtitles;
             state.subtitlesRevealed = (subtitles === 'visible');
 
-            // Mark token as used immediately when interview starts (prevents reuse)
-            if (_b2bToken && !_isAdmin) {
-                markTokenAsUsed(_b2bToken);
-            }
-
             document.getElementById('text-answer-container').style.display = 'none';
             document.getElementById('voice-answer-container').style.display = 'block';
             setupVoiceSubtitles();
@@ -7354,11 +7714,6 @@ Evaluate this full assessment and output a comprehensive certification report in
             const previousHashes = getUsedQuestionHashes(role);
             const questionCount = count || 5;
             let data = null;
-
-            // Mark token as used immediately for text mode too
-            if (_b2bToken && !_isAdmin) {
-                markTokenAsUsed(_b2bToken);
-            }
 
             try {
                 data = await apiCall('/api/interview/start', {
@@ -7563,6 +7918,28 @@ Evaluate this full assessment and output a comprehensive certification report in
         }
     }
 
+    function computeHeuristicAnswerEstimate(answerText, isVoice) {
+        const text = String(answerText || '');
+        const words = text.split(/\s+/).filter(w => w.length > 0);
+        const sentences = text.split(/[.!?]+/).filter(s => s.trim().length > 0);
+        // Strictly capped below CERT_PASS_THRESHOLD so un-evaluated responses never earn a certificate
+        let est = 30;
+        if (words.length >= 5) est += 8;
+        if (words.length >= 15) est += 8;
+        if (words.length >= 30) est += 6;
+        if (words.length >= 60) est += 4;
+        if (sentences.length >= 2) est += 4;
+        est = Math.min(60, Math.max(25, est));
+        return {
+            score: est,
+            verdict: 'weak',
+            strengths: words.length >= 15
+                ? [isVoice ? 'Provided a detailed spoken response' : 'Provided a detailed response']
+                : [isVoice ? 'Spoken response was recorded' : 'Attempted a response'],
+            improvements: ['⚠️ AI evaluation was unavailable — score is a heuristic estimate based on response depth only and cannot qualify for certification']
+        };
+    }
+
     // ══════════════════════════════════════════
     //  SUBMIT ANSWER
     // ══════════════════════════════════════════
@@ -7627,37 +8004,25 @@ Evaluate this full assessment and output a comprehensive certification report in
                 return;
             }
 
-            // Fallback: heuristic scoring from answer text when API is unreachable
-            const fbWords = answer.split(/\s+/).filter(w => w.length > 0);
-            const fbSentences = answer.split(/[.!?]+/).filter(s => s.trim().length > 0);
-            let fbScore = 30;
-            if (fbWords.length >= 5) fbScore += 10;
-            if (fbWords.length >= 15) fbScore += 10;
-            if (fbWords.length >= 30) fbScore += 10;
-            if (fbWords.length >= 60) fbScore += 8;
-            if (fbSentences.length >= 2) fbScore += 7;
-            if (fbSentences.length >= 4) fbScore += 5;
-            fbScore = Math.min(75, fbScore); // Cap — can't earn top marks without real AI eval
-            const fbVerdict = fbScore >= 65 ? 'good' : 'weak';
-            const fbStrengths = fbWords.length >= 15 ? ['Provided a detailed response'] : ['Attempted a response'];
-            const fbImprovements = ['⚠️ AI evaluation was unavailable — score is a heuristic estimate based on response depth'];
+            // Fallback: length-based estimate capped strictly below CERT_PASS_THRESHOLD
+            const fb = computeHeuristicAnswerEstimate(answer, false);
             state.answers.push({
                 questionId: q.id,
                 question: q.question,
                 type: q.type,
                 difficulty: q.difficulty,
                 answer,
-                score: fbScore,
-                verdict: fbVerdict,
-                strengths: fbStrengths,
-                improvements: fbImprovements,
+                score: fb.score,
+                verdict: fb.verdict,
+                strengths: fb.strengths,
+                improvements: fb.improvements,
                 followUp: '',
                 scoringMethod: 'heuristic'
             });
             showFeedback({
-                score: fbScore, verdict: fbVerdict,
-                strengths: fbStrengths,
-                improvements: fbImprovements,
+                score: fb.score, verdict: fb.verdict,
+                strengths: fb.strengths,
+                improvements: fb.improvements,
                 followUp: '',
             });
         } finally {
@@ -7814,29 +8179,16 @@ Evaluate this full assessment and output a comprehensive certification report in
                 return;
             }
 
-            // Heuristic scoring from spoken answer text when API is unreachable
-            const vfbText = finalAnswer || '';
-            const vfbWords = vfbText.split(/\s+/).filter(w => w.length > 0);
-            const vfbSentences = vfbText.split(/[.!?]+/).filter(s => s.trim().length > 0);
-            let vfbScore = 30;
-            if (vfbWords.length >= 5) vfbScore += 10;
-            if (vfbWords.length >= 15) vfbScore += 10;
-            if (vfbWords.length >= 30) vfbScore += 10;
-            if (vfbWords.length >= 60) vfbScore += 8;
-            if (vfbSentences.length >= 2) vfbScore += 7;
-            if (vfbSentences.length >= 4) vfbScore += 5;
-            vfbScore = Math.min(75, vfbScore);
-            const vfbVerdict = vfbScore >= 65 ? 'good' : 'weak';
-            const vfbStrengths = vfbWords.length >= 15 ? ['Provided a detailed spoken response'] : ['Spoken response was recorded'];
-            const vfbImprovements = ['⚠️ AI evaluation was unavailable — score is a heuristic estimate based on response depth'];
+            // Fallback: heuristic scoring from spoken answer text capped below CERT_PASS_THRESHOLD
+            const vfb = computeHeuristicAnswerEstimate(finalAnswer, true);
             if (state.inFollowUp) {
                 const lastIndex = state.answers.length - 1;
                 if (lastIndex >= 0) {
                     state.answers[lastIndex].answer = combinedAnswer;
-                    state.answers[lastIndex].score = vfbScore;
-                    state.answers[lastIndex].verdict = vfbVerdict;
-                    state.answers[lastIndex].strengths = vfbStrengths;
-                    state.answers[lastIndex].improvements = vfbImprovements;
+                    state.answers[lastIndex].score = vfb.score;
+                    state.answers[lastIndex].verdict = vfb.verdict;
+                    state.answers[lastIndex].strengths = vfb.strengths;
+                    state.answers[lastIndex].improvements = vfb.improvements;
                     state.answers[lastIndex].scoringMethod = 'heuristic';
                 }
             } else {
@@ -7846,18 +8198,18 @@ Evaluate this full assessment and output a comprehensive certification report in
                     type: q.type,
                     difficulty: q.difficulty,
                     answer: finalAnswer,
-                    score: vfbScore,
-                    verdict: vfbVerdict,
-                    strengths: vfbStrengths,
-                    improvements: vfbImprovements,
+                    score: vfb.score,
+                    verdict: vfb.verdict,
+                    strengths: vfb.strengths,
+                    improvements: vfb.improvements,
                     followUp: '',
                     scoringMethod: 'heuristic'
                 });
             }
             showFeedback({
-                score: vfbScore, verdict: vfbVerdict,
-                strengths: vfbStrengths,
-                improvements: vfbImprovements,
+                score: vfb.score, verdict: vfb.verdict,
+                strengths: vfb.strengths,
+                improvements: vfb.improvements,
                 followUp: '',
             });
         }
@@ -7972,25 +8324,36 @@ Evaluate this full assessment and output a comprehensive certification report in
                 _fbCallbackFired = true;
                 action();
             };
+            const scheduleFeedbackFallback = (action) => {
+                const waitMs = Math.min(45000, Math.max(18000, feedbackVoiceText.length * 100));
+                const check = () => {
+                    if (_fbCallbackFired) return;
+                    if (window.speechSynthesis && window.speechSynthesis.speaking) {
+                        setTimeout(check, 2000);
+                        return;
+                    }
+                    safeCallback(action);
+                };
+                setTimeout(check, waitMs);
+            };
             if (hasFollowUp) {
                 feedbackVoiceText += `I have a follow-up question for you.`;
                 speakText(feedbackVoiceText, function() {
                     safeCallback(() => handleNextClick());
                 });
-                // Safety timeout: if TTS callback never fires, auto-proceed
-                setTimeout(() => safeCallback(() => handleNextClick()), 15000);
+                scheduleFeedbackFallback(() => handleNextClick());
             } else if (isLast) {
                 feedbackVoiceText += `The interview is now complete. Generating your certification report.`;
                 speakText(feedbackVoiceText, function() {
                     safeCallback(() => nextQuestion());
                 });
-                setTimeout(() => safeCallback(() => nextQuestion()), 15000);
+                scheduleFeedbackFallback(() => nextQuestion());
             } else {
                 feedbackVoiceText += `Moving to the next question.`;
                 speakText(feedbackVoiceText, function() {
                     safeCallback(() => nextQuestion());
                 });
-                setTimeout(() => safeCallback(() => nextQuestion()), 15000);
+                scheduleFeedbackFallback(() => nextQuestion());
             }
         }
     }
@@ -8088,8 +8451,13 @@ Evaluate this full assessment and output a comprehensive certification report in
         // ── Full voice/connection cleanup — ensure everything disconnects ──
         // Close live WebSocket if still open
         if (state.liveWs) {
+            state._intentionalWsClose = true;
             try { state.liveWs.close(); } catch(e) {}
             state.liveWs = null;
+        }
+        if (state._wsHandshakeTimer) {
+            clearTimeout(state._wsHandshakeTimer);
+            state._wsHandshakeTimer = null;
         }
         // Stop mic streaming & release mic hardware
         stopMicStreaming();
@@ -8166,7 +8534,7 @@ Evaluate this full assessment and output a comprehensive certification report in
                 requireCommunicationScores: true,
                 certificationMode: !state.isPracticeMode,
                 passThreshold: CERT_PASS_THRESHOLD
-            });
+            }, 60000);
 
             // Store communication scores if returned
             if (report.communicationScores) {
@@ -8192,10 +8560,12 @@ Evaluate this full assessment and output a comprehensive certification report in
                 console.warn('Direct Gemini report error:', dErr.message);
             }
 
-            // Fallback: derive genuine assessment dynamically from evaluated answer history
-            const avgScore = Math.round(
+            // Fallback: derive score from evaluated answer history; mark heuristic if no real AI evaluation occurred
+            const hasAiEval = state.answers.some(a => a && a.scoringMethod !== 'heuristic' && a.answer !== '(skipped)');
+            const rawAvgScore = Math.round(
                 state.answers.reduce((s, a) => s + (a.score || 0), 0) / Math.max(1, state.answers.length)
             );
+            const avgScore = hasAiEval ? rawAvgScore : Math.min(60, rawAvgScore);
             const collectedStrengths = state.answers.flatMap(a => a.strengths || []).filter(Boolean);
             const collectedImprovements = state.answers.flatMap(a => a.improvements || []).filter(Boolean);
             const topStr = collectedStrengths.length ? [...new Set(collectedStrengths)].slice(0, 4) : [
@@ -8208,8 +8578,11 @@ Evaluate this full assessment and output a comprehensive certification report in
             ];
             renderReport({
                 overallScore: avgScore,
-                recommendation: avgScore >= 82 ? 'strong-hire' : avgScore >= 70 ? 'hire' : avgScore >= 50 ? 'lean-hire' : 'no-hire',
-                summary: `Candidate completed ${state.answers.length} targeted assessment questions for ${state.role} (${state.level}) with an average performance rating of ${avgScore}/100. Evaluated responses demonstrate practical familiarity with core role competencies.`,
+                scoringMethod: hasAiEval ? 'ai' : 'heuristic',
+                recommendation: hasAiEval ? (avgScore >= 82 ? 'strong-hire' : avgScore >= 70 ? 'hire' : avgScore >= 50 ? 'lean-hire' : 'no-hire') : 'lean-hire',
+                summary: hasAiEval
+                    ? `Candidate completed ${state.answers.length} targeted assessment questions for ${state.role} (${state.level}) with an average performance rating of ${avgScore}/100. Evaluated responses demonstrate practical familiarity with core role competencies.`
+                    : `Candidate completed ${state.answers.length} assessment questions for ${state.role} (${state.level}), but AI evaluation was unavailable. Score (${avgScore}/100) is a heuristic estimate only and does not qualify for certification.`,
                 topStrengths: topStr,
                 focusAreas: topFocus,
                 nextSteps: [
@@ -8227,6 +8600,11 @@ Evaluate this full assessment and output a comprehensive certification report in
         const score = report.overallScore || 0;
         const isHeuristic = report.scoringMethod === 'heuristic';
         state._lastGeneratedReport = report;
+        const roleInfoEl = document.getElementById('report-role-info');
+        if (roleInfoEl) {
+            const lvl = String(state.level || 'mid-level');
+            roleInfoEl.textContent = `${state.role || 'Professional'} — ${lvl.charAt(0).toUpperCase() + lvl.slice(1)}`;
+        }
 
         // ── HEURISTIC SCORING WARNING ──
         // Show a clear warning when scores are client-side estimates, not AI-evaluated
@@ -8268,36 +8646,6 @@ Evaluate this full assessment and output a comprehensive certification report in
 
         // ── CERTIFICATION RECORD & VISIBILITY GATE ──
         if (!state.isPracticeMode && score < CERT_PASS_THRESHOLD) {
-            // Save failed assessment cert data to localStorage so it appears in Reports & Analytics
-            if (!state._viewingStoredReport) {
-                try {
-                    const v = state.proctoringViolations || {};
-                    const failTrustScore = Math.max(60, 100 - (v.totalViolations || 0) * 5);
-                    const failCertId = 'SIMP-' + Date.now().toString(36).toUpperCase().substring(0, 6);
-                    const failCertData = {
-                        certId: failCertId,
-                        name: state.candidateName || _b2bCandidateName || localStorage.getItem('cand_name') || 'Candidate',
-                        email: state.candidateEmail || _b2bCandidateEmail || '',
-                        role: state.role || 'Professional',
-                        level: state.level || 'Mid-Level',
-                        date: new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }),
-                        overall: score,
-                        integrity: failTrustScore,
-                        summary: report.summary || '',
-                        topStrengths: report.topStrengths || [],
-                        focusAreas: report.focusAreas || [],
-                        answers: state.answers || [],
-                        communicationScores: report.communicationScores || state.communicationScores || null,
-                        proctoringViolations: { ...v },
-                        passed: false
-                    };
-                    const certs = JSON.parse(localStorage.getItem('simpatico_certifications') || '[]');
-                    certs.push(failCertData);
-                    localStorage.setItem('simpatico_certifications', JSON.stringify(certs));
-                    state._lastCertId = failCertId;
-                } catch(e) { console.warn('Failed cert save note:', e); }
-            }
-
             // If recruiter explicitly hid reports from candidates, show thank-you screen
             if (_b2bShowReport === 0 && !state._viewingStoredReport) {
                 showScreen('screen-thank-you');
@@ -8491,24 +8839,35 @@ Evaluate this full assessment and output a comprehensive certification report in
                 console.log('[renderReport] Saved certification to storage:', certIdVal, certData.name, certData.overall);
 
                 // Also sync to cloud API for admin dashboard & multi-device verification
-                apiCall('/api/interview/save-result', certData).then(res => {
-                    if (res && res.registrationNumber) {
-                        // Update local cert with server-assigned sequential registration number
-                        certData.registrationNumber = res.registrationNumber;
-                        if (res.certId && res.certId !== certIdVal) {
-                            certData.certId = res.certId;
-                            state._lastCertId = res.certId;
+                const { headers: resHeaders, companyId: resCid } = getResultsAuthContext();
+                if (_b2bToken && !certData.token) certData.token = _b2bToken;
+                if (resCid && !certData.company_id) certData.company_id = resCid;
+                certData.savedAt = new Date().toISOString();
+                fetch(`${RESULTS_API_BASE}/api/interview/save-result`, {
+                    method: 'POST',
+                    headers: resHeaders,
+                    body: JSON.stringify(certData)
+                })
+                    .then(r => r.ok ? r.json() : null)
+                    .then(res => {
+                        const resData = res?.data || res;
+                        if (resData && resData.registrationNumber) {
+                            // Update local cert with server-assigned sequential registration number
+                            certData.registrationNumber = resData.registrationNumber;
+                            if (resData.certId && resData.certId !== certIdVal) {
+                                certData.certId = resData.certId;
+                                state._lastCertId = resData.certId;
+                            }
+                            // Re-save with registration number
+                            try {
+                                const updatedCerts = JSON.parse(localStorage.getItem('simpatico_certifications') || '[]');
+                                const idx = updatedCerts.findIndex(c => c.certId === certIdVal || c.certId === resData.certId);
+                                if (idx >= 0) updatedCerts[idx] = certData;
+                                localStorage.setItem('simpatico_certifications', JSON.stringify(updatedCerts));
+                            } catch(e) {}
+                            console.log('[renderReport] Registration number assigned:', resData.registrationNumber);
                         }
-                        // Re-save with registration number
-                        try {
-                            const updatedCerts = JSON.parse(localStorage.getItem('simpatico_certifications') || '[]');
-                            const idx = updatedCerts.findIndex(c => c.certId === certIdVal || c.certId === res.certId);
-                            if (idx >= 0) updatedCerts[idx] = certData;
-                            localStorage.setItem('simpatico_certifications', JSON.stringify(updatedCerts));
-                        } catch(e) {}
-                        console.log('[renderReport] Registration number assigned:', res.registrationNumber);
-                    }
-                }).catch(e => console.warn('Cloud sync note:', e));
+                    }).catch(e => console.warn('Cloud sync note:', e));
             } catch(e) { console.warn('Cert save note:', e); }
         }
 
@@ -8677,7 +9036,8 @@ Evaluate this full assessment and output a comprehensive certification report in
         const name = state.candidateName || _b2bCandidateName || localStorage.getItem('cand_name') || 'Candidate';
         const role = state.role || 'Professional';
         const score = state._lastGeneratedReport?.overallScore || 70;
-        const certUrl = `certificate.html?certId=${encodeURIComponent(certId)}&name=${encodeURIComponent(name)}&role=${encodeURIComponent(role)}&score=${encodeURIComponent(score)}`;
+        const b2bQs = (_isB2B && _b2bToken && _b2bCertDownload) ? `&b2b=1&token=${encodeURIComponent(_b2bToken)}` : '';
+        const certUrl = `certificate.html?certId=${encodeURIComponent(certId)}&name=${encodeURIComponent(name)}&role=${encodeURIComponent(role)}&score=${encodeURIComponent(score)}${b2bQs}`;
         window.open(certUrl, '_blank');
     }
 
@@ -8775,7 +9135,7 @@ Evaluate this full assessment and output a comprehensive certification report in
                     <div style="font-size:0.72rem;color:#64748b;line-height:1.6;margin-top:8px;">Verify: <strong style="color:#f59e0b;">https://simpaticohr.in/verify</strong></div>
                 </div>
                 <div style="text-align:center;">
-                    <img src="https://api.qrserver.com/v1/create-qr-code/?size=160x160&margin=2&ecc=M&data=${encodeURIComponent('https://simpaticohr.in/verify.html?certId=' + certId + '&name=' + encodeURIComponent(name) + '&role=' + encodeURIComponent(role) + '&score=' + overallScore)}" style="width:72px;height:72px;background:#fff;padding:4px;border-radius:8px;display:block;margin:0 auto;" alt="Verify QR">
+                    <img src="https://api.qrserver.com/v1/create-qr-code/?size=160x160&margin=2&ecc=M&data=${encodeURIComponent('https://simpaticohr.in/verify.html?certId=' + certId + '&name=' + encodeURIComponent(name) + '&role=' + encodeURIComponent(role) + '&score=' + overall)}" style="width:72px;height:72px;background:#fff;padding:4px;border-radius:8px;display:block;margin:0 auto;" alt="Verify QR">
                     <div style="font-size:0.62rem;color:#94a3b8;font-weight:700;margin-top:4px;text-transform:uppercase;letter-spacing:0.5px;">Scan to Verify</div>
                 </div>
                 <div style="text-align:center;">
@@ -8819,7 +9179,8 @@ Evaluate this full assessment and output a comprehensive certification report in
         try {
             if (!report) report = {};
             const answers = (state.answers && state.answers.length > 0) ? state.answers : (report.answers || []);
-            const finalScore = (typeof score === 'number' && score > 0) ? score : (report.overallScore || 70);
+            const isHeuristic = report.scoringMethod === 'heuristic';
+            const finalScore = (typeof score === 'number' && score >= 0) ? score : (report.overallScore || 0);
 
             const typeScores = {};
             answers.forEach(a => {
@@ -8865,7 +9226,8 @@ Evaluate this full assessment and output a comprehensive certification report in
                 focusAreas: report.focusAreas || ['Review domain interview evaluation'],
                 communicationScores: commScores || null,
                 reportHidden: true,
-                passed: finalScore >= CERT_PASS_THRESHOLD,
+                scoringMethod: isHeuristic ? 'heuristic' : 'ai',
+                passed: !isHeuristic && finalScore >= CERT_PASS_THRESHOLD,
                 answers: answers,
                 proctoringViolations: { ...(state.proctoringViolations || {}) }
             };
@@ -8884,9 +9246,13 @@ Evaluate this full assessment and output a comprehensive certification report in
             console.log('[saveCertDataSilently] Successfully saved cert:', certData.certId, certData.name, certData.overall);
 
             // Sync to API for admin dashboard access
-            fetch(`${API_BASE}/api/interview/save-result`, {
+            const { headers: silentHeaders, companyId: silentCid } = getResultsAuthContext();
+            if (_b2bToken && !certData.token) certData.token = _b2bToken;
+            if (silentCid && !certData.company_id) certData.company_id = silentCid;
+            certData.savedAt = new Date().toISOString();
+            fetch(`${RESULTS_API_BASE}/api/interview/save-result`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: silentHeaders,
                 body: JSON.stringify(certData)
             }).catch(e => console.warn('Silent cert API sync note:', e));
 
@@ -8903,8 +9269,13 @@ Evaluate this full assessment and output a comprehensive certification report in
     function restartInterview() {
         stopTimer();
         if (state.liveWs) {
+            state._intentionalWsClose = true;
             try { state.liveWs.close(); } catch(e) {}
             state.liveWs = null;
+        }
+        if (state._wsHandshakeTimer) {
+            clearTimeout(state._wsHandshakeTimer);
+            state._wsHandshakeTimer = null;
         }
         stopMicStreaming();
         if (state.recognition) {
@@ -8983,6 +9354,12 @@ Evaluate this full assessment and output a comprehensive certification report in
 
         params.set('token', token);
         params.set('b2b', '1');
+        try {
+            const { companyId: adminCompanyId } = getResultsAuthContext();
+            if (adminCompanyId && adminCompanyId !== 'default' && adminCompanyId !== 'SIMP_PRO_MAIN') {
+                params.set('company_id', adminCompanyId);
+            }
+        } catch (e) {}
 
         // Ensure newly generated token is clean and fresh in ALL storage locations
         try {

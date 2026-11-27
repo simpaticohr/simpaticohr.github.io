@@ -296,6 +296,27 @@ async function main() {
   const jobs = await res.json();
   console.log(`✅ Loaded ${jobs.length} total jobs from Supabase.`);
 
+  // Fetch companies map to guarantee up-to-date company names
+  let companyMap = {};
+  try {
+    const compRes = await fetch(`${SUPABASE_URL}/rest/v1/companies?select=id,name`, {
+      headers: { 'apikey': SUPABASE_KEY }
+    });
+    if (compRes.ok) {
+      const comps = await compRes.json();
+      comps.forEach(c => { if (c.id && c.name) companyMap[c.id] = c.name; });
+    }
+  } catch (e) {
+    console.warn('⚠️ Could not fetch companies for name sync:', e.message);
+  }
+
+  // Sync company names on loaded jobs
+  for (const job of jobs) {
+    if (job.company_id && companyMap[job.company_id]) {
+      job.company_name = companyMap[job.company_id];
+    }
+  }
+
   const activeJobs = jobs.filter(j => {
     const s = (j.status || '').toLowerCase();
     return s === 'active' || s === 'open' || s === '';

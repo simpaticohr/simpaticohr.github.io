@@ -454,15 +454,24 @@
           const db = (typeof getSupabaseClient === 'function' ? getSupabaseClient() : null) || window.SimpaticoDB || window._supabaseClient;
           if (db) {
             const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-            let query = db.from('job_applications').select('*, jobs(title)').order('created_at', { ascending: false });
+            let query = db.from('job_applications').select('*').order('created_at', { ascending: false });
             if (UUID_REGEX.test(cid)) {
               query = query.or('company_id.eq.' + cid + ',tenant_id.eq.' + cid);
             } else {
               query = query.eq('tenant_id', cid);
             }
             if (q) query = query.or('candidate_name.ilike.%' + q + '%,candidate_email.ilike.%' + q + '%');
+            if (skills) query = query.ilike('candidate_skills', '%' + skills + '%');
             const { data, error } = await query;
             if (!error && Array.isArray(data)) {
+              const jobIds = [...new Set(data.map(r => String(r.job_id || '').trim()).filter(id => UUID_REGEX.test(id)))];
+              let jobTitles = {};
+              if (jobIds.length > 0) {
+                try {
+                  const { data: jData } = await db.from('jobs').select('id, title').in('id', jobIds);
+                  if (Array.isArray(jData)) jData.forEach(j => { jobTitles[j.id] = j.title; });
+                } catch(jErr){}
+              }
               const byEmail = new Map();
               data.forEach(r => {
                 const email = (r.candidate_email || r.email || '').toLowerCase().trim();
@@ -476,7 +485,7 @@
                     skills: r.candidate_skills || r.skills || '',
                     best_score: score,
                     last_status: r.status,
-                    last_job_title: r.jobs?.title || '',
+                    last_job_title: jobTitles[r.job_id] || r.jobs?.title || '',
                     applied_at: r.created_at || r.applied_at
                   });
                 }
