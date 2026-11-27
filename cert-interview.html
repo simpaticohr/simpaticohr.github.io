@@ -4591,6 +4591,51 @@
         return float32Array;
     }
 
+    function isAiAudioPlaying() {
+        try {
+            if (audioQueue.length > 0) return true;
+            if (audioCtx && nextPlayTime > audioCtx.currentTime + 0.12) return true;
+        } catch (e) {}
+        return false;
+    }
+
+    function _enterLiveListeningState() {
+        if (!state.liveWs || state._isFinishingVoiceSession) return;
+        state.aiSpeakingActive = false;
+        state._pendingTurnListen = false;
+        if (state._audioDrainTimer) {
+            clearTimeout(state._audioDrainTimer);
+            state._audioDrainTimer = null;
+        }
+        const avatarStage = document.getElementById('avatar-stage');
+        if (avatarStage) avatarStage.className = 'avatar-stage listening';
+        if (window.aiAvatar) {
+            window.aiAvatar.setState('listening');
+            window.aiAvatar.setAmplitude(0);
+        }
+        if (_duixActive && typeof DuixRenderer !== 'undefined') {
+            DuixRenderer.onState('listening');
+            duixPreRenderLikelyLines();
+        }
+        const dot = document.getElementById('voice-status-dot');
+        if (dot) dot.className = 'status-dot pulse-green';
+        const statusTxt = document.getElementById('voice-status-text');
+        if (statusTxt) statusTxt.textContent = 'LISTENING TO YOU';
+        const instr = document.getElementById('voice-instruction');
+        if (instr) instr.textContent = 'Speak your response. Speak naturally.';
+        const subs = document.getElementById('subtitles-text');
+        if (subs && (!subs.textContent || subs.textContent === 'Connecting to AI Interviewer...')) {
+            subs.textContent = 'Listening...';
+        }
+        const finishBtn = document.getElementById('btn-voice-finish');
+        if (finishBtn) finishBtn.disabled = false;
+
+        playChime('listening');
+        startSpeakingTimer();
+        startTimer();
+        startWaveform();
+    }
+
     function playPcmChunk(base64Pcm) {
         const ctx = getAudioContext();
         if (ctx.state === 'suspended') ctx.resume();
@@ -4625,6 +4670,13 @@
             if (index > -1) {
                 audioQueue.splice(index, 1);
             }
+            if (audioQueue.length === 0 && state._pendingTurnListen && state.liveWs && !state._isFinishingVoiceSession) {
+                setTimeout(() => {
+                    if (!isAiAudioPlaying() && state._pendingTurnListen) {
+                        _enterLiveListeningState();
+                    }
+                }, 150);
+            }
         };
     }
 
@@ -4636,6 +4688,10 @@
         });
         audioQueue.length = 0;
         nextPlayTime = 0;
+        if (state._audioDrainTimer) {
+            clearTimeout(state._audioDrainTimer);
+            state._audioDrainTimer = null;
+        }
         // Clear Simli lip-sync buffer on interrupt
         if (_simliAdapter && _simliAdapter.isActive()) {
             _simliAdapter.clearBuffer();
@@ -4643,6 +4699,7 @@
     }
 
     async function startStreamingMicToWs(ws) {
+        stopMicStreaming();
         try {
             micAudioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
             const source = micAudioContext.createMediaStreamSource(micStream);
@@ -4652,8 +4709,8 @@
             micProcessor.connect(micAudioContext.destination);
 
             micProcessor.onaudioprocess = function(e) {
-                // Only stream microphone to Gemini if the AI is NOT speaking
-                if (state.aiSpeakingActive) return;
+                // Only stream microphone to Gemini after setup handshake AND after speaker audio finishes playing
+                if (!state._wsSetupComplete || state.aiSpeakingActive || isAiAudioPlaying()) return;
 
                 const inputData = e.inputBuffer.getChannelData(0); // Float32Array
                 
@@ -4739,28 +4796,38 @@
         return definitiveConcludingPhrases.some(phrase => aiTextLower.includes(phrase));
     }
 
-    async function startLiveVoiceInterview() {
+    async function startLiveVoiceInterview(isReconnect = false) {
         if (state.liveWs) {
+            state._intentionalWsClose = true;
             try { state.liveWs.close(); } catch(e) {}
             state.liveWs = null;
         }
+        if (state._wsHandshakeTimer) {
+            clearTimeout(state._wsHandshakeTimer);
+            state._wsHandshakeTimer = null;
+        }
 
-        // Reset state for websocket session
-        state.liveTranscript = [];
-        state.answers = [];
-        state.currentIndex = 0;
+        if (!isReconnect) {
+            // Reset state for fresh websocket session
+            state.liveTranscript = [];
+            state.answers = [];
+            state.currentIndex = 0;
+            state._modelTurnCount = 0;
+            state._liveReconnectAttempts = 0;
+        }
+        state._intentionalWsClose = false;
         state.aiSpeakingActive = false;
+        state._pendingTurnListen = false;
         state.aiSpokenTextBuffer = '';
         state.userSpeechTranscript = '';
         state._wsSetupComplete = false;
-        state._modelTurnCount = 0;
         state._concludingWindowTimer = null;
         nextPlayTime = 0;
         audioQueue = [];
 
         // Connect UI state
-        document.getElementById('q-number').textContent = 'LIVE';
-        document.getElementById('q-text').textContent = 'Connecting to AI Interviewer...';
+        document.getElementById('q-number').textContent = isReconnect ? `Q${state.currentIndex + 1}` : 'LIVE';
+        document.getElementById('q-text').textContent = isReconnect ? 'Reconnecting to AI Interviewer...' : 'Connecting to AI Interviewer...';
         document.getElementById('btn-voice-finish').disabled = false;
         document.getElementById('btn-voice-finish').textContent = '⏹ End Interview';
         
@@ -4773,19 +4840,29 @@
         }
         window.aiAvatar.setState('processing');
 
-        // Initialize selected avatar renderer (HyperReal / Simli / DuiX / Orb)
-        initSelectedAvatar().then(() => {
-            console.log('[Voice] Selected avatar renderer initialized.');
-        });
+        if (!isReconnect) {
+            // Initialize selected avatar renderer (HyperReal / Simli / DuiX / Orb)
+            initSelectedAvatar().then(() => {
+                console.log('[Voice] Selected avatar renderer initialized.');
+            });
+        }
         document.getElementById('voice-status-dot').className = 'status-dot pulse-blue';
-        document.getElementById('voice-status-text').textContent = 'CONNECTING';
-        document.getElementById('voice-instruction').textContent = 'Establishing secure session with AI Interviewer...';
-        document.getElementById('subtitles-text').textContent = 'Connecting to AI Interviewer...';
+        document.getElementById('voice-status-text').textContent = isReconnect ? 'RECONNECTING' : 'CONNECTING';
+        document.getElementById('voice-instruction').textContent = isReconnect
+            ? 'Connection briefly interrupted — resuming your session...'
+            : 'Establishing secure session with AI Interviewer...';
+        document.getElementById('subtitles-text').textContent = isReconnect ? 'Reconnecting...' : 'Connecting to AI Interviewer...';
 
-        // Secure mic access
+        // Secure mic access with hardware echo cancellation when supported
         try {
             if (!micStream) {
-                micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                try {
+                    micStream = await navigator.mediaDevices.getUserMedia({
+                        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
+                    });
+                } catch (aecErr) {
+                    micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                }
             }
         } catch (err) {
             const btn = document.getElementById('btn-start');
@@ -4911,54 +4988,65 @@ GUIDELINES:
             };
             ws.send(JSON.stringify(setupMsg));
 
-            // Trigger the initial turn
-            const startTurn = {
-                clientContent: {
-                    turns: [{
-                        role: "user",
-                        parts: [{ text: "Hello! I am ready to start the interview." }]
-                    }],
-                    turnComplete: true
+            const beginLiveConversation = () => {
+                if (!state.liveWs || state.liveWs !== ws || ws.readyState !== WebSocket.OPEN || state._wsStartedConversation) return;
+                state._wsStartedConversation = true;
+                state._wsSetupComplete = true;
+                if (state._wsHandshakeTimer) {
+                    clearTimeout(state._wsHandshakeTimer);
+                    state._wsHandshakeTimer = null;
                 }
+
+                const resumeSummary = isReconnect && state.liveTranscript.length > 0
+                    ? `We were disconnected briefly. Continue smoothly from Question ${Math.min(targetQuestions, Math.max(1, state._modelTurnCount))} of ${targetQuestions}. Prior exchange summary: ` +
+                      state.liveTranscript.slice(-4).map(t => `${t.role === 'user' ? 'Candidate' : 'Interviewer'}: ${(t.parts?.[0]?.text || '').substring(0, 140)}`).join(' | ')
+                    : "Hello! I am ready to start the interview.";
+
+                ws.send(JSON.stringify({
+                    clientContent: {
+                        turns: [{
+                            role: "user",
+                            parts: [{ text: resumeSummary }]
+                        }],
+                        turnComplete: true
+                    }
+                }));
+
+                avatarStage.className = 'avatar-stage speaking';
+                if (window.aiAvatar) window.aiAvatar.setState('speaking');
+                document.getElementById('voice-status-dot').className = 'status-dot pulse-blue';
+                document.getElementById('voice-status-text').textContent = 'AI INTERVIEWER ACTIVE';
+                document.getElementById('voice-instruction').textContent = 'AI Interviewer is speaking. Listen carefully.';
+                document.getElementById('subtitles-text').textContent = isReconnect ? 'Resumed interview...' : 'Connected. Starting interview...';
+
+                startStreamingMicToWs(ws);
             };
-            ws.send(JSON.stringify(startTurn));
 
-            avatarStage.className = 'avatar-stage speaking';
-            if (window.aiAvatar) window.aiAvatar.setState('speaking');
-            document.getElementById('voice-status-dot').className = 'status-dot pulse-blue';
-            document.getElementById('voice-status-text').textContent = 'AI INTERVIEWER ACTIVE';
-            document.getElementById('voice-instruction').textContent = 'AI Interviewer is speaking. Listen carefully.';
-            document.getElementById('subtitles-text').textContent = 'Connected. Starting interview...';
-
-            // Set up mic streaming listener
-            startStreamingMicToWs(ws);
-
-            // Also start Web Speech Recognition in parallel so the candidate's spoken responses
-            // are captured into text transcript for authentic AI report evaluation
-            if (!state.recognition) {
-                state.recognition = initSpeechRecognition();
-            }
-            if (state.recognition && !state.recognitionActive) {
-                try {
-                    state.recognition.start();
-                    console.log('[Live Voice] Speech recognition active for candidate transcription.');
-                } catch(e) {
-                    console.warn('[Live Voice] Speech recognition start note:', e.message);
+            state._wsStartedConversation = false;
+            state._beginLiveConversation = beginLiveConversation;
+            // Fallback in case proxy skips emitting setupComplete event
+            state._wsHandshakeTimer = setTimeout(() => {
+                if (!state._wsSetupComplete) {
+                    console.warn('[Gemini Live] setupComplete timeout — starting turn safely.');
+                    beginLiveConversation();
                 }
-            }
+            }, 3500);
 
-            // ── HARD INTERVIEW TIME LIMIT ──
-            // Absolute safety net: force-end the interview after max duration.
-            // Cannot be reset by any activity. Ensures interview ALWAYS ends.
-            const maxMinutes = (targetQuestions * 3) + 5; // 3 min per Q + 5 min buffer
-            state._hardInterviewTimeout = setTimeout(() => {
-                console.log(`[HARD TIMEOUT] Interview exceeded ${maxMinutes} minute limit. Force-ending.`);
-                if (state.liveWs) {
-                    state._isFinishingVoiceSession = false; // Reset guard
-                    finishLiveVoiceInterview();
-                }
-            }, maxMinutes * 60 * 1000);
-            console.log(`[Interview] Hard timeout set: ${maxMinutes} minutes`);
+            if (!isReconnect) {
+                // ── HARD INTERVIEW TIME LIMIT ──
+                // Absolute safety net: force-end the interview after max duration.
+                // Cannot be reset by any activity. Ensures interview ALWAYS ends.
+                const maxMinutes = (targetQuestions * 3) + 5; // 3 min per Q + 5 min buffer
+                if (state._hardInterviewTimeout) clearTimeout(state._hardInterviewTimeout);
+                state._hardInterviewTimeout = setTimeout(() => {
+                    console.log(`[HARD TIMEOUT] Interview exceeded ${maxMinutes} minute limit. Force-ending.`);
+                    if (state.liveWs) {
+                        state._isFinishingVoiceSession = false; // Reset guard
+                        finishLiveVoiceInterview();
+                    }
+                }, maxMinutes * 60 * 1000);
+                console.log(`[Interview] Hard timeout set: ${maxMinutes} minutes`);
+            }
         };
 
         ws.onmessage = async (event) => {
@@ -4978,12 +5066,19 @@ GUIDELINES:
             if (msg.setupComplete) {
                 console.log('[Gemini Live] Handshake complete! setupComplete received.');
                 state._wsSetupComplete = true;
+                if (typeof state._beginLiveConversation === 'function') {
+                    state._beginLiveConversation();
+                }
                 return;
             }
 
             // Handle server-side error messages (e.g. failed Gemini connection)
             if (msg.error) {
                 console.error("Server WebSocket error:", msg.error);
+                if (state._wsHandshakeTimer) {
+                    clearTimeout(state._wsHandshakeTimer);
+                    state._wsHandshakeTimer = null;
+                }
                 showError('setup-error', msg.error);
                 state.liveWs = null; // Prevent finishLiveVoiceInterview from running
                 stopMicStreaming();
@@ -5000,7 +5095,9 @@ GUIDELINES:
                     console.log("AI was interrupted by speech");
                     stopPlayback();
                     state.aiSpeakingActive = false;
+                    state._pendingTurnListen = false;
                     state.aiSpokenTextBuffer = '';
+                    _enterLiveListeningState();
                     return;
                 }
 
@@ -5092,7 +5189,6 @@ GUIDELINES:
                     const isAIConcluding = _checkConcludingPhrases(aiText, effectiveTurns, targetQuestions);
 
                     state.aiSpokenTextBuffer = '';
-                    state.aiSpeakingActive = false;
 
                     // Clear any previous inactivity timeout
                     if (state._liveInactivityTimer) {
@@ -5100,15 +5196,15 @@ GUIDELINES:
                         state._liveInactivityTimer = null;
                     }
 
-                    // Auto-end conditions:
-                    // Only auto-end when all target questions are genuinely completed and AI concluded
+                    // Auto-end only when all target questions are completed and AI concluded
                     const shouldAutoEnd = (isAIConcluding && effectiveTurns >= targetQuestions) ||
-                                          (userTurnsCount >= targetQuestions && isAIConcluding) ||
-                                          (userTurnsCount >= targetQuestions && state.timerSeconds <= 0);
+                                          (userTurnsCount >= targetQuestions && isAIConcluding);
 
                     if (shouldAutoEnd) {
                         if (state._autoEnding) return;
                         state._autoEnding = true;
+                        state.aiSpeakingActive = false;
+                        state._pendingTurnListen = false;
                         console.log(`Interview auto-end: all ${targetQuestions} questions completed successfully.`);
                         stopMicStreaming();
                         cleanupMicStream();
@@ -5119,54 +5215,59 @@ GUIDELINES:
                             finishBtn.textContent = '⌛ Finalizing Report...';
                         }
                         
-                        // Clean timeout to allow farewell audio to finish cleanly
-                        setTimeout(() => {
-                            console.log("Auto-end timer fired. Finalizing voice interview...");
-                            finishLiveVoiceInterview();
-                        }, 2500);
+                        // Wait cleanly for queued farewell audio to finish playing before finalizing report
+                        const waitFarewell = () => {
+                            if (!isAiAudioPlaying()) {
+                                console.log("Farewell audio drained. Finalizing voice interview...");
+                                finishLiveVoiceInterview();
+                            } else {
+                                setTimeout(waitFarewell, 250);
+                            }
+                        };
+                        setTimeout(waitFarewell, 1200);
                         return;
                     }
 
-                    avatarStage.className = 'avatar-stage listening';
-                    if (window.aiAvatar) {
-                        window.aiAvatar.setState('listening');
-                        window.aiAvatar.setAmplitude(0);
+                    // Only enter listening & unmute mic AFTER all queued Web Audio buffers finish playing
+                    if (!isAiAudioPlaying()) {
+                        _enterLiveListeningState();
+                    } else {
+                        state._pendingTurnListen = true;
+                        const remainMs = audioCtx ? Math.max(250, Math.round((nextPlayTime - audioCtx.currentTime) * 1000) + 200) : 1500;
+                        if (state._audioDrainTimer) clearTimeout(state._audioDrainTimer);
+                        state._audioDrainTimer = setTimeout(() => {
+                            if (state._pendingTurnListen) _enterLiveListeningState();
+                        }, Math.min(12000, remainMs));
                     }
-                    if (_duixActive && typeof DuixRenderer !== 'undefined') {
-                        DuixRenderer.onState('listening');
-                        duixPreRenderLikelyLines();
-                    }
-                    document.getElementById('voice-status-dot').className = 'status-dot pulse-green';
-                    document.getElementById('voice-status-text').textContent = 'LISTENING TO YOU';
-                    document.getElementById('voice-instruction').textContent = 'Speak your response. Speak naturally.';
-                    document.getElementById('subtitles-text').textContent = 'Listening...';
-                    document.getElementById('btn-voice-finish').disabled = false;
-
-                    playChime('listening');
-                    startSpeakingTimer();
-                    startTimer();
-                    startWaveform();
                 }
             }
 
-            // Handle user's speech transcription from Gemini Live
-            if (msg.inputTranscription && msg.inputTranscription.text) {
-                const text = msg.inputTranscription.text;
-                console.log("User transcript:", text);
-                document.getElementById('subtitles-text').textContent = text;
-                // Accumulate user speech (each inputTranscription is a complete utterance)
-                state.userSpeechTranscript = text;
-                // Barge-in: if AI is speaking and user starts talking, stop playback
-                if (state.aiSpeakingActive) {
-                    stopPlayback();
-                    state.aiSpeakingActive = false;
+            // Handle user's speech transcription from Gemini Live (supports top-level & serverContent envelopes)
+            const inTrans = msg.serverContent?.inputTranscription || msg.inputTranscription;
+            if (inTrans && inTrans.text) {
+                const text = inTrans.text.trim();
+                if (text) {
+                    console.log("User transcript:", text);
+                    document.getElementById('subtitles-text').textContent = text;
+                    if (!state.userSpeechTranscript) {
+                        state.userSpeechTranscript = text;
+                    } else if (text.startsWith(state.userSpeechTranscript)) {
+                        state.userSpeechTranscript = text;
+                    } else {
+                        state.userSpeechTranscript = (state.userSpeechTranscript + ' ' + text).replace(/\s+/g, ' ').trim();
+                    }
+                    // Barge-in only when speaker audio isn't actively trailing from AI
+                    if (state.aiSpeakingActive && !isAiAudioPlaying()) {
+                        stopPlayback();
+                        state.aiSpeakingActive = false;
+                    }
                 }
             }
 
             // Handle AI's speech transcription for subtitles
-            // In AUDIO-only mode, this is the PRIMARY source of text — arrives AFTER turnComplete
-            if (msg.outputTranscription && msg.outputTranscription.text) {
-                state.aiSpokenTextBuffer += msg.outputTranscription.text;
+            const outTrans = msg.serverContent?.outputTranscription || msg.outputTranscription;
+            if (outTrans && outTrans.text) {
+                state.aiSpokenTextBuffer += outTrans.text;
                 document.getElementById('subtitles-text').textContent = state.aiSpokenTextBuffer;
                 document.getElementById('q-text').textContent = state.aiSpokenTextBuffer;
 
@@ -5206,6 +5307,10 @@ GUIDELINES:
 
         ws.onclose = (event) => {
             console.log(`WebSocket closed: code=${event.code}, reason=${event.reason || 'none'}`);
+            if (state._wsHandshakeTimer) {
+                clearTimeout(state._wsHandshakeTimer);
+                state._wsHandshakeTimer = null;
+            }
             stopPlayback();
             stopWaveform();
             stopSpeakingTimer();
@@ -5214,6 +5319,10 @@ GUIDELINES:
             if (state._liveInactivityTimer) {
                 clearTimeout(state._liveInactivityTimer);
                 state._liveInactivityTimer = null;
+            }
+
+            if (state._intentionalWsClose || ws !== state.liveWs) {
+                return;
             }
 
             // Flush any pending user transcript before counting
@@ -5250,6 +5359,17 @@ GUIDELINES:
                 showScreen('screen-interview');
                 loadQuestion(0);
                 return;
+            } else if (state.liveWs && closedModelTurns >= 1 && (state._liveReconnectAttempts || 0) < 2 && !state._isFinishingVoiceSession) {
+                state._liveReconnectAttempts = (state._liveReconnectAttempts || 0) + 1;
+                state.liveWs = null;
+                stopMicStreaming();
+                console.warn(`[Gemini Live] Mid-interview drop at turn ${closedModelTurns} — attempting reconnect #${state._liveReconnectAttempts}...`);
+                setTimeout(() => {
+                    if (!state._isFinishingVoiceSession) {
+                        startLiveVoiceInterview(true);
+                    }
+                }, 1200);
+                return;
             } else if (state.liveWs) {
                 state.liveWs = null;
                 showPrematureCloseWarning(closedUserTurns, closedTargetQ);
@@ -5258,7 +5378,8 @@ GUIDELINES:
 
         ws.onerror = (err) => {
             console.error("WebSocket error:", err);
-            showError('setup-error', 'Lost connection to AI server.');
+            const vInstr = document.getElementById('voice-instruction');
+            if (vInstr) vInstr.textContent = '⚠️ Temporary connection issue — attempting recovery...';
         };
     }
 
@@ -5296,8 +5417,13 @@ GUIDELINES:
         console.log(`[finishLive] Final transcript: ${state.liveTranscript.length} entries, _modelTurnCount: ${state._modelTurnCount}`);
 
         if (state.liveWs) {
+            state._intentionalWsClose = true;
             try { state.liveWs.close(); } catch(e) {}
             state.liveWs = null;
+        }
+        if (state._wsHandshakeTimer) {
+            clearTimeout(state._wsHandshakeTimer);
+            state._wsHandshakeTimer = null;
         }
 
         stopMicStreaming();
@@ -5813,18 +5939,19 @@ GUIDELINES:
             if (callback) callback();
         };
         
+        const maxDurationMs = Math.min(45000, Math.max(12000, String(text || '').length * 110));
+        const startedAt = Date.now();
         synthWatchdog = setInterval(() => {
-            if (!synth.speaking) {
+            const elapsed = Date.now() - startedAt;
+            if ((elapsed > 1500 && !synth.speaking) || elapsed >= maxDurationMs) {
                 clearInterval(synthWatchdog);
-                if (!isEnded && callback) {
+                if (!isEnded) {
                     isEnded = true;
-                    callback();
+                    try { if (synth.speaking) synth.cancel(); } catch (e) {}
+                    if (callback) callback();
                 }
-            } else {
-                synth.pause();
-                synth.resume();
             }
-        }, 5000);
+        }, 1000);
         
         synth.speak(utterance);
     }
@@ -6038,7 +6165,7 @@ GUIDELINES:
             vadText.textContent = 'Active speech detected';
         }
         
-        // Set a timer to trigger a silence warning after 8 seconds of no speech
+        // Wait 14 seconds of quiet pause before showing a 5-second finish countdown (19s total grace)
         state.vadTimer = setTimeout(() => {
             const currentText = document.getElementById('subtitles-text').textContent.trim();
             if (!currentText || currentText === 'Listening...' || currentText === 'Waiting for AI to finish speaking...' || currentText === 'Listening for speech...') {
@@ -6048,11 +6175,11 @@ GUIDELINES:
                 return;
             }
             
-            // User did speak but is now silent for 8 seconds, show warning countdown
+            // User did speak but is now silent for 14 seconds, show 5s countdown
             if (vadIndicator && vadText) {
                 vadIndicator.className = 'vad-indicator silence-warning';
-                state.vadCountdown = 4;
-                vadText.textContent = `Silence detected. Submitting in ${state.vadCountdown}s...`;
+                state.vadCountdown = 5;
+                vadText.textContent = `Pause detected. Auto-submitting in ${state.vadCountdown}s (keep speaking to continue)...`;
                 playChime('warning');
                 
                 state.vadInterval = setInterval(() => {
@@ -6063,11 +6190,11 @@ GUIDELINES:
                         if (vadIndicator) vadIndicator.style.display = 'none';
                         finishVoiceSpeaking();
                     } else {
-                        vadText.textContent = `Silence detected. Submitting in ${state.vadCountdown}s...`;
+                        vadText.textContent = `Pause detected. Auto-submitting in ${state.vadCountdown}s (keep speaking to continue)...`;
                     }
                 }, 1000);
             }
-        }, 8000);
+        }, 14000);
     }
 
     function initSpeechRecognition() {
@@ -7006,11 +7133,26 @@ GUIDELINES:
             updateTimerDisplay();
             if (state.timerSeconds <= 0) {
                 stopTimer();
-                // Auto-submit/auto-end when timer expires
-                console.log('[Timer] Time expired. Auto-ending current turn...');
+                // Auto-submit/auto-advance when turn timer expires
+                console.log('[Timer] Turn time expired.');
                 if (state.liveWs) {
-                    // WebSocket live mode: end the entire interview
-                    finishLiveVoiceInterview();
+                    const userTurnsCount = (state.liveTranscript || []).filter(t => t.role === 'user' && (t.parts?.[0]?.text || '').trim().length > 5).length;
+                    const effectiveTurns = Math.max(userTurnsCount, Math.max(0, (state._modelTurnCount || 0) - 1));
+                    const targetQ = state.questionsCount || 5;
+                    if (effectiveTurns >= targetQ) {
+                        finishLiveVoiceInterview();
+                    } else if (state.liveWs.readyState === WebSocket.OPEN) {
+                        // Advance smoothly to the next question instead of aborting the whole live interview
+                        try {
+                            state.liveWs.send(JSON.stringify({
+                                clientContent: {
+                                    turns: [{ role: 'user', parts: [{ text: '[Time for this question elapsed. Please acknowledge briefly and proceed to the next numbered question.]' }] }],
+                                    turnComplete: true
+                                }
+                            }));
+                        } catch (e) {}
+                        startTimer();
+                    }
                 } else if (state.voiceMode) {
                     // Non-WS voice mode: submit current answer
                     finishVoiceSpeaking();
@@ -7210,11 +7352,21 @@ GUIDELINES:
         if (!geminiKey) return null;
 
         const cfg = JSON.parse(localStorage.getItem('adminConfig') || '{}');
-        // Primary deep reasoning evaluation model with high-reliability fallback chain
-        const candidateModels = [cfg.geminiModel, 'gemini-1.5-pro', 'gemini-2.0-flash', 'gemini-1.5-flash']
-            .filter(Boolean)
-            .filter(m => m !== 'gemini-3.1-pro' && m !== 'gemini-3.1-flash' && m !== 'gemini-2.5-flash');
-        const modelsToTry = [...new Set(candidateModels.length ? candidateModels : ['gemini-1.5-pro', 'gemini-2.0-flash'])];
+        // Primary reasoning evaluation models with verified v1beta fallback chain
+        const candidateModels = [cfg.geminiModel, 'gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-pro', 'gemini-1.5-flash']
+            .filter(Boolean);
+        const modelsToTry = [...new Set(candidateModels.length ? candidateModels : ['gemini-2.5-flash', 'gemini-2.0-flash'])];
+
+        const reqBody = {
+            contents: [{ role: 'user', parts: [{ text: prompt }] }],
+            generationConfig: {
+                temperature: 0.4,
+                ...(jsonMode ? { responseMimeType: 'application/json' } : {})
+            }
+        };
+        if (systemInstruction) {
+            reqBody.systemInstruction = { parts: [{ text: systemInstruction }] };
+        }
 
         for (const model of modelsToTry) {
             try {
@@ -7482,11 +7634,6 @@ Evaluate this full assessment and output a comprehensive certification report in
             state.subtitlesMode = subtitles;
             state.subtitlesRevealed = (subtitles === 'visible');
 
-            // Mark token as used immediately when interview starts (prevents reuse)
-            if (_b2bToken && !_isAdmin) {
-                markTokenAsUsed(_b2bToken);
-            }
-
             document.getElementById('text-answer-container').style.display = 'none';
             document.getElementById('voice-answer-container').style.display = 'block';
             setupVoiceSubtitles();
@@ -7505,11 +7652,6 @@ Evaluate this full assessment and output a comprehensive certification report in
             const previousHashes = getUsedQuestionHashes(role);
             const questionCount = count || 5;
             let data = null;
-
-            // Mark token as used immediately for text mode too
-            if (_b2bToken && !_isAdmin) {
-                markTokenAsUsed(_b2bToken);
-            }
 
             try {
                 data = await apiCall('/api/interview/start', {
@@ -8120,25 +8262,36 @@ Evaluate this full assessment and output a comprehensive certification report in
                 _fbCallbackFired = true;
                 action();
             };
+            const scheduleFeedbackFallback = (action) => {
+                const waitMs = Math.min(45000, Math.max(18000, feedbackVoiceText.length * 100));
+                const check = () => {
+                    if (_fbCallbackFired) return;
+                    if (window.speechSynthesis && window.speechSynthesis.speaking) {
+                        setTimeout(check, 2000);
+                        return;
+                    }
+                    safeCallback(action);
+                };
+                setTimeout(check, waitMs);
+            };
             if (hasFollowUp) {
                 feedbackVoiceText += `I have a follow-up question for you.`;
                 speakText(feedbackVoiceText, function() {
                     safeCallback(() => handleNextClick());
                 });
-                // Safety timeout: if TTS callback never fires, auto-proceed
-                setTimeout(() => safeCallback(() => handleNextClick()), 15000);
+                scheduleFeedbackFallback(() => handleNextClick());
             } else if (isLast) {
                 feedbackVoiceText += `The interview is now complete. Generating your certification report.`;
                 speakText(feedbackVoiceText, function() {
                     safeCallback(() => nextQuestion());
                 });
-                setTimeout(() => safeCallback(() => nextQuestion()), 15000);
+                scheduleFeedbackFallback(() => nextQuestion());
             } else {
                 feedbackVoiceText += `Moving to the next question.`;
                 speakText(feedbackVoiceText, function() {
                     safeCallback(() => nextQuestion());
                 });
-                setTimeout(() => safeCallback(() => nextQuestion()), 15000);
+                scheduleFeedbackFallback(() => nextQuestion());
             }
         }
     }
@@ -8236,8 +8389,13 @@ Evaluate this full assessment and output a comprehensive certification report in
         // ── Full voice/connection cleanup — ensure everything disconnects ──
         // Close live WebSocket if still open
         if (state.liveWs) {
+            state._intentionalWsClose = true;
             try { state.liveWs.close(); } catch(e) {}
             state.liveWs = null;
+        }
+        if (state._wsHandshakeTimer) {
+            clearTimeout(state._wsHandshakeTimer);
+            state._wsHandshakeTimer = null;
         }
         // Stop mic streaming & release mic hardware
         stopMicStreaming();
@@ -9044,8 +9202,13 @@ Evaluate this full assessment and output a comprehensive certification report in
     function restartInterview() {
         stopTimer();
         if (state.liveWs) {
+            state._intentionalWsClose = true;
             try { state.liveWs.close(); } catch(e) {}
             state.liveWs = null;
+        }
+        if (state._wsHandshakeTimer) {
+            clearTimeout(state._wsHandshakeTimer);
+            state._wsHandshakeTimer = null;
         }
         stopMicStreaming();
         if (state.recognition) {
